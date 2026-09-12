@@ -479,10 +479,21 @@ service cloud.firestore {
 
     match /appointments/{appointmentId} {
       allow create: if isOwner(request.resource.data.userId);
-      allow read: if isOwner(resource.data.userId) || hasPortalAccess();
-      allow update, delete: if hasPortalAccess();
+      allow read: if isOwner(resource.data.userId)
+        || currentAccessRole() == 'portalStaff'
+        || currentAccessRole() == 'admin'
+        || (currentAccessRole() == 'counselor'
+          && resource.data.assignedStaffId == request.auth.uid);
+      allow update, delete: if currentAccessRole() == 'portalStaff'
+        || currentAccessRole() == 'admin'
+        || (currentAccessRole() == 'counselor'
+          && resource.data.assignedStaffId == request.auth.uid);
       match /history/{historyId} {
-        allow read: if isOwner(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId) || hasPortalAccess();
+        allow read: if isOwner(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId)
+          || currentAccessRole() == 'portalStaff'
+          || currentAccessRole() == 'admin'
+          || (currentAccessRole() == 'counselor'
+            && get(/databases/$(database)/documents/appointments/$(appointmentId)).data.assignedStaffId == request.auth.uid);
         allow write: if false;
       }
     }

@@ -473,7 +473,12 @@ class AdminPortalRepository {
           );
 
   Stream<List<AppointmentModel>> watchAppointments() => _firestoreService
-      .watchDocuments(FirestoreCollections.appointments)
+      .watchDocuments(
+        FirestoreCollections.appointments,
+        whereEquals: currentAccessRole == AccessRole.counselor
+            ? {'assignedStaffId': currentAuthUser?.uid ?? ''}
+            : const {},
+      )
       .map(
         (items) =>
             items

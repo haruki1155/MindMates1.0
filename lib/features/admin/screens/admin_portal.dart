@@ -19,6 +19,7 @@ import 'admin_notifications_page.dart';
 import 'admin_change_password_screen.dart';
 import 'admin_operations_dashboard.dart';
 import 'staff_operations_dashboard.dart';
+import 'counselor_operations_dashboard.dart';
 import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../theme/admin_theme.dart';
@@ -448,6 +449,11 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
     AdminPortalPage.dashboard =>
       _repository.currentAccessRole == AccessRole.portalStaff
           ? StaffOperationsDashboardPage(
+              repository: _repository,
+              onNavigate: _setPage,
+            )
+          : _repository.currentAccessRole == AccessRole.counselor
+          ? CounselorOperationsDashboardPage(
               repository: _repository,
               onNavigate: _setPage,
             )

@@ -1201,6 +1201,9 @@ export const reviewAppointment = onCall(async (request) => {
     const current = await transaction.get(appointment);
     if (!current.exists) throw new HttpsError("not-found", "Appointment not found.");
     const data = current.data()!;
+    if (staff.accessRole === "counselor" && String(data.assignedStaffId ?? "") !== staffId) {
+      throw new HttpsError("permission-denied", "This appointment is not assigned to your caseload.");
+    }
     const before = String(data.status ?? "pending").toLowerCase();
     const allowed = before === "confirmed"
       ? ["completed"]
