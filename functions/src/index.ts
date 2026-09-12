@@ -437,6 +437,49 @@ export const setStaffAccountEnabled = onCall(async (request) => {
   return {ok: true};
 });
 
+export const bulkManageStaffAccounts = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  const actor = await requireSuperAdmin(actorId);
+  const rawIds = Array.isArray(request.data?.userIds) ? request.data.userIds : [];
+  const userIds: string[] = Array.from(new Set<string>(rawIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)));
+  const action = String(request.data?.action ?? "");
+  const reason = requiredText(request.data?.reason, "Reason", 3, 500);
+  if (userIds.length < 1 || userIds.length > 200) throw new HttpsError("invalid-argument", "Select between 1 and 200 staff accounts.");
+  if (!["suspend", "reactivate"].includes(action)) throw new HttpsError("invalid-argument", "Choose a valid account action.");
+  if (userIds.includes(actorId) || userIds.includes(configuredSuperAdminUid())) throw new HttpsError("permission-denied", "The super-administrator cannot be modified.");
+  const refs = userIds.map((id) => db.collection("users").doc(id));
+  await db.runTransaction(async (transaction) => {
+    const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+    for (let index = 0; index < snapshots.length; index++) {
+      const before = snapshots[index];
+      if (!before.exists) throw new HttpsError("not-found", "One or more staff accounts could not be found.");
+      const data = (before.data() ?? {}) as Record<string, unknown>;
+      const previous = String(data.staffAccountStatus ?? "pending");
+      if (!STAFF_ACCOUNT_STATUSES.includes(previous as typeof STAFF_ACCOUNT_STATUSES[number])) throw new HttpsError("failed-precondition", "Only staff accounts can be changed.");
+      if (action === "suspend" && previous !== "approved") throw new HttpsError("failed-precondition", "Only active staff accounts can be suspended.");
+      if (action === "reactivate" && previous !== "disabled") throw new HttpsError("failed-precondition", "Only suspended staff accounts can be reactivated.");
+      const enabled = action === "reactivate";
+      transaction.update(before.ref, {
+        staffAccountStatus: enabled ? "approved" : "disabled",
+        accessRole: enabled ? String(data.previousAccessRole ?? "portalStaff") : "appUser",
+        previousAccessRole: enabled ? FieldValue.delete() : String(data.accessRole ?? "portalStaff"),
+        accountStatus: enabled ? "active" : "suspended",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      writeAudit(transaction, db, {
+        actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole,
+        action: enabled ? "STAFF_ACCOUNT_REACTIVATED" : "STAFF_ACCOUNT_SUSPENDED",
+        category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: before.id,
+        metadata: {bulk: true, before: {staffAccountStatus: previous}, after: {staffAccountStatus: enabled ? "approved" : "disabled"}, reason},
+      });
+    }
+  });
+  await Promise.all(userIds.map((id) => action === "reactivate"
+    ? getAuth().updateUser(id, {disabled: false})
+    : getAuth().updateUser(id, {disabled: true}).then(() => getAuth().revokeRefreshTokens(id))));
+  return {ok: true, affected: userIds.length};
+});
+
 const POPULATION_ROLES = ["student", "teaching", "nonTeaching"] as const;
 const ACCESS_ROLES = ["appUser", "portalStaff", "counselor", "admin"] as const;
 export type AccessRoleValue = typeof ACCESS_ROLES[number];

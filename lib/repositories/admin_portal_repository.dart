@@ -874,6 +874,21 @@ class AdminPortalRepository {
     {'userId': userId, 'enabled': enabled, 'reason': reason.trim()},
   );
 
+  Future<int> bulkManageStaffAccounts({
+    required List<String> userIds,
+    required String action,
+    required String reason,
+  }) async {
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('bulkManageStaffAccounts')
+        .call<Map<String, dynamic>>({
+          'userIds': userIds,
+          'action': action,
+          'reason': reason.trim(),
+        });
+    return (result.data['affected'] as num?)?.toInt() ?? userIds.length;
+  }
+
   Future<void> saveOrganizationRecord({
     required String kind,
     String? id,

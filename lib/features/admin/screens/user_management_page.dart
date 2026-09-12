@@ -24,6 +24,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
   String staffRoleFilter = 'All roles';
   String staffStatusFilter = 'All account statuses';
   final Set<String> _updatingStaff = <String>{};
+  final Set<String> _selectedStaffIds = <String>{};
   final searchController = TextEditingController();
   late Future<List<PublicAppUserRecord>> publicUsers;
   int? publicUserCount;
@@ -389,14 +390,121 @@ class _UserManagementPageState extends State<UserManagementPage> {
         })
         .toList();
     if (staff.isEmpty) return const Text('No staff accounts found.');
-    return Column(
-      children: staff
+    _selectedStaffIds.removeWhere((id) => !staff.any((user) => user.id == id));
+    final activeSelected = staff.where((user) => _selectedStaffIds.contains(user.id) && user.staffAccountStatus == StaffAccountStatus.approved).length;
+    final suspendedSelected = staff.where((user) => _selectedStaffIds.contains(user.id) && user.staffAccountStatus == StaffAccountStatus.disabled).length;
+    final allSelected = staff.isNotEmpty && _selectedStaffIds.length == staff.length;
+    final cards = staff
           .map(
             (user) =>
-                _StaffRecordCard(user: user, actions: _staffActions(user)),
+                _StaffRecordCard(
+                  user: user,
+                  selected: _selectedStaffIds.contains(user.id),
+                  onSelected: (value) => setState(() {
+                    if (value) {
+                      _selectedStaffIds.add(user.id);
+                    } else {
+                      _selectedStaffIds.remove(user.id);
+                    }
+                  }),
+                  actions: _staffActions(user),
+                ),
           )
-          .toList(),
+          .toList();
+    final toolbar = Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            Checkbox(
+              value: allSelected,
+              tristate: _selectedStaffIds.isNotEmpty && !allSelected,
+              onChanged: (value) => setState(() {
+                if (allSelected || value == false) {
+                  _selectedStaffIds.clear();
+                } else {
+                  _selectedStaffIds.addAll(staff.map((user) => user.id));
+                }
+              }),
+            ),
+            Text('Select all (${staff.length})'),
+          ]),
+          if (_selectedStaffIds.isNotEmpty) ...[
+            if (activeSelected > 0)
+              OutlinedButton.icon(
+                onPressed: () => _bulkStaffAction(staff, 'suspend'),
+                icon: const Icon(Icons.pause_circle_outline, size: 17),
+                label: Text('Suspend selected ($activeSelected)'),
+              ),
+            if (suspendedSelected > 0)
+              FilledButton.icon(
+                onPressed: () => _bulkStaffAction(staff, 'reactivate'),
+                icon: const Icon(Icons.play_circle_outline, size: 17),
+                label: Text('Reactivate selected ($suspendedSelected)'),
+              ),
+            TextButton(
+              onPressed: () => setState(() => _selectedStaffIds.clear()),
+              child: const Text('Clear selection'),
+            ),
+          ],
+        ],
+      ),
     );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [toolbar, ...cards],
+    );
+  }
+
+  Future<void> _bulkStaffAction(List<UserModel> staff, String action) async {
+    final selected = staff.where((user) => _selectedStaffIds.contains(user.id) &&
+        (action == 'suspend'
+            ? user.staffAccountStatus == StaffAccountStatus.approved
+            : user.staffAccountStatus == StaffAccountStatus.disabled)).toList();
+    if (selected.isEmpty) return;
+    final reason = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('${action == 'suspend' ? 'Suspend' : 'Reactivate'} ${selected.length} staff account${selected.length == 1 ? '' : 's'}?'),
+        content: TextField(
+          controller: reason,
+          minLines: 2,
+          maxLines: 4,
+          decoration: const InputDecoration(
+            labelText: 'Reason',
+            helperText: 'This reason will be recorded in the audit history.',
+          ),
+        ),
+        actions: _confirmActions(dialogContext, action == 'suspend' ? 'Suspend accounts' : 'Reactivate accounts'),
+      ),
+    );
+    if (confirmed != true || reason.text.trim().length < 3) {
+      reason.dispose();
+      return;
+    }
+    setState(() => _updatingStaff.addAll(selected.map((user) => user.id)));
+    try {
+      final affected = await widget.repository.bulkManageStaffAccounts(
+        userIds: selected.map((user) => user.id).toList(),
+        action: action,
+        reason: reason.text,
+      );
+      if (mounted) {
+        setState(() => _selectedStaffIds.removeAll(selected.map((user) => user.id)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$affected account${affected == 1 ? '' : 's'} updated successfully.')));
+      }
+    } on FirebaseFunctionsException catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyAdminError(error))));
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The selected accounts could not be updated. Please try again.')));
+    } finally {
+      if (mounted) setState(() => _updatingStaff.removeAll(selected.map((user) => user.id)));
+    }
+    reason.dispose();
   }
 
   List<Widget> _staffActions(UserModel user) {
@@ -1361,10 +1469,12 @@ class _AppUserFact extends StatelessWidget {
 }
 
 class _StaffRecordCard extends StatelessWidget {
-  const _StaffRecordCard({required this.user, required this.actions});
+  const _StaffRecordCard({required this.user, required this.actions, required this.selected, required this.onSelected});
 
   final UserModel user;
   final List<Widget> actions;
+  final bool selected;
+  final ValueChanged<bool> onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -1396,6 +1506,7 @@ class _StaffRecordCard extends StatelessWidget {
           final identity = Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Checkbox(value: selected, onChanged: (value) => onSelected(value ?? false)),
               CircleAvatar(
                 radius: 20,
                 backgroundColor: AdminColors.accentSoft,
