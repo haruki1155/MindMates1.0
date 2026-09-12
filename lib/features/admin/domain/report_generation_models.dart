@@ -33,6 +33,31 @@ class WalkInAppointmentImportRow {
   };
 }
 
+class ImportedWalkInFile {
+  const ImportedWalkInFile({
+    required this.id,
+    required this.fileName,
+    required this.rowCount,
+    required this.importedAt,
+  });
+
+  final String id;
+  final String fileName;
+  final int rowCount;
+  final DateTime importedAt;
+
+  factory ImportedWalkInFile.fromJson(Map<String, dynamic> json) =>
+      ImportedWalkInFile(
+        id: json['id']?.toString() ?? '',
+        fileName: json['fileName']?.toString() ?? 'Imported walk-in entries',
+        rowCount: (json['rowCount'] as num?)?.toInt() ?? 0,
+        importedAt:
+            DateTime.fromMillisecondsSinceEpoch(
+              (json['importedAtMillis'] as num?)?.toInt() ?? 0,
+            ).toLocal(),
+      );
+}
+
 class ReportFilterOption {
   const ReportFilterOption({required this.key, required this.label});
 

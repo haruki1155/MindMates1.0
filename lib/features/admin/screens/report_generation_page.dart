@@ -259,6 +259,8 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
             _reloadReport();
           },
         ),
+        const SizedBox(height: 18),
+        _ImportedFilesPanel(repository: widget.repository),
       ],
       const SizedBox(height: 18),
       AnimatedSwitcher(
@@ -545,6 +547,220 @@ class _Header extends StatelessWidget {
   );
 }
 
+class _ImportedFilesPanel extends StatefulWidget {
+  const _ImportedFilesPanel({required this.repository});
+
+  final AdminPortalRepository repository;
+
+  @override
+  State<_ImportedFilesPanel> createState() => _ImportedFilesPanelState();
+}
+
+class _ImportedFilesPanelState extends State<_ImportedFilesPanel> {
+  late Future<List<ImportedWalkInFile>> _files;
+  String? _deletingId;
+
+  @override
+  void initState() {
+    super.initState();
+    _files = widget.repository.listWalkInImports();
+  }
+
+  void _reload() {
+    setState(() => _files = widget.repository.listWalkInImports());
+  }
+
+  Future<void> _delete(ImportedWalkInFile file) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete imported file?'),
+        content: Text(
+          'This will permanently remove “${file.fileName}” and its ${file.rowCount} imported appointment${file.rowCount == 1 ? '' : 's'}. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: AdminColors.danger,
+            ),
+            child: const Text('Delete file'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _deletingId = file.id);
+    try {
+      await widget.repository.deleteWalkInImport(file.id);
+      if (mounted) {
+        _showReportSnackBar(context, 'Imported file deleted.');
+        _reload();
+      }
+    } catch (error) {
+      if (mounted) {
+        _showReportSnackBar(context, _friendlyReportError(error), error: true);
+      }
+    } finally {
+      if (mounted) setState(() => _deletingId = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(18),
+    decoration: _panelDecoration,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Imported files',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Review and remove office walk-in imports from your reports.',
+                    style: TextStyle(color: AdminColors.muted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Refresh imported files',
+              onPressed: _deletingId == null ? _reload : null,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        FutureBuilder<List<ImportedWalkInFile>>(
+          future: _files,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const _ImportedFilesSkeleton();
+            }
+            if (snapshot.hasError) {
+              return Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'We could not load imported files.',
+                      style: TextStyle(color: AdminColors.danger),
+                    ),
+                  ),
+                  TextButton(onPressed: _reload, child: const Text('Try again')),
+                ],
+              );
+            }
+            final files = snapshot.data ?? const <ImportedWalkInFile>[];
+            if (files.isEmpty) {
+              return const Text(
+                'No imported files yet. Files imported through Bulk import will appear here.',
+                style: TextStyle(color: AdminColors.muted),
+              );
+            }
+            return Column(
+              children: files
+                  .map(
+                    (file) => ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.description_outlined, size: 19),
+                      ),
+                      title: Text(
+                        file.fileName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '${file.rowCount} appointment${file.rowCount == 1 ? '' : 's'} • ${_importDate(file.importedAt)}',
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Delete imported file',
+                        onPressed: _deletingId == null
+                            ? () => _delete(file)
+                            : null,
+                        icon: _deletingId == file.id
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.delete_outline),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            );
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+class _ImportedFilesSkeleton extends StatelessWidget {
+  const _ImportedFilesSkeleton();
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: List.generate(
+      2,
+      (index) => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            CircleAvatar(backgroundColor: Color(0xFFE9E9E6)),
+            SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SkeletonBar(width: 220),
+                  SizedBox(height: 7),
+                  _SkeletonBar(width: 140, height: 10),
+                ],
+              ),
+            ),
+            SizedBox(width: 24),
+            _SkeletonBar(width: 22, height: 22),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _SkeletonBar extends StatelessWidget {
+  const _SkeletonBar({required this.width, this.height = 14});
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: width,
+    height: height,
+    decoration: BoxDecoration(
+      color: const Color(0xFFE9E9E6),
+      borderRadius: BorderRadius.circular(5),
+    ),
+  );
+}
+
+String _importDate(DateTime date) =>
+    '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
 class _BulkImportDialog extends StatefulWidget {
   const _BulkImportDialog({required this.repository});
   final AdminPortalRepository repository;
@@ -559,6 +775,7 @@ class _BulkImportDialogState extends State<_BulkImportDialog> {
   final _date = TextEditingController();
   final _rows = <WalkInAppointmentImportRow>[];
   _ImportCourseOption? _selectedCourse;
+  String _fileName = 'Manual walk-in entries';
   bool _reading = false;
   bool _saving = false;
   String? _error;
@@ -765,6 +982,7 @@ class _BulkImportDialogState extends State<_BulkImportDialog> {
     try {
       final file = await pickAdminImportFile();
       if (file == null) return;
+      _fileName = file.name;
       final extension = file.extension;
       final parsed = extension == 'csv'
           ? _parseCsv(String.fromCharCodes(file.bytes))
@@ -891,7 +1109,10 @@ class _BulkImportDialogState extends State<_BulkImportDialog> {
       _error = null;
     });
     try {
-      final imported = await widget.repository.importWalkInAppointments(_rows);
+      final imported = await widget.repository.importWalkInAppointments(
+        _rows,
+        fileName: _fileName,
+      );
       if (mounted) Navigator.pop(context, imported);
     } catch (error) {
       if (mounted) setState(() => _error = _friendlyReportError(error));

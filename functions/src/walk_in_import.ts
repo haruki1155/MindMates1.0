@@ -1,6 +1,7 @@
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {actorName} from "./audit";
 
 if (!getApps().length) initializeApp();
 const db = getFirestore();
@@ -70,7 +71,15 @@ export const importWalkInAppointments = onCall(async (request) => {
     };
   });
 
+  const fileName = text(request.data?.fileName) || "Manual walk-in entries";
+  const importReference = db.collection("walk_in_imports").doc();
   const batch = db.batch();
+  batch.set(importReference, {
+    fileName: fileName.slice(0, 180),
+    rowCount: rows.length,
+    importedBy: uid,
+    importedAt: FieldValue.serverTimestamp(),
+  });
   for (const row of rows) {
     const reference = db.collection("appointments").doc();
     batch.set(reference, {
@@ -91,10 +100,74 @@ export const importWalkInAppointments = onCall(async (request) => {
       preferredContactMethod: "",
       createdAt: row.loggedAt,
       source: "walk_in_import",
+      importId: importReference.id,
+      importFileName: fileName.slice(0, 180),
       importedBy: uid,
       importedAt: FieldValue.serverTimestamp(),
     });
   }
   await batch.commit();
   return {imported: rows.length};
+});
+
+async function requireAdmin(uid: string): Promise<FirebaseFirestore.DocumentData> {
+  const snapshot = await db.collection("users").doc(uid).get();
+  const data = snapshot.data() ?? {};
+  const role = text(data.accessRole) || text(data.role);
+  if (role !== "admin") {
+    throw new HttpsError("permission-denied", "Administrator access is required.");
+  }
+  return data;
+}
+
+export const listWalkInImports = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
+  await requireAdmin(uid);
+  const snapshot = await db.collection("walk_in_imports")
+    .orderBy("importedAt", "desc")
+    .limit(100)
+    .get();
+  return {
+    files: snapshot.docs.map((doc) => {
+      const data = doc.data();
+      const importedAt = data.importedAt as FirebaseFirestore.Timestamp | undefined;
+      return {
+        id: doc.id,
+        fileName: text(data.fileName) || "Imported walk-in entries",
+        rowCount: Number(data.rowCount ?? 0),
+        importedAtMillis: importedAt?.toMillis() ?? Date.now(),
+      };
+    }),
+  };
+});
+
+export const deleteWalkInImport = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
+  const actor = await requireAdmin(uid);
+  const importId = text(request.data?.importId);
+  if (!importId || importId.length > 120) {
+    throw new HttpsError("invalid-argument", "A valid imported file is required.");
+  }
+  const importReference = db.collection("walk_in_imports").doc(importId);
+  const importSnapshot = await importReference.get();
+  if (!importSnapshot.exists) {
+    throw new HttpsError("not-found", "This imported file no longer exists.");
+  }
+  const appointments = await db.collection("appointments")
+    .where("importId", "==", importId)
+    .limit(500)
+    .get();
+  const batch = db.batch();
+  appointments.docs.forEach((doc) => batch.delete(doc.ref));
+  batch.delete(importReference);
+  await batch.commit();
+  console.info("Deleted walk-in import", {
+    importId,
+    deletedRows: appointments.size,
+    actorId: uid,
+    actorName: actorName(actor),
+  });
+  return {deleted: appointments.size};
 });

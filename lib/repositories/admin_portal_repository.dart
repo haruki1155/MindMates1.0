@@ -646,7 +646,9 @@ class AdminPortalRepository {
           .toList(growable: false);
 
   Future<int> importWalkInAppointments(
-    List<WalkInAppointmentImportRow> rows,
+    List<WalkInAppointmentImportRow> rows, {
+    String? fileName,
+  }
   ) async {
     if (!currentAccessRole.canAccessClinicalData) {
       throw StateError('Counselor or administrator access is required.');
@@ -655,8 +657,40 @@ class AdminPortalRepository {
         .httpsCallable('importWalkInAppointments')
         .call<Map<String, dynamic>>({
           'rows': rows.map((row) => row.toJson()).toList(growable: false),
+          if (fileName != null && fileName.trim().isNotEmpty)
+            'fileName': fileName.trim(),
         });
     return (result.data['imported'] as num?)?.toInt() ?? rows.length;
+  }
+
+  Future<List<ImportedWalkInFile>> listWalkInImports() async {
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
+    }
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('listWalkInImports')
+        .call<Map<String, dynamic>>();
+    final raw = result.data['files'];
+    return raw is List
+        ? raw
+              .whereType<Map>()
+              .map(
+                (item) => ImportedWalkInFile.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .toList(growable: false)
+        : const [];
+  }
+
+  Future<int> deleteWalkInImport(String importId) async {
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
+    }
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('deleteWalkInImport')
+        .call<Map<String, dynamic>>({'importId': importId});
+    return (result.data['deleted'] as num?)?.toInt() ?? 0;
   }
 
   Stream<List<AdminAssessmentRecord>> watchAssessments() => _firestoreService

@@ -33,7 +33,11 @@ export {
   sendMindAidMessageDev,
 } from "./mind_aid";
 export {getReportAnalytics} from "./report_generation";
-export {importWalkInAppointments} from "./walk_in_import";
+export {
+  importWalkInAppointments,
+  listWalkInImports,
+  deleteWalkInImport,
+} from "./walk_in_import";
 export {
   getCounselingPopulation,
   saveCounselingPopulation,
