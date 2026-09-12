@@ -237,11 +237,28 @@ class AdminPortalRepository {
             'courseId': courseId,
             'requestedRole': requestedRole.storedValue,
           });
+    } catch (error) {
+      // The callable can commit the access request and then lose its response
+      // over the network. Do not delete a valid Auth account in that case.
+      Map<String, dynamic>? profile;
+      try {
+        profile = await getOwnProfile(credential.user!.uid);
+      } catch (_) {
+        // Preserve the original error when reconciliation is unavailable.
+      }
+      if (profile == null || profile['accessRequestId'] == null) {
+        await credential.user?.delete();
+        rethrow;
+      }
+    }
+
+    try {
       await credential.user?.sendEmailVerification();
       return true;
     } catch (_) {
-      await credential.user?.delete();
-      rethrow;
+      // The access request is already safely stored. The user can resend
+      // verification later without losing the registration.
+      return false;
     }
   }
 
