@@ -77,12 +77,14 @@ void main() {
   });
 
   test('failed fetch after midnight does not restore yesterday mood', () async {
-    var now = DateTime(2026, 7, 7, 23);
+    // Use UTC instants so this remains 11 PM / 1 AM in Manila on CI runners
+    // (which run in UTC) as well as on developer machines in other zones.
+    var now = DateTime.utc(2026, 7, 7, 15);
     final repository = _FakeMoodRepository();
     final provider = MoodProvider(repository, nowProvider: () => now);
     await provider.logDailyMood(userId: 'user_1', level: 3);
     repository.throwsOnFetchToday = true;
-    now = DateTime(2026, 7, 8, 1);
+    now = DateTime.utc(2026, 7, 7, 17);
 
     await provider.loadTodayMood('user_1');
 
