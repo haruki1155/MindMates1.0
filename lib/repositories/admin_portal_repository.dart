@@ -563,13 +563,20 @@ class AdminPortalRepository {
     String notificationId, {
     required String action,
   }) async {
+    await managePortalNotifications([notificationId], action: action);
+  }
+
+  Future<void> managePortalNotifications(
+    List<String> notificationIds, {
+    required String action,
+  }) async {
     if (!currentAccessRole.canAccessClinicalData) {
       throw StateError('Counselor or administrator access is required.');
     }
     await FirebaseFunctions.instance
         .httpsCallable('managePortalNotification')
         .call<Map<String, dynamic>>({
-          'notificationId': notificationId,
+          'notificationIds': notificationIds,
           'action': action,
         });
   }

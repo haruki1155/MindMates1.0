@@ -31,6 +31,7 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
   bool _markingAll = false;
   bool _showArchived = false;
   String? _busyId;
+  final Set<String> _selectedIds = <String>{};
 
   Stream<List<AppNotificationModel>> _source() =>
       !_showArchived && widget.notifications != null
@@ -96,6 +97,14 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                       };
                     })
                     .toList(growable: false);
+                _selectedIds.removeWhere(
+                  (id) => !visible.any((item) => item.id == id),
+                );
+                final selectable = visible
+                    .where((item) => _canBulkManage(item))
+                    .toList(growable: false);
+                final allSelected = selectable.isNotEmpty &&
+                    selectable.every((item) => _selectedIds.contains(item.id));
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -167,6 +176,54 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                               });
                             },
                           ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Checkbox(
+                                value: allSelected,
+                                tristate: _selectedIds.isNotEmpty && !allSelected,
+                                onChanged: selectable.isEmpty
+                                    ? null
+                                    : (_) => setState(() {
+                                        if (allSelected) {
+                                          _selectedIds.removeAll(
+                                            selectable.map((item) => item.id),
+                                          );
+                                        } else {
+                                          _selectedIds.addAll(
+                                            selectable.map((item) => item.id),
+                                          );
+                                        }
+                                      }),
+                              ),
+                              Text('Select all${selectable.isEmpty ? '' : ' (${selectable.length})'}'),
+                            ],
+                          ),
+                          if (_selectedIds.isNotEmpty) ...[
+                            if (_showArchived)
+                              OutlinedButton.icon(
+                                onPressed: _busyId == null
+                                    ? () => _bulkManage('restore')
+                                    : null,
+                                icon: const Icon(Icons.unarchive_outlined, size: 18),
+                                label: const Text('Restore selected'),
+                              )
+                            else
+                              OutlinedButton.icon(
+                                onPressed: _busyId == null
+                                    ? () => _bulkManage('archive')
+                                    : null,
+                                icon: const Icon(Icons.archive_outlined, size: 18),
+                                label: const Text('Archive selected'),
+                              ),
+                            OutlinedButton.icon(
+                              onPressed: _busyId == null
+                                  ? () => _bulkManage('delete')
+                                  : null,
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              label: const Text('Delete selected'),
+                            ),
+                          ],
                           if (!_showArchived && unread.isNotEmpty)
                             OutlinedButton.icon(
                               onPressed: _markingAll
@@ -205,6 +262,15 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                                         visible[index].resolvedAt != null
                                     ? () => _manage(visible[index], 'delete')
                                     : null,
+                                selected: _selectedIds.contains(visible[index].id),
+                                selectable: _canBulkManage(visible[index]),
+                                onSelected: (selected) => setState(() {
+                                  if (selected) {
+                                    _selectedIds.add(visible[index].id);
+                                  } else {
+                                    _selectedIds.remove(visible[index].id);
+                                  }
+                                }),
                               ),
                           ],
                         ),
@@ -294,6 +360,55 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
       if (mounted) setState(() => _busyId = null);
     }
   }
+
+  bool _canBulkManage(AppNotificationModel notification) =>
+      _showArchived || notification.isRead || notification.resolvedAt != null;
+
+  Future<void> _bulkManage(String action) async {
+    final ids = _selectedIds.toList(growable: false);
+    if (ids.isEmpty) return;
+    if (action == 'delete') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Delete ${ids.length} notifications?'),
+          content: const Text('The selected notifications will be permanently removed.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    setState(() => _busyId = 'bulk');
+    try {
+      await widget.repository.managePortalNotifications(ids, action: action);
+      if (!mounted) return;
+      setState(() => _selectedIds.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(switch (action) {
+          'archive' => '${ids.length} notifications archived.',
+          'restore' => '${ids.length} notifications restored.',
+          _ => '${ids.length} notifications deleted.',
+        })),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update the selected notifications. Try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busyId = null);
+    }
+  }
 }
 
 class _NotificationSummary extends StatelessWidget {
@@ -374,6 +489,9 @@ class _NotificationTile extends StatelessWidget {
     required this.onArchive,
     required this.onRestore,
     required this.onDelete,
+    required this.selected,
+    required this.selectable,
+    required this.onSelected,
   });
   final AppNotificationModel notification;
   final bool showDivider;
@@ -383,6 +501,9 @@ class _NotificationTile extends StatelessWidget {
   final VoidCallback? onArchive;
   final VoidCallback onRestore;
   final VoidCallback? onDelete;
+  final bool selected;
+  final bool selectable;
+  final ValueChanged<bool> onSelected;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -398,6 +519,12 @@ class _NotificationTile extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Checkbox(
+                  value: selected,
+                  onChanged: selectable
+                      ? (value) => onSelected(value ?? false)
+                      : null,
+                ),
                 Container(
                   width: 42,
                   height: 42,
