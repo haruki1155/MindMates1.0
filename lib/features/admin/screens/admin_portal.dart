@@ -20,6 +20,7 @@ import 'admin_change_password_screen.dart';
 import 'admin_operations_dashboard.dart';
 import 'staff_operations_dashboard.dart';
 import 'counselor_operations_dashboard.dart';
+import 'counselor_workflow_page.dart';
 import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../theme/admin_theme.dart';
@@ -40,6 +41,8 @@ enum AdminPortalPage {
   users,
   profiling,
   appointments,
+  cases,
+  followUps,
   reports,
   notifications,
   availability,
@@ -54,6 +57,8 @@ extension on AdminPortalPage {
     AdminPortalPage.users => 'User Management',
     AdminPortalPage.profiling => 'Profiling Management',
     AdminPortalPage.appointments => 'Appointments',
+    AdminPortalPage.cases => 'My Cases',
+    AdminPortalPage.followUps => 'Follow-ups',
     AdminPortalPage.reports => 'Reports',
     AdminPortalPage.notifications => 'Notifications',
     AdminPortalPage.availability => 'Schedule',
@@ -74,6 +79,8 @@ extension on AdminPortalPage {
     AdminPortalPage.users => Icons.group_outlined,
     AdminPortalPage.profiling => Icons.badge_outlined,
     AdminPortalPage.appointments => Icons.calendar_month_outlined,
+    AdminPortalPage.cases => Icons.folder_shared_outlined,
+    AdminPortalPage.followUps => Icons.task_alt_outlined,
     AdminPortalPage.reports => Icons.analytics_outlined,
     AdminPortalPage.notifications => Icons.notifications_outlined,
     AdminPortalPage.availability => Icons.storefront_outlined,
@@ -469,6 +476,16 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
           ? () => _setPage(AdminPortalPage.assessments)
           : null,
     ),
+    AdminPortalPage.cases => CounselorWorkflowPage(
+      repository: _repository,
+      mode: CounselorWorkflowMode.cases,
+      onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
+    ),
+    AdminPortalPage.followUps => CounselorWorkflowPage(
+      repository: _repository,
+      mode: CounselorWorkflowMode.followUps,
+      onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
+    ),
     AdminPortalPage.reports => ReportGenerationPage(repository: _repository),
     AdminPortalPage.notifications => AdminNotificationsPage(
       repository: _repository,
@@ -506,6 +523,8 @@ class _Nav extends StatelessWidget {
     // Counselor case/profile access must come through an assigned-case
     // surface. The legacy organization-wide profiling screen is admin-only.
     AdminPortalPage.profiling => isSuperAdmin,
+    AdminPortalPage.cases || AdminPortalPage.followUps =>
+        accessRole == AccessRole.counselor,
     AdminPortalPage.reports => accessRole.canAccessClinicalData,
     // Notifications are opened from the persistent header bell instead of
     // duplicating the destination in the workspace navigation.
@@ -527,6 +546,8 @@ class _Nav extends StatelessWidget {
       const _NavSection('Counseling', [
         AdminPortalPage.appointments,
         AdminPortalPage.availability,
+        AdminPortalPage.cases,
+        AdminPortalPage.followUps,
         AdminPortalPage.inquiries,
       ]),
       const _NavSection('Insights', [AdminPortalPage.reports]),
