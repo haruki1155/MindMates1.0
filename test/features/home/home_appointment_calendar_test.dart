@@ -99,7 +99,7 @@ void main() {
     await tester.pumpWidget(_app(provider, HomeScreen(nowProvider: () => now)));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Book'));
+    await tester.tap(find.text('Appoint a Session'));
     await tester.pumpAndSettle();
 
     expect(find.byType(PaccCounselingScreen), findsOneWidget);

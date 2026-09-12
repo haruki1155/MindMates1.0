@@ -1,15 +1,46 @@
 import {getApps, initializeApp} from "firebase-admin/app";
-import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
+import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
 import {getAuth} from "firebase-admin/auth";
 import {getDownloadURL, getStorage} from "firebase-admin/storage";
-import {onDocumentCreated, onDocumentDeleted, onDocumentWritten} from "firebase-functions/v2/firestore";
+import {onDocumentCreated, onDocumentDeleted, onDocumentUpdated, onDocumentWritten} from "firebase-functions/v2/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
-export {submitQuickAssessment, submitFullAssessment} from "./assessment/submissions";
-export {provisionAppUserProfile, getAssessmentStatus} from "./account_integrity";
+import {onSchedule} from "firebase-functions/v2/scheduler";
+export {
+  submitQuickAssessment,
+  submitQuickAssessmentDev,
+  submitFullAssessment,
+  submitFullAssessmentDev,
+} from "./assessment/submissions";
+export {
+  provisionAppUserProfile,
+  provisionAppUserProfileDev,
+  getAssessmentStatus,
+  getAssessmentStatusDev,
+} from "./account_integrity";
+export {
+  resolveSchoolIdAuthEmail,
+  resolveSchoolIdAuthEmailDev,
+  requestAdminPasswordReset,
+  requestAdminPasswordResetDev,
+} from "./account_recovery";
 import {defineString} from "firebase-functions/params";
 import {randomBytes} from "node:crypto";
-export {aggregateMindAidFeedback, sendMindAidMessage} from "./mind_aid";
+import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
+export {
+  aggregateMindAidFeedback,
+  sendMindAidMessage,
+  sendMindAidMessageDev,
+} from "./mind_aid";
+export {getReportAnalytics} from "./report_generation";
+export {importWalkInAppointments} from "./walk_in_import";
+export {
+  getCounselingPopulation,
+  saveCounselingPopulation,
+  getAcademicYears,
+  createAcademicYear,
+  closeAcademicYear,
+} from "./counseling_population";
 
 if (!getApps().length) initializeApp();
 
@@ -246,32 +277,27 @@ function normalizedEmployeeId(value: unknown): string {
 
 const STAFF_ACCESS_ROLES = ["portalStaff", "counselor"] as const;
 const STAFF_ACCOUNT_STATUSES = ["pending", "approved", "rejected", "disabled"] as const;
-const BUNDLED_STAFF_DEPARTMENTS = [
-  "Administration", "Registrar", "Finance", "Library", "Guidance/PACC",
-  "Health Services", "IT/MIS", "Maintenance/Facilities", "Security", "Other",
-] as const;
 
 export const registerStaffAccount = onCall(async (request) => {
   const userId = requireAuthenticatedUser(request);
   const authUser = await getAuth().getUser(userId);
   const email = String(authUser.email ?? "").trim().toLowerCase();
   if (!email) throw new HttpsError("failed-precondition", "An email address is required.");
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new HttpsError("invalid-argument", "Enter a valid email address.");
+  }
   const employeeId = requiredText(request.data?.employeeId, "Employee ID", 3, 40);
   const employeeIdKey = normalizedEmployeeId(employeeId);
   const firstName = requiredText(request.data?.firstName, "First name", 1, 80);
   const lastName = requiredText(request.data?.lastName, "Last name", 1, 80);
   const position = requiredText(request.data?.position, "Position", 2, 100);
-  const department = requiredText(request.data?.department, "Department", 2, 120);
-  const departmentId = typeof request.data?.departmentId === "string" ? request.data.departmentId.trim() : "";
-  if (!departmentId && !BUNDLED_STAFF_DEPARTMENTS.includes(
-    department as typeof BUNDLED_STAFF_DEPARTMENTS[number],
-  )) {
-    throw new HttpsError("invalid-argument", "Choose a valid staff department.");
+  const requestedRole = String(request.data?.requestedRole ?? "").trim();
+  if (!STAFF_ACCESS_ROLES.includes(requestedRole as typeof STAFF_ACCESS_ROLES[number])) {
+    throw new HttpsError("invalid-argument", "Choose PAACC Staff or Counselor.");
   }
-  const collegeId = typeof request.data?.collegeId === "string" ? request.data.collegeId.trim() : "";
-  const courseId = typeof request.data?.courseId === "string" ? request.data.courseId.trim() : "";
   const userRef = db.collection("users").doc(userId);
   const reservationRef = db.collection("employee_id_reservations").doc(employeeIdKey);
+  const requestRef = db.collection("staffAccessRequests").doc();
 
   await db.runTransaction(async (transaction) => {
     const [existing, reservation] = await Promise.all([
@@ -281,57 +307,74 @@ export const registerStaffAccount = onCall(async (request) => {
     if (reservation.exists && reservation.data()?.userId !== userId) {
       throw new HttpsError("already-exists", "That employee ID is already registered.");
     }
-    if (departmentId) {
-      const canonicalDepartment = await transaction.get(db.collection("departments").doc(departmentId));
-      if (!canonicalDepartment.exists || canonicalDepartment.data()?.active !== true) {
-        throw new HttpsError("failed-precondition", "Choose an active department.");
-      }
-    }
-    if (courseId) {
-      const course = await transaction.get(db.collection("courses").doc(courseId));
-      if (!course.exists || course.data()?.active !== true || course.data()?.collegeId !== collegeId) {
-        throw new HttpsError("failed-precondition", "Choose a course belonging to the selected college.");
-      }
-    }
     transaction.create(reservationRef, {userId, employeeId, createdAt: FieldValue.serverTimestamp()});
     transaction.create(userRef, {
       id: userId, email, firstName, lastName, name: `${firstName} ${lastName}`,
-      employeeId, employeeIdKey, position, department, departmentId, collegeId, courseId,
+      employeeId, employeeIdKey, position, office: "PAACC / Guidance Office",
       populationRole: "nonTeaching", declaredRole: "nonTeaching", role: "staff",
       accessRole: "appUser", staffAccountStatus: "pending", verificationStatus: "pending",
+      requestedRole, requestedAccessRole: requestedRole, approvedRole: null,
+      accessRequestId: requestRef.id,
+      registrationStatus: "pending_review", accountStatus: "disabled",
       profileVersion: 3, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
+    transaction.create(requestRef, {
+      requestId: requestRef.id, applicantUserId: userId, firstName, lastName,
+      employeeId, email, position, office: "PAACC / Guidance Office", requestedRole,
+      registrationStatus: "pending_review", submittedAt: FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    writeAudit(transaction, db, {actorId: userId, actorNameSnapshot: `${firstName} ${lastName}`,
+      actorRoleSnapshot: "appUser", action: "STAFF_ACCESS_REQUEST_SUBMITTED",
+      category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: userId,
+      metadata: {after: {registrationStatus: "pending_review", requestedRole}, targetLabel: email}});
   });
-  return {ok: true};
+  return {ok: true, requestId: requestRef.id, reference: `REQ-${requestRef.id.slice(0, 8).toUpperCase()}`};
 });
 
 export const reviewStaffRegistration = onCall(async (request) => {
   const actorId = requireAuthenticatedUser(request);
   const actor = await requireSuperAdmin(actorId);
   const targetUserId = requiredText(request.data?.userId, "User ID", 1, 128);
-  const approve = request.data?.approve === true;
+  const decision = String(request.data?.decision ?? (request.data?.approve === true ? "approve" : "reject"));
+  const approve = decision === "approve";
+  const moreInfo = decision === "more_information";
   const accessRole = String(request.data?.accessRole ?? "portalStaff");
   const reason = requiredText(request.data?.reason, "Reason", 3, 500);
   if (targetUserId === actorId) throw new HttpsError("permission-denied", "You cannot review yourself.");
-  if (approve && !STAFF_ACCESS_ROLES.includes(accessRole as typeof STAFF_ACCESS_ROLES[number])) {
+  if ((approve || moreInfo) && !STAFF_ACCESS_ROLES.includes(accessRole as typeof STAFF_ACCESS_ROLES[number])) {
     throw new HttpsError("invalid-argument", "Choose Portal Staff or Counselor.");
   }
   const target = db.collection("users").doc(targetUserId);
-  const audit = db.collection("admin_audit_logs").doc();
   await db.runTransaction(async (transaction) => {
     const before = await transaction.get(target);
-    if (!before.exists || before.data()?.staffAccountStatus !== "pending") {
+    if (!before.exists || !["pending", "pending_review", "more_information_required"].includes(String(before.data()?.registrationStatus ?? "pending_review"))) {
       throw new HttpsError("failed-precondition", "This registration is no longer pending.");
     }
-    const status = approve ? "approved" : "rejected";
-    transaction.update(target, {staffAccountStatus: status, accessRole: approve ? accessRole : "appUser",
-      verificationStatus: approve ? "verified" : "rejected", verifiedBy: actorId,
-      verifiedAt: approve ? FieldValue.serverTimestamp() : null, updatedAt: FieldValue.serverTimestamp()});
-    transaction.create(audit, {actorId, actorAccessRole: actor.accessRole, targetUserId,
-      action: approve ? "staffRegistrationApproved" : "staffRegistrationRejected", reason,
-      before: {staffAccountStatus: "pending", accessRole: "appUser"},
-      after: {staffAccountStatus: status, accessRole: approve ? accessRole : "appUser"},
-      createdAt: FieldValue.serverTimestamp()});
+    const status = approve ? "approved" : moreInfo ? "more_information_required" : "rejected";
+    transaction.update(target, {
+      staffAccountStatus: approve ? "approved" : moreInfo ? "pending" : "rejected",
+      accessRole: approve ? accessRole : "appUser", approvedRole: approve ? accessRole : null,
+      registrationStatus: status, accountStatus: approve ? "active" : "disabled",
+      verificationStatus: approve ? "verified" : moreInfo ? "pending" : "rejected",
+      verifiedBy: approve ? actorId : null,
+      verifiedAt: approve ? FieldValue.serverTimestamp() : null,
+      approvedBy: approve ? actorId : null,
+      approvedAt: approve ? FieldValue.serverTimestamp() : null,
+      moreInformationReason: moreInfo ? reason : null, reviewReason: reason,
+      updatedAt: FieldValue.serverTimestamp()});
+    const requestId = String(before.data()?.accessRequestId ?? "");
+    if (requestId) {
+      transaction.set(db.collection("staffAccessRequests").doc(requestId), {
+        registrationStatus: status, reviewedAt: FieldValue.serverTimestamp(), reviewedBy: actorId,
+        approvedRole: approve ? accessRole : null, moreInformationReason: moreInfo ? reason : null,
+        reviewReason: reason, updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+    }
+    writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole,
+      action: approve ? "STAFF_ACCESS_REQUEST_APPROVED" : moreInfo ? "STAFF_ACCESS_REQUEST_MORE_INFO_REQUIRED" : "STAFF_REGISTRATION_REJECTED",
+      category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: targetUserId,
+      metadata: {before: {registrationStatus: before.data()?.registrationStatus ?? "pending_review", accessRole: "appUser"}, after: {registrationStatus: status, approvedRole: approve ? accessRole : null}, reason}});
   });
   if (!approve) await getAuth().revokeRefreshTokens(targetUserId);
   return {ok: true};
@@ -347,7 +390,6 @@ export const setStaffAccountEnabled = onCall(async (request) => {
     throw new HttpsError("permission-denied", "The super-administrator cannot be modified.");
   }
   const target = db.collection("users").doc(targetUserId);
-  const audit = db.collection("admin_audit_logs").doc();
   await db.runTransaction(async (transaction) => {
     const before = await transaction.get(target);
     if (!before.exists) throw new HttpsError("not-found", "Staff profile not found.");
@@ -358,10 +400,10 @@ export const setStaffAccountEnabled = onCall(async (request) => {
     const status = enabled ? "approved" : "disabled";
     transaction.update(target, {staffAccountStatus: status, accessRole: enabled ? before.data()?.previousAccessRole ?? "portalStaff" : "appUser",
       previousAccessRole: enabled ? FieldValue.delete() : before.data()?.accessRole ?? "portalStaff", updatedAt: FieldValue.serverTimestamp()});
-    transaction.create(audit, {actorId, actorAccessRole: actor.accessRole, targetUserId,
-      action: enabled ? "staffAccountEnabled" : "staffAccountDisabled", reason,
-      before: {staffAccountStatus: previous, accessRole: before.data()?.accessRole},
-      after: {staffAccountStatus: status}, createdAt: FieldValue.serverTimestamp()});
+    writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole,
+      action: enabled ? "STAFF_ACCOUNT_REACTIVATED" : "STAFF_ACCOUNT_SUSPENDED",
+      category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: targetUserId,
+      metadata: {before: {staffAccountStatus: previous, accessRole: before.data()?.accessRole}, after: {staffAccountStatus: status}, reason}});
   });
   await getAuth().updateUser(targetUserId, {disabled: !enabled});
   if (!enabled) await getAuth().revokeRefreshTokens(targetUserId);
@@ -431,10 +473,19 @@ export const listPublicAppUsers = onCall(async (request) => {
     const data = doc.data();
     return data.staffAccountStatus == null && data.accessRole !== "admin";
   });
-  return {users: await Promise.all(appUsers.map(async (doc) => ({
-    publicUserId: await ensurePublicUserId(doc.id),
-    populationRole: String(doc.data().populationRole ?? doc.data().declaredRole ?? doc.data().role ?? ""),
-  })))};
+  return {users: await Promise.all(appUsers.map(async (doc) => {
+    const data = doc.data();
+    const createdAt = data.createdAt instanceof Timestamp
+      ? data.createdAt.toDate().toISOString()
+      : typeof data.createdAt === "string" ? data.createdAt : null;
+    return {
+      userId: doc.id,
+      publicUserId: await ensurePublicUserId(doc.id),
+      populationRole: String(data.populationRole ?? data.declaredRole ?? data.role ?? ""),
+      department: String(data.department ?? data.sector ?? ""),
+      createdAt,
+    };
+  }))};
 });
 
 export const backfillPublicAppUserIds = onCall(async (request) => {
@@ -609,23 +660,80 @@ export const assignAccessRole = onCall(async (request) => {
     throw new HttpsError("permission-denied", "The super-administrator cannot be modified.");
   }
   const target = db.collection("users").doc(targetUserId);
-  const audit = db.collection("role_audit_logs").doc();
   await db.runTransaction(async (transaction) => {
     const before = await transaction.get(target);
     if (!before.exists) throw new HttpsError("not-found", "User profile not found.");
     transaction.update(target, {accessRole, profileVersion: 2, updatedAt: FieldValue.serverTimestamp()});
-    transaction.create(audit, {
-      targetUserId,
-      actorId,
-      actorAccessRole: actor.accessRole,
-      action: "accessRoleAssigned",
-      reason,
-      before: {accessRole: before.data()?.accessRole ?? "appUser"},
-      after: {accessRole},
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole,
+      action: accessRole === "appUser" ? "STAFF_ACCESS_REVOKED" : "STAFF_ROLE_CHANGED",
+      category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: targetUserId,
+      metadata: {before: {accessRole: before.data()?.accessRole ?? "appUser"}, after: {accessRole}, reason}});
   });
   return {ok: true};
+});
+
+const AUDIT_CATEGORY_VALUES = Object.values(AUDIT_CATEGORIES);
+const AUDIT_METADATA_KEYS = new Set([
+  "before", "after", "reason", "format", "reportType", "academicYearId",
+  "selectedDepartment", "dateRange", "targetLabel", "status",
+]);
+
+function safeAuditMetadata(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (!AUDIT_METADATA_KEYS.has(key)) continue;
+    if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+      result[key] = item;
+    } else if (item && typeof item === "object" && !Array.isArray(item)) {
+      const values: Record<string, unknown> = {};
+      for (const [nestedKey, nestedValue] of Object.entries(item as Record<string, unknown>)) {
+        if ((typeof nestedValue === "string" || typeof nestedValue === "number" || typeof nestedValue === "boolean") && nestedKey.length <= 50) values[nestedKey] = nestedValue;
+      }
+      result[key] = values;
+    }
+  }
+  return result;
+}
+
+export const recordAuditEvent = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  const actor = await requireStaff(actorId);
+  const action = String(request.data?.action ?? "") as typeof AUDIT_ACTIONS[number];
+  const category = String(request.data?.category ?? "");
+  if (!AUDIT_ACTIONS.includes(action)) throw new HttpsError("invalid-argument", "Choose a valid audit action.");
+  if (!AUDIT_CATEGORY_VALUES.includes(category as typeof AUDIT_CATEGORY_VALUES[number])) throw new HttpsError("invalid-argument", "Choose a valid audit category.");
+  const targetType = typeof request.data?.targetType === "string" ? request.data.targetType.trim().slice(0, 60) : undefined;
+  const targetId = typeof request.data?.targetId === "string" ? request.data.targetId.trim().slice(0, 160) : undefined;
+  const audit = db.collection("admin_audit_logs").doc();
+  await audit.create({actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole,
+    action, category, targetType: targetType || null, targetId: targetId || null,
+    metadata: safeAuditMetadata(request.data?.metadata), sessionId: null,
+    timestamp: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+    targetUserId: targetType === "staff" ? targetId : null});
+  return {ok: true};
+});
+
+export const getAuditLogPage = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  await requireSuperAdmin(actorId);
+  const targetUserId = requiredText(request.data?.targetUserId, "Target user", 1, 128);
+  const category = typeof request.data?.category === "string" ? request.data.category.trim() : "";
+  const action = typeof request.data?.action === "string" ? request.data.action.trim() : "";
+  const afterMillis = typeof request.data?.afterMillis === "number" ? request.data.afterMillis : null;
+  const pageSize = Math.min(Math.max(Number(request.data?.pageSize ?? 25), 1), 50);
+  let query: FirebaseFirestore.Query = db.collection("admin_audit_logs")
+    .where("targetUserId", "==", targetUserId).orderBy("createdAt", "desc").limit(pageSize);
+  if (category) query = query.where("category", "==", category);
+  if (action) query = query.where("action", "==", action);
+  if (afterMillis != null) query = query.where("createdAt", ">=", Timestamp.fromMillis(afterMillis));
+  if (typeof request.data?.beforeMillis === "number") query = query.startAfter(Timestamp.fromMillis(request.data.beforeMillis));
+  const snapshot = await query.get();
+  return {events: snapshot.docs.map((doc) => {
+    const data = doc.data();
+    const timestamp = data.timestamp instanceof Timestamp ? data.timestamp.toDate().toISOString() : data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : null;
+    return {id: doc.id, ...data, timestamp, createdAt: timestamp};
+  }), hasMore: snapshot.size === pageSize};
 });
 
 export const saveOrganizationRecord = onCall(async (request) => {
@@ -861,6 +969,211 @@ export const aggregateUserActivity = onDocumentCreated(
   },
 );
 
+type PortalNotificationKind = "appointment" | "inquiry";
+
+const NOTIFICATION_ARCHIVE_AFTER_DAYS = 30;
+const NOTIFICATION_DELETE_AFTER_DAYS = 90;
+const DAY_MILLIS = 24 * 60 * 60 * 1000;
+
+export function notificationArchiveAtMillis(readAtMillis: number): number {
+  return readAtMillis + NOTIFICATION_ARCHIVE_AFTER_DAYS * DAY_MILLIS;
+}
+
+export function notificationDeleteAtMillis(archivedAtMillis: number): number {
+  return archivedAtMillis + NOTIFICATION_DELETE_AFTER_DAYS * DAY_MILLIS;
+}
+
+export function isNormalNotificationType(type: unknown): boolean {
+  return type === "appointment" || type === "inquiry";
+}
+
+export function portalNotificationPayload(
+  kind: PortalNotificationKind,
+  recipientId: string,
+  recordId: string,
+): Record<string, unknown> {
+  const isAppointment = kind === "appointment";
+  return {
+    userId: recipientId,
+    type: kind,
+    audience: "portal",
+    title: isAppointment ? "New counseling appointment" : "New inquiry",
+    body: isAppointment ?
+      "A new counseling appointment is ready for review." :
+      "A new inquiry is ready for review.",
+    ...(isAppointment ? {appointmentId: recordId} : {inquiryId: recordId}),
+    createdAt: FieldValue.serverTimestamp(),
+    readAt: null,
+    resolvedAt: null,
+    archiveEligibleAt: null,
+    archivedAt: null,
+    expiresAt: null,
+  };
+}
+
+async function notifyClinicalStaff(
+  kind: PortalNotificationKind,
+  recordId: string,
+): Promise<void> {
+  const staff = await db.collection("users")
+    .where("accessRole", "in", ["portalStaff", "counselor", "admin"])
+    .get();
+  await Promise.all(staff.docs.map(async (recipient) => {
+    const notificationId = `portal_${kind}_${recordId}_${recipient.id}`;
+    try {
+      await db.collection("notifications").doc(notificationId).create(
+        portalNotificationPayload(kind, recipient.id, recordId),
+      );
+    } catch (error: unknown) {
+      const code = typeof error === "object" && error !== null && "code" in error ?
+        String((error as {code?: unknown}).code) : "";
+      if (code !== "6" && code !== "already-exists") throw error;
+    }
+  }));
+}
+
+export const notifyPortalOfAppointment = onDocumentCreated(
+  {document: "appointments/{appointmentId}", retry: true},
+  async (event) => notifyClinicalStaff("appointment", event.params.appointmentId),
+);
+
+export const notifyPortalOfInquiry = onDocumentCreated(
+  {document: "inquiries/{inquiryId}", retry: true},
+  async (event) => notifyClinicalStaff("inquiry", event.params.inquiryId),
+);
+
+export const scheduleReadNotificationArchive = onDocumentUpdated(
+  {document: "notifications/{notificationId}", retry: true},
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!after || !isNormalNotificationType(after.type) || after.archivedAt) return;
+    if (before?.readAt || !(after.readAt instanceof Timestamp) || after.archiveEligibleAt) return;
+    await event.data?.after.ref.update({
+      archiveEligibleAt: Timestamp.fromMillis(notificationArchiveAtMillis(after.readAt.toMillis())),
+    });
+  },
+);
+
+async function archiveResolvedPortalNotifications(
+  kind: PortalNotificationKind,
+  recordId: string,
+): Promise<void> {
+  const idField = kind === "appointment" ? "appointmentId" : "inquiryId";
+  const notifications = await db.collection("notifications").where(idField, "==", recordId).get();
+  if (notifications.empty) return;
+  const archivedAt = Timestamp.now();
+  const expiresAt = Timestamp.fromMillis(notificationDeleteAtMillis(archivedAt.toMillis()));
+  const batch = db.batch();
+  let updates = 0;
+  for (const notification of notifications.docs) {
+    const data = notification.data();
+    if (data.audience !== "portal" || data.archivedAt) continue;
+    batch.update(notification.ref, {
+      resolvedAt: archivedAt,
+      archivedAt,
+      expiresAt,
+      archiveEligibleAt: null,
+    });
+    updates += 1;
+  }
+  if (updates > 0) await batch.commit();
+}
+
+export const resolvePortalAppointmentNotifications = onDocumentUpdated(
+  {document: "appointments/{appointmentId}", retry: true},
+  async (event) => {
+    const before = String(event.data?.before.data()?.status ?? "").toLowerCase();
+    const after = String(event.data?.after.data()?.status ?? "").toLowerCase();
+    const terminal = new Set(["completed", "complete", "declined", "cancelled", "canceled"]);
+    if (terminal.has(after) && !terminal.has(before)) {
+      await archiveResolvedPortalNotifications("appointment", event.params.appointmentId);
+    }
+  },
+);
+
+export const resolvePortalInquiryNotifications = onDocumentUpdated(
+  {document: "inquiries/{inquiryId}", retry: true},
+  async (event) => {
+    const before = String(event.data?.before.data()?.status ?? "").toLowerCase();
+    const after = String(event.data?.after.data()?.status ?? "").toLowerCase();
+    if (after === "resolved" && before !== "resolved") {
+      await archiveResolvedPortalNotifications("inquiry", event.params.inquiryId);
+    }
+  },
+);
+
+export const archiveReadNotifications = onSchedule(
+  {
+    schedule: "every day 02:00",
+    timeZone: "Asia/Manila",
+    region: "asia-east1",
+    timeoutSeconds: 300,
+  },
+  async () => {
+    const now = Timestamp.now();
+    const expiresAt = Timestamp.fromMillis(notificationDeleteAtMillis(now.toMillis()));
+    for (let page = 0; page < 10; page += 1) {
+      const eligible = await db.collection("notifications")
+        .where("archiveEligibleAt", "<=", now)
+        .limit(400)
+        .get();
+      if (eligible.empty) break;
+      const batch = db.batch();
+      for (const notification of eligible.docs) {
+        batch.update(notification.ref, {
+          archivedAt: now,
+          expiresAt,
+          archiveEligibleAt: null,
+        });
+      }
+      await batch.commit();
+      if (eligible.size < 400) break;
+    }
+
+    // Cursor through notifications read before lifecycle tracking existed.
+    // The cursor prevents archived records from being rescanned every day.
+    const stateRef = db.collection("_notification_lifecycle").doc("read_backfill");
+    for (let page = 0; page < 10; page += 1) {
+      const state = await stateRef.get();
+      const cursorReadAt = state.data()?.cursorReadAt;
+      const cursorId = String(state.data()?.cursorId ?? "");
+      const readCutoff = Timestamp.fromMillis(
+        now.toMillis() - NOTIFICATION_ARCHIVE_AFTER_DAYS * DAY_MILLIS,
+      );
+      let query = db.collection("notifications")
+        .where("readAt", "<=", readCutoff)
+        .orderBy("readAt")
+        .orderBy(FieldPath.documentId())
+        .limit(400);
+      if (cursorReadAt instanceof Timestamp && cursorId) {
+        query = query.startAfter(cursorReadAt, cursorId);
+      }
+      const legacy = await query.get();
+      if (legacy.empty) break;
+      const batch = db.batch();
+      for (const notification of legacy.docs) {
+        const data = notification.data();
+        if (isNormalNotificationType(data.type) && !data.archivedAt) {
+          batch.update(notification.ref, {
+            archivedAt: now,
+            expiresAt,
+            archiveEligibleAt: null,
+          });
+        }
+      }
+      const last = legacy.docs.at(-1)!;
+      batch.set(stateRef, {
+        cursorReadAt: last.data().readAt,
+        cursorId: last.id,
+        updatedAt: now,
+      }, {merge: true});
+      await batch.commit();
+      if (legacy.size < 400) break;
+    }
+  },
+);
+
 export const reviewAppointment = onCall(async (request) => {
   const staffId = request.auth?.uid;
   if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
@@ -871,7 +1184,9 @@ export const reviewAppointment = onCall(async (request) => {
   const reply = String(input.reply ?? "").trim();
   const proposedMillis = Number(input.proposedScheduledAt ?? 0);
   const proposedTime = String(input.proposedScheduledTime ?? "").trim();
-  if (!appointmentId || !["confirmed", "declined", "reschedule_proposed"].includes(action)) {
+  // Declined remains readable for legacy records, but is intentionally not a
+  // valid action for new appointment decisions.
+  if (!appointmentId || !["confirmed", "reschedule_required", "reschedule_proposed", "completed"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
   if (!reply) throw new HttpsError("invalid-argument", "A reply to the student is required.");
@@ -887,7 +1202,12 @@ export const reviewAppointment = onCall(async (request) => {
     if (!current.exists) throw new HttpsError("not-found", "Appointment not found.");
     const data = current.data()!;
     const before = String(data.status ?? "pending").toLowerCase();
-    if (!["pending", "upcoming", "reschedule_proposed"].includes(before)) {
+    const allowed = before === "confirmed"
+      ? ["completed"]
+      : before === "reschedule_required"
+        ? ["reschedule_proposed"]
+        : ["confirmed", "reschedule_required", "reschedule_proposed"];
+    if (!["pending", "upcoming", "reschedule_required", "confirmed"].includes(before) || !allowed.includes(action)) {
       throw new HttpsError("failed-precondition", "This appointment has already been finalized.");
     }
     const userId = String(data.userId ?? "");
@@ -914,7 +1234,7 @@ export const reviewAppointment = onCall(async (request) => {
       staffName,
       createdAt: FieldValue.serverTimestamp(),
     });
-    const title = action === "confirmed" ? "Appointment confirmed" : action === "declined" ? "Appointment update" : "New appointment time proposed";
+    const title = action === "confirmed" ? "Appointment confirmed" : action === "completed" ? "Appointment completed" : action === "reschedule_required" ? "Schedule adjustment needed" : "New appointment time proposed";
     transaction.create(notification, {
       userId,
       appointmentId,
@@ -924,6 +1244,22 @@ export const reviewAppointment = onCall(async (request) => {
       createdAt: FieldValue.serverTimestamp(),
       readAt: null,
     });
+    const auditAction = action === "confirmed" ? "APPOINTMENT_CONFIRMED"
+      : action === "completed" ? "APPOINTMENT_COMPLETED"
+        : action === "reschedule_proposed" ? "APPOINTMENT_RESCHEDULED" : "APPOINTMENT_ADJUSTMENT_REQUESTED";
+    writeAudit(transaction, db, {
+      actorId: staffId,
+      actorNameSnapshot: actorName(staff),
+      actorRoleSnapshot: staff.accessRole,
+      action: auditAction,
+      category: AUDIT_CATEGORIES.appointments,
+      targetType: "appointment",
+      targetId: appointmentId,
+      metadata: {
+        before: {status: before},
+        after: {status: action, ...(action === "reschedule_proposed" ? {date: new Date(proposedMillis).toISOString().slice(0, 10), time: proposedTime} : {})},
+      },
+    });
   });
   return {ok: true};
 });
@@ -932,7 +1268,7 @@ export const sendAppointmentNotification = onDocumentCreated(
   {document: "notifications/{notificationId}", retry: true},
   async (event) => {
     const notification = event.data?.data();
-    if (notification?.type !== "appointment") return;
+    if (!notification || !["appointment", "inquiry"].includes(String(notification.type ?? ""))) return;
     const userId = String(notification.userId ?? "");
     if (!userId) return;
     const tokens = await db.collection("user_devices").doc(userId).collection("tokens").get();
@@ -941,7 +1277,11 @@ export const sendAppointmentNotification = onDocumentCreated(
     const result = await getMessaging().sendEachForMulticast({
       tokens: values,
       notification: {title: String(notification.title ?? "MindMate"), body: String(notification.body ?? "")},
-      data: {type: "appointment", appointmentId: String(notification.appointmentId ?? "")},
+      data: {
+        type: String(notification.type),
+        appointmentId: String(notification.appointmentId ?? ""),
+        inquiryId: String(notification.inquiryId ?? ""),
+      },
     });
     const invalid = result.responses
       .map((response, index) => !response.success ? values[index] : "")
@@ -949,3 +1289,39 @@ export const sendAppointmentNotification = onDocumentCreated(
     await Promise.all(invalid.map((token) => db.collection("user_devices").doc(userId).collection("tokens").doc(token).delete()));
   },
 );
+
+export const acknowledgeInquiry = onCall(async (request) => {
+  const staffId = request.auth?.uid;
+  if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
+  const staff = await requireStaff(staffId);
+  const inquiryId = String(request.data?.inquiryId ?? "").trim();
+  if (!inquiryId) throw new HttpsError("invalid-argument", "Inquiry ID is required.");
+  const inquiry = db.collection("inquiries").doc(inquiryId);
+  await db.runTransaction(async (transaction) => {
+    const current = await transaction.get(inquiry);
+    if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
+    const data = current.data()!;
+    if (data.acknowledgedAt) {
+      throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
+    }
+    const userId = String(data.userId ?? "");
+    if (!userId) throw new HttpsError("failed-precondition", "Inquiry has no sender.");
+    transaction.update(inquiry, {
+      status: "in_progress",
+      acknowledgedAt: FieldValue.serverTimestamp(),
+      acknowledgedBy: staffId,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.create(db.collection("notifications").doc(), {
+      userId,
+      inquiryId,
+      type: "inquiry",
+      title: "Form received",
+      body: `PAACC received your ${String(data.subject ?? "form")}. Our staff will review it.`,
+      staffName: String(staff.name ?? staff.email ?? "PAACC staff"),
+      createdAt: FieldValue.serverTimestamp(),
+      readAt: null,
+    });
+  });
+  return {ok: true};
+});

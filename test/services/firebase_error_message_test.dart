@@ -50,7 +50,9 @@ void main() {
       fallback: 'fallback',
     );
 
-    expect(message, contains('security rules'));
+    expect(message, 'You do not have permission to complete this action.');
+    expect(message, isNot(contains('Firestore')));
+    expect(message, isNot(contains('rules')));
     expect(message, isNot('fallback'));
   });
 

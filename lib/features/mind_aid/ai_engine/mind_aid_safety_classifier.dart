@@ -9,11 +9,23 @@ class MindAidSafetyClassifier {
   static const _crisisPhrases = [
     'kill myself',
     'end my life',
+    'end it all',
+    'take my life',
+    'no reason to live',
+    'cant go on',
+    'cannot go on',
+    'want to disappear',
+    'unalive myself',
+    'kms',
     'suicide',
     'self harm',
     'hurt myself',
+    'cut myself',
     'i want to die',
     'do not want to live',
+    'ayoko nang mabuhay',
+    'gusto kong mamatay',
+    'magpakamatay',
   ];
 
   static const _highDistressPhrases = [
@@ -85,7 +97,12 @@ class MindAidSafetyClassifier {
 
   bool _containsAny(String normalizedInput, List<String> phrases) {
     for (final phrase in phrases) {
-      if (normalizedInput.contains(ScoreEngine.normalize(phrase))) {
+      final normalizedPhrase = ScoreEngine.normalize(phrase);
+      if (normalizedPhrase == 'kms') {
+        if (RegExp(r'(^|\s)kms(\s|$)').hasMatch(normalizedInput)) return true;
+        continue;
+      }
+      if (normalizedInput.contains(normalizedPhrase)) {
         return true;
       }
     }

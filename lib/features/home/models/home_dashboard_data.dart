@@ -45,22 +45,28 @@ class HomeDashboardData {
       ),
       services: const [
         HomeServiceData(
+          title: 'Testing Services',
+          subtitle: 'Psychological assessment',
+          icon: Icons.psychology_alt_outlined,
+          colors: [Color(0xFFA9B9F4), Color(0xFFAAAEC6)],
+        ),
+        HomeServiceData(
           title: 'Information Services',
-          subtitle: 'Educational content & resources',
+          subtitle: 'Mental health resources',
           icon: Icons.menu_book_outlined,
-          colors: [Color(0xFFFFE29A), Color(0xFFFFCD3A)],
+          colors: [Color(0xFFEFA8CF), Color(0xFF9A4F83)],
         ),
         HomeServiceData(
           title: 'Individual Inventory Services',
-          subtitle: 'Profiles & progress',
+          subtitle: 'Inquire',
           icon: Icons.assignment_outlined,
-          colors: [Color(0xFFF0F3F8), Color(0xFFECEFF3)],
+          colors: [Color(0xFFFF998B), Color(0xFFFF6651)],
         ),
         HomeServiceData(
           title: 'Counseling Services',
-          subtitle: 'Book an appointment',
+          subtitle: 'Appoint now',
           icon: Icons.groups_2_outlined,
-          colors: [Color(0xFFD6EEF9), Color(0xFFBEE3F5)],
+          colors: [Color(0xFF63DDB8), Color(0xFF00866A)],
         ),
         HomeServiceData(
           title: 'Career Guidance & Placement',

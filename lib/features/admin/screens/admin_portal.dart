@@ -2,52 +2,83 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/admin_inquiry_model.dart';
-import '../../../models/admin_activity_analytics_model.dart';
-import '../../../models/admin_mind_aid_analytics_model.dart';
 import '../../../models/appointment_model.dart';
+import '../../../models/app_notification_model.dart';
+import '../../../models/pacc_availability_model.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../domain/admin_management_models.dart';
 import '../../../repositories/admin_portal_repository.dart';
-import 'admin_status_dashboard_screen.dart';
+import '../../../repositories/admin_status_repository.dart';
+import 'admin_assessment_detail_screen.dart';
 import 'staff_registration_screen.dart';
 import 'user_management_page.dart';
+import 'profile_management_page.dart';
+import 'report_generation_page.dart';
+import 'admin_notifications_page.dart';
 import 'admin_change_password_screen.dart';
+import 'admin_operations_dashboard.dart';
+import 'staff_operations_dashboard.dart';
+import '../../../services/inquiry_pdf_service.dart';
+import '../../../services/firebase/firebase_error_message.dart';
+import '../theme/admin_theme.dart';
 
-const _yellow = Color(0xFFF6B900);
-const _orange = Color(0xFFFF9700);
-const _cream = Color(0xFFFFF9E8);
-const _purple = Color(0xFFAAA7FA);
+const _yellow = AdminColors.accentStrong;
+const _cream = AdminColors.canvas;
+const _purple = AdminColors.accentSoft;
+
+String _headerRoleLabel(AccessRole role) => switch (role) {
+  AccessRole.admin => 'Administrator',
+  AccessRole.counselor => 'Counselor',
+  AccessRole.portalStaff => 'PAACC Staff',
+  AccessRole.appUser => 'Portal User',
+};
 
 enum AdminPortalPage {
   dashboard,
   users,
+  profiling,
   appointments,
+  reports,
+  notifications,
+  availability,
   inquiries,
   assessments,
   profile,
-  status,
 }
 
 extension on AdminPortalPage {
   String get label => switch (this) {
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
-    AdminPortalPage.appointments => 'Appointments',
+    AdminPortalPage.profiling => 'Profiling Management',
+    AdminPortalPage.appointments => 'PAACC Appointments',
+    AdminPortalPage.reports => 'Report Generation',
+    AdminPortalPage.notifications => 'Notifications',
+    AdminPortalPage.availability => 'PAACC Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
-    AdminPortalPage.assessments => 'Assessments',
+    AdminPortalPage.assessments => 'Assessment Results',
     AdminPortalPage.profile => 'Profile',
-    AdminPortalPage.status => 'Admin Status',
+  };
+
+  String get workspaceLabel => switch (this) {
+    AdminPortalPage.appointments => 'Appointments',
+    AdminPortalPage.availability => 'Schedule',
+    AdminPortalPage.reports => 'Reports',
+    _ => label,
   };
 
   IconData get icon => switch (this) {
     AdminPortalPage.dashboard => Icons.home_outlined,
     AdminPortalPage.users => Icons.group_outlined,
+    AdminPortalPage.profiling => Icons.badge_outlined,
     AdminPortalPage.appointments => Icons.calendar_month_outlined,
+    AdminPortalPage.reports => Icons.analytics_outlined,
+    AdminPortalPage.notifications => Icons.notifications_outlined,
+    AdminPortalPage.availability => Icons.storefront_outlined,
     AdminPortalPage.inquiries => Icons.chat_bubble_outline_rounded,
     AdminPortalPage.assessments => Icons.assignment_outlined,
     AdminPortalPage.profile => Icons.account_circle_outlined,
-    AdminPortalPage.status => Icons.monitor_heart_outlined,
   };
 }
 
@@ -63,6 +94,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   final _schoolId = TextEditingController();
   final _password = TextEditingController();
   bool _submitting = false;
+  bool _passwordVisible = false;
 
   @override
   void dispose() {
@@ -97,7 +129,13 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(error.toString().replaceFirst('Bad state: ', '')),
+          content: Text(
+            FirebaseErrorMessage.describe(
+              error,
+              fallback:
+                  'We could not sign you in. Check your details and try again.',
+            ),
+          ),
         ),
       );
     } finally {
@@ -107,91 +145,106 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFFFFF4CF),
-    body: SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 375),
-          child: Card(
-            elevation: 0,
-            color: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(40, 38, 40, 52),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.asset(
-                    'assets/images/Login/logo.png',
-                    height: 72,
-                    errorBuilder: (_, _, _) => const Icon(
-                      Icons.psychology_alt_rounded,
-                      color: _yellow,
-                      size: 62,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'MindMate',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Counseling Management System',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  const SizedBox(height: 34),
-                  _LoginField(
-                    label: 'Email',
-                    hint: 'Enter your email address',
-                    controller: _schoolId,
-                  ),
-                  const SizedBox(height: 14),
-                  _LoginField(
-                    label: 'Password',
-                    hint: 'Enter your password',
-                    obscure: true,
-                    controller: _password,
-                  ),
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _yellow,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 15),
+    body: SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          padding: EdgeInsets.symmetric(
+            horizontal: constraints.maxWidth < 520 ? 20 : 40,
+            vertical: 32,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Card(
+                child: Padding(
+                  padding: EdgeInsets.all(constraints.maxWidth < 520 ? 24 : 40),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        'assets/images/APP LOGO/MindMate_LOGO.jpg',
+                        height: 72,
+                        errorBuilder: (_, _, _) => const Icon(
+                          Icons.psychology_alt_rounded,
+                          color: _yellow,
+                          size: 62,
+                        ),
                       ),
-                      onPressed: _submitting ? null : _signIn,
-                      child: Text(
-                        _submitting ? 'Signing in...' : 'Sign in',
-                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'MindMate',
+                        style: TextStyle(
+                          fontSize: 25,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: _submitting ? null : _resetPassword,
-                    child: const Text('Forgot password?'),
-                  ),
-                  TextButton(
-                    onPressed: _submitting
-                        ? null
-                        : () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => StaffRegistrationScreen(
-                                repository:
-                                    widget.repository ??
-                                    AdminPortalRepository(),
-                              ),
-                            ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Counseling Management System',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      const SizedBox(height: 34),
+                      _LoginField(
+                        label: 'Email',
+                        hint: 'Enter your email address',
+                        controller: _schoolId,
+                      ),
+                      const SizedBox(height: 14),
+                      _LoginField(
+                        label: 'Password',
+                        hint: 'Enter your password',
+                        obscure: !_passwordVisible,
+                        controller: _password,
+                        onSubmitted: (_) {
+                          if (!_submitting) _signIn();
+                        },
+                        suffixIcon: IconButton(
+                          tooltip: _passwordVisible
+                              ? 'Hide password'
+                              : 'Show password',
+                          onPressed: () => setState(
+                            () => _passwordVisible = !_passwordVisible,
                           ),
-                    child: const Text('Register Staff Account'),
+                          icon: Icon(
+                            _passwordVisible
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: _submitting ? null : _signIn,
+                          child: Text(
+                            _submitting ? 'Signing in...' : 'Sign in',
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextButton(
+                        onPressed: _submitting ? null : _resetPassword,
+                        child: const Text('Forgot password?'),
+                      ),
+                      TextButton(
+                        onPressed: _submitting
+                            ? null
+                            : () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => StaffRegistrationScreen(
+                                    repository:
+                                        widget.repository ??
+                                        AdminPortalRepository(),
+                                  ),
+                                ),
+                              ),
+                        child: const Text('Request PAACC Portal Access'),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
@@ -207,13 +260,43 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       );
       return;
     }
-    await (widget.repository ?? AdminPortalRepository()).sendPasswordReset(
-      _schoolId.text,
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password reset email sent.')),
+    setState(() => _submitting = true);
+    try {
+      await (widget.repository ?? AdminPortalRepository()).sendPasswordReset(
+        _schoolId.text,
       );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'If an account exists for that email, a secure password reset '
+              'link has been sent.',
+            ),
+            duration: Duration(seconds: 7),
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              FirebaseErrorMessage.describe(
+                error,
+                fallback: 'Unable to send the reset email. Please try again.',
+              ),
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to send reset email.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 }
@@ -224,11 +307,15 @@ class _LoginField extends StatelessWidget {
     required this.hint,
     required this.controller,
     this.obscure = false,
+    this.suffixIcon,
+    this.onSubmitted,
   });
   final String label;
   final String hint;
   final TextEditingController controller;
   final bool obscure;
+  final Widget? suffixIcon;
+  final ValueChanged<String>? onSubmitted;
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -241,8 +328,10 @@ class _LoginField extends StatelessWidget {
       TextField(
         controller: controller,
         obscureText: obscure,
+        onSubmitted: onSubmitted,
         decoration: InputDecoration(
           hintText: hint,
+          suffixIcon: suffixIcon,
           isDense: true,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(5)),
         ),
@@ -262,10 +351,19 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   late final AdminPortalRepository _repository =
       widget.repository ?? AdminPortalRepository();
   AdminPortalPage _page = AdminPortalPage.dashboard;
+  bool _navCollapsed = false;
+  late final Stream<List<AppNotificationModel>> _notifications;
+
+  @override
+  void initState() {
+    super.initState();
+    _notifications = _repository.watchPortalNotifications();
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final compact = constraints.maxWidth < 840;
+      final compact = constraints.maxWidth < 760;
       return Scaffold(
         backgroundColor: _cream,
         drawer: compact
@@ -283,22 +381,37 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
           children: [
             if (!compact)
               SizedBox(
-                width: 220,
-                child: _Nav(
-                  page: _page,
-                  onChanged: _setPage,
-                  accessRole: _repository.currentAccessRole,
-                  isSuperAdmin: _repository.isSuperAdmin,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  width: _navCollapsed
+                      ? 76
+                      : constraints.maxWidth < 1120
+                      ? 224
+                      : 252,
+                  child: _Nav(
+                    page: _page,
+                    onChanged: _setPage,
+                    collapsed: _navCollapsed,
+                    accessRole: _repository.currentAccessRole,
+                    isSuperAdmin: _repository.isSuperAdmin,
+                  ),
                 ),
               ),
             Expanded(
               child: Column(
                 children: [
-                  Container(height: 20, color: _yellow),
                   _PortalHeader(
                     compact: compact,
+                    navCollapsed: _navCollapsed,
+                    onMenuPressed: compact
+                        ? null
+                        : () => setState(() => _navCollapsed = !_navCollapsed),
                     page: _page,
                     repository: _repository,
+                    notifications: _notifications,
+                    onOpenNotifications: () =>
+                        _setPage(AdminPortalPage.notifications),
                   ),
                   Expanded(child: _buildPage()),
                 ],
@@ -306,6 +419,15 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
             ),
           ],
         ),
+        floatingActionButton:
+            _repository.currentAccessRole.canAccessClinicalData &&
+                _page != AdminPortalPage.notifications
+            ? _NotificationBubble(
+                notifications: _notifications,
+                onPressed: () => _setPage(AdminPortalPage.notifications),
+              )
+            : null,
+        floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
       );
     },
   );
@@ -316,13 +438,37 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   }
 
   Widget _buildPage() => switch (_page) {
-    AdminPortalPage.dashboard => _DashboardPage(repository: _repository),
+    AdminPortalPage.dashboard =>
+      _repository.currentAccessRole == AccessRole.portalStaff
+          ? StaffOperationsDashboardPage(
+              repository: _repository,
+              onNavigate: _setPage,
+            )
+          : AdminOperationsDashboardPage(
+              repository: _repository,
+              onNavigate: _setPage,
+            ),
     AdminPortalPage.users => UserManagementPage(repository: _repository),
-    AdminPortalPage.appointments => _AppointmentsPage(repository: _repository),
+    AdminPortalPage.profiling => ProfileManagementPage(repository: _repository),
+    AdminPortalPage.appointments => _AppointmentsPage(
+      repository: _repository,
+      onOpenAssessments: _repository.currentAccessRole.canAccessClinicalData
+          ? () => _setPage(AdminPortalPage.assessments)
+          : null,
+    ),
+    AdminPortalPage.reports => ReportGenerationPage(repository: _repository),
+    AdminPortalPage.notifications => AdminNotificationsPage(
+      repository: _repository,
+      onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
+      onOpenInquiries: () => _setPage(AdminPortalPage.inquiries),
+    ),
+    AdminPortalPage.availability => _AvailabilityPage(repository: _repository),
     AdminPortalPage.inquiries => _InquiriesPage(repository: _repository),
-    AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
+    AdminPortalPage.assessments => _AssessmentsPage(
+      repository: _repository,
+      onBack: () => _setPage(AdminPortalPage.appointments),
+    ),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
-    AdminPortalPage.status => const AdminStatusDashboardScreen(embedded: true),
   };
 }
 
@@ -331,138 +477,468 @@ class _Nav extends StatelessWidget {
     required this.page,
     required this.onChanged,
     this.compact = false,
+    this.collapsed = false,
     this.accessRole = AccessRole.admin,
     this.isSuperAdmin = false,
   });
   final AdminPortalPage page;
   final ValueChanged<AdminPortalPage> onChanged;
   final bool compact;
+  final bool collapsed;
   final AccessRole accessRole;
   final bool isSuperAdmin;
 
   bool _allowed(AdminPortalPage page) => switch (page) {
     AdminPortalPage.users => isSuperAdmin,
-    AdminPortalPage.assessments ||
-    AdminPortalPage.status => accessRole.canAccessClinicalData,
+    AdminPortalPage.profiling =>
+      isSuperAdmin || accessRole == AccessRole.counselor,
+    AdminPortalPage.reports => accessRole.canAccessClinicalData,
+    // Notifications are opened from the persistent header bell instead of
+    // duplicating the destination in the workspace navigation.
+    AdminPortalPage.notifications => false,
+    // Assessment results are intentionally reached from PAACC Appointments.
+    AdminPortalPage.assessments => false,
+    AdminPortalPage.inquiries =>
+      accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
     _ => accessRole.canUsePortal || accessRole == AccessRole.admin,
   };
   @override
-  Widget build(BuildContext context) => Material(
-    color: _yellow,
-    child: SafeArea(
-      child: Column(
-        children: [
-          if (compact)
-            const Padding(
-              padding: EdgeInsets.all(22),
-              child: Text(
-                'MindMate Admin',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+  Widget build(BuildContext context) {
+    final sections = <_NavSection>[
+      const _NavSection('Overview', [AdminPortalPage.dashboard]),
+      const _NavSection('People', [
+        AdminPortalPage.users,
+        AdminPortalPage.profiling,
+      ]),
+      const _NavSection('Counseling', [
+        AdminPortalPage.appointments,
+        AdminPortalPage.availability,
+        AdminPortalPage.inquiries,
+      ]),
+      const _NavSection('Insights', [AdminPortalPage.reports]),
+      const _NavSection('System', [AdminPortalPage.profile]),
+    ];
+    return Material(
+      color: AdminColors.surface,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                collapsed ? 20 : 20,
+                22,
+                collapsed ? 20 : 20,
+                18,
+              ),
+              child: Row(
+                mainAxisAlignment: collapsed
+                    ? MainAxisAlignment.center
+                    : MainAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AdminColors.accentSoft,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: const Icon(Icons.psychology_alt_outlined, size: 21),
+                  ),
+                  if (!collapsed) const SizedBox(width: 12),
+                  if (!collapsed)
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'MindMate',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          Text(
+                            'ADMIN PORTAL',
+                            style: TextStyle(
+                              color: AdminColors.muted,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (compact)
+                    IconButton(
+                      tooltip: 'Close navigation',
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                ],
               ),
             ),
-          const SizedBox(height: 36),
-          for (final item in AdminPortalPage.values.where(_allowed))
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              child: ListTile(
-                dense: true,
-                leading: Icon(
-                  item.icon,
-                  color: page == item ? Colors.white : Colors.black,
-                ),
-                title: Text(
-                  item.label,
+            const Divider(height: 1),
+            if (!collapsed)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 22, 20, 8),
+                child: Text(
+                  'WORKSPACE',
                   style: TextStyle(
+                    color: AdminColors.muted,
+                    fontSize: 10,
                     fontWeight: FontWeight.w800,
-                    color: page == item ? Colors.white : Colors.black,
-                    fontSize: 13,
+                    letterSpacing: 1.1,
                   ),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                selected: page == item,
-                selectedTileColor: _orange,
-                onTap: () => onChanged(item),
+              ),
+            if (collapsed) const SizedBox(height: 18),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  for (final section in sections)
+                    if (section.pages.any(_allowed)) ...[
+                      if (!collapsed)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 5),
+                          child: Text(
+                            section.title.toUpperCase(),
+                            style: const TextStyle(
+                              color: AdminColors.muted,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ),
+                      for (final item in section.pages.where(_allowed))
+                        if (collapsed)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 3,
+                            ),
+                            child: Tooltip(
+                              message: item.workspaceLabel,
+                              child: Material(
+                                color: page == item
+                                    ? AdminColors.accentSoft
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(9),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(9),
+                                  onTap: () => onChanged(item),
+                                  child: SizedBox(
+                                    height: 46,
+                                    child: Icon(
+                                      item.icon,
+                                      color: page == item
+                                          ? AdminColors.ink
+                                          : AdminColors.muted,
+                                      size: 21,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 2,
+                            ),
+                            child: ListTile(
+                              dense: true,
+                              minTileHeight: 46,
+                              leading: Icon(
+                                item.icon,
+                                color: page == item
+                                    ? AdminColors.ink
+                                    : AdminColors.muted,
+                                size: 21,
+                              ),
+                              title: Text(
+                                item.workspaceLabel,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  color: AdminColors.ink,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              selected: page == item,
+                              selectedTileColor: AdminColors.accentSoft,
+                              onTap: () => onChanged(item),
+                            ),
+                          ),
+                    ],
+                ],
               ),
             ),
-        ],
+            if (!collapsed)
+              const Padding(
+                padding: EdgeInsets.all(20),
+                child: Text(
+                  'Counseling Management System',
+                  style: TextStyle(color: AdminColors.muted, fontSize: 11),
+                ),
+              ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
+}
+
+class _NavSection {
+  const _NavSection(this.title, this.pages);
+
+  final String title;
+  final List<AdminPortalPage> pages;
 }
 
 class _PortalHeader extends StatelessWidget {
   const _PortalHeader({
     required this.compact,
+    required this.navCollapsed,
+    required this.onMenuPressed,
     required this.page,
     required this.repository,
+    required this.notifications,
+    required this.onOpenNotifications,
   });
   final bool compact;
+  final bool navCollapsed;
+  final VoidCallback? onMenuPressed;
   final AdminPortalPage page;
   final AdminPortalRepository repository;
+  final Stream<List<AppNotificationModel>> notifications;
+  final VoidCallback onOpenNotifications;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 16, 28, 12),
-    child: Row(
-      children: [
-        if (compact)
+  Widget build(BuildContext context) {
+    final showIdentity = MediaQuery.sizeOf(context).width >= 560;
+    return Container(
+      height: 72,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 28),
+      decoration: const BoxDecoration(
+        color: AdminColors.surface,
+        border: Border(bottom: BorderSide(color: AdminColors.border)),
+      ),
+      child: Row(
+        children: [
           Builder(
             builder: (context) => IconButton(
+              tooltip: compact
+                  ? 'Open workspace'
+                  : navCollapsed
+                  ? 'Expand workspace'
+                  : 'Collapse workspace',
               icon: const Icon(Icons.menu),
-              onPressed: () => Scaffold.of(context).openDrawer(),
+              onPressed: compact
+                  ? () => Scaffold.of(context).openDrawer()
+                  : onMenuPressed,
             ),
           ),
-        const Spacer(),
-        Column(
+          if (compact) const SizedBox(width: 4),
+          Text(
+            page.label,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+          const Spacer(),
+          _HeaderNotificationButton(
+            notifications: notifications,
+            onPressed: onOpenNotifications,
+          ),
+          const SizedBox(width: 4),
+          if (showIdentity) _HeaderIdentity(repository: repository),
+          if (showIdentity) const SizedBox(width: 10),
+          IconButton(
+            tooltip: 'Sign out',
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (dialogContext) => AlertDialog(
+                  title: const Text('Sign out?'),
+                  content: const Text(
+                    'Are you sure you want to sign out of the MindMate Admin Portal?',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('Sign out'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
+              await repository.signOut();
+              if (context.mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                    builder: (_) => AdminLoginScreen(repository: repository),
+                  ),
+                  (_) => false,
+                );
+              }
+            },
+            icon: const Icon(Icons.logout),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderIdentity extends StatelessWidget {
+  const _HeaderIdentity({required this.repository});
+  final AdminPortalRepository repository;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = repository.currentAuthUser;
+    if (user == null) return const SizedBox.shrink();
+    return StreamBuilder<Map<String, dynamic>?>(
+      stream: repository.watchOwnProfile(user.uid),
+      builder: (context, snapshot) {
+        final data = snapshot.data ?? const <String, dynamic>{};
+        final first = data['firstName']?.toString().trim() ?? '';
+        final last = data['lastName']?.toString().trim() ?? '';
+        final profileName = [
+          first,
+          last,
+        ].where((part) => part.isNotEmpty).join(' ');
+        final name = profileName.isNotEmpty
+            ? profileName
+            : (data['name']?.toString().trim().isNotEmpty == true
+                  ? data['name'].toString().trim()
+                  : user.displayName?.trim().isNotEmpty == true
+                  ? user.displayName!.trim()
+                  : 'Staff member');
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            Text(name, style: const TextStyle(fontWeight: FontWeight.w900)),
             Text(
-              repository.currentAuthUser?.displayName?.trim().isNotEmpty == true
-                  ? repository.currentAuthUser!.displayName!
-                  : repository.currentAuthUser?.email ?? 'Staff member',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  repository.currentAccessRole.storedValue,
-                  style: const TextStyle(fontSize: 12, color: Colors.black54),
-                ),
-                const SizedBox(width: 6),
-                _Tag(
-                  label: repository.currentAccessRole == AccessRole.admin
-                      ? 'Admin'
-                      : 'Staff',
-                  color: _yellow,
-                ),
-              ],
+              _headerRoleLabel(repository.currentAccessRole),
+              style: const TextStyle(fontSize: 11, color: AdminColors.muted),
             ),
           ],
+        );
+      },
+    );
+  }
+}
+
+class _HeaderNotificationButton extends StatelessWidget {
+  const _HeaderNotificationButton({
+    required this.notifications,
+    required this.onPressed,
+  });
+
+  final Stream<List<AppNotificationModel>> notifications;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) =>
+      StreamBuilder<List<AppNotificationModel>>(
+        stream: notifications,
+        builder: (context, snapshot) {
+          final unread = (snapshot.data ?? const <AppNotificationModel>[])
+              .where((item) => !item.isRead)
+              .length;
+          return IconButton(
+            tooltip: unread == 0
+                ? 'Notifications'
+                : '$unread unread notifications',
+            onPressed: onPressed,
+            icon: _NotificationIcon(unread: unread),
+          );
+        },
+      );
+}
+
+class _NotificationIcon extends StatelessWidget {
+  const _NotificationIcon({required this.unread});
+  final int unread;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    clipBehavior: Clip.none,
+    children: [
+      const Icon(Icons.notifications_outlined),
+      if (unread > 0)
+        Positioned(
+          right: -8,
+          top: -7,
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 17, minHeight: 17),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: AdminColors.danger,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AdminColors.surface, width: 1.5),
+            ),
+            child: Text(
+              unread > 99 ? '99+' : '$unread',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 9,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
         ),
-        const SizedBox(width: 12),
-        const CircleAvatar(
-          backgroundColor: _yellow,
-          child: Icon(Icons.account_circle, color: Colors.white, size: 32),
+    ],
+  );
+}
+
+class _NotificationBubble extends StatelessWidget {
+  const _NotificationBubble({
+    required this.notifications,
+    required this.onPressed,
+  });
+
+  final Stream<List<AppNotificationModel>> notifications;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) => StreamBuilder<List<AppNotificationModel>>(
+    stream: notifications,
+    builder: (context, snapshot) {
+      final unread = (snapshot.data ?? const <AppNotificationModel>[])
+          .where((item) => !item.isRead)
+          .toList(growable: false);
+      if (unread.isEmpty) return const SizedBox.shrink();
+      return FloatingActionButton.extended(
+        heroTag: 'admin-notification-bubble',
+        onPressed: onPressed,
+        backgroundColor: AdminColors.accentSoft,
+        foregroundColor: AdminColors.ink,
+        icon: const Icon(Icons.notifications_outlined),
+        label: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 250),
+          child: Text(
+            '${unread.length} new ${unread.length == 1 ? 'notification' : 'notifications'}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
         ),
-        IconButton(
-          tooltip: 'Sign out',
-          onPressed: () async {
-            await repository.signOut();
-            if (context.mounted) {
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(
-                  builder: (_) => AdminLoginScreen(repository: repository),
-                ),
-                (_) => false,
-              );
-            }
-          },
-          icon: const Icon(Icons.logout),
-        ),
-      ],
-    ),
+      );
+    },
   );
 }
 
@@ -477,515 +953,29 @@ class _Page extends StatelessWidget {
   final Widget child;
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
-    padding: const EdgeInsets.fromLTRB(24, 0, 24, 28),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 3),
-        Text(subtitle, style: const TextStyle(fontSize: 16)),
-        const SizedBox(height: 24),
-        child,
-      ],
+    padding: EdgeInsets.fromLTRB(
+      MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
+      28,
+      MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
+      40,
     ),
-  );
-}
-
-class _DashboardPage extends StatelessWidget {
-  const _DashboardPage({required this.repository});
-  final AdminPortalRepository repository;
-  @override
-  Widget build(BuildContext context) => _Page(
-    title: 'Analytics Dashboard',
-    subtitle: 'Overview of System usage and statistics',
-    child: StreamBuilder<List<UserModel>>(
-      stream: repository.watchUsers(),
-      builder: (context, users) => StreamBuilder<List<AdminInquiryModel>>(
-        stream: repository.watchInquiries(),
-        builder: (context, inquiries) => StreamBuilder<List<AdminAssessmentRecord>>(
-          stream: repository.watchAssessments(),
-          builder: (context, assessments) {
-            if (users.hasError || inquiries.hasError || assessments.hasError) {
-              return const _AccessPanel();
-            }
-            final userList = users.data ?? const <UserModel>[];
-            final inquiryList = inquiries.data ?? const <AdminInquiryModel>[];
-            final assessmentList =
-                assessments.data ?? const <AdminAssessmentRecord>[];
-            final studentCount = userList
-                .where((u) => (u.role ?? '').toLowerCase() == 'student')
-                .length;
-            return Column(
-              children: [
-                LayoutBuilder(
-                  builder: (context, box) => Wrap(
-                    spacing: 18,
-                    runSpacing: 14,
-                    children: [
-                      _StatCard(
-                        label: 'Total Active Users',
-                        value: '${userList.length}',
-                        note: '$studentCount students',
-                        icon: Icons.groups_outlined,
-                        color: const Color(0xFFFFE8A5),
-                      ),
-                      _StatCard(
-                        label: 'Total Inquiries',
-                        value: '${inquiryList.length}',
-                        note:
-                            '${inquiryList.where((i) => i.status == InquiryStatus.pending).length} Pending',
-                        icon: Icons.chat_bubble_outline,
-                        color: const Color(0xFFC1BFFF),
-                      ),
-                      _StatCard(
-                        label: 'Assessments',
-                        value: '${assessmentList.length}',
-                        note:
-                            '${assessmentList.where((a) => a.createdAt.isAfter(DateTime.now().subtract(const Duration(days: 7)))).length} this week',
-                        icon: Icons.assignment_outlined,
-                        color: const Color(0xFFD4FFD1),
-                      ),
-                      _StatCard(
-                        label: 'Engagement Rate',
-                        value: userList.isEmpty
-                            ? '0%'
-                            : '${((userList.where((u) => u.lastActiveAt != null).length / userList.length) * 100).round()}%',
-                        note: 'Users with activity',
-                        icon: Icons.trending_up,
-                        color: const Color(0xFFFFE8A5),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-                LayoutBuilder(
-                  builder: (context, box) => Wrap(
-                    spacing: 24,
-                    runSpacing: 18,
-                    children: [
-                      SizedBox(
-                        width: box.maxWidth > 900
-                            ? (box.maxWidth - 24) / 2
-                            : box.maxWidth,
-                        child: _ChartCard(
-                          title: 'Monthly Active Users',
-                          child: _ActivityChart(users: userList),
-                        ),
-                      ),
-                      SizedBox(
-                        width: box.maxWidth > 900
-                            ? (box.maxWidth - 24) / 2
-                            : box.maxWidth,
-                        child: _ChartCard(
-                          title: 'User Distribution',
-                          child: _DistributionChart(users: userList),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _ChartCard(
-                  title: 'Inquiries by Category',
-                  child: _CategoryChart(items: inquiryList),
-                ),
-                const SizedBox(height: 18),
-                _LiveActivityPanel(repository: repository),
-                const SizedBox(height: 18),
-                _MindAidQualityPanel(repository: repository),
-              ],
-            );
-          },
-        ),
-      ),
-    ),
-  );
-}
-
-class _MindAidQualityPanel extends StatelessWidget {
-  const _MindAidQualityPanel({required this.repository});
-
-  final AdminPortalRepository repository;
-
-  @override
-  Widget build(
-    BuildContext context,
-  ) => StreamBuilder<List<AdminMindAidAnalyticsModel>>(
-    stream: repository.watchMindAidAnalytics(),
-    builder: (context, snapshot) {
-      if (snapshot.hasError) return const _AccessPanel();
-      final entries = (snapshot.data ?? const [])
-          .where((entry) {
-            final date = DateTime.tryParse(entry.dateKey);
-            return date != null &&
-                date.isAfter(DateTime.now().subtract(const Duration(days: 8)));
-          })
-          .toList(growable: false);
-      final turns = entries.fold<int>(0, (sum, entry) => sum + entry.turnCount);
-      final fallbacks = entries.fold<int>(
-        0,
-        (sum, entry) => sum + entry.fallbackCount,
-      );
-      final latency = entries.fold<int>(
-        0,
-        (sum, entry) => sum + entry.latencyTotalMs,
-      );
-      final helpful = entries.fold<int>(
-        0,
-        (sum, entry) => sum + entry.helpfulCount,
-      );
-      final unhelpful = entries.fold<int>(
-        0,
-        (sum, entry) => sum + entry.unhelpfulCount,
-      );
-      final intents = <String, int>{};
-      final safety = <String, int>{};
-      for (final entry in entries) {
-        entry.intentCounts.forEach(
-          (key, value) => intents[key] = (intents[key] ?? 0) + value,
-        );
-        entry.safetyCounts.forEach(
-          (key, value) => safety[key] = (safety[key] ?? 0) + value,
-        );
-      }
-      final sortedIntents = intents.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(22),
-        decoration: _box,
+    child: Align(
+      alignment: Alignment.topLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1680),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'MindAid Quality — Last 7 Days',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
-            ),
+            Text(title, style: Theme.of(context).textTheme.headlineLarge),
             const SizedBox(height: 6),
-            const Text(
-              'Aggregate operational metrics only. Conversation text is never shown.',
-              style: TextStyle(color: Colors.black54),
-            ),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _Tag(label: '$turns turns', color: const Color(0xFFFFE8A5)),
-                _Tag(
-                  label: '$fallbacks fallbacks',
-                  color: const Color(0xFFD4FFD1),
-                ),
-                _Tag(
-                  label: turns == 0
-                      ? 'No latency data'
-                      : '${(latency / turns).round()} ms average',
-                  color: const Color(0xFFC1BFFF),
-                ),
-                _Tag(
-                  label: '$helpful helpful / $unhelpful needs improvement',
-                  color: const Color(0xFFD9F5E1),
-                ),
-                if ((safety['crisisOrImmediateRisk'] ?? 0) > 0)
-                  _Tag(
-                    label:
-                        '${safety['crisisOrImmediateRisk']} crisis intercepts',
-                    color: const Color(0xFFFFC7C7),
-                  ),
-              ],
-            ),
-            if (sortedIntents.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: sortedIntents
-                    .take(8)
-                    .map(
-                      (entry) => _Tag(
-                        label: '${entry.key}: ${entry.value}',
-                        color: const Color(0xFFFFF2C8),
-                      ),
-                    )
-                    .toList(growable: false),
-              ),
-            ],
+            Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: 24),
+            child,
           ],
         ),
-      );
-    },
-  );
-}
-
-class _LiveActivityPanel extends StatefulWidget {
-  const _LiveActivityPanel({required this.repository});
-  final AdminPortalRepository repository;
-
-  @override
-  State<_LiveActivityPanel> createState() => _LiveActivityPanelState();
-}
-
-class _LiveActivityPanelState extends State<_LiveActivityPanel> {
-  int days = 7;
-
-  @override
-  Widget build(
-    BuildContext context,
-  ) => StreamBuilder<List<AdminActivityAnalyticsModel>>(
-    stream: widget.repository.watchActivityAnalytics(),
-    builder: (context, snapshot) {
-      if (snapshot.hasError) return const _AccessPanel();
-      final cutoff = DateTime.now().subtract(Duration(days: days - 1));
-      final entries = (snapshot.data ?? const <AdminActivityAnalyticsModel>[])
-          .where(
-            (entry) =>
-                DateTime.tryParse(
-                  entry.dateKey,
-                )?.isAfter(cutoff.subtract(const Duration(days: 1))) ??
-                false,
-          )
-          .toList();
-      final activeUsers = entries.fold(
-        0,
-        (sum, entry) => sum + entry.activeUserCount,
-      );
-      final events = entries.fold(0, (sum, entry) => sum + entry.eventCount);
-      final types = <String, int>{};
-      for (final entry in entries) {
-        entry.activityCounts.forEach(
-          (type, count) => types[type] = (types[type] ?? 0) + count,
-        );
-      }
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(22),
-        decoration: _box,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Live App Activity',
-                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
-                  ),
-                ),
-                DropdownButton<int>(
-                  value: days,
-                  items: const [
-                    DropdownMenuItem(value: 1, child: Text('Today')),
-                    DropdownMenuItem(value: 7, child: Text('Last 7 days')),
-                    DropdownMenuItem(value: 30, child: Text('Last 30 days')),
-                  ],
-                  onChanged: (value) => setState(() => days = value!),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '$activeUsers daily active-user records • $events tracked events',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 14),
-            if (types.isEmpty)
-              const Text('Activity will appear after students use the app.')
-            else
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: types.entries
-                    .map(
-                      (entry) => _Tag(
-                        label: '${entry.key}: ${entry.value}',
-                        color: const Color(0xFFFFE8A5),
-                      ),
-                    )
-                    .toList(),
-              ),
-          ],
-        ),
-      );
-    },
-  );
-}
-
-class _StatCard extends StatelessWidget {
-  const _StatCard({
-    required this.label,
-    required this.value,
-    required this.note,
-    required this.icon,
-    required this.color,
-  });
-  final String label, value, note;
-  final IconData icon;
-  final Color color;
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 260,
-    padding: const EdgeInsets.all(22),
-    decoration: _box,
-    child: Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: const TextStyle(color: Colors.black54)),
-              const SizedBox(height: 3),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 31,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              Text(
-                note,
-                style: const TextStyle(color: Colors.green, fontSize: 13),
-              ),
-            ],
-          ),
-        ),
-        CircleAvatar(
-          radius: 31,
-          backgroundColor: color,
-          child: Icon(icon, color: _yellow, size: 32),
-        ),
-      ],
-    ),
-  );
-}
-
-class _ChartCard extends StatelessWidget {
-  const _ChartCard({required this.title, required this.child});
-  final String title;
-  final Widget child;
-  @override
-  Widget build(BuildContext context) => Container(
-    height: 310,
-    padding: const EdgeInsets.all(20),
-    decoration: _box,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-        ),
-        const SizedBox(height: 18),
-        Expanded(child: child),
-      ],
-    ),
-  );
-}
-
-class _ActivityChart extends StatelessWidget {
-  const _ActivityChart({required this.users});
-  final List<UserModel> users;
-  @override
-  Widget build(BuildContext context) {
-    final values = List<int>.generate(6, (index) {
-      final month = DateTime(
-        DateTime.now().year,
-        DateTime.now().month - 5 + index,
-      );
-      return users
-          .where(
-            (u) =>
-                u.lastActiveAt != null &&
-                u.lastActiveAt!.year == month.year &&
-                u.lastActiveAt!.month == month.month,
-          )
-          .length;
-    });
-    final max = values.fold(1, (a, b) => a > b ? a : b);
-    return CustomPaint(
-      painter: _LinePainter(values.map((v) => v / max).toList()),
-      child: const SizedBox.expand(),
-    );
-  }
-}
-
-class _DistributionChart extends StatelessWidget {
-  const _DistributionChart({required this.users});
-  final List<UserModel> users;
-  @override
-  Widget build(BuildContext context) {
-    final students = users
-        .where((u) => (u.role ?? '').toLowerCase() == 'student')
-        .length;
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 150,
-            height: 150,
-            child: CustomPaint(
-              painter: _PiePainter(
-                users.isEmpty ? .0 : students / users.length,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Students: $students  •  Others: ${users.length - students}',
-            style: const TextStyle(color: _yellow, fontWeight: FontWeight.w700),
-          ),
-        ],
       ),
-    );
-  }
-}
-
-class _CategoryChart extends StatelessWidget {
-  const _CategoryChart({required this.items});
-  final List<AdminInquiryModel> items;
-  @override
-  Widget build(BuildContext context) {
-    final values = <String, int>{};
-    for (final item in items) {
-      values[item.category] = (values[item.category] ?? 0) + 1;
-    }
-    final entries = values.entries.take(5).toList();
-    final max = entries.fold(1, (n, e) => n > e.value ? n : e.value);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        for (final entry in entries)
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.bottomCenter,
-                      child: Container(
-                        color: _yellow,
-                        height: 210 * entry.value / max,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    entry.key,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 10),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
-  }
+    ),
+  );
 }
 
 class _UsersPage extends StatefulWidget {
@@ -1689,60 +1679,239 @@ class _RoleCorrectionQueue extends StatelessWidget {
 }
 
 class _AppointmentsPage extends StatefulWidget {
-  const _AppointmentsPage({required this.repository});
+  const _AppointmentsPage({
+    required this.repository,
+    required this.onOpenAssessments,
+  });
   final AdminPortalRepository repository;
+  final VoidCallback? onOpenAssessments;
   @override
   State<_AppointmentsPage> createState() => _AppointmentsPageState();
 }
 
 class _AppointmentsPageState extends State<_AppointmentsPage> {
-  String filter = 'All status';
+  String filter = 'All';
+  String departmentFilter = 'All departments';
+  final _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => _Page(
-    title: 'Appointments',
-    subtitle: 'Manage your counseling appointments',
+    title: widget.repository.currentAccessRole == AccessRole.portalStaff
+        ? 'Appointments'
+        : 'PAACC Appointments',
+    subtitle: widget.repository.currentAccessRole == AccessRole.portalStaff
+        ? 'Manage today’s PAACC appointments and scheduling.'
+        : 'Review, schedule, and manage counseling appointments.',
     child: StreamBuilder<List<AppointmentModel>>(
       stream: widget.repository.watchAppointments(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const _AccessPanel();
         final all = snapshot.data ?? const <AppointmentModel>[];
-        final items = filter == 'All status'
-            ? all
-            : all
-                  .where((a) => a.status.toLowerCase() == filter.toLowerCase())
-                  .toList();
+        final query = _search.text.trim().toLowerCase();
+        final items = all.where((a) {
+          final status = a.status.toLowerCase().trim();
+          final tab = switch (filter) {
+            'Needs action' => const {
+              'pending',
+              'requested',
+              'reschedule_required',
+              'reschedule_proposed',
+            }.contains(status),
+            'Upcoming' =>
+              status == 'confirmed' && a.scheduledAt.isAfter(DateTime.now()),
+            'Completed' => const {'completed', 'complete'}.contains(status),
+            'Closed' => const {
+              'no_show',
+              'noshow',
+              'cancelled',
+              'canceled',
+              'declined',
+            }.contains(status),
+            _ => true,
+          };
+          return tab &&
+              (query.isEmpty ||
+                  a.fullName.toLowerCase().contains(query) ||
+                  a.userId.toLowerCase().contains(query)) &&
+              (departmentFilter == 'All departments' ||
+                  a.department == departmentFilter);
+        }).toList();
+        final needsAction = all
+            .where(
+              (a) => const {
+                'pending',
+                'requested',
+                'reschedule_required',
+                'reschedule_proposed',
+              }.contains(a.status.toLowerCase().trim()),
+            )
+            .length;
+        final upcoming = all
+            .where(
+              (a) =>
+                  a.status.toLowerCase() == 'confirmed' &&
+                  a.scheduledAt.isAfter(DateTime.now()) &&
+                  a.scheduledAt.isBefore(
+                    DateTime.now().add(const Duration(days: 7)),
+                  ),
+            )
+            .length;
+        final completed = all
+            .where(
+              (a) => const {
+                'completed',
+                'complete',
+              }.contains(a.status.toLowerCase()),
+            )
+            .length;
+        final departments =
+            all
+                .map((a) => a.department ?? '')
+                .where((a) => a.isNotEmpty)
+                .toSet()
+                .toList()
+              ..sort();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _SummaryRow(
-              values: {
-                'Total Active Users': all.length,
-                'Pending': all
-                    .where((a) => a.status.toLowerCase() == 'pending')
-                    .length,
-                'Confirmed': all
-                    .where((a) => a.status.toLowerCase() == 'confirmed')
-                    .length,
-                'Complete': all
-                    .where((a) => a.status.toLowerCase() == 'complete')
-                    .length,
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final cards = <Widget>[
+                  _AppointmentSummaryCard(
+                    label: 'Needs action',
+                    value: needsAction,
+                    subtitle: 'Awaiting review',
+                    icon: Icons.priority_high_rounded,
+                    onTap: () => setState(() => filter = 'Needs action'),
+                  ),
+                  _AppointmentSummaryCard(
+                    label: 'Today',
+                    value: all
+                        .where(
+                          (a) =>
+                              a.status.toLowerCase() == 'confirmed' &&
+                              _sameDay(a.scheduledAt, DateTime.now()),
+                        )
+                        .length,
+                    subtitle: 'Confirmed today',
+                    icon: Icons.today_outlined,
+                    onTap: () => setState(() => filter = 'Upcoming'),
+                  ),
+                  _AppointmentSummaryCard(
+                    label: 'Upcoming',
+                    value: upcoming,
+                    subtitle: 'Next 7 days',
+                    icon: Icons.event_available_outlined,
+                    onTap: () => setState(() => filter = 'Upcoming'),
+                  ),
+                  _AppointmentSummaryCard(
+                    label: 'Completed',
+                    value: completed,
+                    subtitle: 'This academic year',
+                    icon: Icons.task_alt_outlined,
+                    onTap: () => setState(() => filter = 'Completed'),
+                  ),
+                ];
+                if (constraints.maxWidth >= 900) {
+                  return Row(
+                    children: [
+                      for (final card in cards) ...[
+                        Expanded(child: card),
+                        if (card != cards.last) const SizedBox(width: 12),
+                      ],
+                    ],
+                  );
+                }
+                return Wrap(spacing: 12, runSpacing: 12, children: cards);
               },
             ),
-            const SizedBox(height: 22),
-            _Filter(
-              label: 'Filter:',
-              value: filter,
-              values: const [
-                'All status',
-                'pending',
-                'confirmed',
-                'declined',
-                'reschedule_proposed',
-                'completed',
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                SizedBox(
+                  width: 300,
+                  child: TextField(
+                    controller: _search,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Search student name or ID',
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 230,
+                  child: DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    initialValue: departmentFilter,
+                    decoration: const InputDecoration(labelText: 'Department'),
+                    items: ['All departments', ...departments]
+                        .map(
+                          (d) => DropdownMenuItem(
+                            value: d,
+                            child: Text(d, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setState(
+                      () => departmentFilter = v ?? 'All departments',
+                    ),
+                  ),
+                ),
+                if (query.isNotEmpty || departmentFilter != 'All departments')
+                  TextButton(
+                    onPressed: () {
+                      _search.clear();
+                      setState(() => departmentFilter = 'All departments');
+                    },
+                    child: const Text('Clear filters'),
+                  ),
               ],
-              onChanged: (v) => setState(() => filter = v!),
             ),
-            const SizedBox(height: 22),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final tab in const [
+                  'All',
+                  'Needs action',
+                  'Upcoming',
+                  'Completed',
+                  'Closed',
+                ])
+                  ChoiceChip(
+                    label: Text(
+                      '$tab ${tab == 'All'
+                          ? all.length
+                          : tab == 'Needs action'
+                          ? needsAction
+                          : tab == 'Upcoming'
+                          ? upcoming
+                          : tab == 'Completed'
+                          ? completed
+                          : all.length - needsAction - upcoming - completed}',
+                    ),
+                    selected: filter == tab,
+                    onSelected: (_) => setState(() => filter = tab),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Showing ${items.length} of ${all.length} appointments',
+              style: const TextStyle(color: AdminColors.muted, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            if (items.isNotEmpty && MediaQuery.sizeOf(context).width >= 760)
+              const _AppointmentListHeader(),
             ...items.map(
               (a) => _AppointmentCard(item: a, repository: widget.repository),
             ),
@@ -1753,275 +1922,1152 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
   );
 }
 
+class _AppointmentSummaryCard extends StatelessWidget {
+  const _AppointmentSummaryCard({
+    required this.label,
+    required this.value,
+    required this.subtitle,
+    required this.icon,
+    required this.onTap,
+  });
+  final String label;
+  final int value;
+  final String subtitle;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    margin: EdgeInsets.zero,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(icon, color: AdminColors.accentStrong, size: 25),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(color: AdminColors.muted)),
+                Text(
+                  '$value',
+                  style: const TextStyle(
+                    fontSize: 25,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: AdminColors.muted,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _AppointmentCard extends StatelessWidget {
   const _AppointmentCard({required this.item, required this.repository});
   final AppointmentModel item;
   final AdminPortalRepository repository;
   @override
   Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(bottom: 12),
-    padding: const EdgeInsets.all(28),
+    margin: const EdgeInsets.only(bottom: 8),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
     decoration: _box,
-    child: Row(
-      children: [
-        Expanded(
+    child: LayoutBuilder(
+      builder: (context, box) {
+        final student = Expanded(
+          flex: 3,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Text(
-                    item.fullName,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  _Tag(
-                    label: item.course ?? 'User',
-                    color: const Color(0xFFE3A9DF),
-                  ),
-                ],
+              Text(
+                item.fullName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
-              const SizedBox(height: 5),
-              Text(item.email, style: const TextStyle(color: Colors.black54)),
-              const SizedBox(height: 9),
-              Text(item.concern),
-              const SizedBox(height: 18),
-              Wrap(
-                spacing: 12,
-                children: [
-                  _Tag(label: item.status, color: _statusColor(item.status)),
-                  Text(
-                    _date(item.scheduledAt),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  Text(
-                    item.scheduledTime,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ],
+              const SizedBox(height: 3),
+              Text(
+                item.userId,
+                style: const TextStyle(color: AdminColors.muted, fontSize: 12),
               ),
             ],
           ),
-        ),
-        TextButton.icon(
+        );
+        final schedule = Expanded(
+          flex: 2,
+          child: Text(
+            '${_date(item.scheduledAt)}\n${item.scheduledTime.isEmpty ? 'Awaiting scheduling' : item.scheduledTime}',
+            style: const TextStyle(fontSize: 12),
+          ),
+        );
+        final department = Expanded(
+          flex: 3,
+          child: Text(
+            '${item.department ?? 'Department not provided'}\n${item.course ?? 'Course not provided'}',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12),
+          ),
+        );
+        final action = TextButton.icon(
           onPressed: () => _showReviewDialog(context),
-          icon: const Icon(Icons.rate_review_outlined),
-          label: const Text('Review'),
-          style: TextButton.styleFrom(foregroundColor: _yellow),
-        ),
-      ],
+          icon: Icon(
+            item.isFinalized
+                ? Icons.visibility_outlined
+                : Icons.rate_review_outlined,
+            size: 17,
+          ),
+          label: Text(item.isFinalized ? 'View' : 'Review'),
+        );
+        if (box.maxWidth < 700) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(children: [student, const SizedBox(width: 10), action]),
+              const SizedBox(height: 10),
+              Row(children: [schedule, department]),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _Tag(
+                  label: _formalLabel(item.status),
+                  color: _statusColor(item.status),
+                ),
+              ),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            student,
+            const SizedBox(width: 16),
+            schedule,
+            const SizedBox(width: 16),
+            department,
+            const SizedBox(width: 12),
+            _Tag(
+              label: _formalLabel(item.status),
+              color: _statusColor(item.status),
+            ),
+            const SizedBox(width: 8),
+            action,
+          ],
+        );
+      },
     ),
   );
 
   Future<void> _showReviewDialog(BuildContext context) async {
-    var action = 'confirmed';
-    final reply = TextEditingController();
+    final currentStatus = item.status.toLowerCase().trim();
+    var action = currentStatus == 'confirmed'
+        ? 'completed'
+        : currentStatus == 'reschedule_required'
+        ? 'reschedule_proposed'
+        : 'confirmed';
+    String reason = _appointmentReasons(action).first;
     final proposedTime = TextEditingController();
     DateTime? proposedDate;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
-          title: Text('Review ${item.fullName}'),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(28, 26, 28, 0),
+          contentPadding: const EdgeInsets.fromLTRB(28, 20, 28, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.isFinalized ? 'Appointment details' : 'Review appointment',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 5),
+              Text(
+                item.fullName,
+                style: const TextStyle(
+                  color: AdminColors.muted,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
           content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: action,
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'confirmed',
-                      child: Text('Accept / confirm'),
-                    ),
-                    DropdownMenuItem(value: 'declined', child: Text('Decline')),
-                    DropdownMenuItem(
-                      value: 'reschedule_proposed',
-                      child: Text('Propose new time'),
-                    ),
-                  ],
-                  onChanged: (value) => setDialogState(() => action = value!),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: reply,
-                  minLines: 3,
-                  maxLines: 5,
-                  decoration: const InputDecoration(
-                    labelText: 'Reply to student',
-                    border: OutlineInputBorder(),
+            child: SizedBox(
+              width: 660,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _AppointmentSectionHeader(
+                    icon: Icons.person_outline,
+                    title: 'Client information',
                   ),
-                ),
-                if (action == 'reschedule_proposed') ...[
                   const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: () async {
-                      final picked = await showDatePicker(
-                        context: dialogContext,
-                        initialDate: DateTime.now().add(
-                          const Duration(days: 1),
+                  _AppointmentFieldGrid(
+                    fields: [
+                      _AppointmentFieldData('Email address', item.email),
+                      _AppointmentFieldData(
+                        'Contact number',
+                        item.contactNumber,
+                      ),
+                      _AppointmentFieldData(
+                        'Course and year',
+                        '${item.course ?? 'Not provided'} • ${item.yearLevel ?? 'Not provided'}',
+                      ),
+                      _AppointmentFieldData(
+                        'Preferred contact',
+                        item.preferredContactMethod,
+                      ),
+                      _AppointmentFieldData(
+                        'Previous counseling',
+                        item.therapyBefore ?? 'Not provided',
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 34),
+                  const _AppointmentSectionHeader(
+                    icon: Icons.event_note_outlined,
+                    title: 'Request details',
+                  ),
+                  const SizedBox(height: 12),
+                  _AppointmentField(
+                    label: 'Primary concern',
+                    value: item.concern,
+                    prominent: true,
+                  ),
+                  const SizedBox(height: 12),
+                  _AppointmentFieldGrid(
+                    fields: [
+                      _AppointmentFieldData(
+                        'Requested schedule',
+                        '${_date(item.scheduledAt)} • ${item.scheduledTime}',
+                      ),
+                      _AppointmentFieldData(
+                        'Current status',
+                        _formalLabel(item.status),
+                      ),
+                      if ((item.staffReply ?? '').isNotEmpty)
+                        _AppointmentFieldData(
+                          'Decision reason',
+                          item.staffReply!,
                         ),
-                        firstDate: DateTime.now(),
-                        lastDate: DateTime.now().add(const Duration(days: 365)),
-                      );
-                      if (picked != null) {
-                        setDialogState(() => proposedDate = picked);
-                      }
-                    },
-                    child: Text(
-                      proposedDate == null
-                          ? 'Choose proposed date'
-                          : _date(proposedDate),
-                    ),
+                      if (item.proposedScheduledAt != null)
+                        _AppointmentFieldData(
+                          'Proposed schedule',
+                          '${_date(item.proposedScheduledAt)} • ${item.proposedScheduledTime ?? ''}',
+                        ),
+                    ],
                   ),
-                  TextField(
-                    controller: proposedTime,
-                    decoration: const InputDecoration(
-                      labelText: 'Proposed time',
-                      border: OutlineInputBorder(),
+                  if (item.isFinalized) ...[
+                    const SizedBox(height: 22),
+                    const _AppointmentNotice(
+                      icon: Icons.lock_outline,
+                      message:
+                          'This appointment has been finalized. The recorded decision is read-only.',
                     ),
-                  ),
+                  ] else ...[
+                    const Divider(height: 34),
+                    const _AppointmentSectionHeader(
+                      icon: Icons.fact_check_outlined,
+                      title: 'PAACC decision',
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      initialValue: action,
+                      decoration: const InputDecoration(labelText: 'Action'),
+                      items: currentStatus == 'confirmed'
+                          ? const [
+                              DropdownMenuItem(
+                                value: 'completed',
+                                child: Text('Mark session as completed'),
+                              ),
+                            ]
+                          : currentStatus == 'reschedule_required'
+                          ? const [
+                              DropdownMenuItem(
+                                value: 'reschedule_proposed',
+                                child: Text('Propose new schedule'),
+                              ),
+                            ]
+                          : const [
+                              DropdownMenuItem(
+                                value: 'confirmed',
+                                child: Text('Confirm appointment'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'reschedule_required',
+                                child: Text('Schedule adjustment needed'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'reschedule_proposed',
+                                child: Text('Propose new schedule'),
+                              ),
+                            ],
+                      onChanged: (value) => setDialogState(() {
+                        action = value!;
+                        reason = _appointmentReasons(action).first;
+                      }),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('reason-$action'),
+                      initialValue: reason,
+                      decoration: const InputDecoration(
+                        labelText: 'Decision reason',
+                      ),
+                      items: _appointmentReasons(action)
+                          .map(
+                            (value) => DropdownMenuItem(
+                              value: value,
+                              child: Text(value),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) =>
+                          setDialogState(() => reason = value!),
+                    ),
+                    if (action == 'reschedule_proposed') ...[
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              final picked = await showDatePicker(
+                                context: dialogContext,
+                                initialDate: DateTime.now().add(
+                                  const Duration(days: 1),
+                                ),
+                                firstDate: DateTime.now(),
+                                lastDate: DateTime.now().add(
+                                  const Duration(days: 365),
+                                ),
+                              );
+                              if (picked != null) {
+                                setDialogState(() => proposedDate = picked);
+                              }
+                            },
+                            icon: const Icon(Icons.calendar_today_outlined),
+                            label: Text(
+                              proposedDate == null
+                                  ? 'Select a date'
+                                  : _date(proposedDate),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 220,
+                            child: TextField(
+                              controller: proposedTime,
+                              decoration: const InputDecoration(
+                                labelText: 'Proposed time',
+                                hintText: 'e.g. 2:00 PM',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
+              child: Text(item.isFinalized ? 'Close' : 'Cancel'),
             ),
-            FilledButton(
-              onPressed: () async {
-                if (reply.text.trim().isEmpty ||
-                    (action == 'reschedule_proposed' &&
-                        (proposedDate == null ||
-                            proposedTime.text.trim().isEmpty))) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Enter a reply and all proposed time details.',
-                      ),
-                    ),
-                  );
-                  return;
-                }
-                try {
-                  await repository.reviewAppointment(
-                    appointmentId: item.id,
-                    action: action,
-                    reply: reply.text.trim(),
-                    proposedScheduledAt: proposedDate,
-                    proposedScheduledTime: proposedTime.text.trim(),
-                  );
-                  if (dialogContext.mounted) Navigator.pop(dialogContext);
-                } catch (_) {
-                  if (context.mounted) {
+            if (!item.isFinalized)
+              FilledButton(
+                onPressed: () async {
+                  if (action == 'reschedule_proposed' &&
+                      (proposedDate == null ||
+                          proposedTime.text.trim().isEmpty)) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
-                        content: Text('Unable to update the appointment.'),
+                        content: Text(
+                          'Enter a reply and all proposed time details.',
+                        ),
                       ),
                     );
+                    return;
                   }
-                }
-              },
-              child: const Text('Send decision'),
-            ),
+                  try {
+                    await repository.reviewAppointment(
+                      appointmentId: item.id,
+                      action: action,
+                      reply: reason,
+                      proposedScheduledAt: proposedDate,
+                      proposedScheduledTime: proposedTime.text.trim(),
+                    );
+                    if (dialogContext.mounted) Navigator.pop(dialogContext);
+                  } catch (_) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Unable to update the appointment.'),
+                        ),
+                      );
+                    }
+                  }
+                },
+                child: const Text('Send decision'),
+              ),
           ],
         ),
       ),
     );
-    reply.dispose();
     proposedTime.dispose();
+  }
+
+  static List<String> _appointmentReasons(String action) => switch (action) {
+    'confirmed' => const [
+      'Schedule and counselor are available',
+      'Appointment approved by PAACC',
+    ],
+    'reschedule_required' => const ['Schedule adjustment needed'],
+    'reschedule_proposed' => const [
+      'A different office time is available',
+      'The requested time needs to be adjusted',
+    ],
+    _ => const ['Counseling session completed'],
+  };
+}
+
+class _AppointmentListHeader extends StatelessWidget {
+  const _AppointmentListHeader();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(18, 4, 112, 8),
+    child: Row(
+      children: const [
+        Expanded(flex: 3, child: Text('STUDENT', style: _listHeaderStyle)),
+        SizedBox(width: 16),
+        Expanded(flex: 2, child: Text('SCHEDULE', style: _listHeaderStyle)),
+        SizedBox(width: 16),
+        Expanded(
+          flex: 3,
+          child: Text('DEPARTMENT / COURSE', style: _listHeaderStyle),
+        ),
+        SizedBox(width: 12),
+        SizedBox(width: 108, child: Text('STATUS', style: _listHeaderStyle)),
+      ],
+    ),
+  );
+}
+
+const _listHeaderStyle = TextStyle(
+  color: AdminColors.muted,
+  fontSize: 10,
+  fontWeight: FontWeight.w900,
+  letterSpacing: .8,
+);
+
+class _AppointmentSectionHeader extends StatelessWidget {
+  const _AppointmentSectionHeader({required this.icon, required this.title});
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 19, color: AdminColors.muted),
+      const SizedBox(width: 9),
+      Text(
+        title,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+      ),
+    ],
+  );
+}
+
+class _AppointmentFieldData {
+  const _AppointmentFieldData(this.label, this.value);
+  final String label;
+  final String value;
+}
+
+class _AppointmentFieldGrid extends StatelessWidget {
+  const _AppointmentFieldGrid({required this.fields});
+  final List<_AppointmentFieldData> fields;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final width = box.maxWidth >= 560
+          ? (box.maxWidth - 24) / 2
+          : box.maxWidth;
+      return Wrap(
+        spacing: 24,
+        runSpacing: 16,
+        children: fields
+            .map(
+              (field) => SizedBox(
+                width: width,
+                child: _AppointmentField(
+                  label: field.label,
+                  value: field.value,
+                ),
+              ),
+            )
+            .toList(),
+      );
+    },
+  );
+}
+
+class _AppointmentField extends StatelessWidget {
+  const _AppointmentField({
+    required this.label,
+    required this.value,
+    this.prominent = false,
+  });
+
+  final String label;
+  final String value;
+  final bool prominent;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: prominent ? const EdgeInsets.all(14) : EdgeInsets.zero,
+    decoration: prominent
+        ? BoxDecoration(
+            color: AdminColors.canvas,
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(color: AdminColors.border),
+          )
+        : null,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: const TextStyle(
+            color: AdminColors.muted,
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+            letterSpacing: .7,
+          ),
+        ),
+        const SizedBox(height: 5),
+        SelectableText(
+          value.trim().isEmpty ? 'Not provided' : value,
+          style: const TextStyle(
+            color: AdminColors.ink,
+            fontSize: 14,
+            height: 1.4,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _AppointmentNotice extends StatelessWidget {
+  const _AppointmentNotice({required this.icon, required this.message});
+  final IconData icon;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: AdminColors.accentFaint,
+      borderRadius: BorderRadius.circular(9),
+      border: Border.all(color: AdminColors.accentSoft),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 19),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            message,
+            style: const TextStyle(fontSize: 13, height: 1.4),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _AvailabilityPage extends StatefulWidget {
+  const _AvailabilityPage({required this.repository});
+  final AdminPortalRepository repository;
+
+  @override
+  State<_AvailabilityPage> createState() => _AvailabilityPageState();
+}
+
+class _AvailabilityPageState extends State<_AvailabilityPage> {
+  PaccAvailabilityModel? _draft;
+  bool _saving = false;
+
+  @override
+  Widget build(BuildContext context) => _Page(
+    title: 'PAACC Schedule & Availability',
+    subtitle:
+        'Publish office hours, walk-in availability, and counselor presence',
+    child: StreamBuilder<PaccAvailabilityModel?>(
+      stream: widget.repository.watchPaccAvailability(),
+      builder: (context, snapshot) {
+        final value =
+            _draft ??
+            snapshot.data ??
+            const PaccAvailabilityModel(
+              openDays: [1, 2, 3, 4, 5],
+              opensAt: '08:00',
+              closesAt: '17:00',
+              presence: CounselorPresence.inOffice,
+              acceptsWalkIns: true,
+            );
+        return Container(
+          padding: const EdgeInsets.all(28),
+          decoration: _box,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Working days',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                children: List.generate(7, (index) {
+                  final day = index + 1;
+                  const labels = [
+                    'Mon',
+                    'Tue',
+                    'Wed',
+                    'Thu',
+                    'Fri',
+                    'Sat',
+                    'Sun',
+                  ];
+                  return FilterChip(
+                    label: Text(labels[index]),
+                    selected: value.openDays.contains(day),
+                    onSelected: (selected) => _update(
+                      value,
+                      openDays: selected
+                          ? ([...value.openDays, day]..sort())
+                          : value.openDays
+                                .where((item) => item != day)
+                                .toList(),
+                    ),
+                  );
+                }),
+              ),
+              const SizedBox(height: 22),
+              Wrap(
+                spacing: 14,
+                runSpacing: 12,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () => _pickTime(value, opening: true),
+                    icon: const Icon(Icons.login_outlined),
+                    label: Text('Opens ${value.opensAt}'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => _pickTime(value, opening: false),
+                    icon: const Icon(Icons.logout_outlined),
+                    label: Text('Closes ${value.closesAt}'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 22),
+              DropdownButtonFormField<CounselorPresence>(
+                initialValue: value.presence,
+                decoration: const InputDecoration(
+                  labelText: 'Counselor status',
+                  border: OutlineInputBorder(),
+                ),
+                items: CounselorPresence.values
+                    .map(
+                      (presence) => DropdownMenuItem(
+                        value: presence,
+                        child: Text(presence.label),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (presence) {
+                  if (presence != null) _update(value, presence: presence);
+                },
+              ),
+              const SizedBox(height: 10),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Accept walk-in visits'),
+                subtitle: const Text(
+                  'Users will see whether they may visit without an appointment.',
+                ),
+                value: value.acceptsWalkIns,
+                onChanged: (enabled) => _update(value, acceptsWalkIns: enabled),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _saving ? null : () => _save(value),
+                  icon: const Icon(Icons.publish_outlined),
+                  label: Text(
+                    _saving ? 'Publishing...' : 'Publish availability',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+
+  void _update(
+    PaccAvailabilityModel current, {
+    List<int>? openDays,
+    String? opensAt,
+    String? closesAt,
+    CounselorPresence? presence,
+    bool? acceptsWalkIns,
+  }) {
+    setState(
+      () => _draft = PaccAvailabilityModel(
+        openDays: openDays ?? current.openDays,
+        opensAt: opensAt ?? current.opensAt,
+        closesAt: closesAt ?? current.closesAt,
+        presence: presence ?? current.presence,
+        acceptsWalkIns: acceptsWalkIns ?? current.acceptsWalkIns,
+        notice: current.notice,
+        updatedAt: current.updatedAt,
+      ),
+    );
+  }
+
+  Future<void> _pickTime(
+    PaccAvailabilityModel value, {
+    required bool opening,
+  }) async {
+    final raw = opening ? value.opensAt : value.closesAt;
+    final parts = raw.split(':');
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: int.parse(parts[0]),
+        minute: int.parse(parts[1]),
+      ),
+    );
+    if (picked == null) return;
+    final formatted =
+        '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+    _update(
+      value,
+      opensAt: opening ? formatted : null,
+      closesAt: opening ? null : formatted,
+    );
+  }
+
+  Future<void> _save(PaccAvailabilityModel value) async {
+    setState(() => _saving = true);
+    try {
+      await widget.repository.savePaccAvailability(value);
+      _draft = null;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PAACC availability published.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 }
 
 class _AssessmentsPage extends StatefulWidget {
-  const _AssessmentsPage({required this.repository});
+  const _AssessmentsPage({required this.repository, required this.onBack});
   final AdminPortalRepository repository;
+  final VoidCallback onBack;
   @override
   State<_AssessmentsPage> createState() => _AssessmentsPageState();
 }
 
 class _AssessmentsPageState extends State<_AssessmentsPage> {
-  String filter = 'All Types';
+  String typeFilter = 'All Types';
+  String yearFilter = 'All Years';
+  String statusFilter = 'All Statuses';
+  String roleFilter = 'All Roles';
+  String archiveFilter = 'Active';
+
   @override
   Widget build(BuildContext context) => _Page(
-    title: 'Assessments',
-    subtitle: 'Track and manage assessment results',
+    title: 'Assessment Results',
+    subtitle: 'Review and archive assessment records from PAACC appointments',
     child: StreamBuilder<List<AdminAssessmentRecord>>(
       stream: widget.repository.watchAssessments(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const _AccessPanel();
         final all = snapshot.data ?? const <AdminAssessmentRecord>[];
-        final items = filter == 'All Types'
-            ? all
-            : all
-                  .where((a) => a.type.toLowerCase() == filter.toLowerCase())
-                  .toList();
+        final years = {
+          for (final item in all) '${item.createdAt.year}',
+        }.toList()..sort((a, b) => b.compareTo(a));
+        final statuses = {
+          for (final item in all) item.status ?? 'Pending',
+        }.toList()..sort();
+        final roles = {for (final item in all) item.role ?? 'User'}.toList()
+          ..sort();
         final types = [
           'All Types',
           ...{for (final item in all) item.type},
         ];
+        final items = all
+            .where(
+              (item) =>
+                  (archiveFilter == 'Archived'
+                      ? item.isArchived
+                      : !item.isArchived) &&
+                  (typeFilter == 'All Types' || item.type == typeFilter) &&
+                  (yearFilter == 'All Years' ||
+                      '${item.createdAt.year}' == yearFilter) &&
+                  (statusFilter == 'All Statuses' ||
+                      (item.status ?? 'Pending') == statusFilter) &&
+                  (roleFilter == 'All Roles' ||
+                      (item.role ?? 'User') == roleFilter),
+            )
+            .toList();
+        final active = all.where((item) => !item.isArchived).toList();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Filter(
-              label: 'Filter:',
-              value: filter,
-              values: types,
-              onChanged: (v) => setState(() => filter = v!),
+            OutlinedButton.icon(
+              onPressed: widget.onBack,
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back to PAACC appointments'),
             ),
-            const SizedBox(height: 14),
-            _SummaryRow(
+            const SizedBox(height: 20),
+            _CompactSummaryStrip(
               values: {
-                'Total Assessments': all.length,
-                'Completed': all
+                'Active': active.length,
+                'With results': active
                     .where((a) => (a.status ?? '').isNotEmpty)
                     .length,
-                'Pending': all.where((a) => (a.status ?? '').isEmpty).length,
+                'Pending': active.where((a) => (a.status ?? '').isEmpty).length,
+                'Archived': all.where((a) => a.isArchived).length,
               },
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
             Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
               decoration: _box,
-              child: _ResponsiveTable(
-                columns: const [
-                  'User ID',
-                  'Type',
-                  'Assessment Type',
-                  'Date',
-                  'Score',
-                  'Status',
-                  'Actions',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Filter records',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _FilterField(
+                        label: 'Record state',
+                        value: archiveFilter,
+                        values: const ['Active', 'Archived'],
+                        onChanged: (value) =>
+                            setState(() => archiveFilter = value!),
+                      ),
+                      _FilterField(
+                        label: 'Year',
+                        value: yearFilter,
+                        values: ['All Years', ...years],
+                        onChanged: (value) =>
+                            setState(() => yearFilter = value!),
+                      ),
+                      _FilterField(
+                        label: 'Status',
+                        value: statusFilter,
+                        values: ['All Statuses', ...statuses],
+                        onChanged: (value) =>
+                            setState(() => statusFilter = value!),
+                      ),
+                      _FilterField(
+                        label: 'Role',
+                        value: roleFilter,
+                        values: ['All Roles', ...roles],
+                        onChanged: (value) =>
+                            setState(() => roleFilter = value!),
+                      ),
+                      _FilterField(
+                        label: 'Assessment',
+                        value: typeFilter,
+                        values: types,
+                        onChanged: (value) =>
+                            setState(() => typeFilter = value!),
+                      ),
+                    ],
+                  ),
                 ],
-                rows: items
-                    .map(
-                      (a) => [
-                        a.userId,
-                        a.role ?? 'User',
-                        a.type,
-                        _date(a.createdAt),
-                        a.score?.toString() ?? '-',
-                        _Tag(
-                          label: a.status ?? 'Pending',
-                          color: (a.status ?? '').isEmpty
-                              ? const Color(0xFFFFE9AD)
-                              : const Color(0xFF8DD78B),
-                        ),
-                        const Icon(Icons.visibility_outlined, color: _yellow),
-                      ],
-                    )
-                    .toList(),
               ),
             ),
+            const SizedBox(height: 14),
+            if (items.isEmpty)
+              _EmptyPanel(
+                message:
+                    'No ${archiveFilter.toLowerCase()} assessments match these filters.',
+              )
+            else
+              Container(
+                decoration: _box,
+                child: _ResponsiveTable(
+                  columns: const [
+                    'User reference',
+                    'Year',
+                    'Date',
+                    'Status',
+                    'Role',
+                    'Assessment Type',
+                    'Actions',
+                  ],
+                  rows: items
+                      .map(
+                        (assessment) => [
+                          _UserReference(value: assessment.userId),
+                          '${assessment.createdAt.year}',
+                          _date(assessment.createdAt),
+                          _Tag(
+                            label: _formalLabel(assessment.status ?? 'Pending'),
+                            color: (assessment.status ?? '').isEmpty
+                                ? AdminColors.accentSoft
+                                : AdminColors.surfaceMuted,
+                          ),
+                          _formalLabel(assessment.role ?? 'User'),
+                          _formalLabel(assessment.type),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'View assessment results',
+                                onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => AdminAssessmentDetailScreen(
+                                      userId: assessment.userId,
+                                      userLabel: assessment.userId,
+                                      assessmentId: assessment.id,
+                                      repository: AdminStatusRepository(),
+                                    ),
+                                  ),
+                                ),
+                                icon: const Icon(Icons.visibility_outlined),
+                              ),
+                              IconButton(
+                                tooltip: assessment.isArchived
+                                    ? 'Restore assessment'
+                                    : 'Archive assessment',
+                                onPressed: () => _setArchived(assessment),
+                                icon: Icon(
+                                  assessment.isArchived
+                                      ? Icons.unarchive_outlined
+                                      : Icons.archive_outlined,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      )
+                      .toList(),
+                ),
+              ),
           ],
         );
       },
     ),
   );
+
+  Future<void> _setArchived(AdminAssessmentRecord assessment) async {
+    final archive = !assessment.isArchived;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('${archive ? 'Archive' : 'Restore'} assessment?'),
+        content: Text(
+          archive
+              ? 'This keeps the record securely stored but removes it from the active assessment list.'
+              : 'This returns the record to the active assessment list.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(archive ? 'Archive' : 'Restore'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.repository.setAssessmentArchived(assessment.id, archive);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              archive ? 'Assessment archived.' : 'Assessment restored.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to update assessment: $error')),
+        );
+      }
+    }
+  }
+}
+
+class _CompactSummaryStrip extends StatelessWidget {
+  const _CompactSummaryStrip({required this.values});
+  final Map<String, int> values;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    decoration: _box,
+    child: LayoutBuilder(
+      builder: (context, box) {
+        final compact = box.maxWidth < 620;
+        return Wrap(
+          children: values.entries
+              .map(
+                (entry) => SizedBox(
+                  width: compact
+                      ? box.maxWidth / 2
+                      : box.maxWidth / values.length,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 16,
+                    ),
+                    decoration: const BoxDecoration(
+                      border: Border(
+                        right: BorderSide(color: AdminColors.border),
+                        bottom: BorderSide(color: AdminColors.border),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${entry.value}',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            height: 1,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            entry.key,
+                            style: const TextStyle(
+                              color: AdminColors.muted,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        );
+      },
+    ),
+  );
+}
+
+class _FilterField extends StatelessWidget {
+  const _FilterField({
+    required this.label,
+    required this.value,
+    required this.values,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String value;
+  final List<String> values;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 190,
+    child: DropdownButtonFormField<String>(
+      initialValue: value,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label),
+      items: values
+          .map(
+            (item) => DropdownMenuItem(
+              value: item,
+              child: Text(_formalLabel(item), overflow: TextOverflow.ellipsis),
+            ),
+          )
+          .toList(),
+      onChanged: onChanged,
+    ),
+  );
+}
+
+class _UserReference extends StatelessWidget {
+  const _UserReference({required this.value});
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final abbreviated = value.length > 14
+        ? '${value.substring(0, 6)}…${value.substring(value.length - 5)}'
+        : value;
+    return Tooltip(
+      message: value,
+      child: Text(
+        abbreviated,
+        style: const TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
 }
 
 class _InquiriesPage extends StatefulWidget {
@@ -2034,11 +3080,22 @@ class _InquiriesPage extends StatefulWidget {
 class _InquiriesPageState extends State<_InquiriesPage> {
   String status = 'All Status';
   String category = 'All Categories';
-  AdminInquiryModel? selected;
+
+  void _openInquiry(AdminInquiryModel inquiry) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _InquiryDetailScreen(
+          inquiry: inquiry,
+          repository: widget.repository,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => _Page(
-    title: 'Inquiry Management',
-    subtitle: 'Manage student and faculty inquiries',
+    title: 'Inquiries',
+    subtitle: 'Review, acknowledge, and resolve submitted inquiries.',
     child: StreamBuilder<List<AdminInquiryModel>>(
       stream: widget.repository.watchInquiries(),
       builder: (context, snapshot) {
@@ -2055,76 +3112,66 @@ class _InquiriesPageState extends State<_InquiriesPage> {
                   (category == 'All Categories' || i.category == category),
             )
             .toList();
-        final current = selected == null
-            ? (items.isEmpty ? null : items.first)
-            : items.contains(selected)
-            ? selected
-            : items.isEmpty
-            ? null
-            : items.first;
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _FilterRow(
-              children: [
-                _Filter(
-                  label: 'Filter:',
-                  value: status,
-                  values: const [
-                    'All Status',
-                    'Pending',
-                    'In Progress',
-                    'Resolved',
-                  ],
-                  onChanged: (v) => setState(() => status = v!),
-                ),
-                _Filter(
-                  label: '',
-                  value: category,
-                  values: categories,
-                  onChanged: (v) => setState(() => category = v!),
-                ),
-              ],
+            _CompactSummaryStrip(
+              values: {
+                'Total': all.length,
+                'Pending': all
+                    .where((item) => item.status == InquiryStatus.pending)
+                    .length,
+                'In progress': all
+                    .where((item) => item.status == InquiryStatus.inProgress)
+                    .length,
+                'Resolved': all
+                    .where((item) => item.status == InquiryStatus.resolved)
+                    .length,
+              },
             ),
-            const SizedBox(height: 20),
-            LayoutBuilder(
-              builder: (context, box) => box.maxWidth < 900
-                  ? Column(
-                      children: [
-                        _InquiryList(
-                          items: items,
-                          selected: current,
-                          onSelect: (i) => setState(() => selected = i),
-                        ),
-                        const SizedBox(height: 16),
-                        _InquiryDetails(
-                          item: current,
-                          repository: widget.repository,
-                          onUpdated: () => setState(() {}),
-                        ),
-                      ],
-                    )
-                  : Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: _InquiryList(
-                            items: items,
-                            selected: current,
-                            onSelect: (i) => setState(() => selected = i),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: _InquiryDetails(
-                            item: current,
-                            repository: widget.repository,
-                            onUpdated: () => setState(() {}),
-                          ),
-                        ),
-                      ],
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: _box,
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.end,
+                children: [
+                  _FilterField(
+                    label: 'Status',
+                    value: status,
+                    values: const [
+                      'All Status',
+                      'Pending',
+                      'In Progress',
+                      'Resolved',
+                    ],
+                    onChanged: (value) => setState(() => status = value!),
+                  ),
+                  _FilterField(
+                    label: 'Category',
+                    value: category,
+                    values: categories,
+                    onChanged: (value) => setState(() => category = value!),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      '${items.length} ${items.length == 1 ? 'inquiry' : 'inquiries'} shown',
+                      style: const TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(height: 14),
+            _InquiryList(items: items, selected: null, onSelect: _openInquiry),
           ],
         );
       },
@@ -2143,64 +3190,209 @@ class _InquiryList extends StatelessWidget {
   final ValueChanged<AdminInquiryModel> onSelect;
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: items.isEmpty
-        ? [
-            const _EmptyPanel(
-              message: 'No inquiries match the selected filters.',
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return const _EmptyPanel(
+        message: 'No inquiries match the selected filters.',
+      );
+    }
+    return Container(
+      decoration: _box,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 15, 16, 12),
+            child: Text(
+              'Inquiry queue',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
             ),
-          ]
-        : items
-              .map(
-                (item) => InkWell(
-                  onTap: () => onSelect(item),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 14),
-                    padding: const EdgeInsets.all(24),
-                    decoration: _box.copyWith(
-                      color: item.id == selected?.id
-                          ? const Color(0xFFFFFDF6)
-                          : Colors.white,
-                    ),
-                    child: Column(
+          ),
+          const Divider(height: 1),
+          for (var index = 0; index < items.length; index++) ...[
+            _InquiryQueueRow(
+              item: items[index],
+              selected: items[index].id == selected?.id,
+              onTap: () => onSelect(items[index]),
+            ),
+            if (index < items.length - 1) const Divider(height: 1),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _InquiryQueueRow extends StatelessWidget {
+  const _InquiryQueueRow({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
+  final AdminInquiryModel item;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    selected: selected,
+    button: true,
+    child: Material(
+      color: selected ? AdminColors.accentFaint : Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(top: 6),
+                decoration: BoxDecoration(
+                  color: _statusColor(item.status.storedValue),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AdminColors.border),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          item.subject,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
+                        Expanded(
+                          child: Text(
+                            item.subject,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 5),
+                        const SizedBox(width: 8),
                         Text(
-                          '${item.displayName} • ${item.email}',
-                          style: const TextStyle(color: Colors.black54),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          item.message,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 15),
-                        Wrap(
-                          spacing: 12,
-                          children: [
-                            _Tag(
-                              label: item.status.label,
-                              color: _statusColor(item.status.storedValue),
-                            ),
-                            Text(item.category),
-                            Text(_date(item.createdAt)),
-                          ],
+                          _date(item.createdAt),
+                          style: const TextStyle(
+                            color: AdminColors.muted,
+                            fontSize: 10,
+                          ),
                         ),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 4),
+                    Text(
+                      item.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      item.message.trim().isEmpty
+                          ? 'No message provided.'
+                          : item.message,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, height: 1.4),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        _Tag(
+                          label: item.status.label,
+                          color: _statusColor(item.status.storedValue),
+                        ),
+                        _Tag(
+                          label: item.category,
+                          color: AdminColors.surfaceMuted,
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              )
-              .toList(),
+              ),
+              if (selected) ...[
+                const SizedBox(width: 8),
+                const Icon(Icons.chevron_right, size: 20),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _InquiryDetailScreen extends StatelessWidget {
+  const _InquiryDetailScreen({required this.inquiry, required this.repository});
+
+  final AdminInquiryModel inquiry;
+  final AdminPortalRepository repository;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: AdminColors.canvas,
+    appBar: AppBar(
+      toolbarHeight: 68,
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Inquiry details',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Review the submitted message, form responses, and case status.',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AdminColors.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    ),
+    body: StreamBuilder<List<AdminInquiryModel>>(
+      stream: repository.watchInquiries(),
+      builder: (context, snapshot) {
+        var current = inquiry;
+        for (final item in snapshot.data ?? const <AdminInquiryModel>[]) {
+          if (item.id == inquiry.id) {
+            current = item;
+            break;
+          }
+        }
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(
+            MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1080),
+              child: _InquiryDetails(
+                item: current,
+                repository: repository,
+                onUpdated: () {},
+              ),
+            ),
+          ),
+        );
+      },
+    ),
   );
 }
 
@@ -2221,54 +3413,353 @@ class _InquiryDetails extends StatelessWidget {
       );
     }
     return Container(
-      padding: const EdgeInsets.all(26),
+      padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 18 : 22),
       decoration: _box,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Inquiry Details',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 14),
-          _Detail(label: 'Subject', value: item!.subject),
-          _Detail(label: 'Name', value: item!.displayName),
-          _Detail(label: 'Email', value: item!.email),
-          _Detail(label: 'Type', value: item!.role ?? 'User'),
-          _Detail(label: 'Category', value: item!.category),
-          _Detail(label: 'Message', value: item!.message),
-          const SizedBox(height: 26),
-          const Center(
-            child: Text(
-              'Update Status',
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-          const SizedBox(height: 10),
-          for (final next in InquiryStatus.values)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _statusColor(next.storedValue),
-                    foregroundColor: next == InquiryStatus.pending
-                        ? Colors.black
-                        : Colors.white,
-                  ),
-                  onPressed: () async {
-                    await repository.updateInquiryStatus(item!.id, next);
-                    onUpdated();
-                  },
-                  child: Text('Mark as ${next.label}'),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _Tag(
+                label: item!.status.label,
+                color: _statusColor(item!.status.storedValue),
+              ),
+              _Tag(label: item!.category, color: AdminColors.surfaceMuted),
+              Text(
+                _date(item!.createdAt),
+                style: const TextStyle(
+                  color: AdminColors.muted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            item!.subject,
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontSize: 20),
+          ),
+          const SizedBox(height: 16),
+          _InquirySender(item: item!),
+          const Divider(height: 34),
+          const _InquirySectionHeading(
+            icon: Icons.chat_bubble_outline,
+            title: 'Message',
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: AdminColors.canvas,
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(color: AdminColors.border),
             ),
+            child: SelectableText(
+              item!.message.trim().isEmpty
+                  ? 'No message was provided.'
+                  : item!.message,
+              style: const TextStyle(fontSize: 14, height: 1.55),
+            ),
+          ),
+          if (item!.isFormSubmission) ...[
+            const Divider(height: 34),
+            const _InquirySectionHeading(
+              icon: Icons.description_outlined,
+              title: 'Form responses',
+            ),
+            const SizedBox(height: 12),
+            _InquiryResponseGrid(responses: item!.formData),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => InquiryPdfService.preview(item!),
+                  icon: const Icon(Icons.preview_outlined),
+                  label: const Text('PDF preview'),
+                ),
+                FilledButton.icon(
+                  onPressed: () => InquiryPdfService.download(item!),
+                  icon: const Icon(Icons.download_outlined),
+                  label: const Text('Download PDF'),
+                ),
+              ],
+            ),
+          ],
+          const Divider(height: 34),
+          const _InquirySectionHeading(
+            icon: Icons.task_alt_outlined,
+            title: 'Case actions',
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              OutlinedButton.icon(
+                onPressed: item!.isAcknowledged
+                    ? null
+                    : () => _acknowledge(context),
+                icon: Icon(
+                  item!.isAcknowledged
+                      ? Icons.check_circle_outline
+                      : Icons.notifications_active_outlined,
+                ),
+                label: Text(
+                  item!.isAcknowledged
+                      ? 'Receipt acknowledged'
+                      : 'Acknowledge receipt',
+                ),
+              ),
+              _InquiryStatusMenu(
+                current: item!.status,
+                onSelected: (next) => _updateStatus(context, next),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
+
+  Future<void> _acknowledge(BuildContext context) async {
+    try {
+      await repository.acknowledgeInquiry(item!.id);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Receipt notification sent.')),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to acknowledge inquiry: $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _updateStatus(BuildContext context, InquiryStatus next) async {
+    if (next == item!.status) return;
+    try {
+      await repository.updateInquiryStatus(item!.id, next);
+      onUpdated();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Inquiry marked ${next.label.toLowerCase()}.'),
+          ),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to update inquiry: $error')),
+        );
+      }
+    }
+  }
+}
+
+class _InquirySectionHeading extends StatelessWidget {
+  const _InquirySectionHeading({required this.icon, required this.title});
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 18, color: AdminColors.muted),
+      const SizedBox(width: 8),
+      Text(
+        title,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+      ),
+    ],
+  );
+}
+
+class _InquirySender extends StatelessWidget {
+  const _InquirySender({required this.item});
+  final AdminInquiryModel item;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: AdminColors.accentFaint,
+      borderRadius: BorderRadius.circular(9),
+      border: Border.all(color: AdminColors.accentSoft),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CircleAvatar(
+          radius: 19,
+          backgroundColor: AdminColors.accentSoft,
+          child: Text(
+            item.displayName.trim().isEmpty
+                ? '?'
+                : item.displayName.trim()[0].toUpperCase(),
+            style: const TextStyle(
+              color: AdminColors.ink,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.displayName,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 3),
+              SelectableText(
+                item.email,
+                style: const TextStyle(color: AdminColors.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                _formalLabel(item.role ?? 'User'),
+                style: const TextStyle(color: AdminColors.muted, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _InquiryResponseGrid extends StatelessWidget {
+  const _InquiryResponseGrid({required this.responses});
+  final Map<String, dynamic> responses;
+
+  @override
+  Widget build(BuildContext context) {
+    if (responses.isEmpty) {
+      return const Text(
+        'No structured responses were included.',
+        style: TextStyle(color: AdminColors.muted, fontSize: 12),
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, box) {
+        final width = box.maxWidth >= 620
+            ? (box.maxWidth - 12) / 2
+            : box.maxWidth;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: responses.entries
+              .map(
+                (response) => SizedBox(
+                  width: width,
+                  child: Container(
+                    padding: const EdgeInsets.all(13),
+                    decoration: BoxDecoration(
+                      color: AdminColors.canvas,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AdminColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _formalLabel(response.key).toUpperCase(),
+                          style: const TextStyle(
+                            color: AdminColors.muted,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: .6,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        SelectableText(
+                          response.value?.toString().trim().isNotEmpty == true
+                              ? response.value.toString()
+                              : 'Not provided',
+                          style: const TextStyle(fontSize: 12, height: 1.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+}
+
+class _InquiryStatusMenu extends StatelessWidget {
+  const _InquiryStatusMenu({required this.current, required this.onSelected});
+  final InquiryStatus current;
+  final ValueChanged<InquiryStatus> onSelected;
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<InquiryStatus>(
+    tooltip: 'Change inquiry status',
+    onSelected: onSelected,
+    itemBuilder: (context) => InquiryStatus.values
+        .map(
+          (status) => PopupMenuItem(
+            value: status,
+            child: Row(
+              children: [
+                Icon(
+                  status == current
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  size: 17,
+                ),
+                const SizedBox(width: 9),
+                Text(status.label),
+              ],
+            ),
+          ),
+        )
+        .toList(),
+    child: Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: AdminColors.ink,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.swap_horiz, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          Text(
+            'Change status',
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: Colors.white),
+          ),
+          const SizedBox(width: 6),
+          const Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
+        ],
+      ),
+    ),
+  );
 }
 
 class _ProfilePage extends StatefulWidget {
@@ -2282,6 +3773,122 @@ class _ProfilePageState extends State<_ProfilePage> {
   final name = TextEditingController();
   final email = TextEditingController();
   final phone = TextEditingController();
+  Map<String, dynamic> _profile = const {};
+  bool _profileLoading = true;
+  bool _savingProfile = false;
+  String? _profileError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) setState(() => _profileLoading = false);
+      return;
+    }
+    try {
+      final profile = await widget.repository.getOwnProfile(user.uid);
+      if (!mounted) return;
+      final firstName = profile?['firstName']?.toString().trim() ?? '';
+      final lastName = profile?['lastName']?.toString().trim() ?? '';
+      final storedName = profile?['name']?.toString().trim() ?? '';
+      final resolvedName = [
+        firstName,
+        lastName,
+      ].where((part) => part.isNotEmpty).join(' ');
+      final phoneNumber = profile?['phone']?.toString().trim() ?? '';
+      setState(() {
+        _profile = profile ?? const {};
+        name.text = resolvedName.isNotEmpty
+            ? resolvedName
+            : (storedName.isNotEmpty ? storedName : user.displayName ?? '');
+        email.text = user.email ?? profile?['email']?.toString() ?? '';
+        phone.text = phoneNumber;
+        _profileLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _profileLoading = false;
+        _profileError = 'Profile details could not be loaded.';
+        name.text = user.displayName ?? '';
+        email.text = user.email ?? '';
+      });
+    }
+  }
+
+  String get _roleLabel {
+    final role = _profile['approvedRole'] ?? _profile['accessRole'];
+    return switch (role?.toString()) {
+      'counselor' => 'Counselor',
+      'portalStaff' || 'staff' => 'PAACC Staff',
+      'admin' => 'Administrator',
+      _ => switch (widget.repository.currentAccessRole) {
+        AccessRole.counselor => 'Counselor',
+        AccessRole.portalStaff => 'PAACC Staff',
+        AccessRole.admin => 'Administrator',
+        AccessRole.appUser => 'Portal User',
+      },
+    };
+  }
+
+  Future<void> _saveProfile(String userId) async {
+    final fullName = name.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (fullName.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid name before saving.')),
+      );
+      return;
+    }
+    final parts = fullName.split(' ');
+    setState(() => _savingProfile = true);
+    try {
+      await widget.repository.updateOwnProfile(userId, {
+        'name': fullName,
+        'firstName': parts.first,
+        'lastName': parts.skip(1).join(' '),
+        'phone': phone.text.trim(),
+        'updatedAt': DateTime.now(),
+      });
+      if (!mounted) return;
+      setState(() {
+        _profile = {
+          ..._profile,
+          'name': fullName,
+          'firstName': parts.first,
+          'lastName': parts.skip(1).join(' '),
+          'phone': phone.text.trim(),
+        };
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile changes saved successfully.')),
+      );
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'Profile update failed.',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            FirebaseErrorMessage.describe(
+              error,
+              fallback: 'Profile changes could not be saved. Please try again.',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _savingProfile = false);
+    }
+  }
+
   @override
   void dispose() {
     name.dispose();
@@ -2300,221 +3907,195 @@ class _ProfilePageState extends State<_ProfilePage> {
         child: _AccessPanel(),
       );
     }
-    name.text = name.text.isEmpty ? user.displayName ?? '' : name.text;
-    email.text = email.text.isEmpty ? user.email ?? '' : email.text;
     return _Page(
       title: 'Profile Settings',
       subtitle: 'Manage your account information and preferences',
       child: LayoutBuilder(
-        builder: (context, box) => Wrap(
-          spacing: 46,
-          runSpacing: 18,
-          children: [
-            Container(
-              width: 380,
-              height: 650,
-              padding: const EdgeInsets.all(32),
-              decoration: _box,
-              child: Column(
-                children: [
-                  const CircleAvatar(
-                    radius: 75,
-                    backgroundColor: _yellow,
-                    child: Icon(
-                      Icons.account_circle,
-                      color: Colors.white,
-                      size: 115,
+        builder: (context, box) {
+          final stacked = box.maxWidth < 900;
+          final profileWidth = stacked ? box.maxWidth : 300.0;
+          final formWidth = stacked ? box.maxWidth : box.maxWidth - 324;
+          return Wrap(
+            spacing: 24,
+            runSpacing: 18,
+            children: [
+              Container(
+                width: profileWidth,
+                padding: const EdgeInsets.all(28),
+                decoration: _box,
+                child: Column(
+                  children: [
+                    const CircleAvatar(
+                      radius: 54,
+                      backgroundColor: AdminColors.accentSoft,
+                      child: Icon(
+                        Icons.person_outline,
+                        color: AdminColors.ink,
+                        size: 54,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 36),
-                  Text(
-                    name.text.isEmpty ? 'Admin User' : name.text,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 26,
+                    const SizedBox(height: 20),
+                    Text(
+                      _profileLoading
+                          ? 'Loading profile…'
+                          : (name.text.isEmpty ? 'MindMate User' : name.text),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 26,
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: _yellow),
-                    onPressed: () {},
-                    child: const Text('Change Photo'),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(
-              width: box.maxWidth > 900 ? box.maxWidth - 430 : 600,
-              child: Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(34),
-                    decoration: _box,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Personal information',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
-                          ),
+                    const SizedBox(height: 8),
+                    Text(
+                      user.email ?? '',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AdminColors.muted),
+                    ),
+                    const SizedBox(height: 10),
+                    Chip(label: Text(_roleLabel)),
+                    if (_profileError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _profileError!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: AdminColors.muted,
+                          fontSize: 12,
                         ),
-                        const SizedBox(height: 35),
-                        Wrap(
-                          spacing: 30,
-                          runSpacing: 22,
-                          children: [
-                            SizedBox(
-                              width: 380,
-                              child: TextField(
-                                controller: name,
-                                decoration: const InputDecoration(
-                                  labelText: 'Full name',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: formWidth,
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: _box,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Personal information',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
                             ),
-                            SizedBox(
-                              width: 380,
-                              child: TextField(
-                                controller: email,
-                                decoration: const InputDecoration(
-                                  labelText: 'Email',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 380,
-                              child: TextField(
-                                controller: phone,
-                                decoration: const InputDecoration(
-                                  labelText: 'Phone number',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
+                          ),
+                          if (!_profileLoading &&
+                              _profile['employeeId'] != null) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Employee ID: ${_profile['employeeId']}',
+                              style: const TextStyle(color: AdminColors.muted),
                             ),
                           ],
-                        ),
-                        const SizedBox(height: 28),
-                        Center(
-                          child: FilledButton(
-                            style: FilledButton.styleFrom(
-                              backgroundColor: _yellow,
+                          const SizedBox(height: 35),
+                          LayoutBuilder(
+                            builder: (context, fieldBox) {
+                              final fieldWidth = fieldBox.maxWidth >= 780
+                                  ? (fieldBox.maxWidth - 20) / 2
+                                  : fieldBox.maxWidth;
+                              return Wrap(
+                                spacing: 30,
+                                runSpacing: 22,
+                                children: [
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: TextField(
+                                      controller: name,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Full name',
+                                        border: OutlineInputBorder(),
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: TextField(
+                                      controller: email,
+                                      readOnly: true,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Email',
+                                        helperText:
+                                            'Account email cannot be changed here.',
+                                        border: OutlineInputBorder(),
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: fieldWidth,
+                                    child: TextField(
+                                      controller: phone,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Phone number',
+                                        border: OutlineInputBorder(),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 28),
+                          Center(
+                            child: FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: _yellow,
+                              ),
+                              onPressed: _savingProfile
+                                  ? null
+                                  : () => _saveProfile(user.uid),
+                              child: _savingProfile
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text('Save Changes'),
                             ),
-                            onPressed: () =>
-                                widget.repository.updateOwnProfile(user.uid, {
-                                  'name': name.text.trim(),
-                                  'email': email.text.trim(),
-                                  'phone': phone.text.trim(),
-                                  'updatedAt': DateTime.now(),
-                                }),
-                            child: const Text('Save Changes'),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Container(
-                    padding: const EdgeInsets.all(34),
-                    decoration: _box,
-                    child: const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Change Password',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w900,
+                    const SizedBox(height: 20),
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      decoration: _box,
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Change Password',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                        ),
-                        SizedBox(height: 22),
-                        TextField(
-                          enabled: false,
-                          decoration: InputDecoration(
-                            labelText: 'Available after admin authentication',
-                            border: OutlineInputBorder(),
+                          SizedBox(height: 22),
+                          TextField(
+                            enabled: false,
+                            decoration: InputDecoration(
+                              labelText: 'Available after admin authentication',
+                              border: OutlineInputBorder(),
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({required this.values});
-  final Map<String, int> values;
-  @override
-  Widget build(BuildContext context) => Wrap(
-    spacing: 18,
-    runSpacing: 14,
-    children: values.entries
-        .map(
-          (e) => _StatCard(
-            label: e.key,
-            value: '${e.value}',
-            note: '',
-            icon: Icons.assignment_outlined,
-            color: const Color(0xFFFFEDBB),
-          ),
-        )
-        .toList(),
-  );
-}
-
-class _Filter extends StatelessWidget {
-  const _Filter({
-    required this.label,
-    required this.value,
-    required this.values,
-    required this.onChanged,
-  });
-  final String label, value;
-  final List<String> values;
-  final ValueChanged<String?> onChanged;
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-    decoration: _box,
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (label.isNotEmpty) ...[
-          Text(
-            label,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(width: 8),
-        ],
-        DropdownButton<String>(
-          value: value,
-          underline: const SizedBox(),
-          items: values
-              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-              .toList(),
-          onChanged: onChanged,
-        ),
-      ],
-    ),
-  );
-}
-
-class _FilterRow extends StatelessWidget {
-  const _FilterRow({required this.children});
-  final List<Widget> children;
-  @override
-  Widget build(BuildContext context) =>
-      Wrap(spacing: 12, runSpacing: 10, children: children);
 }
 
 class _ResponsiveTable extends StatelessWidget {
@@ -2522,30 +4103,36 @@ class _ResponsiveTable extends StatelessWidget {
   final List<String> columns;
   final List<List<Object>> rows;
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    scrollDirection: Axis.horizontal,
-    child: DataTable(
-      columns: columns
-          .map(
-            (c) => DataColumn(
-              label: Text(
-                c,
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-            ),
-          )
-          .toList(),
-      rows: rows
-          .map(
-            (row) => DataRow(
-              cells: row
-                  .map(
-                    (cell) => DataCell(cell is Widget ? cell : Text('$cell')),
-                  )
-                  .toList(),
-            ),
-          )
-          .toList(),
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) => SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minWidth: box.maxWidth),
+        child: DataTable(
+          columns: columns
+              .map(
+                (c) => DataColumn(
+                  label: Text(
+                    c,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              )
+              .toList(),
+          rows: rows
+              .map(
+                (row) => DataRow(
+                  cells: row
+                      .map(
+                        (cell) =>
+                            DataCell(cell is Widget ? cell : Text('$cell')),
+                      )
+                      .toList(),
+                ),
+              )
+              .toList(),
+        ),
+      ),
     ),
   );
 }
@@ -2564,23 +4151,6 @@ class _Tag extends StatelessWidget {
     child: Text(
       label,
       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-    ),
-  );
-}
-
-class _Detail extends StatelessWidget {
-  const _Detail({required this.label, required this.value});
-  final String label, value;
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 13),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
-        const SizedBox(height: 4),
-        Text(value),
-      ],
     ),
   );
 }
@@ -2605,7 +4175,7 @@ class _EmptyPanel extends StatelessWidget {
     child: Text(
       message,
       textAlign: TextAlign.center,
-      style: const TextStyle(color: Colors.black54),
+      style: const TextStyle(color: AdminColors.muted),
     ),
   );
 }
@@ -2613,6 +4183,39 @@ class _EmptyPanel extends StatelessWidget {
 String _date(DateTime? date) => date == null
     ? '-'
     : '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+bool _sameDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+String _formalLabel(String value) {
+  switch (value.toLowerCase().trim()) {
+    case 'pending':
+    case 'requested':
+      return 'Pending review';
+    case 'reschedule_required':
+      return 'Schedule adjustment needed';
+    case 'reschedule_proposed':
+      return 'New schedule proposed';
+    case 'declined':
+      return 'Schedule adjustment needed';
+    case 'no_show':
+    case 'noshow':
+      return 'No-show';
+    default:
+      return value
+          .replaceAllMapped(
+            RegExp(r'([a-z])([A-Z])'),
+            (match) => '${match.group(1)} ${match.group(2)}',
+          )
+          .replaceAll('_', ' ')
+          .split(' ')
+          .where((word) => word.isNotEmpty)
+          .map(
+            (word) =>
+                '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}',
+          )
+          .join(' ');
+  }
+}
+
 Color _statusColor(String status) =>
     switch (status.toLowerCase().replaceAll(' ', '_')) {
       'resolved' || 'complete' => const Color(0xFF8ED77B),
@@ -2620,71 +4223,7 @@ Color _statusColor(String status) =>
       _ => const Color(0xFFFFE8A7),
     };
 final _box = BoxDecoration(
-  color: Colors.white,
-  borderRadius: BorderRadius.circular(14),
-  boxShadow: const [
-    BoxShadow(color: Color(0x38000000), blurRadius: 3, offset: Offset(0, 3)),
-  ],
+  color: AdminColors.surface,
+  borderRadius: BorderRadius.circular(10),
+  border: Border.all(color: AdminColors.border),
 );
-
-class _LinePainter extends CustomPainter {
-  const _LinePainter(this.values);
-  final List<double> values;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final grid = Paint()
-      ..color = Colors.black26
-      ..style = PaintingStyle.stroke;
-    for (var i = 0; i < 4; i++) {
-      canvas.drawLine(
-        Offset(0, size.height * i / 3),
-        Offset(size.width, size.height * i / 3),
-        grid,
-      );
-    }
-    final p = Path();
-    for (var i = 0; i < values.length; i++) {
-      final point = Offset(
-        size.width * i / (values.length - 1),
-        size.height - values[i] * (size.height - 18) - 9,
-      );
-      i == 0 ? p.moveTo(point.dx, point.dy) : p.lineTo(point.dx, point.dy);
-    }
-    canvas.drawPath(
-      p,
-      Paint()
-        ..color = _yellow
-        ..strokeWidth = 3
-        ..style = PaintingStyle.stroke,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _LinePainter old) => old.values != values;
-}
-
-class _PiePainter extends CustomPainter {
-  const _PiePainter(this.ratio);
-  final double ratio;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    canvas.drawArc(
-      rect,
-      -1.5708,
-      6.283 * ratio,
-      true,
-      Paint()..color = _yellow,
-    );
-    canvas.drawArc(
-      rect,
-      -1.5708 + 6.283 * ratio,
-      6.283 * (1 - ratio),
-      true,
-      Paint()..color = const Color(0xFF7568FF),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _PiePainter old) => old.ratio != ratio;
-}

@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/__/auth/action",
+      "destination": "/index.html"
+    }
+  ]
+}

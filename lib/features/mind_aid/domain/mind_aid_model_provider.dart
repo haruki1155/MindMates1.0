@@ -237,12 +237,16 @@ class MindAidOutputGuardrails {
   static const _blockedPatterns = [
     'you have depression',
     'you have anxiety disorder',
+    'you have bipolar',
+    'you have ptsd',
     'you are diagnosed',
     'i diagnose',
     'as your therapist',
     'as a licensed counselor',
     'keep this secret',
     'do not tell anyone',
+    'take this medication',
+    'guaranteed to work',
   ];
 
   static String clean(String value) {
@@ -254,8 +258,8 @@ class MindAidOutputGuardrails {
       if (normalized.contains(blocked)) return '';
     }
 
-    if (trimmed.length > 1400) {
-      return '${trimmed.substring(0, 1400).trimRight()}...';
+    if (trimmed.length > 1200) {
+      return '${trimmed.substring(0, 1200).trimRight()}...';
     }
 
     return trimmed;

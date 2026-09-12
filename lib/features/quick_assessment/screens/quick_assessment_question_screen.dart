@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../providers/assessment_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
 import '../models/quick_assessment_models.dart';
@@ -170,7 +171,9 @@ class _QuestionPage extends StatelessWidget {
     final userId = _currentUserId(context);
     if (userId == null || userId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please sign in to save your assessment.')),
+        const SnackBar(
+          content: Text('Please sign in to save your assessment.'),
+        ),
       );
       return false;
     }
@@ -183,6 +186,17 @@ class _QuestionPage extends StatelessWidget {
       if (payload != null) {
         await userProvider.markQuickAssessment(userId);
         await userProvider.loadProfile(userId);
+        if (context.mounted) {
+          try {
+            await context.read<ReportProvider>().refreshWeeklyReport(userId);
+          } on ProviderNotFoundException {
+            // Lightweight previews and focused tests may omit ReportProvider.
+          } catch (error) {
+            // The assessment is already saved; a delayed report refresh must
+            // not make the completed submission look unsuccessful.
+            debugPrint('Quick assessment summary refresh failed: $error');
+          }
+        }
       }
       await _persistSelectedRole(userProvider);
       return payload != null;

@@ -20,8 +20,12 @@ void main() {
         'quickAssessmentScore': 62,
         'quickAssessmentStatus': 'moderate',
         'quickAssessmentSignal': 'watchful',
+        'quickAssessmentSummary': 'Exact quick summary.',
+        'quickAssessmentAreaStatuses': {'Stress load': 'Moderate'},
         'fullAssessmentScore': 71,
         'fullAssessmentStatus': 'High Concern',
+        'fullAssessmentSummary': 'Exact full summary.',
+        'fullAssessmentDomainStatuses': {'Sleep and Rest': 'Elevated'},
         'fullAssessmentTopConcernAreas': ['Sleep and Rest', 'Academic Stress'],
         'mindAidMessageCount': 4,
         'activeDayCount': 3,
@@ -53,8 +57,14 @@ void main() {
       expect(report.quickAssessmentScore, 62);
       expect(report.quickAssessmentStatus, 'moderate');
       expect(report.quickAssessmentSignal, 'watchful');
+      expect(report.quickAssessmentSummary, 'Exact quick summary.');
+      expect(report.quickAssessmentAreaStatuses, {'Stress load': 'Moderate'});
       expect(report.fullAssessmentScore, 71);
       expect(report.fullAssessmentStatus, 'High Concern');
+      expect(report.fullAssessmentSummary, 'Exact full summary.');
+      expect(report.fullAssessmentDomainStatuses, {
+        'Sleep and Rest': 'Elevated',
+      });
       expect(report.fullAssessmentTopConcernAreas, [
         'Sleep and Rest',
         'Academic Stress',

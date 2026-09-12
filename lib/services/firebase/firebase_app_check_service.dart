@@ -2,6 +2,7 @@ import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../core/config/android_firebase_identity.dart';
+import '../../core/config/app_environment.dart';
 import 'firebase_runtime_diagnostics.dart';
 
 enum FirebaseAppCheckStatus {
@@ -37,6 +38,11 @@ class FirebaseAppCheckService {
       : FirebaseAppCheckStatus.active;
 
   static Future<void> activate() async {
+    if (AppEnvironmentConfig.isStaging) {
+      _status = FirebaseAppCheckStatus.active;
+      FirebaseRuntimeDiagnostics.log(event: 'app_check_disabled_for_staging');
+      return;
+    }
     if (kIsWeb) {
       if (statusForWebSiteKey(_webSiteKey) ==
           FirebaseAppCheckStatus.missingWebConfiguration) {
@@ -86,10 +92,12 @@ class FirebaseAppCheckService {
   }
 
   static Future<String?> refreshToken() {
+    if (AppEnvironmentConfig.isStaging) return Future.value();
     return FirebaseAppCheck.instance.getToken(true);
   }
 
   static Future<String> requireToken() async {
+    if (AppEnvironmentConfig.isStaging) return 'staging-app-check-disabled';
     if (isWebUnavailable) throw StateError(webConfigurationMessage);
     if (_status != FirebaseAppCheckStatus.active) {
       throw StateError('Firebase App Check is not active on this device.');

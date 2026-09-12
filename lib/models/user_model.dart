@@ -26,6 +26,10 @@ class UserModel {
     this.populationRole,
     this.declaredRole,
     this.accessRole = AccessRole.appUser,
+    this.requestedRole,
+    this.approvedRole,
+    this.registrationStatus,
+    this.accountStatus,
     this.verificationStatus = VerificationStatus.pending,
     this.staffAccountStatus,
     this.mustChangePassword = false,
@@ -40,8 +44,13 @@ class UserModel {
     this.lastActiveAt,
     this.activeDateKeys = const [],
     this.avatarAssetName,
+    this.profilePhotoUrl,
+    this.profilePhotoPath,
+    this.dateOfBirth,
+    this.gender,
     this.quickAssessmentCompleted = false,
     this.quickAssessmentCompletedAt,
+    this.profileSetupCompleted = false,
   });
 
   final String id;
@@ -66,6 +75,10 @@ class UserModel {
   final PopulationRole? populationRole;
   final PopulationRole? declaredRole;
   final AccessRole accessRole;
+  final AccessRole? requestedRole;
+  final AccessRole? approvedRole;
+  final String? registrationStatus;
+  final String? accountStatus;
   final VerificationStatus verificationStatus;
   final StaffAccountStatus? staffAccountStatus;
   final bool mustChangePassword;
@@ -80,8 +93,13 @@ class UserModel {
   final DateTime? lastActiveAt;
   final List<String> activeDateKeys;
   final String? avatarAssetName;
+  final String? profilePhotoUrl;
+  final String? profilePhotoPath;
+  final DateTime? dateOfBirth;
+  final String? gender;
   final bool quickAssessmentCompleted;
   final DateTime? quickAssessmentCompletedAt;
+  final bool profileSetupCompleted;
 
   String get displayName {
     final parts =
@@ -111,10 +129,24 @@ class UserModel {
         };
   }
 
+  int? get age {
+    final birthDate = dateOfBirth;
+    if (birthDate == null) return null;
+    final today = DateTime.now();
+    var years = today.year - birthDate.year;
+    if (today.month < birthDate.month ||
+        (today.month == birthDate.month && today.day < birthDate.day)) {
+      years--;
+    }
+    return years >= 0 ? years : null;
+  }
+
   PopulationRole? get effectivePopulationRole =>
       populationRole ?? declaredRole ?? PopulationRole.parse(role);
   AssessmentRole? get assessmentRole =>
       AssessmentRole.fromPopulationRole(effectivePopulationRole);
+  bool get isAppUser =>
+      accessRole == AccessRole.appUser && staffAccountStatus == null;
   bool get isProfileComplete {
     final base =
         displayName.trim().isNotEmpty && effectivePopulationRole != null;
@@ -157,6 +189,10 @@ class UserModel {
     PopulationRole? populationRole,
     PopulationRole? declaredRole,
     AccessRole? accessRole,
+    AccessRole? requestedRole,
+    AccessRole? approvedRole,
+    String? registrationStatus,
+    String? accountStatus,
     VerificationStatus? verificationStatus,
     StaffAccountStatus? staffAccountStatus,
     bool? mustChangePassword,
@@ -171,8 +207,13 @@ class UserModel {
     DateTime? lastActiveAt,
     List<String>? activeDateKeys,
     String? avatarAssetName,
+    String? profilePhotoUrl,
+    String? profilePhotoPath,
+    DateTime? dateOfBirth,
+    String? gender,
     bool? quickAssessmentCompleted,
     DateTime? quickAssessmentCompletedAt,
+    bool? profileSetupCompleted,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -195,6 +236,10 @@ class UserModel {
       populationRole: populationRole ?? this.populationRole,
       declaredRole: declaredRole ?? this.declaredRole,
       accessRole: accessRole ?? this.accessRole,
+      requestedRole: requestedRole ?? this.requestedRole,
+      approvedRole: approvedRole ?? this.approvedRole,
+      registrationStatus: registrationStatus ?? this.registrationStatus,
+      accountStatus: accountStatus ?? this.accountStatus,
       verificationStatus: verificationStatus ?? this.verificationStatus,
       staffAccountStatus: staffAccountStatus ?? this.staffAccountStatus,
       mustChangePassword: mustChangePassword ?? this.mustChangePassword,
@@ -209,10 +254,16 @@ class UserModel {
       lastActiveAt: lastActiveAt ?? this.lastActiveAt,
       activeDateKeys: activeDateKeys ?? this.activeDateKeys,
       avatarAssetName: avatarAssetName ?? this.avatarAssetName,
+      profilePhotoUrl: profilePhotoUrl ?? this.profilePhotoUrl,
+      profilePhotoPath: profilePhotoPath ?? this.profilePhotoPath,
+      dateOfBirth: dateOfBirth ?? this.dateOfBirth,
+      gender: gender ?? this.gender,
       quickAssessmentCompleted:
           quickAssessmentCompleted ?? this.quickAssessmentCompleted,
       quickAssessmentCompletedAt:
           quickAssessmentCompletedAt ?? this.quickAssessmentCompletedAt,
+      profileSetupCompleted:
+          profileSetupCompleted ?? this.profileSetupCompleted,
     );
   }
 
@@ -221,6 +272,29 @@ class UserModel {
     final canonicalRole = PopulationRole.parse(json['populationRole']);
     final declaredRole = PopulationRole.parse(json['declaredRole']);
     final legacyPopulation = PopulationRole.parse(legacyRole);
+    final resolvedPopulationRole = canonicalRole ?? legacyPopulation;
+    final resolvedAccessRole = AccessRole.parse(
+      json['accessRole'],
+      legacyRole: legacyRole,
+    );
+    final resolvedProfileVersion = _intOrDefault(json['profileVersion'], 1);
+    final storedVerificationStatus = VerificationStatus.parse(
+      json['verificationStatus'],
+      legacy: !json.containsKey('profileVersion'),
+    );
+
+    // Version 3 app-user profiles get their population role from the trusted
+    // registration flow (School ID or institutional email). Early v3 backend
+    // deployments still stored `pending`, even though no manual verification
+    // step existed. Treat only that obsolete state as automatically verified;
+    // explicit rejection/review decisions and legacy profiles are preserved.
+    final resolvedVerificationStatus =
+        resolvedProfileVersion >= 3 &&
+            resolvedAccessRole == AccessRole.appUser &&
+            resolvedPopulationRole != null &&
+            storedVerificationStatus == VerificationStatus.pending
+        ? VerificationStatus.verified
+        : storedVerificationStatus;
     return UserModel(
       id: (json['id'] ?? id ?? '').toString(),
       email: (json['email'] ?? '').toString(),
@@ -239,19 +313,22 @@ class UserModel {
       sector: _stringOrNull(json['sector']),
       position: _stringOrNull(json['position']),
       role: legacyRole,
-      populationRole: canonicalRole ?? legacyPopulation,
+      populationRole: resolvedPopulationRole,
       declaredRole: declaredRole ?? canonicalRole ?? legacyPopulation,
-      accessRole: AccessRole.parse(json['accessRole'], legacyRole: legacyRole),
-      verificationStatus: VerificationStatus.parse(
-        json['verificationStatus'],
-        legacy: !json.containsKey('profileVersion'),
+      accessRole: resolvedAccessRole,
+      requestedRole: AccessRole.parse(
+        json['requestedRole'] ?? json['requestedAccessRole'],
       ),
+      approvedRole: AccessRole.parse(json['approvedRole']),
+      registrationStatus: _stringOrNull(json['registrationStatus']),
+      accountStatus: _stringOrNull(json['accountStatus']),
+      verificationStatus: resolvedVerificationStatus,
       staffAccountStatus: StaffAccountStatus.parse(json['staffAccountStatus']),
       mustChangePassword: json['mustChangePassword'] == true,
       passwordChangedAt: _dateOrNull(json['passwordChangedAt']),
       verifiedAt: _dateOrNull(json['verifiedAt']),
       verifiedBy: _stringOrNull(json['verifiedBy']),
-      profileVersion: _intOrDefault(json['profileVersion'], 1),
+      profileVersion: resolvedProfileVersion,
       createdAt: _dateOrNull(json['createdAt']),
       dayStreak: _intOrZero(json['dayStreak']),
       longestStreak: _intOrZero(json['longestStreak']),
@@ -259,10 +336,17 @@ class UserModel {
       lastActiveAt: _dateOrNull(json['lastActiveAt']),
       activeDateKeys: _stringList(json['activeDateKeys']),
       avatarAssetName: _stringOrNull(json['avatarAssetName']),
+      profilePhotoUrl: _stringOrNull(json['profilePhotoUrl']),
+      profilePhotoPath: _stringOrNull(json['profilePhotoPath']),
+      dateOfBirth: _dateOrNull(json['dateOfBirth']),
+      gender: _stringOrNull(json['gender']),
       quickAssessmentCompleted: json['quickAssessmentCompleted'] == true,
       quickAssessmentCompletedAt: _dateOrNull(
         json['quickAssessmentCompletedAt'],
       ),
+      profileSetupCompleted: json.containsKey('profileSetupCompleted')
+          ? json['profileSetupCompleted'] == true
+          : _intOrDefault(json['profileVersion'], 1) < 3,
     );
   }
 
@@ -270,7 +354,10 @@ class UserModel {
     return {
       'id': id,
       'email': email,
-      'name': displayName,
+      // `name` is the chosen display name, derived from the profile first name.
+      'name': firstName?.trim().isNotEmpty == true
+          ? firstName!.trim()
+          : displayName,
       'firstName': firstName ?? '',
       'middleName': middleName ?? '',
       'lastName': lastName ?? '',
@@ -288,6 +375,10 @@ class UserModel {
       'populationRole': populationRole?.storedValue ?? '',
       'declaredRole': declaredRole?.storedValue ?? '',
       'accessRole': accessRole.storedValue,
+      'requestedRole': requestedRole?.storedValue ?? '',
+      'approvedRole': approvedRole?.storedValue ?? '',
+      'registrationStatus': registrationStatus ?? '',
+      'accountStatus': accountStatus ?? '',
       'verificationStatus': verificationStatus.storedValue,
       if (staffAccountStatus != null)
         'staffAccountStatus': staffAccountStatus!.name,
@@ -303,9 +394,14 @@ class UserModel {
       'lastActiveAt': lastActiveAt?.toIso8601String(),
       'activeDateKeys': activeDateKeys,
       'avatarAssetName': avatarAssetName ?? '',
+      'profilePhotoUrl': profilePhotoUrl ?? '',
+      'profilePhotoPath': profilePhotoPath ?? '',
+      'dateOfBirth': dateOfBirth?.toIso8601String(),
+      'gender': gender ?? '',
       'quickAssessmentCompleted': quickAssessmentCompleted,
       'quickAssessmentCompletedAt': quickAssessmentCompletedAt
           ?.toIso8601String(),
+      'profileSetupCompleted': profileSetupCompleted,
     };
   }
 
@@ -316,6 +412,9 @@ class UserModel {
       'middleName': middleName?.trim() ?? '',
       'lastName': lastName?.trim() ?? '',
       'avatarAssetName': avatarAssetName?.trim() ?? '',
+      'profilePhotoUrl': profilePhotoUrl?.trim() ?? '',
+      'profilePhotoPath': profilePhotoPath?.trim() ?? '',
+      'profileSetupCompleted': profileSetupCompleted,
       'updatedAt': FieldValue.serverTimestamp(),
     };
   }

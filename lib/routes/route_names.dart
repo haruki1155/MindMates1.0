@@ -5,6 +5,8 @@ class RouteNames {
   static const onboarding = '/onboarding';
   static const login = '/login';
   static const signup = '/signup';
+  static const emailVerification = '/email-verification';
+  static const profileSetup = '/profile-setup';
   static const forgotPassword = '/forgot-password';
   static const quickAssessmentRole = '/quick-assessment/role';
   static const quickAssessmentName = '/quick-assessment/name';
@@ -26,5 +28,4 @@ class RouteNames {
   static const journal = '/journal';
   static const mindfulBreathing = '/insights/mindful-breathing';
   static const sleepQuality = '/sleep-quality';
-  static const adminStatus = '/admin/status';
 }

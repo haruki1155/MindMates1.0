@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../features/admin/screens/admin_status_dashboard_screen.dart';
 import '../features/authentication/screens/forgot_password_screen.dart';
 import '../features/authentication/screens/login_screen.dart';
 import '../features/authentication/screens/signup_screen.dart';
+import '../features/authentication/screens/email_verification_screen.dart';
+import '../features/authentication/screens/profile_setup_screen.dart';
 import '../features/breathing/screens/mindful_breathing_screen.dart';
 import '../features/counseling/screens/services_screen.dart';
 import '../features/home/screens/home_screen.dart';
@@ -35,6 +36,8 @@ class AppPages {
     RouteNames.onboarding: (_) => const OnboardingScreen(),
     RouteNames.login: (_) => const LoginScreen(),
     RouteNames.signup: (_) => const SignupScreen(),
+    RouteNames.emailVerification: (_) => const EmailVerificationScreen(),
+    RouteNames.profileSetup: (_) => const ProfileSetupScreen(),
     RouteNames.forgotPassword: (_) => const ForgotPasswordScreen(),
     RouteNames.quickAssessmentRole: (_) => const QuickAssessmentRoleScreen(),
     RouteNames.quickAssessmentName: (_) => const QuickAssessmentNameScreen(),
@@ -60,6 +63,5 @@ class AppPages {
     RouteNames.journal: (_) => const JournalScreen(),
     RouteNames.mindfulBreathing: (_) => const MindfulBreathingScreen(),
     RouteNames.sleepQuality: (_) => const SleepQualityScreen(),
-    RouteNames.adminStatus: (_) => const AdminStatusDashboardScreen(),
   };
 }

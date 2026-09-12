@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/mind_aid/ai_engine/mind_aid_chat_engine.dart';
 import 'package:mind_mates/features/mind_aid/ai_engine/mind_aid_engine.dart';
 import 'package:mind_mates/features/mind_aid/ai_engine/mind_aid_response_composer.dart';
+import 'package:mind_mates/features/mind_aid/ai_engine/mind_aid_safety_classifier.dart';
 import 'package:mind_mates/features/mind_aid/data/mind_aid_dataset_loader.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_chat_models.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_context.dart';
@@ -106,6 +107,25 @@ void main() {
       expect(result.severity, MindAidSeverity.crisis);
       expect(result.riskFlags, contains('self_harm'));
       expect(result.response, contains('immediate'));
+    });
+
+    test('recognizes common indirect crisis wording', () {
+      final classifier = const MindAidSafetyClassifier();
+
+      expect(
+        classifier.classify(
+          normalizedInput: 'i cannot go on anymore',
+          matches: const [],
+        ).level,
+        MindAidSafetyLevel.crisisOrImmediateRisk,
+      );
+      expect(
+        classifier.classify(
+          normalizedInput: 'kms',
+          matches: const [],
+        ).level,
+        MindAidSafetyLevel.crisisOrImmediateRisk,
+      );
     });
 
     test('uses high assessment categories as a gentle scoring bias', () {
@@ -285,6 +305,31 @@ void main() {
       expect(result.requiresEscalation, isTrue);
       expect(result.safetyLevel, MindAidSafetyLevel.crisisOrImmediateRisk);
       expect(result.text, isNot(contains('This should not be used')));
+      expect(cloud.callCount, 0);
+    });
+
+    test('indirect crisis input is escalated even without an intent match', () async {
+      final cloud = _CountingModelProvider('This must not be used.');
+      final engine = MindAidChatEngine(
+        responseComposer: MindAidResponseComposer(
+          modelProvider: HybridMindAidModelProvider(
+            enabled: true,
+            cloudProvider: cloud,
+          ),
+        ),
+      );
+
+      final result = await engine.respond(
+        const MindAidChatRequest(
+          userId: 'user_1',
+          text: 'I cannot go on anymore',
+        ),
+        dataset,
+      );
+
+      expect(result.requiresEscalation, isTrue);
+      expect(result.severity, MindAidSeverity.crisis);
+      expect(result.safetyLevel, MindAidSafetyLevel.crisisOrImmediateRisk);
       expect(cloud.callCount, 0);
     });
 
@@ -555,18 +600,29 @@ class _CapturingFirestoreService extends FirestoreService {
   final createdDocuments = <Map<String, dynamic>>[];
 
   @override
-  Future<String> createDocument(
+  Future<void> setDocument(
     String collection,
-    Map<String, dynamic> data,
+    String documentId,
+    Map<String, dynamic> data, {
+    bool merge = false,
+  }
   ) async {
-    createdDocuments.add({'collection': collection, ...data});
-    return 'doc_${createdDocuments.length}';
+    createdDocuments.add({
+      'collection': collection,
+      'documentId': documentId,
+      ...data,
+    });
   }
 }
 
 class _FailingFirestoreService extends FirestoreService {
   @override
-  Future<String> createDocument(String collection, Map<String, dynamic> data) {
+  Future<void> setDocument(
+    String collection,
+    String documentId,
+    Map<String, dynamic> data, {
+    bool merge = false,
+  }) {
     throw StateError('permission denied');
   }
 }

@@ -29,6 +29,8 @@ class AppointmentModel {
     this.reviewedAt,
     this.proposedScheduledAt,
     this.proposedScheduledTime,
+    this.department,
+    this.academicYearId,
   });
 
   final String id;
@@ -58,6 +60,17 @@ class AppointmentModel {
   final DateTime? reviewedAt;
   final DateTime? proposedScheduledAt;
   final String? proposedScheduledTime;
+  final String? department;
+  final String? academicYearId;
+
+  bool get isFinalized => const {
+    'completed',
+    'complete',
+    'declined',
+    'reschedule_proposed',
+    'cancelled',
+    'canceled',
+  }.contains(status.toLowerCase().trim());
 
   factory AppointmentModel.fromJson(Map<String, dynamic> json, {String? id}) {
     return AppointmentModel(
@@ -89,6 +102,8 @@ class AppointmentModel {
       reviewedAt: dateTimeFromFirestore(json['reviewedAt']),
       proposedScheduledAt: dateTimeFromFirestore(json['proposedScheduledAt']),
       proposedScheduledTime: _optionalString(json['proposedScheduledTime']),
+      department: _optionalString(json['department']),
+      academicYearId: _optionalString(json['academicYearId']),
     );
   }
 
@@ -118,6 +133,8 @@ class AppointmentModel {
       'reviewedAt': reviewedAt,
       'proposedScheduledAt': proposedScheduledAt,
       'proposedScheduledTime': proposedScheduledTime ?? '',
+      'department': department ?? '',
+      'academicYearId': academicYearId ?? '',
       'createdAt': createdAt,
       'updatedAt': updatedAt,
     };
@@ -151,6 +168,8 @@ class AppointmentModel {
     DateTime? reviewedAt,
     DateTime? proposedScheduledAt,
     String? proposedScheduledTime,
+    String? department,
+    String? academicYearId,
   }) {
     return AppointmentModel(
       id: id ?? this.id,
@@ -182,6 +201,8 @@ class AppointmentModel {
       proposedScheduledAt: proposedScheduledAt ?? this.proposedScheduledAt,
       proposedScheduledTime:
           proposedScheduledTime ?? this.proposedScheduledTime,
+      department: department ?? this.department,
+      academicYearId: academicYearId ?? this.academicYearId,
     );
   }
 

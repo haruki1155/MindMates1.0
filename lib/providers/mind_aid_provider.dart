@@ -37,6 +37,7 @@ class MindAidProvider extends ChangeNotifier {
   MindAidPreferences? _preferences;
   MindAidLaunchContext? _launchContext;
   String? _lastFailedText;
+  String? _sessionUserId;
   bool _lastUserMessagePersisted = false;
   int _selectedSuggestionCount = 0;
   int _highRiskTriggerCount = 0;
@@ -61,6 +62,11 @@ class MindAidProvider extends ChangeNotifier {
     MindAidLaunchContext? launchContext,
   }) async {
     _launchContext = launchContext ?? _launchContext;
+    errorMessage = null;
+    if (_sessionUserId != userId) {
+      repository.resetSession();
+      _sessionUserId = userId;
+    }
     final effectiveContext = _contextWithSessionMemory(context);
     isLoading = true;
     notifyListeners();
@@ -117,7 +123,7 @@ class MindAidProvider extends ChangeNotifier {
         ].take(5).toList(growable: false);
       }
     } catch (e) {
-      errorMessage = e.toString();
+      errorMessage = 'MindAid could not load this conversation.';
     }
 
     isLoading = false;
@@ -129,6 +135,10 @@ class MindAidProvider extends ChangeNotifier {
     String text, {
     MindAidContext context = const MindAidContext(),
   }) async {
+    final trimmedText = text.trim();
+    if (trimmedText.isEmpty || trimmedText.length > 1200 || isSending) {
+      return false;
+    }
     final effectiveContext = _contextWithSessionMemory(context);
     isSending = true;
     _lastUserMessagePersisted = false;
@@ -139,7 +149,7 @@ class MindAidProvider extends ChangeNotifier {
       final userMessage = MindAidMessage(
         id: DateTime.now().toString(),
         sender: MindAidSender.user,
-        text: text,
+        text: trimmedText,
         createdAt: DateTime.now(),
         status: "sent",
       );
@@ -149,12 +159,14 @@ class MindAidProvider extends ChangeNotifier {
 
       final recentMessages = messages
           .map((message) {
-            return message.toModel(conversationId: userId);
+            return message.toModel(
+              conversationId: _preferences?.conversationId ?? userId,
+            );
           })
           .toList(growable: false);
       final result = await repository.sendMessage(
         userId: userId,
-        text: text,
+        text: trimmedText,
         recentMessages: recentMessages,
         context: effectiveContext,
         preferences: _preferences,
@@ -194,9 +206,9 @@ class MindAidProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      errorMessage = e.toString();
+      errorMessage = 'MindAid could not send that message. Please try again.';
       _fallbackCount += 1;
-      _lastFailedText = text;
+      _lastFailedText = trimmedText;
       final index = messages.lastIndexWhere(
         (message) => message.sender == MindAidSender.user,
       );
@@ -246,6 +258,7 @@ class MindAidProvider extends ChangeNotifier {
 
   Future<void> clearHistory(String userId) async {
     await repository.clearHistory(userId);
+    repository.resetSession();
     messages = [];
     _conversationSummary = null;
     _lastFailedText = null;
@@ -255,6 +268,7 @@ class MindAidProvider extends ChangeNotifier {
 
   Future<void> startNewConversation(String userId) async {
     final nextId = await repository.startNewConversation(userId);
+    repository.resetSession();
     final current = _preferences;
     _preferences = MindAidPreferences(
       hasDecision: current?.hasDecision ?? true,

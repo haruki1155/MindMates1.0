@@ -1,10 +1,10 @@
 import {createHash} from "node:crypto";
 
-import {SessionsClient, protos} from "@google-cloud/dialogflow-cx";
+import type {protos} from "@google-cloud/dialogflow-cx";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
-import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
 if (!getApps().length) initializeApp();
 
@@ -39,7 +39,9 @@ interface MindAidResponse {
 }
 
 const crisisPhrases = [
-  "kill myself", "end my life", "suicide", "self harm", "hurt myself",
+  "kill myself", "end my life", "end it all", "take my life",
+  "no reason to live", "cant go on", "cannot go on", "want to disappear",
+  "unalive myself", "suicide", "self harm", "hurt myself", "cut myself",
   "i want to die", "do not want to live", "ayoko nang mabuhay",
   "gusto kong mamatay", "magpakamatay",
 ];
@@ -53,7 +55,9 @@ const highDistressPhrases = [
 const blockedOutputPhrases = [
   "you have depression", "you have anxiety disorder", "you are diagnosed",
   "i diagnose", "as your therapist", "as a licensed counselor",
-  "stop taking", "increase your dose", "keep this secret", "do not tell anyone",
+  "you have bipolar", "you have ptsd", "stop taking", "increase your dose",
+  "take this medication", "keep this secret", "do not tell anyone",
+  "guaranteed to work",
 ];
 
 const allowedActions = new Set([
@@ -68,7 +72,7 @@ function normalize(value: string): string {
 export function classifyMindAidSafety(text: string): SafetyLevel {
   const value = normalize(text);
   if (!value) return "needsClarification";
-  if (crisisPhrases.some((phrase) => value.includes(phrase))) return "crisisOrImmediateRisk";
+  if (crisisPhrases.some((phrase) => value.includes(phrase)) || /(^|\s)kms(\s|$)/.test(value)) return "crisisOrImmediateRisk";
   if (highDistressPhrases.some((phrase) => value.includes(phrase))) return "highDistress";
   return "safeSupport";
 }
@@ -110,7 +114,7 @@ function safetyResponse(level: SafetyLevel, contacts: SupportContacts): {text: s
   const contactLine = verified.length ? `\n\nVerified contacts: ${verified.join(" • ")}` : "";
   if (level === "crisisOrImmediateRisk") {
     return {
-      text: `I’m really sorry you’re carrying this much pain. Your safety matters right now. Please move near a trusted person and contact local emergency services, campus security, ${contacts.paccName}, or the nearest emergency room. If you can, tell someone clearly: “I may not be safe alone right now.”${contactLine}`,
+      text: `I’m really sorry you’re carrying this much pain. MindAid is an automated wellness assistant and cannot provide emergency care. Your safety matters right now. Please move near a trusted person and contact local emergency services, campus security, ${contacts.paccName}, or the nearest emergency room. If you can, tell someone clearly: “I may not be safe alone right now.”${contactLine}`,
       actions: [
         {type: "openCounselingServices", label: "View support services"},
         {type: "bookAppointment", label: "Contact PACC"},
@@ -118,7 +122,7 @@ function safetyResponse(level: SafetyLevel, contacts: SupportContacts): {text: s
     };
   }
   return {
-    text: `This sounds very intense, and you do not have to manage it alone. Please pause and move toward a trusted person or safe place. If you may be in immediate danger, contact local emergency services, campus security, ${contacts.paccName}, or the nearest emergency room now.${contactLine}`,
+    text: `This sounds very intense, and you do not have to manage it alone. MindAid is an automated wellness assistant and cannot provide emergency care. Please pause and move toward a trusted person or safe place. If you may be in immediate danger, contact local emergency services, campus security, ${contacts.paccName}, or the nearest emergency room now.${contactLine}`,
     actions: [
       {type: "startBreathing", label: "Start a grounding exercise"},
       {type: "openCounselingServices", label: "View support services"},
@@ -186,7 +190,7 @@ async function enforceRateLimit(uid: string): Promise<void> {
   });
 }
 
-async function requireConsentAndRollout(uid: string): Promise<boolean> {
+async function requireConsentAndRollout(uid: string): Promise<{personalizationEnabled: boolean; conversationId: string}> {
   const [preferences, rollout] = await Promise.all([
     db.collection("mind_aid_preferences").doc(uid).get(),
     db.collection("mind_aid_config").doc("rollout").get(),
@@ -203,7 +207,10 @@ async function requireConsentAndRollout(uid: string): Promise<boolean> {
   if (!pilotUserIds.includes(uid) && (!enabled || bucket >= percent)) {
     throw new HttpsError("failed-precondition", "MindAid cloud support is not enabled for this account yet.");
   }
-  return preferenceData.personalizationEnabled === true;
+  return {
+    personalizationEnabled: preferenceData.personalizationEnabled === true,
+    conversationId: String(preferenceData.conversationId ?? ""),
+  };
 }
 
 async function derivedContext(uid: string): Promise<Record<string, unknown>> {
@@ -252,10 +259,14 @@ function extractDialogflowResponse(result: protos.google.cloud.dialogflow.cx.v3.
     const data = item as Record<string, unknown>;
     const type = String(data.type ?? "");
     if (!allowedActions.has(type)) return [];
-    return [{type, label: String(data.label ?? "Open"), payload: data.payload as Record<string, unknown> | undefined}];
+    const rawPayload = data.payload;
+    const payload = rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)
+      ? rawPayload as Record<string, unknown>
+      : undefined;
+    return [{type, label: String(data.label ?? "Open"), payload}];
   });
   return {
-    text: texts.join("\n").trim(),
+    text: texts.join("\n").trim().slice(0, 1200),
     intent: String(query?.match?.intent?.displayName ?? "general_support"),
     confidence: Number(query?.match?.confidence ?? 0),
     suggestions: (Array.isArray(payload.suggestions) ? payload.suggestions : []).map(String).slice(0, 5),
@@ -293,14 +304,12 @@ async function persistTurn(uid: string, requestId: string, conversationId: strin
   });
 }
 
-export const sendMindAidMessage = onCall({
-  region: REGION,
-  timeoutSeconds: 15,
-  memory: "256MiB",
-  enforceAppCheck: true,
-}, async (request) => {
+async function sendMindAidMessageHandler(request: CallableRequest) {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
+  if (!request.data || typeof request.data !== "object" || Array.isArray(request.data)) {
+    throw new HttpsError("invalid-argument", "A valid MindAid message is required.");
+  }
   const input = request.data as Record<string, unknown>;
   const requestId = String(input.requestId ?? "").trim();
   const conversationId = String(input.conversationId ?? "").trim();
@@ -321,7 +330,11 @@ export const sendMindAidMessage = onCall({
     } satisfies MindAidResponse;
   }
 
-  const personalizationEnabled = await requireConsentAndRollout(uid);
+  const access = await requireConsentAndRollout(uid);
+  if (access.conversationId !== conversationId) {
+    throw new HttpsError("invalid-argument", "The conversation is no longer active.");
+  }
+  const personalizationEnabled = access.personalizationEnabled;
   await enforceRateLimit(uid);
   const startedAt = Date.now();
   const safetyLevel = classifyMindAidSafety(text);
@@ -340,6 +353,10 @@ export const sendMindAidMessage = onCall({
     const location = process.env.DIALOGFLOW_CX_LOCATION ?? REGION;
     if (!projectId || !agentId) throw new HttpsError("failed-precondition", "Dialogflow CX is not configured.");
     const sessionId = createHash("sha256").update(`${uid}:${conversationId}`).digest("hex").slice(0, 36);
+    // Load the Dialogflow client only when Mind Aid is invoked. Keeping this
+    // SDK out of module initialization prevents Firebase's deployment
+    // discovery process from timing out while loading all callable exports.
+    const {SessionsClient} = await import("@google-cloud/dialogflow-cx");
     const client = new SessionsClient({apiEndpoint: `${location}-dialogflow.googleapis.com`});
     const session = client.projectLocationAgentSessionPath(projectId, location, agentId, sessionId);
     const context = personalizationEnabled ? await derivedContext(uid) : {};
@@ -361,7 +378,20 @@ export const sendMindAidMessage = onCall({
   }
   await persistTurn(uid, requestId, conversationId, text, response, Date.now() - startedAt);
   return response;
-});
+}
+
+export const sendMindAidMessage = onCall({
+  region: REGION,
+  timeoutSeconds: 15,
+  memory: "256MiB",
+  enforceAppCheck: true,
+}, sendMindAidMessageHandler);
+export const sendMindAidMessageDev = onCall({
+  region: REGION,
+  timeoutSeconds: 15,
+  memory: "256MiB",
+  enforceAppCheck: false,
+}, sendMindAidMessageHandler);
 
 export const aggregateMindAidFeedback = onDocumentWritten(
   {region: REGION, document: "mind_aid_feedback/{feedbackId}", retry: true},

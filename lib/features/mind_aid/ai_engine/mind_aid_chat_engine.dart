@@ -2,6 +2,7 @@ import '../../../models/mind_aid_suggestion_model.dart';
 import '../domain/mind_aid_chat_models.dart';
 import '../domain/mind_aid_context.dart';
 import '../domain/mind_aid_dataset_models.dart';
+import '../domain/mind_aid_safety.dart';
 import 'mind_aid_dialogue_manager.dart';
 import 'mind_aid_knowledge_retriever.dart';
 import 'mind_aid_response_composer.dart';
@@ -24,6 +25,10 @@ class MindAidChatEngine {
   final MindAidResponseComposer _responseComposer;
   final MindAidSafetyClassifier _safetyClassifier;
   MindAidConversationState _state = const MindAidConversationState();
+
+  void resetSession() {
+    _state = const MindAidConversationState();
+  }
 
   Future<MindAidChatResponse> respond(
     MindAidChatRequest request,
@@ -55,15 +60,22 @@ class MindAidChatEngine {
       normalizedInput: normalizedInput,
       matches: matches,
     );
+    final safetyIntercept = safety.level.blocksCloud;
     final activeFollowUpMatch = state.activeIntent == null
         ? null
         : _retriever.matchByIntent(state.activeIntent!, dataset);
-    final decision = _dialogueManager.decide(
-      normalizedInput: normalizedInput,
-      matches: matches,
-      state: state,
-      activeFollowUpMatch: activeFollowUpMatch,
-    );
+    final decision = safetyIntercept
+        ? MindAidDialogueDecision(
+            action: MindAidDialogueAction.escalate,
+            matches: matches,
+            reason: 'safety_intercept',
+          )
+        : _dialogueManager.decide(
+            normalizedInput: normalizedInput,
+            matches: matches,
+            state: state,
+            activeFollowUpMatch: activeFollowUpMatch,
+          );
     final responseText = await _responseComposer.compose(
       action: decision.action,
       normalizedInput: normalizedInput,
@@ -74,7 +86,7 @@ class MindAidChatEngine {
       context: context,
       safetyLevel: safety.level,
     );
-    final severity = _highestSeverity(decision.matches);
+    final severity = _highestSeverity(decision.matches, safety.level);
     final followUps = _followUpsFor(decision, state);
     final nextState = state.updateFromResponse(
       matches: decision.matches,
@@ -126,7 +138,16 @@ class MindAidChatEngine {
     );
   }
 
-  MindAidSeverity _highestSeverity(List<MindAidIntentMatch> matches) {
+  MindAidSeverity _highestSeverity(
+    List<MindAidIntentMatch> matches,
+    MindAidSafetyLevel safetyLevel,
+  ) {
+    if (safetyLevel == MindAidSafetyLevel.crisisOrImmediateRisk) {
+      return MindAidSeverity.crisis;
+    }
+    if (safetyLevel == MindAidSafetyLevel.highDistress) {
+      return MindAidSeverity.high;
+    }
     if (matches.any(
       (match) => match.record.severity == MindAidSeverity.crisis,
     )) {

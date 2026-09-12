@@ -6,6 +6,7 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 
 import '../../database/firestore_collections.dart';
 import '../../features/mind_aid/domain/mind_aid_integration_models.dart';
+import 'firebase_callable_router.dart';
 
 class MindAidCloudService {
   MindAidCloudService({
@@ -90,7 +91,7 @@ class MindAidCloudService {
     required String text,
     required String launchContext,
   }) async {
-    final result = await _functions.httpsCallable('sendMindAidMessage').call({
+    final result = await _functions.routedCallable('sendMindAidMessage').call({
       'requestId': requestId,
       'conversationId': conversationId,
       'text': text,

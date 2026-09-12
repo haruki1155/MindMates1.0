@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../models/assessment_explanation_model.dart';
+
 import '../database/firestore_collections.dart';
 import '../models/report_model.dart';
 import '../services/firebase/firestore_service.dart';
@@ -364,20 +366,10 @@ class ReportRepository {
     final reportPayload = {
       'userId': userId,
       'title': 'Mental Health Summary',
-      'description': _description(
-        latestAssessmentStatus: latestAssessmentStatus,
-        latestAssessmentSource: latestAssessmentSource,
-        mentalStatusSignal: mentalStatusSignal,
-        topConcernAreas: topConcernAreas,
-        moodSummary: moodSummary,
-        mindAidMessageCount: mindAidMessageCount,
-        activeDayCount: activeDateKeys.length,
-        currentStreak: currentStreak,
-        breathingSessionCount: breathingSummary.sessionCount,
-        mindfulBreathingMinutes: breathingSummary.minutes,
-        secretChatSummary: secretChatSummary,
-        mentalStatusLabel: mentalStatus.label,
-      ),
+      'description':
+          assessmentSummary.fullSummary ??
+          assessmentSummary.quickSummary ??
+          'Complete an assessment to create your mental health summary.',
       'reportStatus': 'draft',
       'generatedAt': FieldValue.serverTimestamp(),
       'weekStart': Timestamp.fromDate(weekStart),
@@ -390,9 +382,16 @@ class ReportRepository {
       'quickAssessmentScore': assessmentSummary.quickScore,
       'quickAssessmentStatus': assessmentSummary.quickStatus ?? '',
       'quickAssessmentSignal': assessmentSummary.quickSignal ?? '',
+      'quickAssessmentSummary': assessmentSummary.quickSummary ?? '',
+      'quickAssessmentAreaStatuses': assessmentSummary.quickAreaStatuses,
+      'quickAssessmentExplanation': assessmentSummary.quickExplanation
+          ?.toJson(),
       'fullAssessmentScore': assessmentSummary.fullScore,
       'fullAssessmentStatus': assessmentSummary.fullStatus ?? '',
+      'fullAssessmentSummary': assessmentSummary.fullSummary ?? '',
+      'fullAssessmentDomainStatuses': assessmentSummary.fullDomainStatuses,
       'fullAssessmentTopConcernAreas': assessmentSummary.fullConcernAreas,
+      'fullAssessmentExplanation': assessmentSummary.fullExplanation?.toJson(),
       'assessmentSupportPriority': assessmentSummary.supportPriority ?? '',
       'mindAidMessageCount': mindAidMessageCount,
       'activeDayCount': activeDateKeys.length,
@@ -640,75 +639,6 @@ class ReportRepository {
     return signal;
   }
 
-  String _description({
-    required String? latestAssessmentStatus,
-    required String? latestAssessmentSource,
-    required String? mentalStatusSignal,
-    required List<String> topConcernAreas,
-    required _MoodSummary moodSummary,
-    required int mindAidMessageCount,
-    required int activeDayCount,
-    required int currentStreak,
-    required int breathingSessionCount,
-    required int mindfulBreathingMinutes,
-    required _SecretChatSummary secretChatSummary,
-    required String mentalStatusLabel,
-  }) {
-    final parts = <String>['Mental status: $mentalStatusLabel'];
-    if (latestAssessmentStatus != null) {
-      if (latestAssessmentSource == 'quickAssessment') {
-        parts.add(
-          'Your quick assessment suggests a ${latestAssessmentStatus.toLowerCase()} support need',
-        );
-      } else {
-        parts.add(
-          'Latest full assessment shows $latestAssessmentStatus concern',
-        );
-      }
-    }
-    if (mentalStatusSignal != null && mentalStatusSignal.isNotEmpty) {
-      parts.add('wellness signal: $mentalStatusSignal');
-    }
-    if (topConcernAreas.isNotEmpty) {
-      parts.add('main focus: ${topConcernAreas.join(', ')}');
-    }
-    if (moodSummary.count > 0) {
-      final average = moodSummary.average;
-      parts.add(
-        average == null
-            ? '${moodSummary.count} mood check-in${moodSummary.count == 1 ? '' : 's'}'
-            : '${moodSummary.count} mood check-in${moodSummary.count == 1 ? '' : 's'} averaging ${average.toStringAsFixed(1)}/5',
-      );
-    }
-    if (mindAidMessageCount > 0) {
-      parts.add(
-        '$mindAidMessageCount MindAid check-in${mindAidMessageCount == 1 ? '' : 's'}',
-      );
-    }
-    if (secretChatSummary.engagementCount > 0) {
-      parts.add(
-        '${secretChatSummary.engagementCount} Secret Chat engagement${secretChatSummary.engagementCount == 1 ? '' : 's'}',
-      );
-    }
-    if (breathingSessionCount > 0) {
-      parts.add(
-        '$breathingSessionCount breathing session${breathingSessionCount == 1 ? '' : 's'} adding $mindfulBreathingMinutes mindful minute${mindfulBreathingMinutes == 1 ? '' : 's'}',
-      );
-    }
-    if (currentStreak > 0) {
-      parts.add('$currentStreak-day streak');
-    } else if (activeDayCount > 0) {
-      parts.add(
-        '$activeDayCount active day${activeDayCount == 1 ? '' : 's'} this week',
-      );
-    }
-
-    if (parts.length == 1) {
-      return 'Your weekly summary will grow as you use assessments, MindAid, and daily check-ins.';
-    }
-    return '${parts.join(' with ')}.';
-  }
-
   List<String> _recommendedActions({
     required String? latestAssessmentStatus,
     required String? mentalStatusSignal,
@@ -866,6 +796,7 @@ class ReportRepository {
     final severe =
         fullStatus.contains('severe') ||
         fullStatus.contains('high') ||
+        fullStatus.contains('at risk') ||
         quickStatus.contains('very high') ||
         quickSignal == 'elevated' ||
         quickSignal == 'highsupport' ||
@@ -881,6 +812,7 @@ class ReportRepository {
 
     final moderate =
         _isModerateConcernStatus(fullStatus) ||
+        fullStatus.contains('needs improvement') ||
         quickStatus.contains('moderate') ||
         quickSignal == 'watchful' ||
         (quickScore != null && quickScore >= 50) ||
@@ -980,6 +912,16 @@ class _AssessmentSummary {
   String? get fullStatus =>
       _firstText(latestFull?['status'], latestFull?['overallLevel']);
   String? get quickSignal => _firstText(latestQuick?['mentalStatusSignal']);
+  String? get quickSummary => _assessmentSummaryText(latestQuick);
+  String? get fullSummary => _assessmentSummaryText(latestFull);
+  Map<String, String> get quickAreaStatuses => _domainStatuses(latestQuick);
+  Map<String, String> get fullDomainStatuses => _domainStatuses(latestFull);
+  AssessmentExplanationModel? get quickExplanation => latestQuick == null
+      ? null
+      : AssessmentExplanationModel.fromAssessment(latestQuick!);
+  AssessmentExplanationModel? get fullExplanation => latestFull == null
+      ? null
+      : AssessmentExplanationModel.fromAssessment(latestFull!);
   String? get supportPriority => _supportPriority(preferredAssessment);
 
   List<String> get fullConcernAreas => _stringList(
@@ -1001,6 +943,36 @@ class _AssessmentSummary {
       interpretation is Map ? interpretation['supportPriority'] : null,
       assessment['supportPriority'],
     );
+  }
+
+  static String? _assessmentSummaryText(Map<String, dynamic>? assessment) {
+    if (assessment == null) return null;
+    final interpretation = assessment['interpretation'];
+    return _firstText(
+      interpretation is Map ? interpretation['userSummary'] : null,
+      assessment['summary'] ?? assessment['message'],
+    );
+  }
+
+  static Map<String, String> _domainStatuses(Map<String, dynamic>? assessment) {
+    if (assessment == null) return const {};
+    final interpretation = assessment['interpretation'];
+    final domains = interpretation is Map
+        ? interpretation['domainResults']
+        : null;
+    if (domains is! List) return const {};
+    final result = <String, String>{};
+    for (final value in domains) {
+      if (value is! Map) continue;
+      final name = value['domain']?.toString().trim() ?? '';
+      if (name.isEmpty) continue;
+      final scorable = value['isScorable'] != false;
+      final status = scorable
+          ? _firstText(value['bandLabel'], value['band'])
+          : 'Insufficient responses';
+      if (status != null) result[name] = status;
+    }
+    return result;
   }
 
   static String? _firstText(Object? first, [Object? second]) {

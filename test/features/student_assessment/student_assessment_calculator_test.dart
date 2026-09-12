@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/student_assessment/screens/student_assessment_complete_screen.dart';
 import 'package:mind_mates/features/student_assessment/screens/student_assessment_screen.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
-import 'package:mind_mates/features/quick_assessment/widgets/quick_assessment_widgets.dart';
 import 'package:mind_mates/features/student_assessment/data/student_assessment_questions.dart';
 import 'package:mind_mates/features/student_assessment/models/student_assessment_models.dart';
 import 'package:mind_mates/features/student_assessment/services/student_assessment_calculator.dart';
@@ -35,6 +34,87 @@ void main() {
         ),
         0,
       );
+      expect(
+        StudentAssessmentCalculator.riskScore(
+          answer: LikertAnswer.rarely,
+          direction: AssessmentDirection.risk,
+        ),
+        closeTo(33.33, 0.01),
+      );
+      expect(
+        StudentAssessmentCalculator.riskScore(
+          answer: LikertAnswer.often,
+          direction: AssessmentDirection.risk,
+        ),
+        closeTo(66.67, 0.01),
+      );
+      expect(LikertAnswer.values, hasLength(4));
+      expect(
+        LikertAnswer.values.map((answer) => answer.label),
+        isNot(contains('Neutral')),
+      );
+    });
+
+    test('keeps the student assessment in the intended domain sequence', () {
+      List<AssessmentSection> sequenceOf(
+        List<StudentAssessmentQuestion> questions,
+      ) {
+        final orderedSections = <AssessmentSection>[];
+        for (final question in questions.where(
+          (question) => !question.isConditional,
+        )) {
+          if (!orderedSections.contains(question.section)) {
+            orderedSections.add(question.section);
+          }
+        }
+        return orderedSections;
+      }
+
+      expect(sequenceOf(StudentAssessmentQuestions.questions), [
+        AssessmentSection.academicCore,
+        AssessmentSection.financialConcern,
+        AssessmentSection.socialAdjustment,
+        AssessmentSection.sleepRest,
+        AssessmentSection.emotionalWellBeing,
+      ]);
+      expect(sequenceOf(StudentAssessmentQuestions.facultyQuestions), [
+        AssessmentSection.workplaceStressCore,
+        AssessmentSection.professionalSupport,
+        AssessmentSection.professionalWellBeing,
+        AssessmentSection.sleepRest,
+        AssessmentSection.emotionalWellBeing,
+      ]);
+      expect(sequenceOf(StudentAssessmentQuestions.staffQuestions), [
+        AssessmentSection.workplaceResponsibilityCore,
+        AssessmentSection.workplaceSupport,
+        AssessmentSection.workplaceWellBeing,
+        AssessmentSection.sleepRest,
+        AssessmentSection.emotionalWellBeing,
+      ]);
+    });
+
+    test('provides exactly ten active questions for every topic and role', () {
+      for (final questions in [
+        StudentAssessmentQuestions.questions,
+        StudentAssessmentQuestions.facultyQuestions,
+        StudentAssessmentQuestions.staffQuestions,
+      ]) {
+        final active = questions
+            .where((question) => !question.isConditional)
+            .toList();
+        final counts = <AssessmentSection, int>{};
+        for (final question in active) {
+          counts.update(
+            question.section,
+            (count) => count + 1,
+            ifAbsent: () => 1,
+          );
+        }
+
+        expect(active, hasLength(50));
+        expect(counts, hasLength(5));
+        expect(counts.values, everyElement(10));
+      }
     });
 
     test('triggers deeper academic questions for elevated core answers', () {
@@ -126,7 +206,9 @@ void main() {
         for (final question in questions)
           StudentAssessmentAnswer(
             questionId: question.id,
-            answer: LikertAnswer.sometimes,
+            answer: question.direction == AssessmentDirection.risk
+                ? LikertAnswer.always
+                : LikertAnswer.never,
           ),
       ];
 
@@ -135,15 +217,32 @@ void main() {
         answers: answers,
       );
 
-      expect(result.overallScore, 50);
-      expect(result.status, 'Moderate Concern');
+      expect(result.overallScore, 100);
+      expect(result.status, 'At Risk');
       expect(result.totalResponses, questions.length);
-      expect(result.subscaleScores['Sleep and Rest'], 50);
+      expect(result.subscaleScores['Sleep and Rest'], 100);
       expect(
         result.interpretation.algorithmVersion,
-        'wellness_interpretation_v3',
+        'internal_wellness_policy_v2',
       );
       expect(result.interpretation.responseQuality.completionPercent, 100);
+      expect(
+        result.interpretation.userSummary,
+        startsWith(
+          'One or more areas may be placing extra pressure on daily life.',
+        ),
+      );
+      expect(
+        result.interpretation.domainResults.every(
+          (domain) => domain.wellBeingStatus == 'At Risk',
+        ),
+        isTrue,
+      );
+      expect(result.interpretation.focusInsights, isNotEmpty);
+      expect(
+        result.interpretation.focusInsights,
+        everyElement(isNot(startsWith('I '))),
+      );
     });
 
     test('excludes skipped responses and reports insufficient coverage', () {
@@ -155,7 +254,7 @@ void main() {
         for (var index = 0; index < questions.length; index++)
           StudentAssessmentAnswer(
             questionId: questions[index].id,
-            answer: LikertAnswer.sometimes,
+            answer: LikertAnswer.rarely,
             isSkipped: index >= 5,
           ),
       ];
@@ -267,14 +366,14 @@ void main() {
     );
 
     test('uses consistent concern-band boundaries', () {
-      expect(StudentAssessmentCalculator.getStatus(0), 'Low Concern');
-      expect(StudentAssessmentCalculator.getStatus(20), 'Low Concern');
-      expect(StudentAssessmentCalculator.getStatus(20.01), 'Watchful');
-      expect(StudentAssessmentCalculator.getStatus(40), 'Watchful');
-      expect(StudentAssessmentCalculator.getStatus(60), 'Moderate Concern');
-      expect(StudentAssessmentCalculator.getStatus(80), 'Elevated Concern');
-      expect(StudentAssessmentCalculator.getStatus(80.01), 'High Concern');
-      expect(StudentAssessmentCalculator.getStatus(100), 'High Concern');
+      expect(StudentAssessmentCalculator.getStatus(0), 'Thriving');
+      expect(StudentAssessmentCalculator.getStatus(20), 'Thriving');
+      expect(StudentAssessmentCalculator.getStatus(20.01), 'Stable');
+      expect(StudentAssessmentCalculator.getStatus(40), 'Stable');
+      expect(StudentAssessmentCalculator.getStatus(40.01), 'Needs Improvement');
+      expect(StudentAssessmentCalculator.getStatus(60), 'Needs Improvement');
+      expect(StudentAssessmentCalculator.getStatus(60.01), 'At Risk');
+      expect(StudentAssessmentCalculator.getStatus(100), 'At Risk');
     });
 
     test(
@@ -288,7 +387,7 @@ void main() {
         expect(answer.toJson(), {
           'questionId': 'q1',
           'answer': 'often',
-          'value': 4,
+          'value': 3,
           'isSkipped': true,
         });
 
@@ -333,7 +432,9 @@ void main() {
         for (final question in questions)
           StudentAssessmentAnswer(
             questionId: question.id,
-            answer: LikertAnswer.sometimes,
+            answer: question.direction == AssessmentDirection.risk
+                ? LikertAnswer.always
+                : LikertAnswer.never,
           ),
       ];
 
@@ -344,10 +445,10 @@ void main() {
       );
 
       expect(result.userType, 'Teaching Personnel');
-      expect(result.overallScore, 50);
-      expect(result.status, 'Moderate Concern');
-      expect(result.subscaleScores['Workplace Stress'], 50);
-      expect(result.subscaleScores['Professional Support'], 50);
+      expect(result.overallScore, 100);
+      expect(result.status, 'At Risk');
+      expect(result.subscaleScores['Workplace Stress'], 100);
+      expect(result.subscaleScores['Professional Support'], 100);
     });
 
     test('calculates weighted staff result', () {
@@ -358,7 +459,9 @@ void main() {
         for (final question in questions)
           StudentAssessmentAnswer(
             questionId: question.id,
-            answer: LikertAnswer.sometimes,
+            answer: question.direction == AssessmentDirection.risk
+                ? LikertAnswer.always
+                : LikertAnswer.never,
           ),
       ];
 
@@ -369,15 +472,15 @@ void main() {
       );
 
       expect(result.userType, 'Non-Teaching Personnel');
-      expect(result.overallScore, 50);
-      expect(result.status, 'Moderate Concern');
-      expect(result.subscaleScores['Workplace Responsibilities'], 50);
-      expect(result.subscaleScores['Workplace Support'], 50);
+      expect(result.overallScore, 100);
+      expect(result.status, 'At Risk');
+      expect(result.subscaleScores['Workplace Responsibilities'], 100);
+      expect(result.subscaleScores['Workplace Support'], 100);
     });
   });
 
   group('AssessmentProvider student assessment flow', () {
-    test('inserts deeper academic questions after trigger point', () {
+    test('keeps a fixed 50-question assessment after elevated answers', () {
       final provider = AssessmentProvider(AssessmentRepository());
       provider.startStudentAssessment();
 
@@ -387,11 +490,12 @@ void main() {
 
       expect(
         provider.studentQuestions.any((question) => question.isConditional),
-        isTrue,
+        isFalse,
       );
+      expect(provider.studentQuestions, hasLength(50));
       expect(
         provider.currentStudentQuestion?.section,
-        AssessmentSection.academicDeeper,
+        AssessmentSection.financialConcern,
       );
     });
 
@@ -415,33 +519,6 @@ void main() {
         LikertAnswer.rarely,
       );
     });
-
-    test(
-      'removes conditional questions when the trigger answer is corrected',
-      () {
-        final provider = AssessmentProvider(AssessmentRepository())
-          ..startStudentAssessment();
-
-        for (var index = 0; index < 10; index++) {
-          provider.answerCurrentStudentQuestion(
-            index == 9 ? LikertAnswer.always : LikertAnswer.never,
-          );
-        }
-        expect(provider.currentStudentQuestion?.isConditional, isTrue);
-
-        provider.goBackStudentQuestion();
-        provider.answerCurrentStudentQuestion(LikertAnswer.never);
-
-        expect(
-          provider.studentQuestions.any((question) => question.isConditional),
-          isFalse,
-        );
-        expect(
-          provider.currentStudentQuestion?.section,
-          AssessmentSection.financialConcern,
-        );
-      },
-    );
 
     test('starts faculty questions from selected role', () {
       final provider = AssessmentProvider(AssessmentRepository());
@@ -557,7 +634,7 @@ void main() {
   });
 
   group('StudentAssessmentScreen UI', () {
-    testWidgets('neutral option is not preselected', (tester) async {
+    testWidgets('offers four choices without a neutral option', (tester) async {
       final provider = AssessmentProvider(AssessmentRepository())
         ..startStudentAssessment();
 
@@ -569,15 +646,15 @@ void main() {
       );
       await tester.pump();
 
-      final neutralMaterial = tester.widget<Material>(
-        find
-            .ancestor(of: find.text('Neutral'), matching: find.byType(Material))
-            .first,
-      );
-
-      expect(neutralMaterial.color, QuickAssessmentPalette.card);
+      expect(find.text('Strongly Disagree'), findsOneWidget);
+      expect(find.text('Disagree'), findsOneWidget);
+      expect(find.text('Agree'), findsOneWidget);
+      expect(find.text('Strongly Agree'), findsOneWidget);
+      expect(find.text('Neutral'), findsNothing);
       expect(find.text('Back'), findsOneWidget);
       expect(find.text('Skip'), findsNothing);
+      expect(find.text('Academic Stress'), findsWidgets);
+      expect(find.textContaining('Question 1 of'), findsNothing);
     });
   });
 
@@ -612,6 +689,27 @@ void main() {
       await tester.pump();
       await tester.pump();
 
+      expect(find.text('Set an appointment?'), findsOneWidget);
+      expect(
+        find.text(
+          'Do you want to set an appointment with PACC to discuss your well-being result?',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('No'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('Your Well-being Profile'), findsOneWidget);
+      expect(find.text('Secondary overall concern index'), findsNothing);
+      expect(find.text('/ 100'), findsNothing);
+      expect(find.text('Your well-being areas'), findsOneWidget);
+      expect(find.text('Your personal insights'), findsOneWidget);
+      expect(find.text('Domain interpretation'), findsNothing);
+      expect(
+        find.textContaining('Functional-impact observation'),
+        findsNothing,
+      );
       expect(assessmentRepository.savedFullAssessmentUserId, 'user_1');
       expect(reportRepository.generatedForUserId, 'user_1');
       expect(
@@ -625,7 +723,7 @@ void main() {
 void _completeAssessment(AssessmentProvider provider) {
   var guard = 0;
   while (provider.studentResult == null && guard < 100) {
-    provider.answerCurrentStudentQuestion(LikertAnswer.sometimes);
+    provider.answerCurrentStudentQuestion(LikertAnswer.rarely);
     guard += 1;
   }
 }

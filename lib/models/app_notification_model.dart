@@ -9,7 +9,13 @@ class AppNotificationModel {
     required this.type,
     required this.createdAt,
     this.appointmentId,
+    this.inquiryId,
+    this.audience,
     this.readAt,
+    this.resolvedAt,
+    this.archiveEligibleAt,
+    this.archivedAt,
+    this.expiresAt,
   });
 
   final String id;
@@ -19,9 +25,16 @@ class AppNotificationModel {
   final String type;
   final DateTime createdAt;
   final String? appointmentId;
+  final String? inquiryId;
+  final String? audience;
   final DateTime? readAt;
+  final DateTime? resolvedAt;
+  final DateTime? archiveEligibleAt;
+  final DateTime? archivedAt;
+  final DateTime? expiresAt;
 
   bool get isRead => readAt != null;
+  bool get isArchived => archivedAt != null;
 
   factory AppNotificationModel.fromJson(
     Map<String, dynamic> json, {
@@ -33,8 +46,14 @@ class AppNotificationModel {
     body: json['body']?.toString() ?? '',
     type: json['type']?.toString() ?? 'general',
     appointmentId: _text(json['appointmentId']),
+    inquiryId: _text(json['inquiryId']),
+    audience: _text(json['audience']),
     createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
     readAt: dateTimeFromFirestore(json['readAt']),
+    resolvedAt: dateTimeFromFirestore(json['resolvedAt']),
+    archiveEligibleAt: dateTimeFromFirestore(json['archiveEligibleAt']),
+    archivedAt: dateTimeFromFirestore(json['archivedAt']),
+    expiresAt: dateTimeFromFirestore(json['expiresAt']),
   );
 
   static String? _text(Object? value) {

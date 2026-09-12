@@ -105,6 +105,7 @@ class MindAidWellnessSnapshot {
     final score = assessmentScore;
     return status.contains('high') ||
         status.contains('severe') ||
+        status.contains('at risk') ||
         signal == 'watchful' ||
         signal == 'elevated' ||
         signal == 'highsupport' ||

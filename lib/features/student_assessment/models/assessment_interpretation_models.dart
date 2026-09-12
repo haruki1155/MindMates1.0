@@ -1,5 +1,49 @@
 enum AssessmentConcernBand { low, watchful, moderate, elevated, high }
 
+class AssessmentResponsePattern {
+  const AssessmentResponsePattern._();
+
+  static String codeForScore(double? score, {bool isScorable = true}) {
+    if (!isScorable || score == null) return 'insufficientResponses';
+    if (score <= 20) return 'wellBeingSupported';
+    if (score <= 40) return 'generallySteady';
+    if (score <= 60) return 'someStrain';
+    return 'supportMayHelp';
+  }
+
+  static String labelForScore(double? score, {bool isScorable = true}) =>
+      labelForCode(codeForScore(score, isScorable: isScorable));
+
+  static String labelForCode(String code) => switch (code) {
+    'wellBeingSupported' => 'Thriving patterns',
+    'generallySteady' => 'Balanced patterns',
+    'someStrain' => 'Areas to strengthen',
+    'supportMayHelp' => 'Support may be useful',
+    _ => 'More responses needed',
+  };
+
+  static String codeFromLegacy(String? value) {
+    final text = value?.trim().toLowerCase() ?? '';
+    if (text.contains('insufficient') || text.contains('not enough')) {
+      return 'insufficientResponses';
+    }
+    if (text.contains('veryhigh') ||
+        text.contains('very high') ||
+        text.contains('at risk') ||
+        text.contains('elevated') ||
+        text == 'high') {
+      return 'supportMayHelp';
+    }
+    if (text.contains('needs improvement') || text.contains('moderate')) {
+      return 'someStrain';
+    }
+    if (text.contains('stable') || text.contains('watchful')) {
+      return 'generallySteady';
+    }
+    return 'wellBeingSupported';
+  }
+}
+
 extension AssessmentConcernBandLabel on AssessmentConcernBand {
   String get label => switch (this) {
     AssessmentConcernBand.low => 'Low',
@@ -7,6 +51,13 @@ extension AssessmentConcernBandLabel on AssessmentConcernBand {
     AssessmentConcernBand.moderate => 'Moderate',
     AssessmentConcernBand.elevated => 'Elevated',
     AssessmentConcernBand.high => 'High',
+  };
+
+  String get wellBeingStatus => switch (this) {
+    AssessmentConcernBand.low => 'Thriving',
+    AssessmentConcernBand.watchful => 'Stable',
+    AssessmentConcernBand.moderate => 'Needs Improvement',
+    AssessmentConcernBand.elevated || AssessmentConcernBand.high => 'At Risk',
   };
 }
 
@@ -20,11 +71,13 @@ enum AssessmentSupportPriority {
 
 extension AssessmentSupportPriorityLabel on AssessmentSupportPriority {
   String get label => switch (this) {
-    AssessmentSupportPriority.routine => 'Routine monitoring',
-    AssessmentSupportPriority.monitor => 'Monitor',
-    AssessmentSupportPriority.followUpSuggested => 'Follow-up suggested',
-    AssessmentSupportPriority.promptFollowUp => 'Prompt follow-up',
-    AssessmentSupportPriority.insufficientResponses => 'Insufficient responses',
+    AssessmentSupportPriority.routine => 'Routine check-in',
+    AssessmentSupportPriority.monitor => 'Continue monitoring',
+    AssessmentSupportPriority.followUpSuggested =>
+      'Consider additional support',
+    AssessmentSupportPriority.promptFollowUp => 'Timely support encouraged',
+    AssessmentSupportPriority.insufficientResponses =>
+      'Complete more responses',
   };
 }
 
@@ -90,6 +143,11 @@ class AssessmentDomainResult {
     'domain': domain,
     'score': score,
     'band': band.name,
+    'bandLabel': responsePatternLabel,
+    'concernBandLabel': band.label,
+    'wellBeingStatus': wellBeingStatus,
+    'responsePatternCode': responsePatternCode,
+    'responsePatternLabel': responsePatternLabel,
     'answeredCount': answeredCount,
     'skippedCount': skippedCount,
     'presentedCount': presentedCount,
@@ -100,6 +158,14 @@ class AssessmentDomainResult {
     'elevatedIndicators': elevatedIndicators,
     'protectiveIndicators': protectiveIndicators,
   };
+
+  String get wellBeingStatus =>
+      isScorable ? band.wellBeingStatus : 'Insufficient responses';
+
+  String get responsePatternCode =>
+      AssessmentResponsePattern.codeForScore(score, isScorable: isScorable);
+  String get responsePatternLabel =>
+      AssessmentResponsePattern.labelForCode(responsePatternCode);
 }
 
 class AssessmentResponseQuality {
@@ -148,10 +214,12 @@ class AssessmentInterpretation {
     required this.userSummary,
     required this.counselorSummary,
     required this.suggestedActions,
+    this.strengthInsights = const [],
+    this.focusInsights = const [],
     this.protectiveFactors = const [],
     this.functionalImpactFlags = const [],
-    this.algorithmVersion = 'wellness_interpretation_v3',
-    this.questionSetVersion = 'role_based_v3',
+    this.algorithmVersion = 'internal_wellness_policy_v2',
+    this.questionSetVersion = 'experimental_role_based_v3',
     this.recallPeriodDays = 14,
   });
 
@@ -167,12 +235,13 @@ class AssessmentInterpretation {
   final String userSummary;
   final String counselorSummary;
   final List<String> suggestedActions;
+  final List<String> strengthInsights;
+  final List<String> focusInsights;
 
   factory AssessmentInterpretation.fromJson(Map<String, dynamic> json) {
     final quality = _map(json['responseQuality']);
     return AssessmentInterpretation(
-      algorithmVersion:
-          json['algorithmVersion']?.toString() ?? 'wellness_interpretation_v3',
+      algorithmVersion: json['algorithmVersion']?.toString() ?? 'legacy',
       questionSetVersion: json['questionSetVersion']?.toString() ?? 'legacy',
       recallPeriodDays: _int(json['recallPeriodDays'], fallback: 14),
       supportPriority:
@@ -195,6 +264,8 @@ class AssessmentInterpretation {
       userSummary: json['userSummary']?.toString() ?? '',
       counselorSummary: json['counselorSummary']?.toString() ?? '',
       suggestedActions: _strings(json['suggestedActions']),
+      strengthInsights: _strings(json['strengthInsights']),
+      focusInsights: _strings(json['focusInsights']),
     );
   }
 
@@ -212,6 +283,8 @@ class AssessmentInterpretation {
     'userSummary': userSummary,
     'counselorSummary': counselorSummary,
     'suggestedActions': suggestedActions,
+    'strengthInsights': strengthInsights,
+    'focusInsights': focusInsights,
   };
 }
 

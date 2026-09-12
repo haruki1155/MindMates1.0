@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_assets.dart';
+import '../../../core/widgets/mindmate_terms_and_conditions.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../providers/auth_provider.dart';
@@ -25,6 +26,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _requestedProfile = false;
   bool _requestedReport = false;
   bool _requestedSleep = false;
+  bool _isSigningOut = false;
 
   static const List<ProfileActionItem> _actions = [
     ProfileActionItem(
@@ -42,6 +44,10 @@ class _ProfileScreenState extends State<ProfileScreen>
     ProfileActionItem(label: 'Reminders', icon: Icons.notifications),
     ProfileActionItem(label: 'Help', icon: Icons.help_outline),
     ProfileActionItem(label: 'About MindMate', icon: Icons.info),
+    ProfileActionItem(
+      label: 'Terms and Conditions',
+      icon: Icons.gavel_outlined,
+    ),
   ];
 
   @override
@@ -178,6 +184,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   ).pushNamed(RouteNames.secretChatProfile);
                                   return;
                                 }
+                                if (action.label == 'Terms and Conditions') {
+                                  showMindMateTermsAndConditions(context);
+                                  return;
+                                }
                                 _openPlaceholder(context, action.label);
                               },
                             ),
@@ -205,10 +215,21 @@ class _ProfileScreenState extends State<ProfileScreen>
                             delay: 300,
                             child: _DataProtectionCard(),
                           ),
+                          const SizedBox(height: 18),
+                          _AnimatedProfileSection(
+                            delay: 330,
+                            child: _LogOutButton(
+                              isLoading: _isSigningOut,
+                              onTap: _isSigningOut ? null : _confirmAndLogOut,
+                            ),
+                          ),
                           const SizedBox(height: 26),
-                          const _AnimatedProfileSection(
+                          _AnimatedProfileSection(
                             delay: 360,
-                            child: _ProfileFooter(),
+                            child: _ProfileFooter(
+                              onTermsTap: () =>
+                                  showMindMateTermsAndConditions(context),
+                            ),
                           ),
                         ],
                       ),
@@ -292,6 +313,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       role: effectiveUser.roleLabel,
       verificationLabel: effectiveUser.verificationStatus.label,
       avatarAssetName: effectiveUser.avatarAssetName,
+      profilePhotoUrl: effectiveUser.profilePhotoUrl,
       metrics: [
         ProfileMetricData(
           label: 'Day Streak',
@@ -306,10 +328,10 @@ class _ProfileScreenState extends State<ProfileScreen>
           icon: Icons.sentiment_satisfied_alt,
           onTap: onSleepTap,
         ),
-        const ProfileMetricData(
-          label: 'Stress',
-          value: '--/10',
-          icon: Icons.bar_chart,
+        ProfileMetricData(
+          label: 'Age',
+          value: effectiveUser.age?.toString() ?? '--',
+          icon: Icons.cake_outlined,
         ),
       ],
       summary: summary ?? _defaultSummary,
@@ -339,6 +361,59 @@ class _ProfileScreenState extends State<ProfileScreen>
       context,
     ).push(MaterialPageRoute(builder: (_) => _BlankProfilePage(title: title)));
   }
+
+  Future<void> _confirmAndLogOut() async {
+    final shouldLogOut = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Log out of MindMate?'),
+        content: const Text(
+          'You will need to sign in again to access your profile and saved activity.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            icon: const Icon(Icons.logout_rounded),
+            label: const Text('Log Out'),
+          ),
+        ],
+      ),
+    );
+    if (shouldLogOut != true || !mounted) return;
+
+    final authProvider = _authProviderOrNull(context);
+    if (authProvider == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Unable to log out right now.')),
+        );
+      return;
+    }
+
+    setState(() => _isSigningOut = true);
+    try {
+      await authProvider.signOut();
+      if (!mounted) return;
+      context.read<UserProvider>().setUser(null);
+      setState(() => _isSigningOut = false);
+      Navigator.of(
+        context,
+      ).pushNamedAndRemoveUntil(RouteNames.login, (route) => false);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isSigningOut = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Unable to log out. Please try again.')),
+        );
+    }
+  }
 }
 
 class ProfileViewData {
@@ -351,6 +426,7 @@ class ProfileViewData {
     this.department,
     this.memberSince,
     this.avatarAssetName,
+    this.profilePhotoUrl,
     this.metrics = const [],
     this.summary,
   });
@@ -363,6 +439,7 @@ class ProfileViewData {
   final String? department;
   final String? memberSince;
   final String? avatarAssetName;
+  final String? profilePhotoUrl;
   final List<ProfileMetricData> metrics;
   final ProfileSummaryData? summary;
 }
@@ -482,7 +559,10 @@ class _ProfileSummaryCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              _AvatarSlot(assetName: data?.avatarAssetName),
+              _AvatarSlot(
+                assetName: data?.avatarAssetName,
+                photoUrl: data?.profilePhotoUrl,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: hasProfile
@@ -556,9 +636,10 @@ class _ProfileSummaryCard extends StatelessWidget {
 }
 
 class _AvatarSlot extends StatelessWidget {
-  const _AvatarSlot({required this.assetName});
+  const _AvatarSlot({required this.assetName, this.photoUrl});
 
   final String? assetName;
+  final String? photoUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -569,7 +650,21 @@ class _AvatarSlot extends StatelessWidget {
         color: Color(0xFFFFE587),
         shape: BoxShape.circle,
       ),
-      child: assetName == null || assetName!.trim().isEmpty
+      child: photoUrl != null && photoUrl!.trim().isNotEmpty
+          ? ClipOval(
+              child: Image.network(
+                photoUrl!,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const Center(
+                  child: Icon(
+                    Icons.person_rounded,
+                    size: 34,
+                    color: Colors.black,
+                  ),
+                ),
+              ),
+            )
+          : assetName == null || assetName!.trim().isEmpty
           ? const Center(
               child: Icon(Icons.person_rounded, size: 34, color: Colors.black),
             )
@@ -882,7 +977,9 @@ class _DataProtectionCard extends StatelessWidget {
 }
 
 class _ProfileFooter extends StatelessWidget {
-  const _ProfileFooter();
+  const _ProfileFooter({required this.onTermsTap});
+
+  final VoidCallback onTermsTap;
 
   @override
   Widget build(BuildContext context) {
@@ -892,12 +989,27 @@ class _ProfileFooter extends StatelessWidget {
           alignment: WrapAlignment.center,
           spacing: 10,
           runSpacing: 8,
-          children: const [
-            Text('Privacy Policy', style: _ProfileText.footerLink),
-            Text('-', style: _ProfileText.footerLink),
-            Text('Terms of Use', style: _ProfileText.footerLink),
-            Text('-', style: _ProfileText.footerLink),
-            Text('Accessibility Statement', style: _ProfileText.footerLink),
+          children: [
+            const Text('Privacy Policy', style: _ProfileText.footerLink),
+            const Text('-', style: _ProfileText.footerLink),
+            TextButton(
+              key: const Key('profile-terms-link'),
+              onPressed: onTermsTap,
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'Terms and Conditions',
+                style: _ProfileText.footerLink,
+              ),
+            ),
+            const Text('-', style: _ProfileText.footerLink),
+            const Text(
+              'Accessibility Statement',
+              style: _ProfileText.footerLink,
+            ),
           ],
         ),
         const SizedBox(height: 28),
@@ -909,6 +1021,51 @@ class _ProfileFooter extends StatelessWidget {
         const SizedBox(height: 8),
         const Text('Mental Health Companion', style: _ProfileText.footer),
       ],
+    );
+  }
+}
+
+class _LogOutButton extends StatelessWidget {
+  const _LogOutButton({required this.isLoading, required this.onTap});
+
+  final bool isLoading;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Log out of MindMate',
+      child: SizedBox(
+        width: double.infinity,
+        height: 50,
+        child: OutlinedButton.icon(
+          onPressed: onTap,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: _ProfileColors.danger,
+            backgroundColor: Colors.white,
+            side: const BorderSide(color: _ProfileColors.danger, width: 1.4),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          icon: isLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: _ProfileColors.danger,
+                  ),
+                )
+              : const Icon(Icons.logout_rounded, size: 20),
+          label: Text(isLoading ? 'Logging Out...' : 'Log Out'),
+        ),
+      ),
     );
   }
 }
@@ -1499,6 +1656,7 @@ class _ProfileColors {
   static const text = Color(0xFF18130C);
   static const muted = Color(0xFF6E6658);
   static const periwinkle = Color(0xFFAFC2F7);
+  static const danger = Color(0xFFB3261E);
 }
 
 class _ProfileText {

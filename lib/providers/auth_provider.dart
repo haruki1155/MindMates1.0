@@ -12,6 +12,7 @@ enum SignupState {
   appCheckRejected,
   profileSetupPending,
   profileLookupPending,
+  duplicateEmail,
   duplicateSchoolId,
   networkFailed,
   authenticationFailed,
@@ -27,6 +28,8 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _userId;
   String? _errorMessage;
+  String? _registrationEmail;
+  String? _pendingSignupSchoolId;
   SignupState _signupState = SignupState.idle;
   StreamSubscription<String?>? _authSubscription;
 
@@ -36,7 +39,51 @@ class AuthProvider extends ChangeNotifier {
 
   /// The current Firebase user ID, excluding any cached provider state.
   String? get authenticatedUserId => _repository.currentUserId;
-  String? get currentUserEmail => _repository.currentUserEmail;
+  String? get currentUserEmail {
+    try {
+      return _repository.currentUserEmail;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool get currentUserEmailVerified {
+    try {
+      return _repository.currentUserEmailVerified;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> reloadCurrentUser() => _repository.reloadCurrentUser();
+  Future<void> sendEmailVerification() => _repository.sendEmailVerification();
+  Future<bool> sendPasswordResetForSchoolId(String schoolId) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await _repository.sendPasswordResetForSchoolId(schoolId);
+      return true;
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'Password reset failed.',
+      );
+      _errorMessage = FirebaseErrorMessage.describe(
+        error,
+        fallback: 'Unable to send a password reset link. Please try again.',
+      );
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void setRegistrationEmail(String email) => _registrationEmail = email.trim();
+  String? get currentUserDisplayName => _repository.currentUserDisplayName;
+  String? get currentUserPhotoUrl => _repository.currentUserPhotoUrl;
   String? get errorMessage => _errorMessage;
   SignupState get signupState => _signupState;
   bool get hasPendingProfileSetup =>
@@ -118,6 +165,13 @@ class AuthProvider extends ChangeNotifier {
     }, signOutOnFailure: true);
   }
 
+  Future<String?> signInWithGoogle() {
+    return _runAuthAction(() async {
+      final credential = await _repository.signInWithGoogle();
+      return credential.user?.uid ?? _repository.currentUserId;
+    }, signOutOnFailure: true);
+  }
+
   Future<String?> signUp({
     required String password,
     required String firstName,
@@ -131,6 +185,8 @@ class AuthProvider extends ChangeNotifier {
     String? position,
     String? middleName,
     AssessmentRole? role,
+    DateTime? dateOfBirth,
+    String? gender,
   }) async {
     _isLoading = true;
     _errorMessage = null;
@@ -138,7 +194,9 @@ class AuthProvider extends ChangeNotifier {
 
     try {
       final String? id;
-      if (hasPendingProfileSetup && _repository.currentUserId != null) {
+      if (hasPendingProfileSetup &&
+          _repository.currentUserId != null &&
+          _pendingSignupSchoolId == schoolId.trim()) {
         id = await _repository.completeProfileSetup(
           firstName: firstName,
           lastName: lastName,
@@ -151,22 +209,44 @@ class AuthProvider extends ChangeNotifier {
           position: position,
           middleName: middleName,
           role: role,
+          dateOfBirth: dateOfBirth,
+          gender: gender,
         );
       } else {
-        final credential = await _repository.signUp(
-          password: password,
-          firstName: firstName,
-          lastName: lastName,
-          schoolId: schoolId,
-          department: department,
-          course: course,
-          sector: sector,
-          employeeId: employeeId,
-          yearLevel: yearLevel,
-          position: position,
-          middleName: middleName,
-          role: role,
-        );
+        final credential = _registrationEmail?.isNotEmpty == true
+            ? await _repository.signUpWithEmail(
+                email: _registrationEmail!,
+                password: password,
+                firstName: firstName,
+                lastName: lastName,
+                schoolId: schoolId,
+                department: department,
+                course: course,
+                sector: sector,
+                employeeId: employeeId,
+                yearLevel: yearLevel,
+                position: position,
+                middleName: middleName,
+                role: role,
+                dateOfBirth: dateOfBirth,
+                gender: gender,
+              )
+            : await _repository.signUp(
+                password: password,
+                firstName: firstName,
+                lastName: lastName,
+                schoolId: schoolId,
+                department: department,
+                course: course,
+                sector: sector,
+                employeeId: employeeId,
+                yearLevel: yearLevel,
+                position: position,
+                middleName: middleName,
+                role: role,
+                dateOfBirth: dateOfBirth,
+                gender: gender,
+              );
         id = credential.user?.uid ?? _repository.currentUserId;
       }
       if (id == null || id.isEmpty) {
@@ -176,6 +256,7 @@ class AuthProvider extends ChangeNotifier {
       _userId = id;
       _isAuthenticated = true;
       _signupState = SignupState.complete;
+      _pendingSignupSchoolId = null;
       return id;
     } on SignupAppCheckException catch (error, stackTrace) {
       _clearSession(notify: false);
@@ -198,6 +279,7 @@ class AuthProvider extends ChangeNotifier {
       return null;
     } on SignupProfileProvisioningException catch (error, stackTrace) {
       _userId = error.userId;
+      _pendingSignupSchoolId = schoolId.trim();
       _isAuthenticated = _repository.currentUserId == error.userId;
       _signupState = SignupState.profileSetupPending;
       FirebaseErrorMessage.log(
@@ -244,12 +326,44 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<String?> completeGoogleProfile({
+    required String firstName,
+    required String lastName,
+    required String schoolId,
+    required String department,
+    required String course,
+    required String yearLevel,
+    required DateTime dateOfBirth,
+    String? middleName,
+    String? employeeId,
+    String? position,
+    AssessmentRole role = AssessmentRole.student,
+    String? gender,
+  }) {
+    return _runAuthAction(
+      () => _repository.completeFederatedProfileSetup(
+        firstName: firstName,
+        lastName: lastName,
+        schoolId: schoolId,
+        department: department,
+        course: course,
+        yearLevel: yearLevel,
+        dateOfBirth: dateOfBirth,
+        middleName: middleName,
+        employeeId: employeeId,
+        position: position,
+        role: role,
+        gender: gender,
+      ),
+    );
+  }
+
   SignupState _failedSignupState(Object error) {
     if (FirebaseErrorMessage.isAppCheckFailure(error)) {
       return SignupState.appCheckRejected;
     }
     if (FirebaseErrorMessage.codeOf(error) == 'email-already-in-use') {
-      return SignupState.duplicateSchoolId;
+      return SignupState.duplicateEmail;
     }
     if (FirebaseErrorMessage.isNetworkFailure(error)) {
       return SignupState.networkFailed;
@@ -266,6 +380,8 @@ class AuthProvider extends ChangeNotifier {
   void _clearSession({bool notify = true}) {
     _isAuthenticated = false;
     _userId = null;
+    _registrationEmail = null;
+    _pendingSignupSchoolId = null;
     _signupState = SignupState.idle;
     onSessionCleared?.call();
     if (notify) notifyListeners();

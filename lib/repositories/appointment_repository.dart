@@ -40,6 +40,8 @@ class AppointmentRepository {
     final profile = await _userRepository.fetchUserProfile(appointment.userId);
     final data = appointment.toJson()
       ..['populationRole'] = profile?.effectivePopulationRole?.storedValue ?? ''
+      ..['department'] = profile?.department ?? appointment.department ?? ''
+      ..['academicYearId'] = _academicYearFor(appointment.scheduledAt)
       ..['createdAt'] = FieldValue.serverTimestamp()
       ..['updatedAt'] = FieldValue.serverTimestamp();
     final id = await _firestoreService.createDocument(
@@ -51,5 +53,10 @@ class AppointmentRepository {
       UserActivityType.appointmentRequested,
     );
     return appointment.copyWith(id: id, updatedAt: DateTime.now());
+  }
+
+  static String _academicYearFor(DateTime date) {
+    final start = date.month >= 6 ? date.year : date.year - 1;
+    return '$start-${start + 1}';
   }
 }

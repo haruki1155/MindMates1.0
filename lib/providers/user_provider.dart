@@ -24,7 +24,7 @@ class UserProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadProfile(String uid) async {
+  Future<bool> loadProfile(String uid) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -33,9 +33,13 @@ class UserProvider extends ChangeNotifier {
       final fetchedUser = await _repository.fetchUserProfile(uid);
       if (fetchedUser != null) {
         _user = fetchedUser;
+        return true;
       }
+      _errorMessage = 'Profile was not found.';
+      return false;
     } catch (error) {
       _errorMessage = 'Unable to load profile.';
+      return false;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -55,6 +59,34 @@ class UserProvider extends ChangeNotifier {
     } catch (error) {
       _user = previous;
       _errorMessage = 'Unable to update profile.';
+      return false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> uploadProfileImage(
+    String uid,
+    Uint8List bytes, {
+    required String contentType,
+  }) async {
+    _isSaving = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final uploaded = await _repository.uploadProfileImage(
+        uid,
+        bytes,
+        contentType: contentType,
+      );
+      _user = _user?.copyWith(
+        profilePhotoUrl: uploaded.url,
+        profilePhotoPath: uploaded.path,
+      );
+      return true;
+    } catch (_) {
+      _errorMessage = 'Unable to upload profile image.';
       return false;
     } finally {
       _isSaving = false;

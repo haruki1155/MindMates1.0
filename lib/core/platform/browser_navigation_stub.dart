@@ -1,0 +1,1 @@
+void replaceBrowserLocation(String url) {}

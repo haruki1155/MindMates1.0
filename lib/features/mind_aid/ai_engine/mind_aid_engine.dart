@@ -12,6 +12,8 @@ class MindAidEngine {
 
   final MemoryEngine _memory;
 
+  void resetSession() => _memory.reset();
+
   MindAidEngineResult process(
     String input,
     MindAidDatasetBundle dataset, {
@@ -29,10 +31,12 @@ class MindAidEngine {
       ],
       moodLevel: context.moodLevel,
       assessmentScore: context.assessmentScore,
+      quickAssessment: context.quickAssessment,
       assessment: context.assessment,
       conversationSummary: context.conversationSummary,
       preferredSupportStyle: context.preferredSupportStyle,
       journalText: context.journalText,
+      wellnessSnapshot: context.wellnessSnapshot,
     );
 
     final match = IntentEngine.detectBestMatch(

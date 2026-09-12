@@ -1,4 +1,5 @@
 import '../core/utils/firestore_mapper.dart';
+import 'assessment_explanation_model.dart';
 
 class ReportModel {
   const ReportModel({
@@ -18,9 +19,15 @@ class ReportModel {
     this.quickAssessmentScore,
     this.quickAssessmentStatus,
     this.quickAssessmentSignal,
+    this.quickAssessmentSummary,
+    this.quickAssessmentAreaStatuses = const {},
+    this.quickAssessmentExplanation,
     this.fullAssessmentScore,
     this.fullAssessmentStatus,
+    this.fullAssessmentSummary,
+    this.fullAssessmentDomainStatuses = const {},
     this.fullAssessmentTopConcernAreas = const [],
+    this.fullAssessmentExplanation,
     this.mindAidMessageCount = 0,
     this.activeDayCount = 0,
     this.currentStreak = 0,
@@ -57,9 +64,15 @@ class ReportModel {
   final int? quickAssessmentScore;
   final String? quickAssessmentStatus;
   final String? quickAssessmentSignal;
+  final String? quickAssessmentSummary;
+  final Map<String, String> quickAssessmentAreaStatuses;
+  final AssessmentExplanationModel? quickAssessmentExplanation;
   final int? fullAssessmentScore;
   final String? fullAssessmentStatus;
+  final String? fullAssessmentSummary;
+  final Map<String, String> fullAssessmentDomainStatuses;
   final List<String> fullAssessmentTopConcernAreas;
+  final AssessmentExplanationModel? fullAssessmentExplanation;
   final int mindAidMessageCount;
   final int activeDayCount;
   final int currentStreak;
@@ -99,12 +112,26 @@ class ReportModel {
       quickAssessmentScore: _intOrNull(json['quickAssessmentScore']),
       quickAssessmentStatus: _stringOrNull(json['quickAssessmentStatus']),
       quickAssessmentSignal: _stringOrNull(json['quickAssessmentSignal']),
+      quickAssessmentSummary: _stringOrNull(json['quickAssessmentSummary']),
+      quickAssessmentAreaStatuses: _stringMap(
+        json['quickAssessmentAreaStatuses'],
+      ),
+      quickAssessmentExplanation: _explanation(
+        json['quickAssessmentExplanation'],
+      ),
       fullAssessmentScore: _intOrNull(json['fullAssessmentScore']),
       fullAssessmentStatus: _stringOrNull(json['fullAssessmentStatus']),
+      fullAssessmentSummary: _stringOrNull(json['fullAssessmentSummary']),
+      fullAssessmentDomainStatuses: _stringMap(
+        json['fullAssessmentDomainStatuses'],
+      ),
       fullAssessmentTopConcernAreas:
           (json['fullAssessmentTopConcernAreas'] as List<dynamic>? ?? const [])
               .map((area) => area.toString())
               .toList(growable: false),
+      fullAssessmentExplanation: _explanation(
+        json['fullAssessmentExplanation'],
+      ),
       mindAidMessageCount: intFromFirestore(json['mindAidMessageCount']),
       activeDayCount: intFromFirestore(json['activeDayCount']),
       currentStreak: intFromFirestore(json['currentStreak']),
@@ -154,9 +181,15 @@ class ReportModel {
       'quickAssessmentScore': quickAssessmentScore,
       'quickAssessmentStatus': quickAssessmentStatus,
       'quickAssessmentSignal': quickAssessmentSignal,
+      'quickAssessmentSummary': quickAssessmentSummary,
+      'quickAssessmentAreaStatuses': quickAssessmentAreaStatuses,
+      'quickAssessmentExplanation': quickAssessmentExplanation?.toJson(),
       'fullAssessmentScore': fullAssessmentScore,
       'fullAssessmentStatus': fullAssessmentStatus,
+      'fullAssessmentSummary': fullAssessmentSummary,
+      'fullAssessmentDomainStatuses': fullAssessmentDomainStatuses,
       'fullAssessmentTopConcernAreas': fullAssessmentTopConcernAreas,
+      'fullAssessmentExplanation': fullAssessmentExplanation?.toJson(),
       'mindAidMessageCount': mindAidMessageCount,
       'activeDayCount': activeDayCount,
       'currentStreak': currentStreak,
@@ -249,5 +282,22 @@ class ReportModel {
     if (value is double) return value;
     if (value is num) return value.toDouble();
     return double.tryParse(value.toString());
+  }
+
+  static Map<String, String> _stringMap(Object? value) {
+    if (value is! Map) return const {};
+    return {
+      for (final entry in value.entries)
+        if (entry.key.toString().trim().isNotEmpty &&
+            entry.value.toString().trim().isNotEmpty)
+          entry.key.toString(): entry.value.toString(),
+    };
+  }
+
+  static AssessmentExplanationModel? _explanation(Object? value) {
+    if (value is! Map) return null;
+    return AssessmentExplanationModel.fromJson(
+      Map<String, dynamic>.from(value),
+    );
   }
 }

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/counseling/screens/client_feedback_form_screen.dart';
+import 'package:mind_mates/features/counseling/screens/guidance_satisfaction_survey_screen.dart';
 import 'package:mind_mates/features/counseling/screens/pacc_counseling_screen.dart';
+import 'package:mind_mates/features/counseling/screens/service_detail_screen.dart';
 import 'package:mind_mates/features/counseling/screens/services_screen.dart';
 import 'package:mind_mates/models/appointment_model.dart';
 import 'package:mind_mates/models/user_model.dart';
@@ -25,16 +28,161 @@ void main() {
     expect(find.byTooltip('Notifications'), findsOneWidget);
     expect(find.text('PACC Services'), findsOneWidget);
     expect(find.text('All Services'), findsOneWidget);
-    expect(find.text('Information Services'), findsOneWidget);
-    expect(find.text('Individual Inventory Services'), findsOneWidget);
-    expect(find.text('Counseling Services'), findsOneWidget);
-    expect(find.text('Career Guidance and Placement Services'), findsOneWidget);
-    expect(find.text('Referral Services'), findsOneWidget);
-    expect(find.text('Follow-up Services'), findsOneWidget);
-    expect(find.text('Inquire'), findsNWidgets(3));
-    expect(find.text('Contact counselor'), findsOneWidget);
+    expect(find.text('Information Service'), findsOneWidget);
+    expect(find.text('Individual Inventory Service'), findsOneWidget);
+    expect(find.text('Testing Service'), findsOneWidget);
+    expect(find.text('Counseling Service'), findsOneWidget);
+    expect(find.text('Career Guidance and Placement Service'), findsOneWidget);
+    expect(find.text('Referral Service'), findsOneWidget);
+    expect(find.text('Follow-up Service'), findsOneWidget);
+    expect(find.text('Key Features'), findsNothing);
+    expect(find.text('Learn More'), findsNothing);
+    expect(find.text('Inquire'), findsNothing);
+    expect(find.text('PAACC Support Service'), findsOneWidget);
+    expect(find.text('Set Appointment'), findsOneWidget);
+    expect(find.text('Take satisfaction survey'), findsNothing);
+    expect(find.text('Open client feedback form'), findsNothing);
     expect(find.text('Today'), findsNothing);
     expect(find.text('Secret chat'), findsNothing);
+  });
+
+  testWidgets('service cards are tappable and open the detail screen', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 5000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_servicesApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Testing Service'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ServiceDetailScreen), findsOneWidget);
+    expect(find.text('Testing Service'), findsNWidgets(2));
+    expect(
+      find.textContaining('psychological tests and non-psychometric devices'),
+      findsOneWidget,
+    );
+    expect(find.text('Set Appointment'), findsNothing);
+
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ServiceDetailScreen), findsNothing);
+    expect(find.byType(ServicesScreen), findsOneWidget);
+  });
+
+  testWidgets('counseling detail screen shows the appointment CTA', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 5000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_servicesApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Counseling Service'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ServiceDetailScreen), findsOneWidget);
+    expect(
+      find.textContaining('"heart" of the guidance program'),
+      findsOneWidget,
+    );
+    expect(find.text('Appointment Support'), findsOneWidget);
+    expect(find.text('CONFIDENTIAL COUNSELING'), findsOneWidget);
+    expect(find.text('Schedule a Counseling Session'), findsOneWidget);
+    expect(find.text('Set Appointment'), findsOneWidget);
+
+    await tester.tap(find.text('Set Appointment'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PaccCounselingScreen), findsOneWidget);
+  });
+
+  testWidgets('follow-up shows procedure placeholders without removed forms', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_servicesApp());
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Follow-up Service'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Follow-up Service'));
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -700));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Reactivation of Enrollment'), findsOneWidget);
+    expect(
+      find.textContaining('The reactivation process helps returning students'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('reactivation-procedure-steps')),
+      findsOneWidget,
+    );
+    expect(find.text('Open Reactivation Form'), findsNothing);
+    expect(find.text('Student Shifting'), findsOneWidget);
+    expect(
+      find.textContaining('The shifting process helps students'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('shifting-procedure-steps')),
+      findsOneWidget,
+    );
+    expect(find.text('Open Shifting Form'), findsNothing);
+    expect(find.text('Available Forms'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('career guidance detail opens the student satisfaction survey', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 3000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_servicesApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Career Guidance and Placement Service'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Available Forms'), findsOneWidget);
+    expect(find.text('SERVICE EVALUATION'), findsOneWidget);
+    expect(find.text('Guidance Services Student Satisfaction'), findsOneWidget);
+    expect(find.text('CLIENT EXPERIENCE'), findsOneWidget);
+    expect(find.text('Client Feedback Form'), findsOneWidget);
+
+    await tester.tap(find.text('Open Satisfaction Survey'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(GuidanceSatisfactionSurveyScreen), findsOneWidget);
+    expect(find.text('Student Satisfaction Survey'), findsOneWidget);
+  });
+
+  testWidgets('career guidance detail opens the client feedback form', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 3000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_servicesApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Career Guidance and Placement Service'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open Client Feedback Form'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ClientFeedbackFormScreen), findsOneWidget);
+    expect(find.text('STEP 1 OF 3'), findsOneWidget);
+    expect(find.text('Client information'), findsOneWidget);
   });
 
   testWidgets('services Back returns to the previous screen', (tester) async {
@@ -88,7 +236,7 @@ void main() {
     await tester.pumpWidget(_servicesApp());
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.text('Contact counselor'),
+      find.text('Set Appointment'),
       500,
       scrollable: find.byType(Scrollable).first,
     );
@@ -97,7 +245,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('contact counselor opens PACC appointment flow', (tester) async {
+  testWidgets('set appointment opens PACC appointment flow', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -105,13 +253,13 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('Contact counselor'),
+      find.text('Set Appointment'),
       420,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Contact counselor'));
+    await tester.tap(find.text('Set Appointment'));
     await tester.pumpAndSettle();
 
     expect(find.byType(PaccCounselingScreen), findsOneWidget);

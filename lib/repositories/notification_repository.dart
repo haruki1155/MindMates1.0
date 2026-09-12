@@ -25,6 +25,7 @@ class NotificationRepository {
                         id: item['id']?.toString(),
                       ),
                     )
+                    .where((item) => !item.isArchived)
                     .toList()
                   ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
           );

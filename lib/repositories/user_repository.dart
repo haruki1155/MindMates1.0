@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 import '../database/firestore_collections.dart';
 import '../models/user_model.dart';
@@ -138,6 +141,27 @@ class UserRepository {
       uid,
       user.toProfileUpdateJson(),
     );
+  }
+
+  Future<({String url, String path})> uploadProfileImage(
+    String uid,
+    Uint8List bytes, {
+    required String contentType,
+  }) async {
+    if (bytes.isEmpty || bytes.length > 5 * 1024 * 1024) {
+      throw ArgumentError('Profile image must be between 1 byte and 5 MB.');
+    }
+    final extension = contentType == 'image/png' ? 'png' : 'jpg';
+    final path = 'profile_images/$uid/avatar.$extension';
+    final reference = FirebaseStorage.instance.ref(path);
+    await reference.putData(bytes, SettableMetadata(contentType: contentType));
+    final url = await reference.getDownloadURL();
+    await _firestoreService.updateDocument(FirestoreCollections.users, uid, {
+      'profilePhotoUrl': url,
+      'profilePhotoPath': path,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return (url: url, path: path);
   }
 
   Future<void> requestRoleCorrection({

@@ -1,4 +1,5 @@
 import '../models/student_assessment_models.dart';
+import '../models/assessment_interpretation_models.dart';
 import 'assessment_interpretation_engine.dart';
 
 enum AssessmentUserType { student, faculty, staff }
@@ -8,14 +9,20 @@ class StudentAssessmentCalculator {
 
   static const double minimumDomainCompletion = 0.70;
   static const int minimumDomainAnswers = 3;
+  static const int minimumAnswerValue = 1;
+  static const int maximumAnswerValue = 4;
 
   static double riskScore({
     required LikertAnswer answer,
     required AssessmentDirection direction,
   }) {
+    final normalized =
+        ((answer.value - minimumAnswerValue) /
+            (maximumAnswerValue - minimumAnswerValue)) *
+        100;
     return direction == AssessmentDirection.protective
-        ? ((5 - answer.value) / 4) * 100
-        : ((answer.value - 1) / 4) * 100;
+        ? 100 - normalized
+        : normalized;
   }
 
   static bool shouldShowDeeperAcademicQuestions({
@@ -115,6 +122,10 @@ class StudentAssessmentCalculator {
         for (final domain in config.domains) domain.label: domain.allSections,
       },
       userType: config.userLabel,
+      overallWellBeingStatus: AssessmentResponsePattern.labelForScore(
+        overallScore,
+        isScorable: overallScore != null,
+      ),
     );
 
     return StudentAssessmentResult(
@@ -133,24 +144,21 @@ class StudentAssessmentCalculator {
   }
 
   static String getStatus(double score) {
-    if (score <= 20) return 'Low Concern';
-    if (score <= 40) return 'Watchful';
-    if (score <= 60) return 'Moderate Concern';
-    if (score <= 80) return 'Elevated Concern';
-    return 'High Concern';
+    if (score <= 20) return 'Thriving';
+    if (score <= 40) return 'Stable';
+    if (score <= 60) return 'Needs Improvement';
+    return 'At Risk';
   }
 
   static String getMessage(String status) => switch (status) {
-    'Low Concern' =>
-      'Your answered categories currently show a relatively low concern pattern. Continue the routines and support that are working for you.',
-    'Watchful' =>
+    'Thriving' =>
+      'Your answered categories suggest strong current well-being. Continue the routines and support that are working for you.',
+    'Stable' =>
       'Your responses suggest some areas worth watching. Small supportive habits and regular check-ins may help you notice changes.',
-    'Moderate Concern' =>
+    'Needs Improvement' =>
       'Your responses show noticeable strain in one or more wellness areas. Review the category details and consider talking with someone you trust.',
-    'Elevated Concern' =>
-      'Your responses show elevated strain. A conversation with university wellness support or a qualified professional may be helpful.',
-    'High Concern' =>
-      'Your responses show a high concern pattern. Timely support from the university guidance office or a qualified professional is recommended.',
+    'At Risk' =>
+      'Your responses show elevated strain in one or more areas. Timely support from the university guidance office or a qualified professional is recommended.',
     _ => 'Your category results are ready to review.',
   };
 
@@ -197,7 +205,7 @@ class StudentAssessmentCalculator {
   static double _round(double value) => double.parse(value.toStringAsFixed(2));
 
   static const _pilotDisclaimer =
-      'This is an experimental university wellness-awareness screener, not a formally validated instrument or a diagnosis. It is designed to support reflection and conversation, not replace professional judgment. If you feel unsafe or need immediate help, contact your university support office, a trusted person, or a qualified mental health professional.';
+      'This result comes from an experimental university wellness-awareness screener, not a formally validated instrument or a diagnosis. It is designed to support reflection and conversation, not replace professional judgment. If you feel unsafe or need immediate help, contact your university support office, a trusted person, or a qualified mental health professional.';
 }
 
 class _DomainScore {
@@ -233,19 +241,19 @@ class _RoleConfig {
           AssessmentSection.academicCore,
           AssessmentSection.academicDeeper,
         },
-        weight: .25,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Financial Well-Being',
         scoredSections: {AssessmentSection.financialConcern},
         allSections: {AssessmentSection.financialConcern},
-        weight: .15,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Social Adjustment',
         scoredSections: {AssessmentSection.socialAdjustment},
         allSections: {AssessmentSection.socialAdjustment},
-        weight: .10,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Sleep and Rest',
@@ -257,7 +265,7 @@ class _RoleConfig {
         label: 'Emotional Well-Being',
         scoredSections: {AssessmentSection.emotionalWellBeing},
         allSections: {AssessmentSection.emotionalWellBeing},
-        weight: .30,
+        weight: .20,
       ),
     ]),
     AssessmentUserType.faculty => const _RoleConfig('Teaching Personnel', [
@@ -268,31 +276,31 @@ class _RoleConfig {
           AssessmentSection.workplaceStressCore,
           AssessmentSection.workplaceStressDeeper,
         },
-        weight: .30,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Professional Support',
         scoredSections: {AssessmentSection.professionalSupport},
         allSections: {AssessmentSection.professionalSupport},
-        weight: .15,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Professional Well-Being',
         scoredSections: {AssessmentSection.professionalWellBeing},
         allSections: {AssessmentSection.professionalWellBeing},
-        weight: .15,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Sleep and Rest',
         scoredSections: {AssessmentSection.sleepRest},
         allSections: {AssessmentSection.sleepRest},
-        weight: .15,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Emotional Well-Being',
         scoredSections: {AssessmentSection.emotionalWellBeing},
         allSections: {AssessmentSection.emotionalWellBeing},
-        weight: .25,
+        weight: .20,
       ),
     ]),
     AssessmentUserType.staff => const _RoleConfig('Non-Teaching Personnel', [
@@ -303,31 +311,31 @@ class _RoleConfig {
           AssessmentSection.workplaceResponsibilityCore,
           AssessmentSection.workplaceResponsibilityDeeper,
         },
-        weight: .30,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Workplace Support',
         scoredSections: {AssessmentSection.workplaceSupport},
         allSections: {AssessmentSection.workplaceSupport},
-        weight: .15,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Workplace Well-Being',
         scoredSections: {AssessmentSection.workplaceWellBeing},
         allSections: {AssessmentSection.workplaceWellBeing},
-        weight: .15,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Sleep and Rest',
         scoredSections: {AssessmentSection.sleepRest},
         allSections: {AssessmentSection.sleepRest},
-        weight: .15,
+        weight: .20,
       ),
       _DomainConfig(
         label: 'Emotional Well-Being',
         scoredSections: {AssessmentSection.emotionalWellBeing},
         allSections: {AssessmentSection.emotionalWellBeing},
-        weight: .25,
+        weight: .20,
       ),
     ]),
   };

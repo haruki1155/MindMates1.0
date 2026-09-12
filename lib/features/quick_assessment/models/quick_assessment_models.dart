@@ -171,6 +171,11 @@ class QuickAssessmentResult {
   final DateTime createdAt;
   final AssessmentInterpretation interpretation;
 
+  String get responsePatternCode =>
+      AssessmentResponsePattern.codeForScore(concernScore);
+  String get responsePatternLabel =>
+      AssessmentResponsePattern.labelForCode(responsePatternCode);
+
   Map<String, Object> toJson() {
     return {
       'role': role.name,
@@ -178,6 +183,8 @@ class QuickAssessmentResult {
       'responses': responses.map((response) => response.toJson()).toList(),
       'concernScore': concernScore,
       'overallLevel': overallLevel.name,
+      'responsePatternCode': responsePatternCode,
+      'responsePatternLabel': responsePatternLabel,
       'summary': summary,
       'topConcernAreas': topConcernAreas,
       'recommendedNextStep': recommendedNextStep,

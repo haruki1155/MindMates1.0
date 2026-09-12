@@ -81,7 +81,7 @@ void main() {
     expect(provider.errorMessage, contains('debug build is not verified'));
   });
 
-  test('duplicate School ID has a distinct signup state', () async {
+  test('duplicate email has a distinct signup state', () async {
     final provider = AuthProvider(
       _SignupFailureRepository(
         firebase_auth.FirebaseAuthException(code: 'email-already-in-use'),
@@ -91,8 +91,8 @@ void main() {
     final userId = await _attemptSignup(provider);
 
     expect(userId, isNull);
-    expect(provider.signupState, SignupState.duplicateSchoolId);
-    expect(provider.errorMessage, contains('School ID'));
+    expect(provider.signupState, SignupState.duplicateEmail);
+    expect(provider.errorMessage, contains('email address'));
   });
 
   test('network failure has a distinct signup state', () async {
@@ -217,6 +217,8 @@ class _SignupFailureRepository extends AuthRepository {
     String? position,
     String? middleName,
     AssessmentRole? role,
+    DateTime? dateOfBirth,
+    String? gender,
   }) async => throw error;
 
   @override
@@ -250,6 +252,8 @@ class _PendingProfileRepository extends AuthRepository {
     String? position,
     String? middleName,
     AssessmentRole? role,
+    DateTime? dateOfBirth,
+    String? gender,
   }) async {
     signupCalls++;
     throw SignupProfileProvisioningException(
@@ -271,6 +275,8 @@ class _PendingProfileRepository extends AuthRepository {
     String? position,
     String? middleName,
     AssessmentRole? role,
+    DateTime? dateOfBirth,
+    String? gender,
   }) async {
     profileRetryCalls++;
     return 'user_1';
@@ -301,6 +307,8 @@ class _AuthenticationFailureRepository extends AuthRepository {
     String? position,
     String? middleName,
     AssessmentRole? role,
+    DateTime? dateOfBirth,
+    String? gender,
   }) async => throw StateError('Authentication failed.');
 
   @override
@@ -331,6 +339,8 @@ class _ProfileLookupFailureRepository extends AuthRepository {
     String? position,
     String? middleName,
     AssessmentRole? role,
+    DateTime? dateOfBirth,
+    String? gender,
   }) async {
     throw SignupProfileLookupException(
       'user_1',

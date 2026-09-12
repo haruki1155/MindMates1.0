@@ -10,6 +10,7 @@ class AssessmentInterpretationEngine {
     required Map<String, double> domainScores,
     required Map<String, Set<AssessmentSection>> domainSections,
     required String userType,
+    required String overallWellBeingStatus,
   }) {
     final answerById = {
       for (final answer in answers) answer.questionId: answer,
@@ -110,6 +111,8 @@ class AssessmentInterpretationEngine {
     );
     final rationale = _rationale(priority, domainResults, functionalFlags);
     final actions = _actions(priority, domainResults);
+    final strengthInsights = _strengthInsights(domainResults);
+    final focusInsights = _focusInsights(domainResults, functionalFlags);
     final focus = domainResults
         .where((domain) => domain.isScorable && domain.score > 40)
         .take(3);
@@ -123,8 +126,10 @@ class AssessmentInterpretationEngine {
       domainResults: domainResults,
       protectiveFactors: protectiveFactors.take(5).toList(),
       functionalImpactFlags: functionalFlags.take(5).toList(),
+      strengthInsights: strengthInsights,
+      focusInsights: focusInsights,
       rationale: rationale,
-      userSummary: _userSummary(priority, focusText),
+      userSummary: _userSummary(priority, focusText, overallWellBeingStatus),
       counselorSummary:
           '$userType screening: ${priority.label}. $focusText '
           'Response confidence: ${quality.confidence.label.toLowerCase()} '
@@ -177,9 +182,7 @@ class AssessmentInterpretationEngine {
         in domains
             .where((domain) => domain.isScorable && domain.score > 40)
             .take(3)) {
-      reasons.add(
-        '${domain.domain}: ${domain.score.toStringAsFixed(0)}/100 (${domain.band.label.toLowerCase()})',
-      );
+      reasons.add('${domain.domain}: ${domain.responsePatternLabel}');
     }
     if (functionalFlags.isNotEmpty) {
       reasons.add(
@@ -200,20 +203,21 @@ class AssessmentInterpretationEngine {
   static String _userSummary(
     AssessmentSupportPriority priority,
     String focusText,
+    String overallWellBeingStatus,
   ) {
     final opening = switch (priority) {
       AssessmentSupportPriority.routine =>
-        'Your responses suggest generally manageable current well-being.',
+        'Your responses show several supportive habits and generally manageable day-to-day well-being.',
       AssessmentSupportPriority.monitor =>
-        'Your responses suggest an area that may benefit from monitoring and supportive habits.',
+        'Most areas appear manageable, with opportunities for small adjustments and continued awareness.',
       AssessmentSupportPriority.followUpSuggested =>
-        'Your responses suggest notable strain that may benefit from a conversation with a counselor or trusted support person.',
+        'You are managing some areas well, while other parts of daily life may benefit from more attention and support.',
       AssessmentSupportPriority.promptFollowUp =>
-        'Your responses suggest several elevated concerns. Timely support from PACC or another qualified professional is recommended.',
+        'One or more areas may be placing extra pressure on daily life. You do not have to work through those challenges alone.',
       AssessmentSupportPriority.insufficientResponses =>
         'There were not enough answered questions for a dependable interpretation.',
     };
-    return '$opening $focusText This screening result is not a diagnosis.';
+    return '$opening $focusText';
   }
 
   static List<String> _actions(
@@ -242,19 +246,84 @@ class AssessmentInterpretationEngine {
     String domain,
     AssessmentConcernBand band,
   ) {
-    return switch (band) {
-      AssessmentConcernBand.low =>
-        '$domain responses currently show a relatively low concern pattern.',
-      AssessmentConcernBand.watchful =>
-        '$domain may benefit from routine monitoring and supportive habits.',
-      AssessmentConcernBand.moderate =>
-        '$domain shows a noticeable concern pattern worth reviewing.',
-      AssessmentConcernBand.elevated =>
-        '$domain shows elevated strain that may benefit from follow-up.',
-      AssessmentConcernBand.high =>
-        '$domain shows a high concern pattern and deserves timely attention.',
+    return switch ((domain, band)) {
+      (_, AssessmentConcernBand.low) =>
+        'Your responses show supportive habits or resources in this area.',
+      (_, AssessmentConcernBand.watchful) =>
+        'This area appears mostly manageable, with room for continued awareness.',
+      ('Academic Stress', AssessmentConcernBand.moderate) =>
+        'Academic demands may be adding pressure to your concentration, motivation, or routine.',
+      ('Financial Well-Being', AssessmentConcernBand.moderate) =>
+        'Financial concerns may be adding pressure to your studies or daily experience.',
+      ('Social Adjustment', AssessmentConcernBand.moderate) =>
+        'Connection or adjustment may feel less steady in some situations right now.',
+      ('Sleep and Rest', AssessmentConcernBand.moderate) =>
+        'Sleep or rest patterns may be influencing your energy and concentration.',
+      ('Emotional Well-Being', AssessmentConcernBand.moderate) =>
+        'Emotional demands may be using more of your energy than usual.',
+      (_, AssessmentConcernBand.moderate) =>
+        'This area may be creating additional pressure and is worth exploring.',
+      ('Academic Stress', _) =>
+        'Academic demands may be creating sustained pressure. Additional planning or support could make them easier to manage.',
+      ('Financial Well-Being', _) =>
+        'Financial concerns may be affecting focus or daily stress. Practical guidance may help reduce some of that pressure.',
+      ('Social Adjustment', _) =>
+        'Social connection or adjustment may currently feel difficult. A trusted person or welcoming group may help.',
+      ('Sleep and Rest', _) =>
+        'Sleep and recovery may be affecting energy, focus, or daily functioning. A realistic rest plan may help.',
+      ('Emotional Well-Being', _) =>
+        'Emotional demands may be affecting daily well-being. A supportive conversation may make this easier to carry.',
+      (_, _) =>
+        'This area may currently be adding pressure. Consider one manageable support step.',
     };
   }
+
+  static List<String> _strengthInsights(List<AssessmentDomainResult> domains) {
+    final insights = <String>[];
+    for (final domain in domains) {
+      if (!domain.isScorable) continue;
+      if (domain.score <= 20) {
+        insights.add('${domain.domain} currently shows supportive patterns.');
+      } else if (domain.score <= 40) {
+        insights.add('${domain.domain} appears generally manageable.');
+      }
+      if (domain.protectiveIndicators.isNotEmpty) {
+        insights.add(_protectiveInsightFor(domain.domain));
+      }
+    }
+    return insights.toSet().take(3).toList(growable: false);
+  }
+
+  static List<String> _focusInsights(
+    List<AssessmentDomainResult> domains,
+    List<String> functionalFlags,
+  ) {
+    final insights = domains
+        .where((domain) => domain.isScorable && domain.score > 40)
+        .take(3)
+        .map((domain) => domain.interpretation)
+        .toList();
+    if (functionalFlags.isNotEmpty) {
+      insights.add(
+        'Some responses suggest that current pressures may be affecting everyday focus, rest, motivation, or routines.',
+      );
+    }
+    return insights.toSet().take(4).toList(growable: false);
+  }
+
+  static String _protectiveInsightFor(String domain) => switch (domain) {
+    'Academic Stress' =>
+      'You identified at least one academic coping habit or source of support.',
+    'Financial Well-Being' =>
+      'You identified at least one helpful way of understanding or responding to financial concerns.',
+    'Social Adjustment' =>
+      'You identified at least one positive connection or help-seeking strength.',
+    'Sleep and Rest' =>
+      'You identified at least one rest or recovery habit that can support you.',
+    'Emotional Well-Being' =>
+      'You identified at least one emotional-awareness or help-seeking strength.',
+    _ => 'You identified at least one supportive habit in this area.',
+  };
 
   static String _domainAction(String domain, AssessmentConcernBand band) {
     final support = switch (domain) {
@@ -303,9 +372,10 @@ class AssessmentInterpretationEngine {
   }
 
   static double _riskScore(LikertAnswer answer, AssessmentDirection direction) {
+    final normalized = ((answer.value - 1) / 3) * 100;
     return direction == AssessmentDirection.protective
-        ? ((5 - answer.value) / 4) * 100
-        : ((answer.value - 1) / 4) * 100;
+        ? 100 - normalized
+        : normalized;
   }
 
   static double _round(double value) => double.parse(value.toStringAsFixed(2));

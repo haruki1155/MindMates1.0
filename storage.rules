@@ -23,5 +23,14 @@ service firebase.storage {
       allow update: if isOwner(userId) && validProfileImage(fileName);
       allow delete: if isOwner(userId);
     }
+
+    match /profile_images/{userId}/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if isOwner(userId)
+        && fileName.matches('^avatar[.](jpg|png)$')
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('^image/(jpeg|png)$');
+      allow delete: if isOwner(userId);
+    }
   }
 }

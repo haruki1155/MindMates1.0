@@ -3,11 +3,15 @@ import 'assessment_interpretation_models.dart';
 enum LikertAnswer {
   never,
   rarely,
-  sometimes,
   often,
   always;
 
-  int get value => index + 1;
+  int get value => switch (this) {
+    LikertAnswer.never => 1,
+    LikertAnswer.rarely => 2,
+    LikertAnswer.often => 3,
+    LikertAnswer.always => 4,
+  };
 
   String get label {
     switch (this) {
@@ -15,8 +19,6 @@ enum LikertAnswer {
         return 'Strongly Disagree';
       case LikertAnswer.rarely:
         return 'Disagree';
-      case LikertAnswer.sometimes:
-        return 'Neutral';
       case LikertAnswer.often:
         return 'Agree';
       case LikertAnswer.always:
@@ -134,11 +136,21 @@ class StudentAssessmentResult {
   final int totalResponses;
   final AssessmentInterpretation interpretation;
 
+  String get responsePatternCode => AssessmentResponsePattern.codeForScore(
+    overallScore,
+    isScorable: overallScore != null,
+  );
+  String get responsePatternLabel =>
+      AssessmentResponsePattern.labelForCode(responsePatternCode);
+
   Map<String, Object> toJson() {
     return {
       'userType': userType,
       'overallScore': ?overallScore,
       'status': status,
+      'wellBeingStatus': status,
+      'responsePatternCode': responsePatternCode,
+      'responsePatternLabel': responsePatternLabel,
       'subscaleScores': subscaleScores,
       'mainConcernAreas': mainConcernAreas,
       'message': message,

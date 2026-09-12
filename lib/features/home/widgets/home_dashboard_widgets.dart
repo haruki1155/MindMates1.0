@@ -347,19 +347,15 @@ class HomeWelcomeCard extends StatelessWidget {
   const HomeWelcomeCard({
     super.key,
     required this.user,
-    required this.streak,
     required this.onNotificationTap,
-    required this.onStreakTap,
-    required this.onMoodTap,
-    required this.actionLabel,
+    required this.onCalendarTap,
+    required this.onProfileTap,
   });
 
   final HomeUserData user;
-  final HomeStreakData? streak;
   final VoidCallback onNotificationTap;
-  final VoidCallback onStreakTap;
-  final VoidCallback onMoodTap;
-  final String actionLabel;
+  final VoidCallback onCalendarTap;
+  final VoidCallback onProfileTap;
 
   @override
   Widget build(BuildContext context) {
@@ -376,6 +372,16 @@ class HomeWelcomeCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              HomeCircleIconButton(
+                icon: Icons.person_outline,
+                assetName: 'Customer.png',
+                assetColor: HomePalette.text,
+                tooltip: 'Profile',
+                onTap: onProfileTap,
+                size: 36,
+                iconSize: 20,
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -404,6 +410,15 @@ class HomeWelcomeCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               HomeCircleIconButton(
+                icon: Icons.calendar_today_outlined,
+                assetName: 'Calendar.png',
+                tooltip: 'Calendar',
+                onTap: onCalendarTap,
+                size: 36,
+                iconSize: 20,
+              ),
+              const SizedBox(width: 8),
+              HomeCircleIconButton(
                 icon: Icons.notifications_none,
                 assetName: 'Notification.png',
                 tooltip: 'Notifications',
@@ -422,23 +437,154 @@ class HomeWelcomeCard extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 14),
-          _StreakCard(data: streak, onTap: onStreakTap),
-          const SizedBox(height: 14),
-          HomeWideButton(
-            label: actionLabel,
-            icon: Icons.add,
-            assetName: '+.png',
-            onTap: onMoodTap,
-          ),
         ],
       ),
     );
   }
 }
 
-class _StreakCard extends StatelessWidget {
-  const _StreakCard({required this.data, required this.onTap});
+class HomeDashboardBackground extends StatelessWidget {
+  const HomeDashboardBackground({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(child: CustomPaint(painter: _HomeBubblePainter()));
+  }
+}
+
+class _HomeBubblePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, 86),
+      Paint()..color = HomePalette.sun,
+    );
+    final bubbles = <(Offset, double, Color)>[
+      (Offset(size.width * .54, 195), 17, const Color(0x55FFD75C)),
+      (Offset(size.width * .92, 330), 16, const Color(0x3DFFD75C)),
+      (Offset(size.width * .12, 690), 19, const Color(0x42E8D7A0)),
+      (Offset(size.width * .93, 790), 17, const Color(0x4DFFD75C)),
+      (Offset(size.width * .20, 1170), 18, const Color(0x55D5C58E)),
+      (Offset(size.width * .88, 1480), 18, const Color(0x48FFD75C)),
+      (Offset(size.width * .24, 1840), 17, const Color(0x55D5C58E)),
+    ];
+    for (final bubble in bubbles) {
+      canvas.drawCircle(bubble.$1, bubble.$2, Paint()..color = bubble.$3);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class HomeAnnouncementCard extends StatelessWidget {
+  const HomeAnnouncementCard({
+    super.key,
+    required this.onViewMore,
+    required this.onViewDetail,
+    this.badge = 'LIVE',
+    this.message =
+        'Join our mental health talk live on Facebook at 6:00 AM today',
+    this.isOpen,
+  });
+
+  final VoidCallback onViewMore;
+  final VoidCallback onViewDetail;
+  final String badge;
+  final String message;
+  final bool? isOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        HomeSectionHeader(
+          title: 'Announcement',
+          actionLabel: 'View More',
+          onAction: onViewMore,
+        ),
+        const SizedBox(height: 8),
+        Material(
+          color: HomePalette.surface,
+          borderRadius: BorderRadius.circular(HomeMetrics.radius),
+          child: InkWell(
+            onTap: onViewDetail,
+            borderRadius: BorderRadius.circular(HomeMetrics.radius),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: HomeDecor.card(
+                borderColor: const Color(0x99FFC414),
+                radius: HomeMetrics.radius,
+              ),
+              child: Row(
+                children: [
+                  const Text('📣', style: TextStyle(fontSize: 30)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: isOpen == true
+                                ? const Color(0xFF2E7D32)
+                                : const Color(0xFFFF102B),
+                            borderRadius: const BorderRadius.all(
+                              Radius.circular(20),
+                            ),
+                          ),
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 3,
+                            ),
+                            child: Text(
+                              badge,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(message, style: HomeTextStyles.bodyMuted),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: onViewDetail,
+                    style: TextButton.styleFrom(
+                      backgroundColor: const Color(0xFFE5C3F4),
+                      foregroundColor: const Color(0xFF6A2E83),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text(
+                      'View Detail',
+                      style: TextStyle(fontSize: 10),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class HomeStreakCard extends StatelessWidget {
+  const HomeStreakCard({super.key, required this.data, required this.onTap});
 
   final HomeStreakData? data;
   final VoidCallback onTap;
@@ -599,7 +745,7 @@ class HomePaccServicesSection extends StatelessWidget {
             return GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: services.length > 2 ? 2 : services.length,
+              itemCount: services.length > 4 ? 4 : services.length,
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: columns,
                 mainAxisSpacing: 10,
@@ -1240,6 +1386,64 @@ class HomeMentalHealthCheckCard extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class HomeCounselorCard extends StatelessWidget {
+  const HomeCounselorCard({super.key, required this.onContact});
+
+  final VoidCallback onContact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: HomeDecor.card(
+        borderColor: HomePalette.sun,
+        radius: HomeMetrics.radiusLarge,
+      ),
+      child: Column(
+        children: [
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('💛', style: TextStyle(fontSize: 28)),
+              SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'Need to talk to someone?',
+                  style: HomeTextStyles.cardTitle,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'PACC counseling services are available for students and faculty. You’re never alone.',
+            textAlign: TextAlign.center,
+            style: HomeTextStyles.body,
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: 210,
+            child: FilledButton(
+              onPressed: onContact,
+              style: FilledButton.styleFrom(
+                backgroundColor: HomePalette.sun,
+                foregroundColor: HomePalette.text,
+                minimumSize: const Size.fromHeight(46),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                textStyle: HomeTextStyles.button,
+              ),
+              child: const Text('Contact counselor'),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

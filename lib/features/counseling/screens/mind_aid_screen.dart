@@ -62,6 +62,7 @@ class MindAidScreen extends StatefulWidget {
     this.messages = const [],
     this.suggestions = const [],
     this.disclaimerText,
+    this.errorText,
     this.isAssistantTyping = false,
     this.onSendMessage,
     this.onSuggestionSelected,
@@ -78,6 +79,7 @@ class MindAidScreen extends StatefulWidget {
   final List<MindAidMessage> messages;
   final List<MindAidSuggestion> suggestions;
   final String? disclaimerText;
+  final String? errorText;
   final bool isAssistantTyping;
   final ValueChanged<String>? onSendMessage;
   final ValueChanged<MindAidSuggestion>? onSuggestionSelected;
@@ -97,7 +99,10 @@ class MindAidScreen extends StatefulWidget {
 class _MindAidScreenState extends State<MindAidScreen> {
   final TextEditingController _messageController = TextEditingController();
 
-  bool get _canSend => _messageController.text.trim().isNotEmpty;
+  bool get _canSend =>
+      !widget.isAssistantTyping &&
+      _messageController.text.trim().isNotEmpty &&
+      _messageController.text.trim().length <= 1200;
 
   @override
   void initState() {
@@ -119,7 +124,7 @@ class _MindAidScreenState extends State<MindAidScreen> {
 
   void _sendMessage() {
     final message = _messageController.text.trim();
-    if (message.isEmpty) return;
+    if (!_canSend || message.isEmpty) return;
 
     widget.onSendMessage?.call(message);
     _messageController.clear();
@@ -156,6 +161,7 @@ class _MindAidScreenState extends State<MindAidScreen> {
                   suggestions: widget.suggestions,
                   isAssistantTyping: widget.isAssistantTyping,
                   disclaimerText: widget.disclaimerText,
+                  errorText: widget.errorText,
                   onSuggestionSelected: widget.onSuggestionSelected,
                   onActionSelected: widget.onActionSelected,
                   onFeedback: widget.onFeedback,
@@ -351,6 +357,7 @@ class _MindAidConversation extends StatelessWidget {
     required this.suggestions,
     required this.isAssistantTyping,
     required this.disclaimerText,
+    required this.errorText,
     required this.onSuggestionSelected,
     required this.onActionSelected,
     required this.onFeedback,
@@ -361,6 +368,7 @@ class _MindAidConversation extends StatelessWidget {
   final List<MindAidSuggestion> suggestions;
   final bool isAssistantTyping;
   final String? disclaimerText;
+  final String? errorText;
   final ValueChanged<MindAidSuggestion>? onSuggestionSelected;
   final ValueChanged<MindAidAction>? onActionSelected;
   final MindAidFeedbackCallback? onFeedback;
@@ -372,6 +380,10 @@ class _MindAidConversation extends StatelessWidget {
       physics: const BouncingScrollPhysics(),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       slivers: [
+        if (errorText != null && errorText!.trim().isNotEmpty)
+          SliverToBoxAdapter(
+            child: _MindAidErrorBanner(text: errorText!.trim()),
+          ),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(12, 18, 12, 26),
           sliver: messages.isEmpty && !isAssistantTyping
@@ -404,6 +416,34 @@ class _MindAidConversation extends StatelessWidget {
             child: _DisclaimerPanel(text: disclaimerText!.trim()),
           ),
       ],
+    );
+  }
+}
+
+class _MindAidErrorBanner extends StatelessWidget {
+  const _MindAidErrorBanner({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF0E8),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE6A17A)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, size: 19),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: _MindAidText.cardBody)),
+        ],
+      ),
     );
   }
 }
@@ -963,6 +1003,16 @@ class _MindAidComposer extends StatelessWidget {
                 controller: controller,
                 minLines: 1,
                 maxLines: 4,
+                maxLength: 1200,
+                buildCounter:
+                    (
+                      _, {
+                      required currentLength,
+                      required isFocused,
+                      required maxLength,
+                    }) => currentLength >= 1100
+                    ? Text('$currentLength/$maxLength')
+                    : null,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => onSend(),
                 decoration: InputDecoration(

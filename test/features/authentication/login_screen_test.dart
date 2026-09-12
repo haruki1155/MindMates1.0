@@ -20,6 +20,7 @@ void main() {
     final authProvider = _FakeAuthProvider();
     await tester.pumpWidget(_LoginHarness(authProvider: authProvider));
 
+    expect(find.textContaining('Unofficial'), findsNothing);
     expect(find.text('School ID'), findsOneWidget);
     expect(find.text('Email'), findsNothing);
 
@@ -31,7 +32,7 @@ void main() {
     expect(authProvider.signInCalls, 0);
   });
 
-  testWidgets('login passes generated auth email from School ID', (
+  testWidgets('login submits the School ID as the primary credential', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1200));
@@ -55,7 +56,6 @@ void main() {
 
     expect(authProvider.signInCalls, 1);
     expect(authProvider.schoolId, 'UCU 2026-0001');
-    expect(authProvider.generatedEmail, 'ucu.2026.0001@mindmate.local');
     expect(find.text('home target'), findsOneWidget);
   });
 }
@@ -95,7 +95,6 @@ class _FakeAuthProvider extends AuthProvider {
 
   int signInCalls = 0;
   String? schoolId;
-  String? generatedEmail;
 
   @override
   Future<String?> signIn({
@@ -104,7 +103,6 @@ class _FakeAuthProvider extends AuthProvider {
   }) async {
     signInCalls += 1;
     this.schoolId = schoolId;
-    generatedEmail = AuthRepository.authEmailForSchoolId(schoolId);
     return 'user_1';
   }
 }

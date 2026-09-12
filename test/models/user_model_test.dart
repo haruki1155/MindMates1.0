@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/user_model.dart';
 
 void main() {
@@ -15,6 +16,7 @@ void main() {
         'course': 'BS Information Technology',
         'sector': '',
         'role': 'student',
+        'gender': 'Female',
         'createdAt': '2026-06-30T08:15:00.000',
       });
 
@@ -22,6 +24,7 @@ void main() {
       expect(user.displayName, 'Leonardo Santos Molar');
       expect(user.roleLabel, 'Student');
       expect(user.course, 'BS Information Technology');
+      expect(user.gender, 'Female');
       expect(user.sector, isNull);
       expect(user.dayStreak, 0);
       expect(user.createdAt, DateTime(2026, 6, 30, 8, 15));
@@ -36,6 +39,33 @@ void main() {
 
       expect(user.createdAt, isNull);
       expect(user.displayName, 'mia@example.com');
+    });
+
+    test('normalizes obsolete pending status for auto-assigned v3 roles', () {
+      final user = UserModel.fromJson({
+        'id': 'user_auto_verified',
+        'email': 'student@example.com',
+        'populationRole': 'student',
+        'declaredRole': 'student',
+        'accessRole': 'appUser',
+        'verificationStatus': 'pending',
+        'profileVersion': 3,
+      });
+
+      expect(user.verificationStatus, VerificationStatus.verified);
+    });
+
+    test('preserves pending verification for legacy profiles', () {
+      final user = UserModel.fromJson({
+        'id': 'legacy_pending',
+        'email': 'student@example.com',
+        'populationRole': 'student',
+        'accessRole': 'appUser',
+        'verificationStatus': 'pending',
+        'profileVersion': 2,
+      });
+
+      expect(user.verificationStatus, VerificationStatus.pending);
     });
 
     test('profile update json includes editable fields', () {
@@ -122,6 +152,16 @@ void main() {
       expect(user['department'], '');
       expect(user['course'], '');
       expect(user['role'], 'staff');
+    });
+
+    test('serializes registration gender', () {
+      final user = const UserModel(
+        id: 'user_gender',
+        email: 'user@example.com',
+        gender: 'Non-binary',
+      ).toJson();
+
+      expect(user['gender'], 'Non-binary');
     });
 
     test('maps durable quick assessment completion fields', () {

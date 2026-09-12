@@ -23,6 +23,14 @@ class MindAidResponseComposer {
     required MindAidContext context,
     required MindAidSafetyLevel safetyLevel,
   }) async {
+    if (safetyLevel.blocksCloud) {
+      return _safetyResponse(
+        safetyLevel: safetyLevel,
+        dataset: dataset,
+        normalizedInput: normalizedInput,
+      );
+    }
+
     if (action != MindAidDialogueAction.escalate &&
         _isAssessmentReviewRequest(normalizedInput) &&
         context.hasAssessment) {
@@ -111,6 +119,28 @@ class MindAidResponseComposer {
     }
 
     return buffer.toString();
+  }
+
+  String _safetyResponse({
+    required MindAidSafetyLevel safetyLevel,
+    required MindAidDatasetBundle dataset,
+    required String normalizedInput,
+  }) {
+    final record = dataset.crisisRecords.isEmpty
+        ? null
+        : dataset.crisisRecords.first;
+    if (record != null) {
+      return ResponseBuilder.build(
+        record: record,
+        dataset: dataset,
+        normalizedInput: normalizedInput,
+      );
+    }
+
+    if (safetyLevel == MindAidSafetyLevel.crisisOrImmediateRisk) {
+      return 'MindAid is an automated wellness assistant and cannot provide emergency care. Your safety matters right now. Please move near a trusted person and contact local emergency services, campus security, PACC, or the nearest emergency room immediately.';
+    }
+    return 'MindAid is an automated wellness assistant and cannot provide emergency care. This sounds very intense. Please move toward a trusted person or safe place and contact PACC or local emergency services if you may be in immediate danger.';
   }
 
   String _assessmentReview(MindAidContext context) {

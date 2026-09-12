@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/constants/app_colors.dart';
 import '../../../models/admin_status_summary_model.dart';
 import '../../../repositories/admin_status_repository.dart';
 import 'admin_assessment_detail_screen.dart';
+import '../theme/admin_theme.dart';
 
 class AdminStatusDashboardScreen extends StatelessWidget {
   const AdminStatusDashboardScreen({
@@ -47,15 +47,16 @@ class AdminStatusDashboardScreen extends StatelessWidget {
         return _DashboardContent(
           statuses: statuses,
           repository: _effectiveRepository,
+          showHeading: embedded,
         );
       },
     );
     if (embedded) return content;
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AdminColors.canvas,
       appBar: AppBar(
         title: const Text('Admin User Status'),
-        backgroundColor: AppColors.surface,
+        backgroundColor: AdminColors.surface,
         surfaceTintColor: Colors.transparent,
       ),
       body: content,
@@ -64,10 +65,15 @@ class AdminStatusDashboardScreen extends StatelessWidget {
 }
 
 class _DashboardContent extends StatelessWidget {
-  const _DashboardContent({required this.statuses, required this.repository});
+  const _DashboardContent({
+    required this.statuses,
+    required this.repository,
+    required this.showHeading,
+  });
 
   final List<AdminStatusSummaryModel> statuses;
   final AdminStatusRepository repository;
+  final bool showHeading;
 
   @override
   Widget build(BuildContext context) {
@@ -78,33 +84,64 @@ class _DashboardContent extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         return SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
+          padding: EdgeInsets.fromLTRB(
+            constraints.maxWidth < 600 ? 16 : 28,
+            28,
+            constraints.maxWidth < 600 ? 16 : 28,
+            40,
+          ),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1040),
+              constraints: const BoxConstraints(maxWidth: 1440),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      _StatusSummaryTile(
-                        label: 'Prompt follow-up',
-                        count: severeCount,
-                        color: const Color(0xFFB3261E),
-                      ),
-                      _StatusSummaryTile(
-                        label: 'Review suggested',
-                        count: moderateCount,
-                        color: const Color(0xFFB06A00),
-                      ),
-                      _StatusSummaryTile(
-                        label: 'Routine monitoring',
-                        count: normalCount,
-                        color: AppColors.primary,
-                      ),
-                    ],
+                  if (showHeading) ...[
+                    Text(
+                      'Admin Status',
+                      style: Theme.of(context).textTheme.headlineLarge,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Review well-being signals and prioritize follow-up',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                  LayoutBuilder(
+                    builder: (context, tileBox) {
+                      final columns = tileBox.maxWidth >= 840
+                          ? 3
+                          : tileBox.maxWidth >= 500
+                          ? 2
+                          : 1;
+                      final width =
+                          (tileBox.maxWidth - ((columns - 1) * 12)) / columns;
+                      return Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          _StatusSummaryTile(
+                            width: width,
+                            label: 'Prompt follow-up',
+                            count: severeCount,
+                            color: const Color(0xFFB3261E),
+                          ),
+                          _StatusSummaryTile(
+                            width: width,
+                            label: 'Review suggested',
+                            count: moderateCount,
+                            color: const Color(0xFFB06A00),
+                          ),
+                          _StatusSummaryTile(
+                            width: width,
+                            label: 'Routine monitoring',
+                            count: normalCount,
+                            color: AdminColors.accentStrong,
+                          ),
+                        ],
+                      );
+                    },
                   ),
                   const SizedBox(height: 18),
                   _StatusTable(statuses: statuses, repository: repository),
@@ -124,11 +161,13 @@ class _DashboardContent extends StatelessWidget {
 
 class _StatusSummaryTile extends StatelessWidget {
   const _StatusSummaryTile({
+    required this.width,
     required this.label,
     required this.count,
     required this.color,
   });
 
+  final double width;
   final String label;
   final int count;
   final Color color;
@@ -136,12 +175,12 @@ class _StatusSummaryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 230,
+      width: width,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: .28)),
+        color: AdminColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AdminColors.border),
       ),
       child: Row(
         children: [
@@ -161,7 +200,7 @@ class _StatusSummaryTile extends StatelessWidget {
                 Text(
                   '$count',
                   style: const TextStyle(
-                    color: AppColors.textPrimary,
+                    color: AdminColors.ink,
                     fontSize: 28,
                     height: 1,
                     fontWeight: FontWeight.w900,
@@ -171,7 +210,7 @@ class _StatusSummaryTile extends StatelessWidget {
                 Text(
                   label,
                   style: const TextStyle(
-                    color: AppColors.textMuted,
+                    color: AdminColors.muted,
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
                   ),
@@ -195,12 +234,12 @@ class _StatusTable extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE1E8E5)),
+        color: AdminColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AdminColors.border),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
@@ -269,7 +308,7 @@ class _StatusBadge extends StatelessWidget {
     final color = switch (status) {
       AdminUserStatus.severe => const Color(0xFFB3261E),
       AdminUserStatus.moderate => const Color(0xFFB06A00),
-      AdminUserStatus.normal => AppColors.primary,
+      AdminUserStatus.normal => AdminColors.accentStrong,
     };
 
     return Container(
@@ -308,19 +347,19 @@ class _MessagePanel extends StatelessWidget {
         width: 360,
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: AdminColors.surface,
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: AppColors.primary, size: 38),
+            Icon(icon, color: AdminColors.accentStrong, size: 38),
             const SizedBox(height: 12),
             Text(
               title,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: AppColors.textPrimary,
+                color: AdminColors.ink,
                 fontSize: 18,
                 fontWeight: FontWeight.w900,
               ),
@@ -330,7 +369,7 @@ class _MessagePanel extends StatelessWidget {
               message,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                color: AppColors.textMuted,
+                color: AdminColors.muted,
                 fontSize: 13,
                 height: 1.35,
                 fontWeight: FontWeight.w600,

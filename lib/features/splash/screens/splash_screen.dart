@@ -56,7 +56,30 @@ class _SplashScreenState extends State<SplashScreen>
       try {
         final userProvider = context.read<UserProvider>();
         final assessmentProvider = context.read<AssessmentProvider>();
-        await userProvider.loadProfile(userId);
+        final profileLoaded = await userProvider.loadProfile(userId);
+        if (!profileLoaded || userProvider.user == null) {
+          throw StateError('Your profile could not be loaded.');
+        }
+        final authEmail = authProvider.currentUserEmail;
+        if (authEmail != null &&
+            authEmail.isNotEmpty &&
+            !authEmail.endsWith('@mindmate.local') &&
+            !authProvider.currentUserEmailVerified) {
+          routeName = RouteNames.emailVerification;
+          if (mounted) {
+            Navigator.of(context).pushReplacementNamed(routeName);
+          }
+          return;
+        }
+        if (userProvider.user!.profileVersion >= 3 &&
+            (!userProvider.user!.isProfileComplete ||
+                !userProvider.user!.profileSetupCompleted)) {
+          routeName = RouteNames.profileSetup;
+          if (mounted) {
+            Navigator.of(context).pushReplacementNamed(routeName);
+          }
+          return;
+        }
         final completed = await assessmentProvider
             .ensureQuickAssessmentCompletion(userId);
         if (completed && userProvider.user?.quickAssessmentCompleted != true) {
@@ -135,7 +158,7 @@ class _SplashContent extends StatelessWidget {
                       ],
                     ),
                     child: Image.asset(
-                      'assets/images/Login/logo.png',
+                      'assets/images/APP LOGO/MindMate_LOGO.jpg',
                       fit: BoxFit.contain,
                     ),
                   ),

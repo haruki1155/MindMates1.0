@@ -82,8 +82,31 @@ class _LoginBodyState extends State<_LoginBody> {
       return;
     }
 
+    final authEmail = authProvider.currentUserEmail;
+    if (authEmail != null &&
+        authEmail.isNotEmpty &&
+        !authEmail.endsWith('@mindmate.local') &&
+        !authProvider.currentUserEmailVerified) {
+      Navigator.of(
+        context,
+      ).pushNamedAndRemoveUntil(RouteNames.emailVerification, (route) => false);
+      return;
+    }
+
     try {
-      await userProvider.loadProfile(userId);
+      final profileLoaded = await userProvider.loadProfile(userId);
+      if (!mounted) return;
+      if (!profileLoaded || userProvider.user == null) {
+        throw StateError('Your profile could not be loaded.');
+      }
+      if (userProvider.user!.profileVersion >= 3 &&
+          (!userProvider.user!.isProfileComplete ||
+              !userProvider.user!.profileSetupCompleted)) {
+        Navigator.of(
+          context,
+        ).pushNamedAndRemoveUntil(RouteNames.profileSetup, (route) => false);
+        return;
+      }
       final hasCompletedQuickAssessment = await assessmentProvider
           .ensureQuickAssessmentCompletion(userId);
       if (hasCompletedQuickAssessment &&
@@ -112,6 +135,36 @@ class _LoginBodyState extends State<_LoginBody> {
           ),
         );
     }
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    final authProvider = context.read<AuthProvider>();
+    final userProvider = context.read<UserProvider>();
+    final assessmentProvider = context.read<AssessmentProvider>();
+    final userId = await authProvider.signInWithGoogle();
+    if (!mounted || userId == null) {
+      if (mounted && authProvider.errorMessage != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(authProvider.errorMessage!)));
+      }
+      return;
+    }
+    userProvider.setUser(null);
+    await userProvider.loadProfile(userId);
+    if (!mounted) return;
+    if (userProvider.user == null) {
+      Navigator.of(context).pushReplacementNamed(RouteNames.signup);
+      return;
+    }
+    final completed = await assessmentProvider.ensureQuickAssessmentCompletion(
+      userId,
+    );
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      destinationAfterAuthentication(hasCompletedQuickAssessment: completed),
+      (route) => false,
+    );
   }
 
   void _openForgotPassword() {
@@ -158,6 +211,7 @@ class _LoginBodyState extends State<_LoginBody> {
                           onForgotPassword: _openForgotPassword,
                           onCreateAccount: _openSignup,
                           onSignIn: _handleSignIn,
+                          onGoogleSignIn: _handleGoogleSignIn,
                         );
                       },
                     ),
@@ -175,7 +229,7 @@ class _LoginBodyState extends State<_LoginBody> {
 class _LogoHeader extends StatelessWidget {
   const _LogoHeader();
 
-  static const _logoPath = 'assets/images/Login/logo.png';
+  static const _logoPath = 'assets/images/APP LOGO/MindMate_LOGO.jpg';
 
   @override
   Widget build(BuildContext context) {
@@ -194,7 +248,7 @@ class _LogoHeader extends StatelessWidget {
           ),
         ],
       ),
-      child: Image.asset(_logoPath, fit: BoxFit.contain),
+      child: ClipOval(child: Image.asset(_logoPath, fit: BoxFit.cover)),
     );
   }
 }
@@ -240,6 +294,7 @@ class _LoginFormCard extends StatelessWidget {
     required this.onForgotPassword,
     required this.onCreateAccount,
     required this.onSignIn,
+    required this.onGoogleSignIn,
   });
 
   final TextEditingController identificationController;
@@ -248,6 +303,7 @@ class _LoginFormCard extends StatelessWidget {
   final VoidCallback onForgotPassword;
   final VoidCallback onCreateAccount;
   final Future<void> Function() onSignIn;
+  final Future<void> Function() onGoogleSignIn;
 
   @override
   Widget build(BuildContext context) {
@@ -269,8 +325,6 @@ class _LoginFormCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const _NoticePanel(),
-          const SizedBox(height: 22),
           _LoginField(
             controller: identificationController,
             label: 'School ID',
@@ -309,6 +363,19 @@ class _LoginFormCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           _SignInButton(onPressed: isLoading ? null : onSignIn),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: isLoading ? null : onGoogleSignIn,
+            icon: const Text(
+              'G',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+            ),
+            label: const Text('Continue with Google'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              foregroundColor: _LoginColors.text,
+            ),
+          ),
           const SizedBox(height: 18),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -341,31 +408,6 @@ class _LoginFormCard extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _NoticePanel extends StatelessWidget {
-  const _NoticePanel();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: _LoginColors.notice,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: const Text(
-        'Unofficial campus support app. Refer to UCU-MiS+ and PACC instructions before use.',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: _LoginColors.text,
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-          height: 1.35,
-        ),
       ),
     );
   }
@@ -550,7 +592,6 @@ class _LoginColors {
 
   static const background = Color(0xFFFFFCF4);
   static const card = Color(0xFFFFFFFF);
-  static const notice = Color(0xFFFFF1C8);
   static const primary = Color(0xFFFFC944);
   static const softGreen = Color(0xFFBFE3D6);
   static const border = Color(0xFFF0E5C8);

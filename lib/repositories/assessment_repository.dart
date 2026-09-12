@@ -1,9 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
+import '../core/config/app_environment.dart';
 import '../database/firestore_collections.dart';
 import '../features/quick_assessment/models/quick_assessment_models.dart';
 import '../features/student_assessment/models/student_assessment_models.dart';
 import '../features/student_assessment/data/student_assessment_questions.dart';
+import '../services/firebase/firebase_callable_router.dart';
+import '../services/firebase/firebase_runtime_diagnostics.dart';
 import '../services/firebase/firestore_service.dart';
 
 class AssessmentRepository {
@@ -20,6 +24,13 @@ class AssessmentRepository {
     required String userId,
     required QuickAssessmentResult result,
   }) async {
+    if (AppEnvironmentConfig.isStaging) {
+      return _saveQuickAssessmentThroughStagingFunction(
+        userId: userId,
+        result: result,
+      );
+    }
+
     final documentId = quickAssessmentDocumentId(userId);
     final existing = await _firestoreService.getDocument(
       FirestoreCollections.assessments,
@@ -101,6 +112,14 @@ class AssessmentRepository {
     required StudentAssessmentResult result,
     List<StudentAssessmentAnswer> answers = const [],
   }) async {
+    if (AppEnvironmentConfig.isStaging) {
+      return _saveStudentAssessmentThroughStagingFunction(
+        userId: userId,
+        result: result,
+        answers: answers,
+      );
+    }
+
     final populationRole = switch (result.userType.toLowerCase()) {
       'student' => 'student',
       'teaching personnel' || 'teaching' || 'faculty' => 'teaching',
@@ -155,6 +174,92 @@ class AssessmentRepository {
           'questionSetVersion': questionSetVersion,
           'createdAt': FieldValue.serverTimestamp(),
         });
+  }
+
+  Future<Map<String, Object>> _saveQuickAssessmentThroughStagingFunction({
+    required String userId,
+    required QuickAssessmentResult result,
+  }) async {
+    final response = await _stagingFunctions
+        .routedCallable('submitQuickAssessment')
+        .call({
+          'submissionId': 'quick_${_safeSubmissionPart(userId)}',
+          'role': result.role.populationRole.storedValue,
+          'name': result.name,
+          'responses': [
+            for (final answer in result.responses)
+              {
+                'questionId': answer.questionId,
+                'optionId': answer.optionId,
+                'value': answer.value,
+              },
+          ],
+        });
+    FirebaseRuntimeDiagnostics.log(
+      event: 'staging_quick_assessment_submitted',
+      correlationId: _correlationId(response.data),
+    );
+    return _objectMap(response.data);
+  }
+
+  Future<Map<String, Object>> _saveStudentAssessmentThroughStagingFunction({
+    required String userId,
+    required StudentAssessmentResult result,
+    required List<StudentAssessmentAnswer> answers,
+  }) async {
+    final response = await _stagingFunctions
+        .routedCallable('submitFullAssessment')
+        .call({
+          'submissionId': _fullSubmissionId(userId, answers),
+          'answers': [for (final answer in answers) answer.toJson()],
+        });
+    FirebaseRuntimeDiagnostics.log(
+      event: 'staging_full_assessment_submitted',
+      correlationId: _correlationId(response.data),
+    );
+    return _objectMap(response.data);
+  }
+
+  FirebaseFunctions get _stagingFunctions => FirebaseFunctions.instanceFor(
+    region: AppEnvironmentConfig.functionsRegion,
+  );
+
+  static String _safeSubmissionPart(String value) {
+    final safe = value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    return safe.length > 70 ? safe.substring(0, 70) : safe;
+  }
+
+  static String _fullSubmissionId(
+    String userId,
+    List<StudentAssessmentAnswer> answers,
+  ) {
+    final canonical = [
+      userId,
+      for (final answer in answers)
+        '${answer.questionId}:${answer.answer.name}:${answer.isSkipped}',
+    ].join('|');
+    var hash = 2166136261;
+    for (final codeUnit in canonical.codeUnits) {
+      hash = ((hash ^ codeUnit) * 16777619) & 0x7fffffff;
+    }
+    return 'full_${_safeSubmissionPart(userId)}_${hash.toRadixString(36)}';
+  }
+
+  static String? _correlationId(Object? value) {
+    if (value is! Map) return null;
+    final id = value['correlationId']?.toString().trim() ?? '';
+    return id.isEmpty ? null : id;
+  }
+
+  static Map<String, Object> _objectMap(Object? value) {
+    if (value is! Map) {
+      throw StateError('The staging assessment response was not an object.');
+    }
+    return {
+      for (final entry in value.entries)
+        if (entry.key != null && entry.value != null)
+          entry.key.toString(): entry.value as Object,
+    };
   }
 
   Future<Map<String, dynamic>?> fetchLatestAssessment(String userId) async {

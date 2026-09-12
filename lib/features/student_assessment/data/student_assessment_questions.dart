@@ -3,7 +3,7 @@ import '../models/student_assessment_models.dart';
 class StudentAssessmentQuestions {
   const StudentAssessmentQuestions._();
 
-  static const questions = [
+  static final questions = const <StudentAssessmentQuestion>[
     StudentAssessmentQuestion(
       id: 'academic_core_1',
       text: 'I feel overwhelmed by academic requirements.',
@@ -165,6 +165,36 @@ class StudentAssessmentQuestions {
       direction: AssessmentDirection.risk,
     ),
     StudentAssessmentQuestion(
+      id: 'financial_6',
+      text: 'Unexpected school expenses cause me stress.',
+      section: AssessmentSection.financialConcern,
+      direction: AssessmentDirection.risk,
+    ),
+    StudentAssessmentQuestion(
+      id: 'financial_7',
+      text: 'Financial limitations prevent me from joining school activities.',
+      section: AssessmentSection.financialConcern,
+      direction: AssessmentDirection.risk,
+    ),
+    StudentAssessmentQuestion(
+      id: 'financial_8',
+      text: 'I worry about paying for my basic educational needs.',
+      section: AssessmentSection.financialConcern,
+      direction: AssessmentDirection.risk,
+    ),
+    StudentAssessmentQuestion(
+      id: 'financial_9',
+      text: 'I have difficulty managing my school-related budget.',
+      section: AssessmentSection.financialConcern,
+      direction: AssessmentDirection.risk,
+    ),
+    StudentAssessmentQuestion(
+      id: 'financial_10',
+      text: 'Financial pressure makes me consider delaying my studies.',
+      section: AssessmentSection.financialConcern,
+      direction: AssessmentDirection.risk,
+    ),
+    StudentAssessmentQuestion(
       id: 'social_1',
       text: 'I feel supported by my classmates.',
       section: AssessmentSection.socialAdjustment,
@@ -191,6 +221,36 @@ class StudentAssessmentQuestions {
     StudentAssessmentQuestion(
       id: 'social_5',
       text: 'Social relationships positively affect my well-being.',
+      section: AssessmentSection.socialAdjustment,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'social_6',
+      text: 'I have someone at the university I can talk to when needed.',
+      section: AssessmentSection.socialAdjustment,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'social_7',
+      text: 'I feel accepted by people in my university community.',
+      section: AssessmentSection.socialAdjustment,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'social_8',
+      text: 'I participate in group or community activities.',
+      section: AssessmentSection.socialAdjustment,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'social_9',
+      text: 'I can communicate comfortably with my peers.',
+      section: AssessmentSection.socialAdjustment,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'social_10',
+      text: 'My university connections help me feel less isolated.',
       section: AssessmentSection.socialAdjustment,
       direction: AssessmentDirection.protective,
     ),
@@ -238,7 +298,7 @@ class StudentAssessmentQuestions {
     ),
     StudentAssessmentQuestion(
       id: 'sleep_8',
-      text: 'Sleep affects my mood.',
+      text: 'Poor sleep negatively affects my mood.',
       section: AssessmentSection.sleepRest,
       direction: AssessmentDirection.risk,
     ),
@@ -314,9 +374,9 @@ class StudentAssessmentQuestions {
       section: AssessmentSection.emotionalWellBeing,
       direction: AssessmentDirection.protective,
     ),
-  ];
+  ].where((question) => !question.isConditional).toList(growable: false);
 
-  static const facultyQuestions = [
+  static final facultyQuestions = const <StudentAssessmentQuestion>[
     StudentAssessmentQuestion(
       id: 'faculty_workplace_core_1',
       text: 'My workload is manageable.',
@@ -478,6 +538,36 @@ class StudentAssessmentQuestions {
       direction: AssessmentDirection.protective,
     ),
     StudentAssessmentQuestion(
+      id: 'faculty_support_6',
+      text: 'My department leadership listens to workplace concerns.',
+      section: AssessmentSection.professionalSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'faculty_support_7',
+      text: 'My colleagues offer help when my workload is difficult.',
+      section: AssessmentSection.professionalSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'faculty_support_8',
+      text: 'I have access to the resources I need to teach effectively.',
+      section: AssessmentSection.professionalSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'faculty_support_9',
+      text: 'I receive constructive feedback about my work.',
+      section: AssessmentSection.professionalSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'faculty_support_10',
+      text: 'I know where to seek support for workplace concerns.',
+      section: AssessmentSection.professionalSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
       id: 'faculty_wellbeing_1',
       text: 'I can manage stress effectively.',
       section: AssessmentSection.professionalWellBeing,
@@ -507,11 +597,41 @@ class StudentAssessmentQuestions {
       section: AssessmentSection.professionalWellBeing,
       direction: AssessmentDirection.protective,
     ),
+    StudentAssessmentQuestion(
+      id: 'faculty_wellbeing_6',
+      text: 'I have enough energy to carry out my teaching duties.',
+      section: AssessmentSection.professionalWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'faculty_wellbeing_7',
+      text: 'I can disconnect from work during my personal time.',
+      section: AssessmentSection.professionalWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'faculty_wellbeing_8',
+      text: 'I feel a sense of purpose in my professional role.',
+      section: AssessmentSection.professionalWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'faculty_wellbeing_9',
+      text: 'I recover well after a stressful workday.',
+      section: AssessmentSection.professionalWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'faculty_wellbeing_10',
+      text: 'My work routine supports my overall health.',
+      section: AssessmentSection.professionalWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
     ...commonSleepQuestions,
     ...commonEmotionalQuestions,
-  ];
+  ].where((question) => !question.isConditional).toList(growable: false);
 
-  static const staffQuestions = [
+  static final staffQuestions = const <StudentAssessmentQuestion>[
     StudentAssessmentQuestion(
       id: 'staff_responsibility_core_1',
       text: 'My workload is manageable.',
@@ -673,6 +793,36 @@ class StudentAssessmentQuestions {
       direction: AssessmentDirection.protective,
     ),
     StudentAssessmentQuestion(
+      id: 'staff_support_6',
+      text: 'My supervisor listens to workplace concerns.',
+      section: AssessmentSection.workplaceSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'staff_support_7',
+      text: 'My team cooperates when the workload is difficult.',
+      section: AssessmentSection.workplaceSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'staff_support_8',
+      text: 'I have access to the resources and training I need.',
+      section: AssessmentSection.workplaceSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'staff_support_9',
+      text: 'I receive constructive feedback about my work.',
+      section: AssessmentSection.workplaceSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'staff_support_10',
+      text: 'I know where to seek support for workplace concerns.',
+      section: AssessmentSection.workplaceSupport,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
       id: 'staff_wellbeing_1',
       text: 'I can manage stress effectively.',
       section: AssessmentSection.workplaceWellBeing,
@@ -702,9 +852,39 @@ class StudentAssessmentQuestions {
       section: AssessmentSection.workplaceWellBeing,
       direction: AssessmentDirection.protective,
     ),
+    StudentAssessmentQuestion(
+      id: 'staff_wellbeing_6',
+      text: 'I have enough energy to carry out my work duties.',
+      section: AssessmentSection.workplaceWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'staff_wellbeing_7',
+      text: 'I can disconnect from work during my personal time.',
+      section: AssessmentSection.workplaceWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'staff_wellbeing_8',
+      text: 'I feel a sense of purpose in my workplace role.',
+      section: AssessmentSection.workplaceWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'staff_wellbeing_9',
+      text: 'I recover well after a stressful workday.',
+      section: AssessmentSection.workplaceWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
+    StudentAssessmentQuestion(
+      id: 'staff_wellbeing_10',
+      text: 'My work routine supports my overall health.',
+      section: AssessmentSection.workplaceWellBeing,
+      direction: AssessmentDirection.protective,
+    ),
     ...commonSleepQuestions,
     ...commonEmotionalQuestions,
-  ];
+  ].where((question) => !question.isConditional).toList(growable: false);
 
   static const commonSleepQuestions = [
     StudentAssessmentQuestion(
@@ -751,7 +931,7 @@ class StudentAssessmentQuestions {
     ),
     StudentAssessmentQuestion(
       id: 'common_sleep_8',
-      text: 'Sleep affects my mood.',
+      text: 'Poor sleep negatively affects my mood.',
       section: AssessmentSection.sleepRest,
       direction: AssessmentDirection.risk,
     ),

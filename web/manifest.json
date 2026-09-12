@@ -1,6 +1,6 @@
 {
-    "name": "MindMate Admin",
-    "short_name": "MindMate Admin",
+    "name": "MindMate",
+    "short_name": "MindMate",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FFF9E8",

@@ -1,6 +1,7 @@
 import {createHash, randomUUID} from "node:crypto";
+import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
-import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 import {
   AssessmentRole,
   roleFromPopulation,
@@ -15,6 +16,8 @@ import {
 } from "./calculator";
 import {toHttpsError} from "./errors";
 import {quickProfileRoleDecision, submissionHashesMatch} from "./submission_policy";
+
+if (!getApps().length) initializeApp();
 
 const db = getFirestore();
 const assessments = db.collection("assessments");
@@ -105,7 +108,7 @@ function legacyRole(role: AssessmentRole): string {
   return "student";
 }
 
-export const submitQuickAssessment = onCall({enforceAppCheck: true}, async (request) => {
+async function submitQuickAssessmentHandler(request: CallableRequest) {
   const correlationId = randomUUID();
   const uid = uidFrom(request);
   const data = objectData(request.data);
@@ -170,9 +173,12 @@ export const submitQuickAssessment = onCall({enforceAppCheck: true}, async (requ
     console.error("quick_assessment_failed", {correlationId, uid, error});
     return toHttpsError(error);
   }
-});
+}
 
-export const submitFullAssessment = onCall({enforceAppCheck: true}, async (request) => {
+export const submitQuickAssessment = onCall({enforceAppCheck: true}, submitQuickAssessmentHandler);
+export const submitQuickAssessmentDev = onCall({enforceAppCheck: false}, submitQuickAssessmentHandler);
+
+async function submitFullAssessmentHandler(request: CallableRequest) {
   const correlationId = randomUUID();
   const uid = uidFrom(request);
   const data = objectData(request.data);
@@ -229,4 +235,7 @@ export const submitFullAssessment = onCall({enforceAppCheck: true}, async (reque
     console.error("full_assessment_failed", {correlationId, uid, error});
     return toHttpsError(error);
   }
-});
+}
+
+export const submitFullAssessment = onCall({enforceAppCheck: true}, submitFullAssessmentHandler);
+export const submitFullAssessmentDev = onCall({enforceAppCheck: false}, submitFullAssessmentHandler);

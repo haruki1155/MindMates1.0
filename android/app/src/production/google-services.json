@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "842251480963",
+    "project_id": "mind-mates-cd2cf",
+    "storage_bucket": "mind-mates-cd2cf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:842251480963:android:4c05d169dbacf125eb50b6",
+        "android_client_info": {
+          "package_name": "ph.edu.ucu.mindmates"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "842251480963-csirkeh4ah6a02sg89id6qfkr41rrk91.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAS2NzGcr6UsuaA06GSdVg_4Cm3GDR1YnA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "842251480963-csirkeh4ah6a02sg89id6qfkr41rrk91.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

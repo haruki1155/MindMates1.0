@@ -10,6 +10,10 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function isVerifiedEmail() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
     function currentAccessRole() {
       return !signedIn() || !exists(/databases/$(database)/documents/users/$(request.auth.uid))
         ? 'appUser'
@@ -43,24 +47,18 @@ service cloud.firestore {
         && currentAccessRole() == 'admin';
     }
 
-    function validSelfProfileCreate(userId) {
-      return isOwner(userId)
-        && request.resource.data.id == userId
-        && request.resource.data.accessRole == 'appUser'
-        && request.resource.data.verificationStatus == 'pending'
-        && request.resource.data.role in ['student', 'faculty', 'staff']
-        && request.resource.data.populationRole in ['student', 'teaching', 'nonTeaching']
-        && request.resource.data.declaredRole == request.resource.data.populationRole;
-    }
-
     function validSelfProfileUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-        'name', 'firstName', 'middleName', 'lastName', 'avatarAssetName',
+        'name', 'firstName', 'middleName', 'lastName', 'phone', 'avatarAssetName',
+        'profilePhotoUrl', 'profilePhotoPath', 'profileSetupCompleted',
         'updatedAt', 'lastActiveAt', 'lastActivityDateKey', 'activeDateKeys',
         'streakUpdatedAt', 'dayStreak', 'longestStreak',
         'quickAssessmentCompleted', 'quickAssessmentCompletedAt',
         'lastMoodDateKey'
-      ]);
+      ])
+      && (!request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['profileSetupCompleted'])
+          || request.resource.data.profileSetupCompleted == true);
     }
 
     function isLegacyPrivileged() {
@@ -70,7 +68,9 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow create: if validSelfProfileCreate(userId);
+      // New profiles must be created by the Admin SDK callable so Student ID
+      // reservation and profile creation remain one atomic transaction.
+      allow create: if false;
       allow read: if isOwner(userId) || isSystemAdmin();
       allow update: if (isOwner(userId) && validSelfProfileUpdate());
       allow delete: if isSystemAdmin();
@@ -100,6 +100,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /student_id_reservations/{recordId} {
+      allow read, write: if false;
+    }
+
     match /admin_audit_logs/{auditId} {
       allow read: if isSystemAdmin();
       allow write: if false;
@@ -114,7 +118,7 @@ service cloud.firestore {
     }
 
     match /assessments/{assessmentId} {
-      allow create: if isOwner(request.resource.data.userId)
+      allow create: if isVerifiedEmail() && isOwner(request.resource.data.userId)
         && (request.resource.data.type != 'quick'
           || assessmentId == 'quick_' + request.auth.uid);
       allow get: if (signedIn()
@@ -129,7 +133,7 @@ service cloud.firestore {
     }
 
     match /assessment_feedback/{feedbackId} {
-      allow create: if signedIn()
+      allow create: if isVerifiedEmail() && signedIn()
         && request.resource.data.keys().hasOnly([
           'clarity', 'algorithmVersion', 'questionSetVersion', 'createdAt'
         ])
@@ -181,7 +185,7 @@ service cloud.firestore {
     }
 
     match /journals/{journalId} {
-      allow create: if isOwner(request.resource.data.userId);
+      allow create: if isVerifiedEmail() && isOwner(request.resource.data.userId);
       allow read, delete: if isOwner(resource.data.userId);
       allow update: if isOwner(resource.data.userId)
         && request.resource.data.userId == resource.data.userId;
@@ -222,7 +226,17 @@ service cloud.firestore {
         && request.resource.data.text.size() >= 1
         && request.resource.data.text.size() <= 1600
         && request.resource.data.conversationId is string
-        && request.resource.data.conversationId.size() <= 64;
+        && request.resource.data.conversationId.size() <= 64
+        && request.resource.data.id == messageId
+        && request.resource.data.status is string
+        && request.resource.data.status.size() <= 24
+        && request.resource.data.source is string
+        && request.resource.data.source in ['local', 'dialogflow', 'controlled_safety']
+        && request.resource.data.confidence is number
+        && request.resource.data.confidence >= 0
+        && request.resource.data.confidence <= 1
+        && (request.resource.data.sender == 'user'
+          || request.resource.data.source == 'local');
       allow read, delete: if isOwner(resource.data.userId);
       allow update: if false;
     }
@@ -474,8 +488,12 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow read: if isOwner(resource.data.userId) || isAdmin();
+      // Notifications are per-recipient. Clinical access must not expose
+      // notification text sent to other users.
+      allow read: if isOwner(resource.data.userId);
       allow update: if isOwner(resource.data.userId)
+        && resource.data.readAt == null
+        && request.resource.data.readAt == request.time
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt']);
       allow create, delete: if false;
     }
@@ -490,7 +508,7 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.keys().hasOnly([
           'userId', 'subject', 'message', 'category', 'email', 'name',
-          'role', 'status', 'createdAt'
+          'role', 'formType', 'formData', 'status', 'createdAt'
         ])
         && request.resource.data.subject is string
         && request.resource.data.subject.size() >= 1
@@ -503,6 +521,12 @@ service cloud.firestore {
       allow read: if isOwner(resource.data.userId) || hasPortalAccess();
       allow update: if hasPortalAccess()
         && request.resource.data.userId == resource.data.userId;
+      allow delete: if false;
+    }
+
+    match /pacc_availability/{documentId} {
+      allow read: if signedIn();
+      allow create, update: if hasPortalAccess();
       allow delete: if false;
     }
 

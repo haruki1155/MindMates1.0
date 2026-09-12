@@ -17,7 +17,7 @@ test("migration maps every supported legacy population spelling", () => {
 });
 
 test("migration resolves the repository Firebase project", () => {
-  assert.equal(resolveProjectId(), "mind-mates-cd2cf");
+  assert.equal(resolveProjectId(), "mindmate-staging");
 });
 
 test("least-privilege access policy separates every portal role", () => {

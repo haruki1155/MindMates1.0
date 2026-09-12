@@ -28,67 +28,77 @@ class _AdminChangePasswordScreenState extends State<AdminChangePasswordScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460),
-        child: Card(
-          child: Padding(
-            padding: const EdgeInsets.all(28),
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.password, size: 52),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Change your temporary password',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'You must choose a private password before accessing the administrator portal.',
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 20),
-                  TextFormField(
-                    controller: password,
-                    obscureText: obscure,
-                    decoration: InputDecoration(
-                      labelText: 'New password',
-                      suffixIcon: IconButton(
-                        onPressed: () => setState(() => obscure = !obscure),
-                        icon: Icon(
-                          obscure ? Icons.visibility : Icons.visibility_off,
+    body: SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Card(
+              child: Padding(
+                padding: EdgeInsets.all(
+                  MediaQuery.sizeOf(context).width < 500 ? 22 : 32,
+                ),
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.password, size: 52),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Change your temporary password',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                    ),
-                    validator: _validatePassword,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: confirmation,
-                    obscureText: obscure,
-                    decoration: const InputDecoration(
-                      labelText: 'Confirm new password',
-                    ),
-                    validator: (value) => value != password.text
-                        ? 'Passwords do not match.'
-                        : null,
-                  ),
-                  const SizedBox(height: 22),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: submitting ? null : _submit,
-                      child: Text(
-                        submitting
-                            ? 'Updating…'
-                            : 'Change password and continue',
+                      const SizedBox(height: 8),
+                      const Text(
+                        'You must choose a private password before accessing the administrator portal.',
+                        textAlign: TextAlign.center,
                       ),
-                    ),
+                      const SizedBox(height: 20),
+                      TextFormField(
+                        controller: password,
+                        obscureText: obscure,
+                        decoration: InputDecoration(
+                          labelText: 'New password',
+                          suffixIcon: IconButton(
+                            onPressed: () => setState(() => obscure = !obscure),
+                            icon: Icon(
+                              obscure ? Icons.visibility : Icons.visibility_off,
+                            ),
+                          ),
+                        ),
+                        validator: _validatePassword,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: confirmation,
+                        obscureText: obscure,
+                        decoration: const InputDecoration(
+                          labelText: 'Confirm new password',
+                        ),
+                        validator: (value) => value != password.text
+                            ? 'Passwords do not match.'
+                            : null,
+                      ),
+                      const SizedBox(height: 22),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: submitting ? null : _submit,
+                          child: Text(
+                            submitting
+                                ? 'Updating…'
+                                : 'Change password and continue',
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),

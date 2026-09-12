@@ -52,6 +52,19 @@ export function migrateAssessmentData(data: Record<string, unknown>): Record<str
     const value = item as Record<string, unknown>;
     return {questionId: String(value.questionId), answer: String(value.answer), isSkipped: value.isSkipped === true};
   });
+  const legacyFivePointScale = answers.some((answer) => answer.answer === "sometimes") ||
+    String(data.questionSetVersion ?? "").includes("_v1");
+  if (legacyFivePointScale) {
+    return {
+      ...data,
+      role,
+      populationRole: role,
+      calculationAuthority: "client_legacy",
+      verificationStatus: "legacy_scale_preserved",
+      algorithmVersion: String(data.algorithmVersion ?? "internal_wellness_policy_v1"),
+      questionSetVersion: String(data.questionSetVersion ?? "experimental_role_based_v1"),
+    };
+  }
   validateFullAnswers(role, answers);
   return {
     ...calculateFull(role, answers),
@@ -91,7 +104,7 @@ async function main(): Promise<void> {
       if (previous && previous !== quickRole) conflictingUsers.add(userId);
       else quickRoles.set(userId, quickRole);
     }
-    if (status === "verified" || status === "verified_legacy_recomputed") {
+    if (status === "verified" || status === "verified_legacy_recomputed" || status === "legacy_scale_preserved") {
       counts.alreadyProcessed++;
       continue;
     }

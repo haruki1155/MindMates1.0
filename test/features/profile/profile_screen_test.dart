@@ -7,14 +7,17 @@ import 'package:mind_mates/features/profile/screens/profile_screen.dart';
 import 'package:mind_mates/models/mental_health_activity_summary.dart';
 import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/models/user_model.dart';
+import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/providers/mental_health_activity_provider.dart';
 import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/mental_health_activity_repository.dart';
+import 'package:mind_mates/repositories/auth_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:mind_mates/routes/app_pages.dart';
 import 'package:mind_mates/routes/route_names.dart';
+import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
@@ -63,6 +66,68 @@ void main() {
     expect(find.text('View Insights'), findsOneWidget);
     expect(AppPages.routes[RouteNames.mentalHealthReport], isNotNull);
     expect(AppPages.routes[RouteNames.mentalHealthInsights], isNotNull);
+  });
+
+  testWidgets('profile opens the Terms and Conditions', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(800, 4000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final provider = UserProvider(_FakeUserRepository())
+      ..setUser(const UserModel(id: 'user_1', email: 'leo@example.com'));
+
+    await tester.pumpWidget(
+      _profileApp(provider, data: _dataFrom(provider.user!)),
+    );
+
+    await tester.tap(find.text('Terms and Conditions').first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Terms and Conditions'), findsWidgets);
+    expect(find.textContaining('Data Privacy Act of 2012'), findsOneWidget);
+    expect(find.byKey(const Key('terms-close')), findsOneWidget);
+  });
+
+  testWidgets('profile Log Out confirms, signs out, and opens login', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 4000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final userProvider = UserProvider(_FakeUserRepository())
+      ..setUser(const UserModel(id: 'user_1', email: 'leo@example.com'));
+    final authProvider = _FakeAuthProvider();
+
+    await tester.pumpWidget(
+      _profileApp(
+        userProvider,
+        data: _dataFrom(userProvider.user!),
+        authProvider: authProvider,
+      ),
+    );
+
+    expect(find.text('Log Out'), findsOneWidget);
+    await tester.tap(find.text('Log Out'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Log out of MindMate?'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(authProvider.signOutCalls, 0);
+
+    await tester.tap(find.text('Log Out'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.widgetWithText(FilledButton, 'Log Out'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(authProvider.signOutCalls, 1);
+    expect(userProvider.user, isNull);
+    expect(find.text('Login target'), findsOneWidget);
+    expect(find.byType(ProfileScreen), findsNothing);
   });
 
   testWidgets('mental health summary uses generated report text', (
@@ -135,6 +200,17 @@ void main() {
       averageMoodLevel: 3.2,
       assessmentCount: 1,
       fullAssessmentScore: 18,
+      fullAssessmentStatus: 'At Risk',
+      fullAssessmentSummary:
+          'Your responses suggest some strain in Academic Stress and Sleep and Rest.',
+      fullAssessmentDomainStatuses: const {
+        'Academic Stress': 'At Risk',
+        'Sleep and Rest': 'Stable',
+      },
+      quickAssessmentStatus: 'moderate',
+      quickAssessmentSummary:
+          'Responses suggest some areas of strain that may benefit from support.',
+      quickAssessmentAreaStatuses: const {'Stress load': 'Moderate'},
       latestAssessmentStatus: 'Moderate concern',
       mentalStatusSignal: 'Academic stress needs attention.',
       breathingSessionCount: 2,
@@ -169,27 +245,22 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('A complete weekly reflection for review.'),
-      findsOneWidget,
-    );
-    expect(find.text('Needs Support'), findsOneWidget);
-    expect(find.text('Jul 1, 2026 - Jul 7, 2026'), findsOneWidget);
+    expect(find.text('Latest Psychological Assessment'), findsOneWidget);
+    expect(find.text('Quick Assessment'), findsOneWidget);
+    expect(find.text('Well-being status by sector'), findsNWidgets(2));
     expect(find.text('Academic Stress'), findsOneWidget);
     expect(find.text('Sleep and Rest'), findsOneWidget);
-    expect(find.text('Continue daily mood check-ins'), findsOneWidget);
-    expect(find.text('Moderate concern'), findsWidgets);
-    expect(find.text('Recorded score: 18'), findsOneWidget);
-    expect(find.text("Today's activity"), findsOneWidget);
-    expect(find.text('Live'), findsOneWidget);
-    expect(find.text('Avg 3.2/5'), findsOneWidget);
-    expect(find.text('5'), findsOneWidget);
-    expect(find.text('8 min'), findsWidgets);
-    expect(find.text('4-day streak'), findsWidgets);
-    expect(find.text('Secret Chat'), findsWidgets);
-    expect(find.text('1 posts, 2 comments'), findsOneWidget);
-    expect(find.text('Recent Activity'), findsOneWidget);
-    expect(activityRepository.loadCount, 1);
+    expect(find.text('Stress load'), findsOneWidget);
+    expect(find.text('At Risk'), findsNWidgets(2));
+    expect(find.text('Stable'), findsOneWidget);
+    expect(
+      find.textContaining('Your responses suggest some strain'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Recorded score'), findsNothing);
+    expect(find.text('Weekly mood'), findsNothing);
+    expect(activityRepository.loadCount, 0);
+    expect(reportRepository.refreshCount, 1);
 
     final refresh = tester
         .state<RefreshIndicatorState>(find.byType(RefreshIndicator))
@@ -198,8 +269,8 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await refresh;
     await tester.pumpAndSettle();
-    expect(activityRepository.loadCount, 2);
-    expect(reportRepository.refreshCount, 1);
+    expect(activityRepository.loadCount, 0);
+    expect(reportRepository.refreshCount, 2);
   });
 
   testWidgets('mental health report shows empty daily activity state', (
@@ -231,11 +302,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text("Today's activity"), findsOneWidget);
-    expect(find.text('No activity yet'), findsOneWidget);
-    expect(find.textContaining('No activity yet today'), findsWidgets);
-    expect(find.text('Mood'), findsOneWidget);
-    expect(find.text('0'), findsWidgets);
+    expect(
+      find.textContaining('Complete a Quick or Full Assessment'),
+      findsOneWidget,
+    );
+    expect(find.text("Today's activity"), findsNothing);
   });
 
   testWidgets('mental health report shows loading while refreshing on open', (
@@ -261,12 +332,12 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
 
     activityRepository.completeLoad();
     await tester.pumpAndSettle();
 
-    expect(activityRepository.loadCount, 1);
+    expect(activityRepository.loadCount, 0);
   });
 
   testWidgets('mental health report asks for sign in when user is missing', (
@@ -282,7 +353,7 @@ void main() {
     );
 
     expect(
-      find.text('Please sign in to view your mental health summary.'),
+      find.text('Please sign in to view your assessment summary.'),
       findsOneWidget,
     );
   });
@@ -292,16 +363,23 @@ Widget _profileApp(
   UserProvider provider, {
   ProfileViewData? data,
   ReportProvider? reportProvider,
+  AuthProvider? authProvider,
 }) {
   return MultiProvider(
     providers: [
       ChangeNotifierProvider<UserProvider>.value(value: provider),
+      if (authProvider != null)
+        ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
       if (reportProvider != null)
         ChangeNotifierProvider<ReportProvider>.value(value: reportProvider),
     ],
     child: MaterialApp(
       theme: ThemeData(splashFactory: NoSplash.splashFactory),
       home: ProfileScreen(data: data),
+      routes: {
+        RouteNames.login: (_) =>
+            const Scaffold(body: Center(child: Text('Login target'))),
+      },
     ),
   );
 }
@@ -348,6 +426,21 @@ class _FakeUserRepository extends UserRepository {
   Future<void> updateUserProfile(String uid, UserModel user) async {
     updatedUser = user;
   }
+}
+
+class _FakeAuthProvider extends AuthProvider {
+  _FakeAuthProvider() : super(_FakeAuthRepository());
+
+  int signOutCalls = 0;
+
+  @override
+  Future<void> signOut() async {
+    signOutCalls += 1;
+  }
+}
+
+class _FakeAuthRepository extends AuthRepository {
+  _FakeAuthRepository() : super(AuthService());
 }
 
 class _FakeReportRepository extends ReportRepository {

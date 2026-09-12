@@ -6,14 +6,26 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../repositories/assessment_repository.dart';
 import '../../../routes/route_names.dart';
+import '../../counseling/screens/pacc_counseling_screen.dart';
+import '../../student_assessment/models/assessment_interpretation_models.dart';
 import '../models/quick_assessment_models.dart';
 import '../widgets/quick_assessment_widgets.dart';
 
-class QuickAssessmentCategoryScreen extends StatelessWidget {
+class QuickAssessmentCategoryScreen extends StatefulWidget {
   const QuickAssessmentCategoryScreen({super.key});
 
   @override
+  State<QuickAssessmentCategoryScreen> createState() =>
+      _QuickAssessmentCategoryScreenState();
+}
+
+class _QuickAssessmentCategoryScreenState
+    extends State<QuickAssessmentCategoryScreen> {
+  bool _promptRequested = false;
+
+  @override
   Widget build(BuildContext context) {
+    _requestAppointmentDecision();
     return Consumer<AssessmentProvider>(
       builder: (context, provider, _) {
         final role = provider.selectedRole ?? AssessmentRole.student;
@@ -46,6 +58,48 @@ class QuickAssessmentCategoryScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  void _requestAppointmentDecision() {
+    if (_promptRequested ||
+        context.read<AssessmentProvider>().quickResult == null) {
+      return;
+    }
+    _promptRequested = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final result = context.read<AssessmentProvider>().quickResult;
+      final wantsAppointment = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          icon: const Icon(Icons.calendar_month_outlined, size: 34),
+          title: const Text('Set an appointment?'),
+          content: const Text(
+            'Do you want to set an appointment with PACC to discuss your well-being result?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('No'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Yes'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || wantsAppointment != true) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PaccCounselingScreen(
+            startBooking: true,
+            initialConcern: result?.interpretation.userSummary ?? '',
+          ),
+        ),
+      );
+    });
   }
 
   static String iconFor(AssessmentRole role) {
@@ -86,9 +140,117 @@ class _DecisionContent extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           QuickPlaceholderIcon(
-            icon: QuickAssessmentCategoryScreen.iconFor(role),
+            icon: _QuickAssessmentCategoryScreenState.iconFor(role),
             size: 20,
           ),
+          if (provider.quickResult != null) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Your quick well-being profile',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              provider.quickResult!.responsePatternLabel,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: QuickAssessmentPalette.text,
+                fontSize: 19,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              provider.quickResult!.interpretation.userSummary,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: QuickAssessmentPalette.secondaryText,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Support option: ${provider.quickResult!.interpretation.supportPriority.label}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 14),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Your strengths',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            for (final strength
+                in provider.quickResult!.interpretation.strengthInsights)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('• $strength'),
+              ),
+            if (provider
+                .quickResult!
+                .interpretation
+                .focusInsights
+                .isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Areas to explore',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+              for (final focus
+                  in provider.quickResult!.interpretation.focusInsights)
+                Align(alignment: Alignment.centerLeft, child: Text('• $focus')),
+            ],
+            const SizedBox(height: 12),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Brief response indicators',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Each indicator is based on one answer and is not a complete category assessment.',
+                style: TextStyle(
+                  color: QuickAssessmentPalette.secondaryText,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            for (final indicator
+                in provider.quickResult!.interpretation.domainResults)
+              Padding(
+                padding: const EdgeInsets.only(top: 5),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        indicator.domain,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        indicator.responsePatternLabel,
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const Divider(height: 28),
+          ],
           const SizedBox(height: 20),
           const Text(
             'Full Assessment Optional',

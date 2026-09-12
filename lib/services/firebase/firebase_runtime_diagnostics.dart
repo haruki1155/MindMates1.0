@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../core/config/android_firebase_identity.dart';
+import '../../core/config/app_environment.dart';
 
 class FirebaseRuntimeDiagnostics {
   const FirebaseRuntimeDiagnostics._();
@@ -17,6 +18,7 @@ class FirebaseRuntimeDiagnostics {
 
     final metadata = <String, String>{
       'event': event,
+      'environment': AppEnvironmentConfig.current.name,
       'packageName': AndroidFirebaseIdentity.packageName,
       'firebaseAppId': _firebaseAppId(),
       'buildMode': _buildMode,
@@ -25,6 +27,13 @@ class FirebaseRuntimeDiagnostics {
       'correlationId': correlationId ?? correlationIdFrom(error) ?? '',
     };
     debugPrint('FirebaseRuntime $metadata');
+  }
+
+  static void logStartupFailure({
+    required String stage,
+    required Object error,
+  }) {
+    log(event: 'startup_${stage}_failed', error: error);
   }
 
   static String? firebaseErrorCode(Object? error) {
@@ -51,6 +60,7 @@ class FirebaseRuntimeDiagnostics {
       : 'release';
 
   static String get _appCheckProvider {
+    if (AppEnvironmentConfig.isStaging) return 'staging-disabled';
     if (kIsWeb) return 'recaptcha-enterprise';
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:

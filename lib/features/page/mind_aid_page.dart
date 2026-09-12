@@ -50,7 +50,8 @@ class _MindAidPageState extends State<MindAidPage> {
     return MindAidScreen(
       messages: provider.messages,
       suggestions: provider.suggestions,
-      isAssistantTyping: provider.isSending,
+      isAssistantTyping: provider.isSending || provider.isLoading,
+      errorText: provider.errorMessage,
       onSendMessage: (text) {
         _sendAndRecordActivity(userId, text, mindAidContext);
       },
@@ -82,8 +83,8 @@ class _MindAidPageState extends State<MindAidPage> {
       onNewConversation: () => _startNewConversation(provider, userId),
       onPrivacyTap: () => _showConsentDialog(provider, userId, editing: true),
       disclaimerText: provider.usesDialogflow
-          ? 'Supportive AI using Dialogflow. MindAid is not a counselor or emergency service.'
-          : 'Local supportive assistant. MindAid is not a counselor or emergency service.',
+          ? 'MindAid is an automated, non-clinical wellness assistant. It offers general information, reflection prompts, and coping suggestions when PACC or administrators are unavailable. It is not monitored in real time, does not diagnose or treat mental-health conditions, and never replaces professional support or emergency services.'
+          : 'MindAid is an automated, non-clinical wellness assistant. It offers general information, reflection prompts, and coping suggestions when PACC or administrators are unavailable. It is not monitored in real time, does not diagnose or treat mental-health conditions, and never replaces professional support or emergency services.',
     );
   }
 
@@ -240,7 +241,7 @@ class _MindAidPageState extends State<MindAidPage> {
           editing ? 'AI privacy settings' : 'Choose how MindAid works',
         ),
         content: const Text(
-          'Dialogflow can make MindAid more conversational. It receives your chat turns and derived signals such as mood trends and assessment level. Journal text, mood notes, raw answers, and contact details are never sent. You can instead keep using the local assistant.',
+          'MindAid is a non-clinical automated wellness assistant, not a therapist, diagnostic tool, treatment service, or emergency response service. It can provide general wellness information and coping suggestions when PACC or administrators are unavailable, but chats are not monitored in real time. Dialogflow can make MindAid more conversational. With your permission, it receives your chat turns and limited derived signals such as mood trends and assessment level. Journal text, mood notes, raw answers, and contact details are never sent. You can instead keep using the local assistant.',
         ),
         actions: [
           TextButton(

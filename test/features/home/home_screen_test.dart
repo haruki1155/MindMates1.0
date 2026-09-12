@@ -23,6 +23,28 @@ import 'package:mind_mates/routes/app_pages.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('announcement actions are interactive', (tester) async {
+    var viewMoreCalls = 0;
+    var detailCalls = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomeAnnouncementCard(
+            onViewMore: () => viewMoreCalls++,
+            onViewDetail: () => detailCalls++,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('View More'));
+    await tester.tap(find.text('View Detail'));
+
+    expect(viewMoreCalls, 1);
+    expect(detailCalls, 1);
+  });
+
   testWidgets('daily affirmation rotates to the next supplied quote on tap', (
     tester,
   ) async {
@@ -123,7 +145,18 @@ void main() {
     expect(find.text('Student'), findsOneWidget);
     expect(find.text('Day streak'), findsOneWidget);
     expect(find.text('5'), findsWidgets);
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -900));
+    await tester.scrollUntilVisible(
+      find.text('View Summary'),
+      500,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('View Summary'));
     await tester.pumpAndSettle();
     expect(
       find.text('Your weekly mental health summary is ready to review.'),
@@ -134,8 +167,7 @@ void main() {
     await tester.tap(find.text('View Summary'));
     await tester.pumpAndSettle();
 
-    expect(find.text('This week is ready for review'), findsOneWidget);
-    expect(find.text("Today's activity"), findsOneWidget);
+    expect(find.text('Mental Health Summary'), findsOneWidget);
   });
 
   testWidgets('home Insight destination opens the insights screen', (
@@ -312,8 +344,15 @@ void main() {
     await tester.scrollUntilVisible(
       find.text('Mental Wellbeing 101'),
       500,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
+    await tester.ensureVisible(find.text('Mental Wellbeing 101'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Mental Wellbeing 101'));
     await tester.pumpAndSettle();
 
@@ -550,6 +589,8 @@ void main() {
       500,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('Breathing exercise'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Breathing exercise'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));

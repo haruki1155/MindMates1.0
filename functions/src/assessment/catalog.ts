@@ -42,7 +42,7 @@ const commonSleep: AssessmentQuestion[] = [
   q("common_sleep_5", "Stress affects my sleep.", "sleepRest", "Sleep and Rest", "risk"),
   q("common_sleep_6", "I maintain a healthy sleep schedule.", "sleepRest", "Sleep and Rest", "protective"),
   q("common_sleep_7", "Lack of sleep affects my concentration.", "sleepRest", "Sleep and Rest", "risk"),
-  q("common_sleep_8", "Sleep affects my mood.", "sleepRest", "Sleep and Rest", "risk"),
+  q("common_sleep_8", "Poor sleep negatively affects my mood.", "sleepRest", "Sleep and Rest", "risk"),
   q("common_sleep_9", "I prioritize rest.", "sleepRest", "Sleep and Rest", "protective"),
   q("common_sleep_10", "I feel physically rested.", "sleepRest", "Sleep and Rest", "protective"),
 ];
@@ -73,7 +73,7 @@ const studentEmotional = commonEmotional.map((question, index) => ({
   id: `emotional_${index + 1}`,
 }));
 
-const student: AssessmentQuestion[] = [
+const studentCatalog: AssessmentQuestion[] = [
   ...[
     "I feel overwhelmed by academic requirements.", "I worry about my grades.",
     "I struggle to meet deadlines.", "I feel pressured to perform well academically.",
@@ -91,18 +91,28 @@ const student: AssessmentQuestion[] = [
   ...[
     "Financial concerns affect my studies.", "I worry about tuition or school expenses.",
     "Financial stress affects my concentration.", "I worry about future educational costs.",
-    "Financial concerns affect my emotional well-being.",
+    "Financial concerns affect my emotional well-being.", "Unexpected school expenses cause me stress.",
+    "Financial limitations prevent me from joining school activities.",
+    "I worry about paying for my basic educational needs.",
+    "I have difficulty managing my school-related budget.",
+    "Financial pressure makes me consider delaying my studies.",
   ].map((text, i) => q(`financial_${i + 1}`, text, "financialConcern", "Financial Well-Being", "risk")),
   ...[
     "I feel supported by my classmates.", "I find it easy to build friendships.",
     "I feel comfortable seeking help.", "I feel connected to the university community.",
     "Social relationships positively affect my well-being.",
+    "I have someone at the university I can talk to when needed.",
+    "I feel accepted by people in my university community.",
+    "I participate in group or community activities.",
+    "I can communicate comfortably with my peers.",
+    "My university connections help me feel less isolated.",
   ].map((text, i) => q(`social_${i + 1}`, text, "socialAdjustment", "Social Adjustment", "protective")),
   ...studentSleep,
   ...studentEmotional,
 ];
+const student = studentCatalog.filter((question) => !question.conditional);
 
-const faculty: AssessmentQuestion[] = [
+const facultyCatalog: AssessmentQuestion[] = [
   q("faculty_workplace_core_1", "My workload is manageable.", "workplaceStressCore", "Workplace Stress", "protective"),
   q("faculty_workplace_core_2", "Teaching responsibilities cause me stress.", "workplaceStressCore", "Workplace Stress", "risk"),
   q("faculty_workplace_core_3", "Administrative tasks increase my stress level.", "workplaceStressCore", "Workplace Stress", "risk"),
@@ -124,17 +134,28 @@ const faculty: AssessmentQuestion[] = [
     "I receive support from my department.", "I can communicate concerns with colleagues.",
     "I feel respected in the workplace.", "I receive recognition for my efforts.",
     "I feel supported by university policies.",
+    "My department leadership listens to workplace concerns.",
+    "My colleagues offer help when my workload is difficult.",
+    "I have access to the resources I need to teach effectively.",
+    "I receive constructive feedback about my work.",
+    "I know where to seek support for workplace concerns.",
   ].map((text, i) => q(`faculty_support_${i + 1}`, text, "professionalSupport", "Professional Support", "protective")),
   ...[
     "I can manage stress effectively.", "I feel emotionally balanced.",
     "I remain motivated in my profession.", "I am satisfied with my work environment.",
     "I feel confident handling workplace challenges.",
+    "I have enough energy to carry out my teaching duties.",
+    "I can disconnect from work during my personal time.",
+    "I feel a sense of purpose in my professional role.",
+    "I recover well after a stressful workday.",
+    "My work routine supports my overall health.",
   ].map((text, i) => q(`faculty_wellbeing_${i + 1}`, text, "professionalWellBeing", "Professional Well-Being", "protective")),
   ...commonSleep,
   ...commonEmotional,
 ];
+const faculty = facultyCatalog.filter((question) => !question.conditional);
 
-const staff: AssessmentQuestion[] = [
+const staffCatalog: AssessmentQuestion[] = [
   q("staff_responsibility_core_1", "My workload is manageable.", "workplaceResponsibilityCore", "Workplace Responsibilities", "protective"),
   ...[
     "I feel overwhelmed by work responsibilities.", "Deadlines cause me stress.",
@@ -153,16 +174,25 @@ const staff: AssessmentQuestion[] = [
   ...[
     "I receive support from supervisors.", "I receive support from coworkers.",
     "I can communicate workplace concerns openly.", "I feel valued in my workplace.",
-    "I feel respected by colleagues.",
+    "I feel respected by colleagues.", "My supervisor listens to workplace concerns.",
+    "My team cooperates when the workload is difficult.",
+    "I have access to the resources and training I need.",
+    "I receive constructive feedback about my work.",
+    "I know where to seek support for workplace concerns.",
   ].map((text, i) => q(`staff_support_${i + 1}`, text, "workplaceSupport", "Workplace Support", "protective")),
   ...[
     "I can manage stress effectively.", "I feel emotionally balanced.",
     "I am satisfied with my work environment.", "I feel motivated at work.",
-    "I feel confident handling challenges.",
+    "I feel confident handling challenges.", "I have enough energy to carry out my work duties.",
+    "I can disconnect from work during my personal time.",
+    "I feel a sense of purpose in my workplace role.",
+    "I recover well after a stressful workday.",
+    "My work routine supports my overall health.",
   ].map((text, i) => q(`staff_wellbeing_${i + 1}`, text, "workplaceWellBeing", "Workplace Well-Being", "protective")),
   ...commonSleep,
   ...commonEmotional,
 ];
+const staff = staffCatalog.filter((question) => !question.conditional);
 
 export const QUESTIONS_BY_ROLE: Record<AssessmentRole, AssessmentQuestion[]> = {
   student,
@@ -190,9 +220,9 @@ export const QUICK_QUESTIONS: QuickQuestion[] = [
 
 // No documented validation source was found. These are internal experimental
 // product rules retained for compatibility and requiring professional review.
-export const ALGORITHM_VERSION = "internal_wellness_policy_v1";
-export const FULL_QUESTION_SET_VERSION = "experimental_role_based_v1";
-export const QUICK_QUESTION_SET_VERSION = "experimental_quick_v1";
+export const ALGORITHM_VERSION = "internal_wellness_policy_v2";
+export const FULL_QUESTION_SET_VERSION = "experimental_role_based_v3";
+export const QUICK_QUESTION_SET_VERSION = "quick_v2";
 export const POLICY_SOURCE = "internally_defined_product_rule";
 export const POLICY_VALIDATION_STATUS = "requires_professional_review";
 export const MIN_DOMAIN_ANSWERS = 3;
@@ -223,25 +253,25 @@ export const ROLE_LABELS: Record<AssessmentRole, string> = {
 
 export const ROLE_DOMAINS: Record<AssessmentRole, {label: string; sections: string[]; weight: number}[]> = {
   student: [
-    {label: "Academic Stress", sections: ["academicCore"], weight: .25},
-    {label: "Financial Well-Being", sections: ["financialConcern"], weight: .15},
-    {label: "Social Adjustment", sections: ["socialAdjustment"], weight: .10},
+    {label: "Academic Stress", sections: ["academicCore"], weight: .20},
+    {label: "Financial Well-Being", sections: ["financialConcern"], weight: .20},
+    {label: "Social Adjustment", sections: ["socialAdjustment"], weight: .20},
     {label: "Sleep and Rest", sections: ["sleepRest"], weight: .20},
-    {label: "Emotional Well-Being", sections: ["emotionalWellBeing"], weight: .30},
+    {label: "Emotional Well-Being", sections: ["emotionalWellBeing"], weight: .20},
   ],
   teaching: [
-    {label: "Workplace Stress", sections: ["workplaceStressCore"], weight: .30},
-    {label: "Professional Support", sections: ["professionalSupport"], weight: .15},
-    {label: "Professional Well-Being", sections: ["professionalWellBeing"], weight: .15},
-    {label: "Sleep and Rest", sections: ["sleepRest"], weight: .15},
-    {label: "Emotional Well-Being", sections: ["emotionalWellBeing"], weight: .25},
+    {label: "Workplace Stress", sections: ["workplaceStressCore"], weight: .20},
+    {label: "Professional Support", sections: ["professionalSupport"], weight: .20},
+    {label: "Professional Well-Being", sections: ["professionalWellBeing"], weight: .20},
+    {label: "Sleep and Rest", sections: ["sleepRest"], weight: .20},
+    {label: "Emotional Well-Being", sections: ["emotionalWellBeing"], weight: .20},
   ],
   nonTeaching: [
-    {label: "Workplace Responsibilities", sections: ["workplaceResponsibilityCore"], weight: .30},
-    {label: "Workplace Support", sections: ["workplaceSupport"], weight: .15},
-    {label: "Workplace Well-Being", sections: ["workplaceWellBeing"], weight: .15},
-    {label: "Sleep and Rest", sections: ["sleepRest"], weight: .15},
-    {label: "Emotional Well-Being", sections: ["emotionalWellBeing"], weight: .25},
+    {label: "Workplace Responsibilities", sections: ["workplaceResponsibilityCore"], weight: .20},
+    {label: "Workplace Support", sections: ["workplaceSupport"], weight: .20},
+    {label: "Workplace Well-Being", sections: ["workplaceWellBeing"], weight: .20},
+    {label: "Sleep and Rest", sections: ["sleepRest"], weight: .20},
+    {label: "Emotional Well-Being", sections: ["emotionalWellBeing"], weight: .20},
   ],
 };
 

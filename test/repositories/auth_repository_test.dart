@@ -22,4 +22,29 @@ void main() {
       expect(AuthRepository.authEmailForSchoolId(' '), 'user@mindmate.local');
     });
   });
+
+  group('AuthRepository institutional email classification', () {
+    test('recognizes only the exact UCU domain as teaching personnel', () {
+      expect(
+        AuthRepository.registrationRoleForEmail('juandelacruz@ucu.edu.ph').name,
+        'faculty',
+      );
+      expect(
+        AuthRepository.isInstitutionalEmployeeEmail(
+          ' JuanDelaCruz@UCU.EDU.PH ',
+        ),
+        isTrue,
+      );
+      expect(
+        AuthRepository.isInstitutionalEmployeeEmail(
+          'teacher@ucu.edu.ph.example.com',
+        ),
+        isFalse,
+      );
+      expect(
+        AuthRepository.isInstitutionalEmployeeEmail('student@gmail.com'),
+        isFalse,
+      );
+    });
+  });
 }

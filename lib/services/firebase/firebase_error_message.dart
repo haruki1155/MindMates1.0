@@ -22,6 +22,25 @@ class FirebaseErrorMessage {
       return appCheckMessage();
     }
     final code = codeOf(error);
+    if (error is FirebaseFunctionsException) {
+      final message = error.message?.trim();
+      if (message != null &&
+          message.isNotEmpty &&
+          {
+            'invalid-argument',
+            'failed-precondition',
+            'already-exists',
+            'not-found',
+            'internal',
+            'unavailable',
+          }.contains(code)) {
+        return message;
+      }
+    }
+    if (code == 'invalid-argument' && error is FirebaseFunctionsException) {
+      final message = error.message?.trim();
+      if (message != null && message.isNotEmpty) return message;
+    }
     if (error is FormatException) {
       return 'The assessment was saved, but the verified result could not be read. Tap retry to refresh it.';
     }
@@ -36,7 +55,7 @@ class FirebaseErrorMessage {
     }
     switch (code) {
       case 'permission-denied':
-        return 'Firebase denied access to the requested data. Check the account profile and security rules, then try again.';
+        return 'You do not have permission to complete this action.';
       case 'unauthenticated':
         return 'Please sign in again to continue.';
       case 'failed-precondition':
@@ -56,15 +75,22 @@ class FirebaseErrorMessage {
       case 'unavailable':
         return 'The connection to MindMates is unavailable. Check your internet connection and try again.';
       case 'email-already-in-use':
-        return 'An account already exists for this School ID.';
+        return 'This email address is already registered. Sign in or use a different email address.';
       case 'weak-password':
         return 'Password should be at least 6 characters.';
+      case 'too-many-requests':
+        return 'Too many verification requests were sent. Wait a minute, then try again.';
       case 'invalid-email':
-        return 'Enter a valid School ID.';
+        return 'Enter a valid email address.';
       case 'invalid-credential':
       case 'wrong-password':
       case 'user-not-found':
         return 'School ID or password is incorrect.';
+      case 'password-reset-unavailable':
+        return error is FirebaseAuthException &&
+                error.message?.trim().isNotEmpty == true
+            ? error.message!.trim()
+            : 'Password recovery is unavailable for this account. Contact MindMate support.';
       default:
         return fallback;
     }

@@ -73,7 +73,6 @@ class _MindAidLauncherOverlayState extends State<MindAidLauncherOverlay> {
     RouteNames.signup,
     RouteNames.forgotPassword,
     RouteNames.mindAid,
-    RouteNames.adminStatus,
   };
 
   @override

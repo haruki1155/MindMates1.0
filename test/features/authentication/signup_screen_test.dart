@@ -19,7 +19,9 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
+    await _dismissInstructions(tester);
 
+    expect(find.textContaining('Unofficial'), findsNothing);
     expect(find.text('College or Department'), findsWidgets);
     expect(find.text('Course or Program'), findsWidgets);
     expect(find.text('Select college first'), findsOneWidget);
@@ -45,6 +47,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
+    await _dismissInstructions(tester);
 
     await _selectDropdownItem(
       tester,
@@ -80,10 +83,10 @@ void main() {
 
     final authProvider = _FakeAuthProvider();
     await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
+    await _dismissInstructions(tester);
 
     await _fillRequiredTextFields(tester);
-    await tester.tap(find.byType(Checkbox));
-    await tester.pump();
+    await _acceptTerms(tester);
 
     await tester.tap(find.text('Sign Up'));
     await tester.pump();
@@ -99,6 +102,7 @@ void main() {
 
     final authProvider = _FakeAuthProvider();
     await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
+    await _dismissInstructions(tester);
 
     await _fillRequiredTextFields(tester);
     await _selectDropdownItem(
@@ -112,8 +116,7 @@ void main() {
       fieldLabel: 'Course or Program',
       itemLabel: 'BS Information Technology',
     );
-    await tester.tap(find.byType(Checkbox));
-    await tester.pump();
+    await _acceptTerms(tester);
 
     await tester.tap(find.text('Sign Up'));
     await tester.pumpAndSettle();
@@ -128,7 +131,7 @@ void main() {
     expect(find.text('onboarding target'), findsOneWidget);
   });
 
-  testWidgets('teaching signup uses department and position fields', (
+  testWidgets('official UCU email automatically switches to teaching fields', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1600));
@@ -138,14 +141,90 @@ void main() {
     await tester.pumpWidget(
       _SignupHarness(authProvider: authProvider, role: AssessmentRole.faculty),
     );
+    await _dismissInstructions(tester);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Email Address'),
+      'juandelacruz@ucu.edu.ph',
+    );
+    await tester.pump();
 
     expect(find.text('College or Department'), findsWidgets);
+    expect(find.text('Employee ID'), findsWidgets);
+    expect(find.text('Teaching personnel account detected'), findsOneWidget);
     expect(find.text('Course or Program'), findsNothing);
+    expect(find.text('Year Level'), findsNothing);
     expect(find.text('Position or Designation'), findsWidgets);
     expect(find.text('Sector'), findsNothing);
   });
 
-  testWidgets('non-teaching signup requires and passes sector', (tester) async {
+  testWidgets(
+    'official UCU registration submits teaching role and employee ID',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final authProvider = _FakeAuthProvider();
+      await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
+      await _dismissInstructions(tester);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Email Address'),
+        'juandelacruz@ucu.edu.ph',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'First Name'),
+        'Juan',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Last Name'),
+        'Dela Cruz',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Employee ID'),
+        'EMP-1001',
+      );
+      await tester.tap(find.text('Select date'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('15').last);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      await _selectDropdownItem(
+        tester,
+        fieldLabel: 'College or Department',
+        itemLabel: 'College of Nursing',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Position or Designation'),
+        'Instructor',
+      );
+      await _selectDropdownItem(
+        tester,
+        fieldLabel: 'Sex / Gender',
+        itemLabel: 'Male',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Password'),
+        'password123',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Confirm Password'),
+        'password123',
+      );
+      await _acceptTerms(tester);
+      await tester.tap(find.text('Sign Up'));
+      await tester.pumpAndSettle();
+
+      expect(authProvider.signupCalls, 1);
+      expect(authProvider.role, AssessmentRole.faculty);
+      expect(authProvider.employeeId, 'EMP-1001');
+      expect(authProvider.position, 'Instructor');
+      expect(authProvider.gender, 'Male');
+    },
+  );
+
+  testWidgets('non-teaching selection still shows universal student form', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -153,38 +232,25 @@ void main() {
     await tester.pumpWidget(
       _SignupHarness(authProvider: authProvider, role: AssessmentRole.staff),
     );
+    await _dismissInstructions(tester);
 
-    expect(find.text('Sector'), findsWidgets);
-    expect(find.text('College or Department'), findsNothing);
-    expect(find.text('Course or Program'), findsNothing);
-
-    await _fillRequiredTextFields(tester);
-    await tester.tap(find.byType(Checkbox));
-    await tester.pump();
-
-    await tester.tap(find.text('Sign Up'));
-    await tester.pump();
-
-    expect(find.text('Sector is required'), findsOneWidget);
-    expect(authProvider.signupCalls, 0);
-
-    await _selectDropdownItem(
-      tester,
-      fieldLabel: 'Sector',
-      itemLabel: 'Guidance/PACC',
-    );
-    await tester.tap(find.text('Sign Up'));
-    await tester.pumpAndSettle();
-
-    expect(authProvider.signupCalls, 1);
-    expect(authProvider.department, '');
-    expect(authProvider.course, '');
-    expect(authProvider.sector, 'Guidance/PACC');
-    expect(authProvider.role, AssessmentRole.staff);
+    expect(find.text('Sector'), findsNothing);
+    expect(find.text('College or Department'), findsWidgets);
+    expect(find.text('Course or Program'), findsWidgets);
+    expect(find.text('Year Level'), findsWidgets);
   });
 }
 
 Future<void> _fillRequiredTextFields(WidgetTester tester) async {
+  await tester.tap(find.text('Select date'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('15').last);
+  await tester.tap(find.text('OK'));
+  await tester.pumpAndSettle();
+  await tester.enterText(
+    find.widgetWithText(TextFormField, 'Email Address'),
+    'student@gmail.com',
+  );
   await tester.enterText(
     find.widgetWithText(TextFormField, 'First Name'),
     'Leo',
@@ -196,16 +262,22 @@ Future<void> _fillRequiredTextFields(WidgetTester tester) async {
   await tester.enterText(
     find.widgetWithText(
       TextFormField,
-      find.text('School ID').evaluate().isNotEmpty
-          ? 'School ID'
+      find.text('Student ID').evaluate().isNotEmpty
+          ? 'Student ID'
           : 'Employee ID',
     ),
     '2026-1',
   );
-  final yearLevel = find.widgetWithText(TextFormField, 'Year Level');
-  if (yearLevel.evaluate().isNotEmpty) {
-    await tester.enterText(yearLevel, '2nd Year');
-  }
+  await _selectDropdownItem(
+    tester,
+    fieldLabel: 'Year Level',
+    itemLabel: '2nd Year',
+  );
+  await _selectDropdownItem(
+    tester,
+    fieldLabel: 'Sex / Gender',
+    itemLabel: 'Prefer not to say',
+  );
   final position = find.widgetWithText(
     TextFormField,
     'Position or Designation',
@@ -224,16 +296,43 @@ Future<void> _fillRequiredTextFields(WidgetTester tester) async {
   await tester.pump();
 }
 
+Future<void> _dismissInstructions(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  expect(find.text('Before you create an account'), findsOneWidget);
+  await tester.tap(find.text('Continue'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _acceptTerms(WidgetTester tester) async {
+  final termsControl = find.byKey(const Key('registration-terms-control'));
+  await tester.ensureVisible(termsControl);
+  await tester.tap(termsControl);
+  await tester.pumpAndSettle();
+
+  final agreeButton = find.byKey(const Key('terms-agree'));
+  expect(tester.widget<FilledButton>(agreeButton).onPressed, isNull);
+  await tester.drag(
+    find.byKey(const Key('terms-scroll-view')),
+    const Offset(0, -2000),
+  );
+  await tester.pumpAndSettle();
+  expect(tester.widget<FilledButton>(agreeButton).onPressed, isNotNull);
+  await tester.tap(agreeButton);
+  await tester.pumpAndSettle();
+
+  expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isTrue);
+}
+
 Future<void> _selectDropdownItem(
   WidgetTester tester, {
   required String fieldLabel,
   required String itemLabel,
 }) async {
-  final index = switch (fieldLabel) {
-    'Course or Program' => 1,
-    _ => 0,
-  };
-  final field = find.byType(DropdownButtonFormField<String>).at(index);
+  final field = find.byWidgetPredicate(
+    (widget) =>
+        widget is DropdownButtonFormField<String> &&
+        widget.decoration.hintText == fieldLabel,
+  );
   await tester.ensureVisible(field);
   await tester.tap(field);
   await tester.pumpAndSettle();
@@ -290,6 +389,13 @@ class _FakeAuthProvider extends AuthProvider {
   String? schoolId;
   String? generatedEmail;
   AssessmentRole? role;
+  String? gender;
+
+  @override
+  String? get currentUserEmail => null;
+
+  @override
+  String? get currentUserDisplayName => null;
 
   @override
   Future<String?> signUp({
@@ -305,6 +411,8 @@ class _FakeAuthProvider extends AuthProvider {
     String? position,
     String? middleName,
     AssessmentRole? role,
+    DateTime? dateOfBirth,
+    String? gender,
   }) async {
     signupCalls += 1;
     this.department = department;
@@ -316,6 +424,7 @@ class _FakeAuthProvider extends AuthProvider {
     this.schoolId = schoolId;
     generatedEmail = AuthRepository.authEmailForSchoolId(schoolId);
     this.role = role;
+    this.gender = gender;
     return 'user_1';
   }
 }

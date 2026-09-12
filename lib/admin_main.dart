@@ -1,14 +1,21 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
-import 'core/constants/app_colors.dart';
+import 'core/config/app_environment.dart';
 import 'features/admin/screens/admin_auth_gate.dart';
-import 'firebase_options.dart';
+import 'features/admin/screens/admin_email_action_screen.dart';
+import 'features/admin/theme/admin_theme.dart';
+import 'firebase_options_selector.dart';
 import 'services/firebase/firebase_app_check_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  final options = MindMatesFirebaseOptions.currentPlatform;
+  AppEnvironmentConfig.validateFirebaseIdentity(
+    projectId: options.projectId,
+    callableRegion: AppEnvironmentConfig.functionsRegion,
+  );
+  await Firebase.initializeApp(options: options);
   try {
     await FirebaseAppCheckService.activate();
   } catch (error) {
@@ -24,18 +31,12 @@ class MindMateAdminApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MindMate Admin',
+      title: 'MindMate',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.primary,
-          primary: AppColors.primary,
-          surface: AppColors.surface,
-        ),
-        scaffoldBackgroundColor: AppColors.background,
-        useMaterial3: true,
-      ),
-      home: const AdminAuthGate(),
+      theme: AdminTheme.data,
+      home: AdminEmailActionScreen.supports(Uri.base)
+          ? AdminEmailActionScreen(uri: Uri.base)
+          : const AdminAuthGate(),
     );
   }
 }

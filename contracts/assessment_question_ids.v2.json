@@ -1,0 +1,41 @@
+{
+  "version": "experimental_role_based_v2",
+  "responseScale": [
+    { "id": "never", "label": "Strongly Disagree", "value": 1 },
+    { "id": "rarely", "label": "Disagree", "value": 2 },
+    { "id": "often", "label": "Agree", "value": 3 },
+    { "id": "always", "label": "Strongly Agree", "value": 4 }
+  ],
+  "scoring": {
+    "normalization": "((value - 1) / 3) * 100",
+    "protectiveDirection": "100 - normalized",
+    "overallDomainWeight": 0.2,
+    "displayStatuses": ["Thriving", "Stable", "Needs Improvement", "At Risk"]
+  },
+  "roles": {
+    "student": [
+      { "prefix": "academic_core_", "count": 10 },
+      { "prefix": "academic_deeper_", "count": 10, "conditional": true },
+      { "prefix": "financial_", "count": 5 },
+      { "prefix": "social_", "count": 5 },
+      { "prefix": "sleep_", "count": 10 },
+      { "prefix": "emotional_", "count": 10 }
+    ],
+    "teaching": [
+      { "prefix": "faculty_workplace_core_", "count": 10 },
+      { "prefix": "faculty_workplace_deeper_", "count": 10, "conditional": true },
+      { "prefix": "faculty_support_", "count": 5 },
+      { "prefix": "faculty_wellbeing_", "count": 5 },
+      { "prefix": "common_sleep_", "count": 10 },
+      { "prefix": "common_emotional_", "count": 10 }
+    ],
+    "nonTeaching": [
+      { "prefix": "staff_responsibility_core_", "count": 10 },
+      { "prefix": "staff_responsibility_deeper_", "count": 10, "conditional": true },
+      { "prefix": "staff_support_", "count": 5 },
+      { "prefix": "staff_wellbeing_", "count": 5 },
+      { "prefix": "common_sleep_", "count": 10 },
+      { "prefix": "common_emotional_", "count": 10 }
+    ]
+  }
+}

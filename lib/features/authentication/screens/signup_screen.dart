@@ -4,12 +4,13 @@ import 'package:provider/provider.dart';
 import '../../quick_assessment/models/quick_assessment_models.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
-import '../../../providers/assessment_provider.dart';
+import '../../../core/widgets/mindmate_terms_and_conditions.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../repositories/auth_repository.dart';
-import '../auth_flow_routes.dart';
 import '../data/registration_organization_catalog.dart';
+import '../../../routes/route_names.dart';
+import '../auth_flow_routes.dart';
 
 class SignupScreen extends StatelessWidget {
   const SignupScreen({super.key});
@@ -40,6 +41,7 @@ class _SignupBody extends StatefulWidget {
 
 class _SignupBodyState extends State<_SignupBody> {
   final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
   final _firstNameController = TextEditingController();
   final _middleNameController = TextEditingController();
   final _lastNameController = TextEditingController();
@@ -51,10 +53,103 @@ class _SignupBodyState extends State<_SignupBody> {
   String? _selectedDepartment;
   String? _selectedCourse;
   String? _selectedSector;
+  String? _selectedGender;
   bool _acceptedTerms = false;
+  DateTime? _dateOfBirth;
+  bool _googleDefaultsApplied = false;
+
+  bool get _isGoogleProfileSetup {
+    final email = context.read<AuthProvider>().currentUserEmail ?? '';
+    return email.isNotEmpty && !email.endsWith('@mindmate.local');
+  }
+
+  AssessmentRole get _registrationRole =>
+      AuthRepository.registrationRoleForEmail(_emailController.text);
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController.addListener(_handleEmailChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showRegistrationInstructions();
+    });
+  }
+
+  void _handleEmailChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _showRegistrationInstructions() {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.how_to_reg_outlined),
+        title: const Text('Before you create an account'),
+        content: const Text(
+          'Student accounts use a valid personal email address and Student ID.\n\n'
+          'Teaching personnel must use their official UCU email (for example, '
+          'juandelacruz@ucu.edu.ph). The form will automatically change to '
+          'Teaching and ask for an Employee ID.\n\n'
+          'Non-teaching registration remains unchanged while a reliable '
+          'verification method is being prepared. There is no manual account-type selector.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleTermsChanged() async {
+    if (_acceptedTerms) {
+      setState(() => _acceptedTerms = false);
+      return;
+    }
+
+    final accepted = await showMindMateTermsAndConditions(
+      context,
+      requireAcceptance: true,
+    );
+    if (mounted && accepted) setState(() => _acceptedTerms = true);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_googleDefaultsApplied || !_isGoogleProfileSetup) return;
+    _googleDefaultsApplied = true;
+    _emailController.text = context.read<AuthProvider>().currentUserEmail ?? '';
+    final displayName =
+        context.read<AuthProvider>().currentUserDisplayName ?? '';
+    final parts = displayName.trim().split(RegExp(r'\s+'));
+    if (parts.isNotEmpty && parts.first.isNotEmpty) {
+      _firstNameController.text = parts.first;
+      if (parts.length > 1) {
+        _lastNameController.text = parts.sublist(1).join(' ');
+      }
+    }
+  }
+
+  Future<void> _pickDateOfBirth() async {
+    final today = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate:
+          _dateOfBirth ?? DateTime(today.year - 18, today.month, today.day),
+      firstDate: DateTime(today.year - 120),
+      lastDate: today,
+    );
+    if (picked != null && mounted) setState(() => _dateOfBirth = picked);
+  }
 
   @override
   void dispose() {
+    _emailController.removeListener(_handleEmailChanged);
+    _emailController.dispose();
     _firstNameController.dispose();
     _middleNameController.dispose();
     _lastNameController.dispose();
@@ -94,33 +189,58 @@ class _SignupBodyState extends State<_SignupBody> {
           ..hideCurrentSnackBar()
           ..showSnackBar(
             const SnackBar(
-              content: Text('Please accept Privacy & Term of Use.'),
+              content: Text('Please read and accept the Terms and Conditions.'),
             ),
           );
       }
       return;
     }
 
-    final assessmentProvider = context.read<AssessmentProvider>();
     final authProvider = context.read<AuthProvider>();
     final userProvider = context.read<UserProvider>();
-    final role = assessmentProvider.selectedRole;
-    final usesSector = role == AssessmentRole.staff;
-    final isStudent = role == AssessmentRole.student;
-    final userId = await authProvider.signUp(
-      password: _passwordController.text,
-      firstName: _firstNameController.text,
-      lastName: _lastNameController.text,
-      schoolId: _schoolIdController.text,
-      department: usesSector ? '' : _selectedDepartment ?? '',
-      course: isStudent ? _selectedCourse ?? '' : '',
-      sector: usesSector ? _selectedSector : null,
-      employeeId: isStudent ? null : _schoolIdController.text,
-      yearLevel: isStudent ? _yearLevelController.text : null,
-      position: isStudent ? null : _positionController.text,
-      middleName: _middleNameController.text,
-      role: role,
-    );
+    authProvider.setRegistrationEmail(_emailController.text);
+    final role = _registrationRole;
+    final birthDate = _dateOfBirth;
+    if (birthDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Date of birth is required.')),
+      );
+      return;
+    }
+    final userId = _isGoogleProfileSetup
+        ? await authProvider.completeGoogleProfile(
+            firstName: _firstNameController.text,
+            lastName: _lastNameController.text,
+            schoolId: _schoolIdController.text,
+            department: _selectedDepartment ?? '',
+            course: _selectedCourse ?? '',
+            yearLevel: _yearLevelController.text,
+            dateOfBirth: birthDate,
+            middleName: _middleNameController.text,
+            employeeId: role == AssessmentRole.faculty
+                ? _schoolIdController.text
+                : null,
+            position: _positionController.text,
+            role: role,
+            gender: _selectedGender,
+          )
+        : await authProvider.signUp(
+            password: _passwordController.text,
+            firstName: _firstNameController.text,
+            lastName: _lastNameController.text,
+            schoolId: _schoolIdController.text,
+            department: _selectedDepartment ?? '',
+            course: _selectedCourse ?? '',
+            yearLevel: _yearLevelController.text,
+            middleName: _middleNameController.text,
+            employeeId: role == AssessmentRole.faculty
+                ? _schoolIdController.text
+                : null,
+            position: _positionController.text,
+            role: role,
+            dateOfBirth: birthDate,
+            gender: _selectedGender,
+          );
 
     if (!mounted) return;
 
@@ -140,12 +260,26 @@ class _SignupBodyState extends State<_SignupBody> {
     userProvider.setUser(
       _localProfileFromRegistration(userId: userId, role: role),
     );
-    await userProvider.loadProfile(userId);
-
+    final profileLoaded = await userProvider.loadProfile(userId);
+    if (!profileLoaded) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            userProvider.errorMessage ??
+                'Your profile could not be loaded. Please try again.',
+          ),
+        ),
+      );
+      return;
+    }
     if (!mounted) return;
-    final destination = destinationAfterAuthentication(
-      hasCompletedQuickAssessment: false,
-    );
+    final provider = context.read<AuthProvider>();
+    final destination = provider.currentUserEmail?.isNotEmpty != true
+        ? destinationAfterAuthentication(hasCompletedQuickAssessment: false)
+        : provider.currentUserEmailVerified
+        ? RouteNames.profileSetup
+        : RouteNames.emailVerification;
     Navigator.of(
       context,
     ).pushNamedAndRemoveUntil(destination, (route) => false);
@@ -160,7 +294,9 @@ class _SignupBodyState extends State<_SignupBody> {
     final populationRole = role?.populationRole;
     return UserModel(
       id: userId,
-      email: AuthRepository.authEmailForSchoolId(_schoolIdController.text),
+      email:
+          context.read<AuthProvider>().currentUserEmail ??
+          AuthRepository.authEmailForSchoolId(_schoolIdController.text),
       firstName: _firstNameController.text.trim(),
       middleName: _middleNameController.text.trim(),
       lastName: _lastNameController.text.trim(),
@@ -175,10 +311,14 @@ class _SignupBodyState extends State<_SignupBody> {
       populationRole: populationRole,
       declaredRole: populationRole,
       accessRole: AccessRole.appUser,
-      verificationStatus: VerificationStatus.pending,
-      profileVersion: 2,
+      verificationStatus: VerificationStatus.verified,
+      verifiedAt: DateTime.now(),
+      verifiedBy: 'automatic-registration',
+      profileVersion: 3,
       createdAt: DateTime.now(),
       dayStreak: 0,
+      dateOfBirth: _dateOfBirth,
+      gender: _selectedGender,
     );
   }
 
@@ -196,13 +336,15 @@ class _SignupBodyState extends State<_SignupBody> {
             children: [
               const _LogoHeader(),
               const SizedBox(height: 16),
-              const _NoticePanel(),
-              const SizedBox(height: 12),
               Consumer<AuthProvider>(
                 builder: (context, authProvider, _) {
                   return _SignupFormCard(
                     formKey: _formKey,
-                    role: context.watch<AssessmentProvider>().selectedRole,
+                    role: _registrationRole,
+                    isGoogleProfileSetup: _isGoogleProfileSetup,
+                    dateOfBirth: _dateOfBirth,
+                    onPickDateOfBirth: _pickDateOfBirth,
+                    emailController: _emailController,
                     firstNameController: _firstNameController,
                     middleNameController: _middleNameController,
                     lastNameController: _lastNameController,
@@ -214,6 +356,7 @@ class _SignupBodyState extends State<_SignupBody> {
                     selectedDepartment: _selectedDepartment,
                     selectedCourse: _selectedCourse,
                     selectedSector: _selectedSector,
+                    selectedGender: _selectedGender,
                     acceptedTerms: _acceptedTerms,
                     isLoading: authProvider.isLoading,
                     onDepartmentChanged: (value) {
@@ -228,9 +371,10 @@ class _SignupBodyState extends State<_SignupBody> {
                     onSectorChanged: (value) {
                       setState(() => _selectedSector = value);
                     },
-                    onTermsChanged: (value) {
-                      setState(() => _acceptedTerms = value ?? false);
+                    onGenderChanged: (value) {
+                      setState(() => _selectedGender = value);
                     },
+                    onTermsTap: _handleTermsChanged,
                     onSignUp: _handleSignUp,
                     requiredValidator: _requiredValidator,
                     confirmPasswordValidator: _confirmPasswordValidator,
@@ -248,38 +392,11 @@ class _SignupBodyState extends State<_SignupBody> {
 class _LogoHeader extends StatelessWidget {
   const _LogoHeader();
 
-  static const _logoPath =
-      'assets/images/Create Account/Green_and_White_Circle_Minimalist_Garden_Logo-removebg-preview 1.png';
+  static const _logoPath = 'assets/images/APP LOGO/MindMate_LOGO.jpg';
 
   @override
   Widget build(BuildContext context) {
     return Image.asset(_logoPath, width: 150, height: 150, fit: BoxFit.contain);
-  }
-}
-
-class _NoticePanel extends StatelessWidget {
-  const _NoticePanel();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 300,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-      decoration: BoxDecoration(
-        color: _SignupColors.notice,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Text(
-        '-- Unofficial --\nRefer to the instructions of UCU-MiS+ FB Page\n+ PACC before using.',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: _SignupColors.text,
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          height: 1.33,
-        ),
-      ),
-    );
   }
 }
 
@@ -298,15 +415,21 @@ class _SignupFormCard extends StatelessWidget {
     required this.selectedDepartment,
     required this.selectedCourse,
     required this.selectedSector,
+    required this.selectedGender,
     required this.acceptedTerms,
     required this.isLoading,
     required this.onDepartmentChanged,
     required this.onCourseChanged,
     required this.onSectorChanged,
-    required this.onTermsChanged,
+    required this.onGenderChanged,
+    required this.onTermsTap,
     required this.onSignUp,
     required this.requiredValidator,
     required this.confirmPasswordValidator,
+    required this.isGoogleProfileSetup,
+    required this.dateOfBirth,
+    required this.onPickDateOfBirth,
+    required this.emailController,
   });
 
   final GlobalKey<FormState> formKey;
@@ -322,15 +445,21 @@ class _SignupFormCard extends StatelessWidget {
   final String? selectedDepartment;
   final String? selectedCourse;
   final String? selectedSector;
+  final String? selectedGender;
   final bool acceptedTerms;
   final bool isLoading;
   final ValueChanged<String?> onDepartmentChanged;
   final ValueChanged<String?> onCourseChanged;
   final ValueChanged<String?> onSectorChanged;
-  final ValueChanged<bool?> onTermsChanged;
+  final ValueChanged<String?> onGenderChanged;
+  final VoidCallback onTermsTap;
   final Future<void> Function() onSignUp;
   final String? Function(String?, String) requiredValidator;
   final String? Function(String?) confirmPasswordValidator;
+  final bool isGoogleProfileSetup;
+  final DateTime? dateOfBirth;
+  final Future<void> Function() onPickDateOfBirth;
+  final TextEditingController emailController;
 
   @override
   Widget build(BuildContext context) {
@@ -360,6 +489,25 @@ class _SignupFormCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _SignupField(
+              controller: emailController,
+              label: 'Email Address',
+              icon: Icons.email_outlined,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.next,
+              readOnly: isGoogleProfileSetup,
+              validator: (value) {
+                final text = value?.trim() ?? '';
+                if (text.isEmpty) return 'Email address is required';
+                if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(text)) {
+                  return 'Enter a valid email address';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 7),
+            _AccountTypeNotice(isTeaching: !isStudent),
+            const SizedBox(height: 7),
+            _SignupField(
               controller: firstNameController,
               label: 'First Name',
               icon: Icons.person_outline,
@@ -382,13 +530,29 @@ class _SignupFormCard extends StatelessWidget {
             const SizedBox(height: 7),
             _SignupField(
               controller: schoolIdController,
-              label: isStudent ? 'School ID' : 'Employee ID',
+              label: isStudent ? 'Student ID' : 'Employee ID',
               icon: Icons.badge_outlined,
               keyboardType: TextInputType.text,
               textInputAction: TextInputAction.next,
               validator: (value) => requiredValidator(
                 value,
-                isStudent ? 'School ID' : 'Employee ID',
+                isStudent ? 'Student ID' : 'Employee ID',
+              ),
+            ),
+            const SizedBox(height: 7),
+            InkWell(
+              onTap: onPickDateOfBirth,
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Date of Birth',
+                  prefixIcon: Icon(Icons.cake_outlined),
+                  border: OutlineInputBorder(),
+                ),
+                child: Text(
+                  dateOfBirth == null
+                      ? 'Select date'
+                      : '${dateOfBirth!.month}/${dateOfBirth!.day}/${dateOfBirth!.year}',
+                ),
               ),
             ),
             const SizedBox(height: 7),
@@ -430,11 +594,14 @@ class _SignupFormCard extends StatelessWidget {
             ],
             const SizedBox(height: 7),
             if (isStudent)
-              _SignupField(
-                controller: yearLevelController,
+              _SignupDropdownField(
                 label: 'Year Level',
                 icon: Icons.timeline_outlined,
-                textInputAction: TextInputAction.next,
+                value: yearLevelController.text.isEmpty
+                    ? null
+                    : yearLevelController.text,
+                items: const ['1st Year', '2nd Year', '3rd Year', '4th Year'],
+                onChanged: (value) => yearLevelController.text = value ?? '',
                 validator: (value) => requiredValidator(value, 'Year level'),
               )
             else
@@ -447,32 +614,104 @@ class _SignupFormCard extends StatelessWidget {
                     requiredValidator(value, 'Position or designation'),
               ),
             const SizedBox(height: 7),
-            _SignupField(
-              controller: passwordController,
-              label: 'Password',
-              icon: Icons.lock_outline,
-              obscureText: true,
-              textInputAction: TextInputAction.next,
-              validator: (value) => requiredValidator(value, 'Password'),
+            _SignupDropdownField(
+              label: 'Sex / Gender',
+              icon: Icons.wc_outlined,
+              value: selectedGender,
+              items: const [
+                'Male',
+                'Female',
+                'Non-binary',
+                'Prefer not to say',
+              ],
+              onChanged: onGenderChanged,
+              validator: (value) => requiredValidator(value, 'Sex / gender'),
             ),
             const SizedBox(height: 7),
-            _SignupField(
-              controller: confirmPasswordController,
-              label: 'Confirm Password',
-              icon: Icons.lock_outline,
-              obscureText: true,
-              textInputAction: TextInputAction.done,
-              validator: confirmPasswordValidator,
-            ),
+            if (!isGoogleProfileSetup) ...[
+              _SignupField(
+                controller: passwordController,
+                label: 'Password',
+                icon: Icons.lock_outline,
+                obscureText: true,
+                textInputAction: TextInputAction.next,
+                validator: (value) => requiredValidator(value, 'Password'),
+              ),
+              const SizedBox(height: 7),
+              _SignupField(
+                controller: confirmPasswordController,
+                label: 'Confirm Password',
+                icon: Icons.lock_outline,
+                obscureText: true,
+                textInputAction: TextInputAction.done,
+                validator: confirmPasswordValidator,
+              ),
+            ],
             const SizedBox(height: 9),
-            _TermsCheckbox(
-              acceptedTerms: acceptedTerms,
-              onChanged: onTermsChanged,
-            ),
+            _TermsCheckbox(acceptedTerms: acceptedTerms, onTap: onTermsTap),
             const SizedBox(height: 23),
             _SignUpButton(onPressed: isLoading ? null : onSignUp),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AccountTypeNotice extends StatelessWidget {
+  const _AccountTypeNotice({required this.isTeaching});
+
+  final bool isTeaching;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = isTeaching
+        ? 'Teaching personnel account detected'
+        : 'Student account';
+    final message = isTeaching
+        ? 'Official UCU email confirmed. Your Employee ID and work details are required.'
+        : 'Use your student details below. Teaching personnel must enter an @ucu.edu.ph email.';
+    return Container(
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: isTeaching ? const Color(0xFFE8F5EF) : const Color(0xFFFFF4D6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            isTeaching ? Icons.verified_outlined : Icons.school_outlined,
+            size: 18,
+            color: _SignupColors.text,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: _SignupColors.text,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    color: _SignupColors.text,
+                    fontSize: 10,
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -487,6 +726,7 @@ class _SignupField extends StatelessWidget {
     this.textInputAction,
     this.obscureText = false,
     this.validator,
+    this.readOnly = false,
   });
 
   final TextEditingController controller;
@@ -496,6 +736,7 @@ class _SignupField extends StatelessWidget {
   final TextInputAction? textInputAction;
   final bool obscureText;
   final String? Function(String?)? validator;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -520,6 +761,7 @@ class _SignupField extends StatelessWidget {
           keyboardType: keyboardType,
           textInputAction: textInputAction,
           obscureText: obscureText,
+          readOnly: readOnly,
           validator: validator,
           cursorColor: _SignupColors.button,
           style: const TextStyle(
@@ -721,39 +963,61 @@ class _SignupFieldIcon extends StatelessWidget {
 }
 
 class _TermsCheckbox extends StatelessWidget {
-  const _TermsCheckbox({required this.acceptedTerms, required this.onChanged});
+  const _TermsCheckbox({required this.acceptedTerms, required this.onTap});
 
   final bool acceptedTerms;
-  final ValueChanged<bool?> onChanged;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 18,
-          height: 18,
-          child: Checkbox(
-            value: acceptedTerms,
-            onChanged: onChanged,
-            activeColor: _SignupColors.button,
-            checkColor: _SignupColors.text,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            side: const BorderSide(color: _SignupColors.text, width: 1.2),
+    return Semantics(
+      button: true,
+      checked: acceptedTerms,
+      label: 'Read and accept the Terms and Conditions',
+      child: InkWell(
+        key: const Key('registration-terms-control'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 18,
+                height: 18,
+                child: ExcludeSemantics(
+                  child: IgnorePointer(
+                    child: Checkbox(
+                      value: acceptedTerms,
+                      onChanged: (_) {},
+                      activeColor: _SignupColors.button,
+                      checkColor: _SignupColors.text,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      side: const BorderSide(
+                        color: _SignupColors.text,
+                        width: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 7),
+              const Expanded(
+                child: Text(
+                  'I have read and accept the Terms and Conditions',
+                  style: TextStyle(
+                    color: _SignupColors.text,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+              const Icon(Icons.open_in_new_rounded, size: 15),
+            ],
           ),
         ),
-        const SizedBox(width: 5),
-        const Expanded(
-          child: Text(
-            'I accept Privacy & Term of Use',
-            style: TextStyle(
-              color: _SignupColors.text,
-              fontSize: 10,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -876,7 +1140,6 @@ class _SignupColors {
 
   static const background = Color(0xFFFEFEFE);
   static const card = Color(0xFFFFE9AC);
-  static const notice = Color(0xFFFFE292);
   static const button = Color(0xFFFFBE0A);
   static const text = Color(0xFF050505);
   static const hintText = Color(0xFF6C6250);

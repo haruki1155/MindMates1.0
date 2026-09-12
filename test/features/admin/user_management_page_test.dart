@@ -13,21 +13,29 @@ class _Repository extends AdminPortalRepository {
   bool get isSuperAdmin => true;
 
   @override
-  Future<List<PublicAppUserRecord>> listPublicAppUsers() async => const [
+  Future<List<PublicAppUserRecord>> listPublicAppUsers() async => [
     PublicAppUserRecord(
+      userId: 'private-app-uid',
       publicUserId: 'USR-7K4P2Q',
       populationRole: PopulationRole.student,
+      department: 'CITE',
+      createdAt: DateTime(2026, 9, 1),
     ),
   ];
 
   @override
-  Stream<List<UserModel>> watchUsers() => Stream.value(const [
+  Stream<List<UserModel>> watchUsers() => Stream.value([
     UserModel(
       id: 'private-app-uid',
       email: 'private@student.example',
       firstName: 'Private',
       lastName: 'Student',
+      schoolId: '2024-001',
+      department: 'CITE',
+      course: 'BSIT',
+      yearLevel: '3rd Year',
       populationRole: PopulationRole.student,
+      createdAt: DateTime(2026, 9, 1),
     ),
     UserModel(
       id: 'staff-uid',
@@ -58,9 +66,13 @@ class _Repository extends AdminPortalRepository {
 }
 
 void main() {
-  testWidgets('app users expose only public ID and population category', (
+  testWidgets('app users show department, creation date, and profile action', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(1440, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       MaterialApp(home: UserManagementPage(repository: _Repository())),
     );
@@ -68,11 +80,20 @@ void main() {
 
     expect(find.text('USR-7K4P2Q'), findsOneWidget);
     expect(find.text('Student'), findsOneWidget);
+    expect(find.text('CITE'), findsOneWidget);
+    expect(find.text('2026-09-01'), findsOneWidget);
+    expect(find.text('View user'), findsOneWidget);
     expect(find.text('Private Student'), findsNothing);
     expect(find.text('private@student.example'), findsNothing);
     expect(find.text('Review'), findsNothing);
     expect(find.text('Verify'), findsNothing);
     expect(find.text('Reject'), findsNothing);
+
+    await tester.tap(find.text('View user'));
+    await tester.pumpAndSettle();
+    expect(find.text('Personal information'), findsOneWidget);
+    expect(find.text('Private Student'), findsWidgets);
+    expect(find.text('Academic information'), findsOneWidget);
   });
 
   testWidgets('pending staff show visible contextual action buttons', (
@@ -85,9 +106,8 @@ void main() {
     await tester.tap(find.text('Staff / Counselors (1)'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Portal Staff'), findsOneWidget);
-    expect(find.text('Verify'), findsOneWidget);
-    expect(find.text('Review'), findsOneWidget);
-    expect(find.text('Reject'), findsOneWidget);
+    expect(find.textContaining('Requested:'), findsOneWidget);
+    expect(find.text('Manage'), findsOneWidget);
+    expect(find.text('Pending review'), findsOneWidget);
   });
 }

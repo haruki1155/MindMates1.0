@@ -7,6 +7,7 @@ import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
 import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
+import '../../counseling/screens/pacc_counseling_screen.dart';
 import '../models/student_assessment_models.dart';
 import '../models/assessment_interpretation_models.dart';
 
@@ -23,6 +24,8 @@ class _StudentAssessmentCompleteScreenState
     with SingleTickerProviderStateMixin {
   late final AnimationController _backgroundController;
   bool _requestedSave = false;
+  bool _appointmentPromptRequested = false;
+  bool _resultUnlocked = false;
 
   @override
   void initState() {
@@ -59,6 +62,14 @@ class _StudentAssessmentCompleteScreenState
         }
 
         _saveResultIfNeeded(provider);
+        _requestAppointmentDecision(result);
+
+        if (!_resultUnlocked) {
+          return const Scaffold(
+            backgroundColor: QuickAssessmentPalette.background,
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
 
         return Scaffold(
           backgroundColor: QuickAssessmentPalette.background,
@@ -82,11 +93,6 @@ class _StudentAssessmentCompleteScreenState
                           _AnimatedResultSection(
                             delay: 50,
                             child: _CategoryBars(result: result),
-                          ),
-                          const SizedBox(height: 12),
-                          _AnimatedResultSection(
-                            delay: 90,
-                            child: _CategoryScoreDots(result: result),
                           ),
                           const SizedBox(height: 12),
                           _AnimatedResultSection(
@@ -165,6 +171,47 @@ class _StudentAssessmentCompleteScreenState
     });
   }
 
+  void _requestAppointmentDecision(StudentAssessmentResult result) {
+    if (_appointmentPromptRequested) return;
+    _appointmentPromptRequested = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final wantsAppointment = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          icon: const Icon(Icons.calendar_month_outlined, size: 34),
+          title: const Text('Set an appointment?'),
+          content: const Text(
+            'Do you want to set an appointment with PACC to discuss your well-being result?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('No'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Yes'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      setState(() => _resultUnlocked = true);
+      if (wantsAppointment == true) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PaccCounselingScreen(
+              startBooking: true,
+              initialConcern: result.interpretation.userSummary,
+            ),
+          ),
+        );
+      }
+    });
+  }
+
   ReportProvider? _reportProviderOrNull() {
     try {
       return context.read<ReportProvider>();
@@ -198,13 +245,13 @@ class _Hero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 570,
+      height: 470,
       decoration: const BoxDecoration(color: QuickAssessmentPalette.primary),
       child: Stack(
         alignment: Alignment.topCenter,
         children: [
           Positioned(
-            top: 442,
+            top: 350,
             left: -80,
             right: -80,
             child: Container(
@@ -245,10 +292,7 @@ class _Hero extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _ScoreGauge(
-                  score: result.overallScore,
-                  status: result.interpretation.supportPriority.label,
-                ),
+                _ScoreGauge(status: result.responsePatternLabel),
               ],
             ),
           ),
@@ -287,207 +331,70 @@ class _HeroBadge extends StatelessWidget {
   }
 }
 
-class _ScoreGauge extends StatefulWidget {
-  const _ScoreGauge({required this.score, required this.status});
+class _ScoreGauge extends StatelessWidget {
+  const _ScoreGauge({required this.status});
 
-  final double? score;
   final String status;
 
   @override
-  State<_ScoreGauge> createState() => _ScoreGaugeState();
-}
-
-class _ScoreGaugeState extends State<_ScoreGauge> {
-  @override
   Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: widget.score ?? 0),
-      duration: const Duration(milliseconds: 900),
-      curve: Curves.easeOutQuart,
-      builder: (context, animatedScore, _) {
-        return ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 268),
-          child: Container(
-            width: 252,
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
-            decoration: BoxDecoration(
-              color: QuickAssessmentPalette.card,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: QuickAssessmentPalette.softBorder),
-              boxShadow: [
-                BoxShadow(
-                  color: QuickAssessmentPalette.shadow,
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Secondary overall concern index',
-                  style: TextStyle(
-                    color: _ResultPalette.text,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: 128,
-                  height: 128,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      CustomPaint(
-                        size: const Size.square(128),
-                        painter: _ScoreRingPainter(
-                          progress: animatedScore / 100,
-                        ),
-                      ),
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            widget.score == null
-                                ? '—'
-                                : animatedScore.round().toString(),
-                            style: const TextStyle(
-                              color: _ResultPalette.text,
-                              fontSize: 38,
-                              fontWeight: FontWeight.w900,
-                              height: 0.95,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            widget.score == null ? 'Not available' : '/ 100',
-                            style: TextStyle(
-                              color: _ResultPalette.mutedText,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 9,
-                  ),
-                  decoration: BoxDecoration(
-                    color: QuickAssessmentPalette.cream,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: QuickAssessmentPalette.primary.withValues(
-                        alpha: 0.7,
-                      ),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Concern level',
-                          style: TextStyle(
-                            color: _ResultPalette.secondaryText,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                      Flexible(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            widget.status,
-                            maxLines: 1,
-                            style: const TextStyle(
-                              color: _ResultPalette.text,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  widget.score == null
-                      ? 'More answers are needed in one or more categories.'
-                      : 'This summarizes category patterns; it is not a mental-health grade.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _ResultPalette.mutedText,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    height: 1.2,
-                  ),
-                ),
-              ],
+    return Container(
+      width: 286,
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      decoration: BoxDecoration(
+        color: QuickAssessmentPalette.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: QuickAssessmentPalette.softBorder),
+        boxShadow: [
+          BoxShadow(
+            color: QuickAssessmentPalette.shadow,
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.auto_awesome_rounded,
+            color: Color(0xFFE0A500),
+            size: 32,
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Your Well-being Profile',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _ResultPalette.text,
+              fontSize: 17,
+              fontWeight: FontWeight.w900,
             ),
           ),
-        );
-      },
+          const SizedBox(height: 10),
+          Text(
+            status,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: _ResultPalette.text,
+              fontSize: 19,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'A reflection on current strengths and areas you may want to explore. This is not a diagnosis.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _ResultPalette.mutedText,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
+          ),
+        ],
+      ),
     );
-  }
-}
-
-class _ScoreRingPainter extends CustomPainter {
-  const _ScoreRingPainter({required this.progress});
-
-  final double progress;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = (size.shortestSide / 2) - 8;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    final clampedProgress = progress.clamp(0.0, 1.0);
-
-    final trackPaint = Paint()
-      ..color = const Color(0xFFEDE9DD)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round;
-
-    final glowPaint = Paint()
-      ..color = QuickAssessmentPalette.primary.withValues(alpha: 0.22)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 18
-      ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
-
-    final progressPaint = Paint()
-      ..shader = const LinearGradient(
-        colors: [Color(0xFFFFD64D), QuickAssessmentPalette.primary],
-      ).createShader(rect)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 12
-      ..strokeCap = StrokeCap.round;
-
-    const startAngle = -1.5707963267948966;
-    final sweepAngle = 6.283185307179586 * clampedProgress;
-
-    canvas.drawCircle(center, radius, trackPaint);
-    if (clampedProgress > 0) {
-      canvas.drawArc(rect, startAngle, sweepAngle, false, glowPaint);
-      canvas.drawArc(rect, startAngle, sweepAngle, false, progressPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _ScoreRingPainter oldDelegate) {
-    return oldDelegate.progress != progress;
   }
 }
 
@@ -592,7 +499,7 @@ class _SummaryCards extends StatelessWidget {
     return Column(
       children: [
         _InfoCard(
-          title: result.interpretation.supportPriority.label,
+          title: 'Your well-being at a glance',
           body: result.interpretation.userSummary,
         ),
         const SizedBox(height: 10),
@@ -601,7 +508,13 @@ class _SummaryCards extends StatelessWidget {
           body:
               '${result.interpretation.responseQuality.confidence.label} '
               '(${result.interpretation.responseQuality.completionPercent.round()}% answered). '
-              'Skipped responses were excluded from scoring.',
+              'This summary uses only the questions you answered.',
+        ),
+        const SizedBox(height: 10),
+        _InfoCard(
+          title: 'Support options',
+          body:
+              '${result.interpretation.supportPriority.label}. Everyone experiences challenges differently. Counseling is available as an optional, confidential conversation if you would like additional guidance.',
         ),
         const SizedBox(height: 10),
         _InsightsCard(result: result),
@@ -699,46 +612,86 @@ class _InsightsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final interpretation = result.interpretation;
-    final insights = <String>[
-      ...interpretation.rationale,
-      ...interpretation.protectiveFactors.map(
-        (factor) => 'Protective strength: $factor',
-      ),
-      ...interpretation.functionalImpactFlags.map(
-        (flag) => 'Functional-impact observation: $flag',
-      ),
-      ...interpretation.suggestedActions,
-    ];
 
     return _Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('What your responses suggest', style: _ResultText.title),
+          Text('Your personal insights', style: _ResultText.title),
           const SizedBox(height: 12),
-          if (insights.isEmpty)
-            const Text(
-              'No specific concern pattern was identified from the responses provided.',
-              style: _ResultText.body,
+          _InsightGroup(
+            icon: Icons.star_rounded,
+            title: 'Your strengths',
+            emptyText:
+                'Your completed responses still provide a useful starting point for reflection.',
+            items: interpretation.strengthInsights,
+          ),
+          const SizedBox(height: 14),
+          _InsightGroup(
+            icon: Icons.explore_outlined,
+            title: 'Areas to explore',
+            emptyText:
+                'No specific area stood out as needing additional attention right now.',
+            items: interpretation.focusInsights,
+          ),
+          if (interpretation.suggestedActions.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            _InsightGroup(
+              icon: Icons.lightbulb_outline_rounded,
+              title: 'Options you can try',
+              emptyText: '',
+              items: interpretation.suggestedActions,
             ),
-          for (var index = 0; index < insights.length; index += 1)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _MiniNumber(number: index + 1),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(insights[index], style: _ResultText.body),
-                  ),
-                ],
-              ),
-            ),
+          ],
         ],
       ),
     );
   }
+}
+
+class _InsightGroup extends StatelessWidget {
+  const _InsightGroup({
+    required this.icon,
+    required this.title,
+    required this.emptyText,
+    required this.items,
+  });
+
+  final IconData icon;
+  final String title;
+  final String emptyText;
+  final List<String> items;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          Icon(icon, size: 20, color: const Color(0xFF9A6B00)),
+          const SizedBox(width: 7),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+          ),
+        ],
+      ),
+      const SizedBox(height: 7),
+      if (items.isEmpty && emptyText.isNotEmpty)
+        Text(emptyText, style: _ResultText.body),
+      for (final item in items)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 7),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('•  ', style: _ResultText.body),
+              Expanded(child: Text(item, style: _ResultText.body)),
+            ],
+          ),
+        ),
+    ],
+  );
 }
 
 class _CategoryBars extends StatelessWidget {
@@ -753,25 +706,19 @@ class _CategoryBars extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Wellness Domains', style: _ResultText.title),
+          Text('Your well-being areas', style: _ResultText.title),
+          const SizedBox(height: 5),
+          const Text(
+            'Each area summarizes ten answers. Statuses describe response patterns, not personal labels.',
+            style: _ResultText.body,
+          ),
           const SizedBox(height: 16),
           for (final entry in result.interpretation.domainResults.indexed)
             Padding(
               padding: const EdgeInsets.only(bottom: 13),
               child: _ScoreBar(domain: entry.$2, staggerIndex: entry.$1),
             ),
-          const SizedBox(height: 8),
-          const Center(
-            child: Text(
-              '* Higher scores indicate greater reported concern',
-              style: TextStyle(
-                color: _ResultPalette.mutedText,
-                fontSize: 11,
-                fontStyle: FontStyle.italic,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+          const SizedBox(height: 4),
         ],
       ),
     );
@@ -789,185 +736,78 @@ class _ScoreBar extends StatelessWidget {
     final duration = Duration(milliseconds: 430 + (staggerIndex * 45));
 
     return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: domain.isScorable ? domain.score / 100 : 0),
+      tween: Tween(begin: 0, end: 1),
       duration: duration,
       curve: Curves.easeOutQuart,
       builder: (context, value, _) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    domain.domain,
-                    style: const TextStyle(
-                      color: _ResultPalette.text,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900,
+        return Container(
+          padding: const EdgeInsets.all(13),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: QuickAssessmentPalette.softBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      domain.domain,
+                      style: const TextStyle(
+                        color: _ResultPalette.text,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
-                ),
-                Text(
-                  domain.isScorable
-                      ? '${(domain.score * value).round()}% · ${domain.band.label}'
-                      : 'Insufficient responses',
-                  style: const TextStyle(
-                    color: _ResultPalette.secondaryText,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
+                  Text(
+                    domain.isScorable
+                        ? domain.responsePatternLabel
+                        : 'Insufficient responses',
+                    style: const TextStyle(
+                      color: _ResultPalette.secondaryText,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: domain.isScorable ? value : null,
-                minHeight: 8,
-                backgroundColor: Colors.white,
-                valueColor: const AlwaysStoppedAnimation(
-                  QuickAssessmentPalette.primary,
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                domain.interpretation,
+                style: const TextStyle(
+                  color: _ResultPalette.mutedText,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  height: 1.25,
                 ),
               ),
-            ),
-            const SizedBox(height: 5),
-            Text(
-              '${domain.interpretation} ${domain.suggestedAction} '
-              '${domain.answeredCount}/${domain.presentedCount} core questions answered.',
-              style: const TextStyle(
-                color: _ResultPalette.mutedText,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                height: 1.25,
+              const SizedBox(height: 7),
+              Text(
+                'Option to try: ${domain.suggestedAction}',
+                style: const TextStyle(
+                  color: _ResultPalette.secondaryText,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  height: 1.25,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 5),
+              Text(
+                '${domain.answeredCount} of ${domain.presentedCount} questions answered',
+                style: const TextStyle(
+                  color: _ResultPalette.mutedText,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
-  }
-}
-
-class _CategoryScoreDots extends StatelessWidget {
-  const _CategoryScoreDots({required this.result});
-
-  final StudentAssessmentResult result;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      borderColor: const Color(0xFFE66767),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Domain interpretation', style: _ResultText.title),
-          const SizedBox(height: 8),
-          Text(result.interpretation.counselorSummary, style: _ResultText.body),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: result.subscaleScores.entries
-                .map((entry) => _ScoreBox(label: entry.key, score: entry.value))
-                .toList(),
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: Text(
-              'Total responses: ${result.totalResponses}',
-              style: const TextStyle(
-                color: _ResultPalette.secondaryText,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ScoreBox extends StatelessWidget {
-  const _ScoreBox({required this.label, required this.score});
-
-  final String label;
-  final double score;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = score >= 60
-        ? const Color(0xFFFF3B30)
-        : score >= 40
-        ? const Color(0xFFFFB900)
-        : const Color(0xFF75E000);
-
-    return Container(
-      width: 58,
-      height: 66,
-      decoration: BoxDecoration(
-        color: QuickAssessmentPalette.card,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color, width: 2),
-      ),
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            score.round().toString(),
-            style: const TextStyle(
-              color: _ResultPalette.text,
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          Text(
-            _shortLabel(label),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            style: const TextStyle(
-              color: _ResultPalette.secondaryText,
-              fontSize: 7.4,
-              fontWeight: FontWeight.w700,
-              height: 1.08,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _shortLabel(String label) {
-    switch (label) {
-      case 'Academic Stress':
-        return 'Academic\nStress';
-      case 'Financial Well-Being':
-        return 'Financial\nWell-being';
-      case 'Social Adjustment':
-        return 'Social\nAdjustment';
-      case 'Workplace Stress':
-        return 'Workplace\nStress';
-      case 'Professional Support':
-        return 'Prof.\nSupport';
-      case 'Professional Well-Being':
-        return 'Prof.\nWell-being';
-      case 'Workplace Responsibilities':
-        return 'Work\nDuties';
-      case 'Workplace Support':
-        return 'Work\nSupport';
-      case 'Workplace Well-Being':
-        return 'Work\nWell-being';
-      case 'Sleep and Rest':
-        return 'Sleep\nRest';
-      case 'Emotional Well-Being':
-        return 'Emotional\nWell-being';
-      default:
-        return label;
-    }
   }
 }
 
@@ -1228,43 +1068,14 @@ class _ResultActions extends StatelessWidget {
   }
 }
 
-class _MiniNumber extends StatelessWidget {
-  const _MiniNumber({required this.number});
-
-  final int number;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 14,
-      height: 14,
-      decoration: const BoxDecoration(
-        color: QuickAssessmentPalette.primary,
-        shape: BoxShape.circle,
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        '$number',
-        style: const TextStyle(
-          color: _ResultPalette.text,
-          fontSize: 9,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-    );
-  }
-}
-
 class _Panel extends StatelessWidget {
   const _Panel({
     required this.child,
     this.backgroundColor = QuickAssessmentPalette.card,
-    this.borderColor = QuickAssessmentPalette.softBorder,
   });
 
   final Widget child;
   final Color backgroundColor;
-  final Color borderColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1273,7 +1084,7 @@ class _Panel extends StatelessWidget {
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: borderColor),
+        border: Border.all(color: QuickAssessmentPalette.softBorder),
         boxShadow: [
           BoxShadow(
             color: QuickAssessmentPalette.shadow.withValues(alpha: 0.1),

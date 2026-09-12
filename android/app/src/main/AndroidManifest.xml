@@ -1,5 +1,6 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="ph.edu.ucu.mindmates">
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature
@@ -7,11 +8,11 @@
         android:required="false" />
 
     <application
-        android:label="mind_mates"
+        android:label="MindMate"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
-            android:name=".MainActivity"
+            android:name="ph.edu.ucu.mindmates.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""

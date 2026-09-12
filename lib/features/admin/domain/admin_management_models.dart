@@ -40,20 +40,35 @@ class StaffRegistration {
 
 class PublicAppUserRecord {
   const PublicAppUserRecord({
+    required this.userId,
     required this.publicUserId,
     required this.populationRole,
+    required this.department,
+    this.createdAt,
   });
 
+  final String userId;
   final String publicUserId;
   final PopulationRole populationRole;
+  final String department;
+  final DateTime? createdAt;
 
   factory PublicAppUserRecord.fromJson(Map<String, dynamic> json) =>
       PublicAppUserRecord(
+        userId: '${json['userId'] ?? ''}',
         publicUserId: '${json['publicUserId'] ?? ''}',
         populationRole:
             PopulationRole.parse(json['populationRole']) ??
             PopulationRole.student,
+        department: '${json['department'] ?? ''}'.trim(),
+        createdAt: _publicUserDate(json['createdAt']),
       );
+}
+
+DateTime? _publicUserDate(Object? value) {
+  if (value is Timestamp) return value.toDate();
+  if (value is DateTime) return value;
+  return DateTime.tryParse(value?.toString() ?? '');
 }
 
 class OrganizationRecord {
@@ -124,6 +139,12 @@ class AdminAuditEvent {
     required this.actorId,
     required this.targetUserId,
     required this.reason,
+    this.category = '',
+    this.actorNameSnapshot = '',
+    this.actorRoleSnapshot = '',
+    this.targetType,
+    this.targetId,
+    this.metadata = const {},
     this.createdAt,
   });
   final String id;
@@ -131,16 +152,35 @@ class AdminAuditEvent {
   final String actorId;
   final String targetUserId;
   final String reason;
+  final String category;
+  final String actorNameSnapshot;
+  final String actorRoleSnapshot;
+  final String? targetType;
+  final String? targetId;
+  final Map<String, dynamic> metadata;
   final DateTime? createdAt;
-  factory AdminAuditEvent.fromJson(Map<String, dynamic> json) =>
-      AdminAuditEvent(
-        id: '${json['id'] ?? ''}',
-        action: '${json['action'] ?? ''}',
-        actorId: '${json['actorId'] ?? ''}',
-        targetUserId: '${json['targetUserId'] ?? ''}',
-        reason: '${json['reason'] ?? ''}',
-        createdAt: json['createdAt'] is Timestamp
-            ? (json['createdAt'] as Timestamp).toDate()
-            : null,
-      );
+  factory AdminAuditEvent.fromJson(
+    Map<String, dynamic> json,
+  ) => AdminAuditEvent(
+    id: '${json['id'] ?? ''}',
+    action: '${json['action'] ?? ''}',
+    actorId: '${json['actorId'] ?? ''}',
+    targetUserId: '${json['targetUserId'] ?? ''}',
+    reason:
+        '${json['reason'] ?? (json['metadata'] is Map ? (json['metadata'] as Map)['reason'] : '') ?? ''}',
+    category: '${json['category'] ?? ''}',
+    actorNameSnapshot: '${json['actorNameSnapshot'] ?? ''}',
+    actorRoleSnapshot:
+        '${json['actorRoleSnapshot'] ?? json['actorAccessRole'] ?? ''}',
+    targetType: json['targetType']?.toString(),
+    targetId: json['targetId']?.toString(),
+    metadata: json['metadata'] is Map
+        ? Map<String, dynamic>.from(json['metadata'] as Map)
+        : const {},
+    createdAt: json['createdAt'] is Timestamp
+        ? (json['createdAt'] as Timestamp).toDate()
+        : json['timestamp'] is Timestamp
+        ? (json['timestamp'] as Timestamp).toDate()
+        : DateTime.tryParse('${json['createdAt'] ?? json['timestamp'] ?? ''}'),
+  );
 }

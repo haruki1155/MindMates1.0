@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 import '../../../providers/assessment_provider.dart';
 import '../../../providers/appointment_provider.dart';
@@ -16,6 +17,8 @@ import '../../counseling/widgets/appointment_details_sheet.dart';
 import '../../../models/appointment_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../services/firebase/app_notification_service.dart';
+import '../../../models/pacc_availability_model.dart';
+import '../../../repositories/pacc_availability_repository.dart';
 import '../../notifications/screens/notifications_screen.dart';
 import '../models/home_dashboard_data.dart';
 import '../widgets/home_dashboard_widgets.dart';
@@ -117,55 +120,88 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: HomePalette.background,
       body: Stack(
         children: [
+          const Positioned.fill(child: HomeDashboardBackground()),
           SafeArea(
             bottom: false,
             child: CustomScrollView(
               controller: _scrollController,
               physics: const BouncingScrollPhysics(),
               slivers: [
-                SliverToBoxAdapter(
-                  child: HomeCalendarHeader(
-                    title: data.headerTitle,
-                    days: data.days,
-                    onProfileTap: _openProfile,
-                    onCalendarTap: _openAppointmentCalendar,
-                  ),
-                ),
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(
                     horizontalPadding,
-                    14,
+                    28,
                     horizontalPadding,
                     124,
                   ),
                   sliver: SliverList.list(
                     children: [
-                      if (!_isAssessmentBannerDismissed)
-                        HomeAnimatedSection(
-                          delay: 0,
-                          child: HomeAssessmentBanner(
-                            data: data.assessment,
-                            onStart: _openStudentAssessment,
-                            onClose: _dismissAssessmentBanner,
-                          ),
-                        ),
-                      const SizedBox(height: 14),
                       HomeAnimatedSection(
                         delay: 70,
                         child: HomeWelcomeCard(
                           user: user,
-                          streak: data.streak,
                           onNotificationTap: _openNotifications,
-                          onStreakTap: () => _openPlaceholder('Streak Details'),
-                          onMoodTap: _openLogMood,
-                          actionLabel:
-                              (context.watch<MoodProvider>().hasCheckedInToday)
+                          onCalendarTap: _openAppointmentCalendar,
+                          onProfileTap: _openProfile,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      HomeAnimatedSection(
+                        delay: 74,
+                        child: HomeStreakCard(
+                          data: data.streak,
+                          onTap: _openLogMood,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      HomeAnimatedSection(
+                        delay: 78,
+                        child: StreamBuilder<PaccAvailabilityModel?>(
+                          stream: Firebase.apps.isEmpty
+                              ? const Stream<PaccAvailabilityModel?>.empty()
+                              : PaccAvailabilityRepository().watchCurrent(),
+                          builder: (context, snapshot) {
+                            final availability = snapshot.data;
+                            final open = availability?.isOpenAt(
+                              widget._nowProvider(),
+                            );
+                            final message = availability == null
+                                ? 'PAACC office availability has not been published yet.'
+                                : '${availability.presence.label}. ${availability.opensAt}–${availability.closesAt}. ${availability.acceptsWalkIns ? 'Walk-ins accepted.' : 'Appointment required.'}';
+                            return HomeAnnouncementCard(
+                              badge: availability == null
+                                  ? 'PAACC'
+                                  : availability.statusLabel(
+                                      widget._nowProvider(),
+                                    ),
+                              message: message,
+                              isOpen: open,
+                              onViewMore: _openNotifications,
+                              onViewDetail: () =>
+                                  _showAvailabilityDetails(availability),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      HomeAnimatedSection(
+                        delay: 86,
+                        child: HomeWideButton(
+                          label: context.watch<MoodProvider>().hasCheckedInToday
                               ? 'View today’s mood'
                               : 'Log your mood',
+                          icon: Icons.add,
+                          assetName: '+.png',
+                          onTap: _openLogMood,
                         ),
                       ),
                       if (appointmentProvider != null) ...[
                         const SizedBox(height: 14),
+                        const Text(
+                          'Upcoming Appointments',
+                          style: HomeTextStyles.sectionTitle,
+                        ),
+                        const SizedBox(height: 8),
                         HomeAnimatedSection(
                           delay: 95,
                           child: _HomeAppointmentPreview(
@@ -190,12 +226,23 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       ],
+                      if (!_isAssessmentBannerDismissed) ...[
+                        const SizedBox(height: 14),
+                        HomeAnimatedSection(
+                          delay: 110,
+                          child: HomeAssessmentBanner(
+                            data: data.assessment,
+                            onStart: _openStudentAssessment,
+                            onClose: _dismissAssessmentBanner,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: HomeMetrics.sectionGap),
                       HomeAnimatedSection(
                         delay: 120,
                         child: HomePaccServicesSection(
                           services: data.services,
-                          onOpen: _openPlaceholder,
+                          onOpen: (_) => _openServices(),
                           onViewAll: _openServices,
                         ),
                       ),
@@ -214,11 +261,17 @@ class _HomeScreenState extends State<HomeScreen> {
                         delay: 220,
                         child: HomeMentalHealthCheckCard(
                           data: data.mentalHealthCheck,
-                          onStart: () =>
-                              _openPlaceholder('Mental Health Check'),
+                          onStart: _openStudentAssessment,
                           onViewSummary: () => Navigator.of(
                             context,
                           ).pushNamed(RouteNames.mentalHealthReport),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      HomeAnimatedSection(
+                        delay: 245,
+                        child: HomeCounselorCard(
+                          onContact: _openAppointmentBooking,
                         ),
                       ),
                       const SizedBox(height: HomeMetrics.sectionGap),
@@ -227,7 +280,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: HomeResourcesSection(
                           resources: data.resources,
                           onOpen: _openResource,
-                          onSeeAll: () => _openPlaceholder('All Resources'),
+                          onSeeAll: () => Navigator.of(
+                            context,
+                          ).pushNamed(RouteNames.mentalHealthInsights),
                         ),
                       ),
                       const SizedBox(height: HomeMetrics.sectionGap),
@@ -478,6 +533,38 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _showAvailabilityDetails(PaccAvailabilityModel? availability) {
+    const days = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    final openDays =
+        availability?.openDays.map((day) => days[day - 1]).join(', ') ??
+        'Not published';
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('PAACC office availability'),
+        content: Text(
+          availability == null
+              ? 'The PAACC schedule has not been published yet.'
+              : '${availability.presence.label}\n\nWorking days: $openDays\nHours: ${availability.opensAt}–${availability.closesAt}\n\n${availability.acceptsWalkIns ? 'Walk-in visits are currently accepted during office hours.' : 'Please book an appointment before visiting.'}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openAppointmentBooking() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -704,13 +791,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    if (resource.title == 'View your insights' ||
-        resource.title == 'Mental Wellbeing 101') {
-      Navigator.of(context).pushNamed(RouteNames.mentalHealthInsights);
-      return;
-    }
-
-    _openPlaceholder(resource.title);
+    Navigator.of(context).pushNamed(RouteNames.mentalHealthInsights);
   }
 
   void _openLogMood() {
@@ -730,6 +811,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (title == 'Sleep Quality') {
       Navigator.of(context).pushNamed(RouteNames.sleepQuality);
+      return;
+    }
+
+    if (title == 'Facial Recognition') {
+      _openLogMood();
       return;
     }
 
@@ -799,30 +885,41 @@ class _HomeAppointmentPreview extends StatelessWidget {
               ],
             )
           : item == null
-          ? Row(
+          ? Column(
               children: [
-                const CircleAvatar(
-                  backgroundColor: HomePalette.softGold,
-                  child: Icon(Icons.event_available_outlined),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'No upcoming appointment',
-                        style: HomeTextStyles.cardTitle,
-                      ),
-                      SizedBox(height: 3),
-                      Text(
-                        'Schedule confidential support when you need it.',
-                        style: HomeTextStyles.bodyMuted,
-                      ),
-                    ],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: HomeCircleIconButton(
+                    icon: Icons.calendar_today_outlined,
+                    assetName: 'Calendar.png',
+                    tooltip: 'Open appointment calendar',
+                    onTap: onOpen,
+                    size: 38,
+                    iconSize: 20,
                   ),
                 ),
-                TextButton(onPressed: onBook, child: const Text('Book')),
+                const Icon(
+                  Icons.calendar_month_rounded,
+                  size: 46,
+                  color: HomePalette.muted,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'No upcoming appointments',
+                  style: HomeTextStyles.bodyMuted,
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: onBook,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: HomePalette.sun,
+                    foregroundColor: HomePalette.text,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                  child: const Text('Appoint a Session'),
+                ),
               ],
             )
           : InkWell(

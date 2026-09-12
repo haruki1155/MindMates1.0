@@ -87,32 +87,6 @@ class AssessmentProvider extends ChangeNotifier {
     return (_studentQuestionIndex + 1) / _studentQuestions.length;
   }
 
-  double get studentCategoryProgress {
-    final current = currentStudentQuestion;
-    if (current == null) return 0;
-    final categoryQuestions = _studentQuestions
-        .where((question) => question.section == current.section)
-        .toList();
-    final position = categoryQuestions.indexWhere(
-      (question) => question.id == current.id,
-    );
-    return categoryQuestions.isEmpty
-        ? 0
-        : (position + 1) / categoryQuestions.length;
-  }
-
-  String get studentCategoryProgressLabel {
-    final current = currentStudentQuestion;
-    if (current == null) return '';
-    final categoryQuestions = _studentQuestions
-        .where((question) => question.section == current.section)
-        .toList();
-    final position = categoryQuestions.indexWhere(
-      (question) => question.id == current.id,
-    );
-    return 'Question ${position + 1} of ${categoryQuestions.length} in this category';
-  }
-
   StudentAssessmentQuestion? get currentStudentQuestion {
     if (_studentQuestions.isEmpty) return null;
     return _studentQuestions[_studentQuestionIndex];
@@ -219,7 +193,7 @@ class AssessmentProvider extends ChangeNotifier {
       responses: responses,
       concernScore: concernScore,
       overallLevel: overallLevel,
-      summary: QuickAssessmentScoring.summaryForLevel(overallLevel),
+      summary: QuickAssessmentScoring.summaryForScore(concernScore),
       topConcernAreas: QuickAssessmentScoring.topConcernAreas(responses),
       recommendedNextStep: QuickAssessmentScoring.recommendedNextStepForLevel(
         overallLevel,
@@ -281,10 +255,6 @@ class AssessmentProvider extends ChangeNotifier {
       ),
     );
 
-    if (_isDeeperTriggerPoint(question)) {
-      _syncDeeperQuestionsAfterTrigger();
-    }
-
     if (isLastStudentQuestion) {
       _studentResult = StudentAssessmentCalculator.calculate(
         questions: _studentQuestions,
@@ -343,57 +313,5 @@ class AssessmentProvider extends ChangeNotifier {
       case AssessmentUserType.staff:
         return StudentAssessmentQuestions.staffQuestions;
     }
-  }
-
-  bool _isDeeperTriggerPoint(StudentAssessmentQuestion question) {
-    final isCoreSection =
-        question.section == AssessmentSection.academicCore ||
-        question.section == AssessmentSection.workplaceStressCore ||
-        question.section == AssessmentSection.workplaceResponsibilityCore;
-
-    return isCoreSection && question.id.endsWith('_10');
-  }
-
-  bool _shouldShowDeeperQuestions() {
-    final questions = _questionsForActiveRole();
-    final coreSection = switch (activeAssessmentUserType) {
-      AssessmentUserType.student => AssessmentSection.academicCore,
-      AssessmentUserType.faculty => AssessmentSection.workplaceStressCore,
-      AssessmentUserType.staff => AssessmentSection.workplaceResponsibilityCore,
-    };
-
-    return StudentAssessmentCalculator.shouldShowDeeperQuestions(
-      questions: questions,
-      answers: _studentAnswers,
-      coreSection: coreSection,
-    );
-  }
-
-  void _syncDeeperQuestionsAfterTrigger() {
-    final triggerIndex = _studentQuestionIndex;
-    final conditionalIds = _questionsForActiveRole()
-        .where((question) => question.isConditional)
-        .map((question) => question.id)
-        .toSet();
-    _studentQuestions = _studentQuestions
-        .where((question) => !question.isConditional)
-        .toList();
-
-    if (_shouldShowDeeperQuestions()) {
-      final deeperQuestions = _questionsForActiveRole()
-          .where((question) => question.isConditional)
-          .toList();
-      final insertIndex = triggerIndex + 1;
-      _studentQuestions = [
-        ..._studentQuestions.take(insertIndex),
-        ...deeperQuestions,
-        ..._studentQuestions.skip(insertIndex),
-      ];
-      return;
-    }
-
-    _studentAnswers.removeWhere(
-      (answer) => conditionalIds.contains(answer.questionId),
-    );
   }
 }

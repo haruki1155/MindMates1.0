@@ -14,20 +14,38 @@ val signingProperties = Properties()
 if (signingPropertiesFile.exists()) {
     signingPropertiesFile.inputStream().use(signingProperties::load)
 }
+val developmentApplicationId = "com.example.mind_mates"
+val stagingApplicationId = "com.example.mind_mates.staging"
 val productionApplicationId = "ph.edu.ucu.mindmates"
-val productionFirebaseAppId = "1:842251480963:android:4c05d169dbacf125eb50b6"
-val googleServicesFile = file("google-services.json")
-val googleServicesConfigurationError = when {
-    !googleServicesFile.isFile ->
-        "android/app/google-services.json is required for $productionApplicationId."
-    !googleServicesFile.readText().contains("\"package_name\": \"$productionApplicationId\"") ->
-        "google-services.json does not match Android package $productionApplicationId."
-    !googleServicesFile.readText().contains("\"mobilesdk_app_id\": \"$productionFirebaseAppId\"") ->
-        "google-services.json does not match Firebase Android app $productionFirebaseAppId."
-    else -> null
-}
-if (googleServicesConfigurationError != null) {
-    throw GradleException(googleServicesConfigurationError)
+val firebaseAppIds = mapOf(
+    "Development" to "1:1004916101316:android:e4c840c1c3070222c73991",
+    "Staging" to "1:978195258114:android:36354078e3d99999f5801b",
+    "Production" to "1:842251480963:android:4c05d169dbacf125eb50b6",
+)
+val applicationIds = mapOf(
+    "Development" to developmentApplicationId,
+    "Staging" to stagingApplicationId,
+    "Production" to productionApplicationId,
+)
+
+// Every variant must use the Firebase registration for its exact package.
+tasks.configureEach {
+    val flavor = listOf("Development", "Staging", "Production")
+        .firstOrNull { name.startsWith("process$it") && name.endsWith("GoogleServices") }
+    if (flavor != null) {
+        doFirst {
+            val configuration = file("src/${flavor.lowercase()}/google-services.json")
+            val applicationId = applicationIds.getValue(flavor)
+            val firebaseAppId = firebaseAppIds.getValue(flavor)
+            if (!configuration.isFile ||
+                !configuration.readText().contains("\"package_name\": \"$applicationId\"") ||
+                !configuration.readText().contains("\"mobilesdk_app_id\": \"$firebaseAppId\"")) {
+                throw GradleException(
+                    "android/app/src/${flavor.lowercase()}/google-services.json must match $applicationId and $firebaseAppId.",
+                )
+            }
+        }
+    }
 }
 val requiredSigningKeys = listOf("keyAlias", "storeFile", "storePassword", "keyPassword")
 val missingSigningKeys = requiredSigningKeys.filter { signingProperties.getProperty(it).isNullOrBlank() }
@@ -41,7 +59,12 @@ val releaseConfigurationError = when {
 }
 
 tasks.configureEach {
-    if (name == "preReleaseBuild" || name == "assembleRelease" || name == "bundleRelease") {
+    if (name.contains("Staging") && name.endsWith("Release")) {
+        doFirst {
+            throw GradleException("Staging is debug-only. Build assembleStagingDebug instead.")
+        }
+    }
+    if (name == "preProductionReleaseBuild" || name == "assembleProductionRelease" || name == "bundleProductionRelease") {
         doFirst {
             if (releaseConfigurationError != null) {
                 throw GradleException(releaseConfigurationError)
@@ -68,6 +91,22 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    flavorDimensions += "environment"
+    productFlavors {
+        create("development") {
+            dimension = "environment"
+            applicationId = developmentApplicationId
+        }
+        create("staging") {
+            dimension = "environment"
+            applicationId = stagingApplicationId
+        }
+        create("production") {
+            dimension = "environment"
+            applicationId = productionApplicationId
+        }
     }
 
     buildTypes {

@@ -8,6 +8,8 @@ test("classifies English and Taglish crisis messages before Dialogflow", () => {
   assert.equal(classifyMindAidSafety("Ayoko nang mabuhay"), "crisisOrImmediateRisk");
   assert.equal(classifyMindAidSafety("Hindi ako safe right now"), "highDistress");
   assert.equal(classifyMindAidSafety("I feel stressed about finals"), "safeSupport");
+  assert.equal(classifyMindAidSafety("I cannot go on anymore"), "crisisOrImmediateRisk");
+  assert.equal(classifyMindAidSafety("kms"), "crisisOrImmediateRisk");
 });
 
 test("rejects diagnostic and prescription-like generated output", () => {

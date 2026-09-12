@@ -38,4 +38,42 @@ void main() {
     expect(find.text('Sign in'), findsOneWidget);
     expect(find.text('Mobile application'), findsNothing);
   });
+
+  testWidgets('bootstrap renders its child after initialization succeeds', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      AppBootstrap(
+        initializer: () async {},
+        child: const MaterialApp(home: Text('Application ready')),
+      ),
+    );
+    expect(find.text('Starting MindMate…'), findsOneWidget);
+    await tester.pump();
+    expect(find.text('Application ready'), findsOneWidget);
+  });
+
+  testWidgets(
+    'bootstrap shows a retryable diagnostic after initialization fails',
+    (tester) async {
+      var attempts = 0;
+      Future<void> initialize() async {
+        attempts++;
+        if (attempts == 1) throw StateError('firebase-unavailable');
+      }
+
+      await tester.pumpWidget(
+        AppBootstrap(
+          initializer: initialize,
+          child: const MaterialApp(home: Text('Application ready')),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('MindMate could not start'), findsOneWidget);
+      expect(find.text('Startup code: firebase-unavailable'), findsOneWidget);
+      await tester.tap(find.text('Retry'));
+      await tester.pump();
+      expect(find.text('Application ready'), findsOneWidget);
+    },
+  );
 }

@@ -10,7 +10,6 @@ import {
   QUICK_BOUNDARIES,
   RESPONSE_COMPLETION,
   INDICATOR_BOUNDARIES,
-  CONDITIONAL_RULE,
   FUNCTIONAL_IMPACT_QUESTION_IDS,
   PRIORITY_RULES,
   POLICY_SOURCE,
@@ -50,21 +49,24 @@ export type Interpretation = {
   userSummary: string;
   counselorSummary: string;
   suggestedActions: string[];
+  strengthInsights: string[];
+  focusInsights: string[];
 };
 
 const DISCLAIMER =
-  "This score is an estimate from an experimental internal wellness framework. No documented validation source was found for its exact questions, weights, thresholds, or follow-up rules. It is not a diagnosis, does not confirm a mental-health condition, does not replace a licensed professional, and does not automatically alert a counselor or emergency service.";
+  "This result is an estimate from an experimental internal wellness framework. No documented validation source was found for its exact questions, weights, thresholds, or follow-up rules. It is not a diagnosis, does not confirm a mental-health condition, does not replace a licensed professional, and does not automatically alert a counselor or emergency service.";
 
 function round(value: number): number {
   return Number(value.toFixed(2));
 }
 
 function riskScore(value: number, direction: AssessmentDirection): number {
-  return direction === "protective" ? ((5 - value) / 4) * 100 : ((value - 1) / 4) * 100;
+  const normalized = ((value - 1) / 3) * 100;
+  return direction === "protective" ? 100 - normalized : normalized;
 }
 
 function scoreForAnswer(answer: string, direction: AssessmentDirection): number {
-  const values: Record<string, number> = {never: 1, rarely: 2, sometimes: 3, often: 4, always: 5};
+  const values: Record<string, number> = {never: 1, rarely: 2, often: 3, always: 4};
   const value = values[answer];
   if (!value) throw new AssessmentValidationError("Invalid Likert answer.");
   return riskScore(value, direction);
@@ -79,11 +81,61 @@ function concernBand(score: number): {name: string; label: string} {
 }
 
 function statusFor(score: number): string {
-  if (score <= SCORE_BOUNDARIES.low) return "Low Concern";
-  if (score <= SCORE_BOUNDARIES.watchful) return "Watchful";
-  if (score <= SCORE_BOUNDARIES.moderate) return "Moderate Concern";
-  if (score <= SCORE_BOUNDARIES.elevated) return "Elevated Concern";
-  return "High Concern";
+  if (score <= SCORE_BOUNDARIES.low) return "Thriving";
+  if (score <= SCORE_BOUNDARIES.watchful) return "Stable";
+  if (score <= SCORE_BOUNDARIES.moderate) return "Needs Improvement";
+  return "At Risk";
+}
+
+function responsePattern(score: number | null): {code: string; label: string} {
+  if (score === null) return {code: "insufficientResponses", label: "More responses needed"};
+  if (score <= SCORE_BOUNDARIES.low) return {code: "wellBeingSupported", label: "Thriving patterns"};
+  if (score <= SCORE_BOUNDARIES.watchful) return {code: "generallySteady", label: "Balanced patterns"};
+  if (score <= SCORE_BOUNDARIES.moderate) return {code: "someStrain", label: "Areas to strengthen"};
+  return {code: "supportMayHelp", label: "Support may be useful"};
+}
+
+function domainNarrative(domain: string, band: string): string {
+  if (band === "low") return "Your responses show supportive habits or resources in this area.";
+  if (band === "watchful") return "This area appears mostly manageable, with room for continued awareness.";
+  const moderate: Record<string, string> = {
+    "Academic Stress": "Academic demands may be adding pressure to your concentration, motivation, or routine.",
+    "Financial Well-Being": "Financial concerns may be adding pressure to your studies or daily experience.",
+    "Social Adjustment": "Connection or adjustment may feel less steady in some situations right now.",
+    "Sleep and Rest": "Sleep or rest patterns may be influencing your energy and concentration.",
+    "Emotional Well-Being": "Emotional demands may be using more of your energy than usual.",
+  };
+  if (band === "moderate") return moderate[domain] ?? "This area may be creating additional pressure and is worth exploring.";
+  const additional: Record<string, string> = {
+    "Academic Stress": "Academic demands may be creating sustained pressure. Additional planning or support could make them easier to manage.",
+    "Financial Well-Being": "Financial concerns may be affecting focus or daily stress. Practical guidance may help reduce some of that pressure.",
+    "Social Adjustment": "Social connection or adjustment may currently feel difficult. A trusted person or welcoming group may help.",
+    "Sleep and Rest": "Sleep and recovery may be affecting energy, focus, or daily functioning. A realistic rest plan may help.",
+    "Emotional Well-Being": "Emotional demands may be affecting daily well-being. A supportive conversation may make this easier to carry.",
+  };
+  return additional[domain] ?? "This area may currently be adding pressure. Consider one manageable support step.";
+}
+
+function protectiveInsight(domain: string): string {
+  const insights: Record<string, string> = {
+    "Academic Stress": "You identified at least one academic coping habit or source of support.",
+    "Financial Well-Being": "You identified at least one helpful way of understanding or responding to financial concerns.",
+    "Social Adjustment": "You identified at least one positive connection or help-seeking strength.",
+    "Sleep and Rest": "You identified at least one rest or recovery habit that can support you.",
+    "Emotional Well-Being": "You identified at least one emotional-awareness or help-seeking strength.",
+  };
+  return insights[domain] ?? "You identified at least one supportive habit in this area.";
+}
+
+function supportGuidance(priority: string): string {
+  const labels: Record<string, string> = {
+    routine: "Routine check-in",
+    monitor: "Continue monitoring",
+    followUpSuggested: "Consider additional support",
+    promptFollowUp: "Timely support encouraged",
+    insufficientResponses: "Complete more responses",
+  };
+  return labels[priority] ?? labels.insufficientResponses;
 }
 
 function actionFor(domain: string, band: string): string {
@@ -107,19 +159,6 @@ function actionFor(domain: string, band: string): string {
   return `Consider discussing this area with university wellness support and ${text}.`;
 }
 
-function shouldShowDeeper(questions: AssessmentQuestion[], answers: FullAnswer[]): boolean {
-  const riskCore = questions.filter((question) => !question.conditional && question.direction === "risk" &&
-    ["academicCore", "workplaceStressCore", "workplaceResponsibilityCore"].includes(question.section));
-  const byId = new Map(answers.map((answer) => [answer.questionId, answer]));
-  const scored = riskCore
-    .map((question) => ({question, answer: byId.get(question.id)}))
-    .filter((item): item is {question: AssessmentQuestion; answer: FullAnswer} => Boolean(item.answer && !item.answer.isSkipped));
-  const always = scored.filter((item) => item.answer.answer === "always").length;
-  const oftenOrAlways = scored.filter((item) => item.answer.answer === "often" || item.answer.answer === "always").length;
-  const average = scored.length === 0 ? 0 : scored.reduce((total, item) => total + scoreForAnswer(item.answer.answer, item.question.direction), 0) / scored.length;
-  return always >= CONDITIONAL_RULE.always || oftenOrAlways >= CONDITIONAL_RULE.oftenOrAlways || average >= CONDITIONAL_RULE.average;
-}
-
 function quality(presented: number, answers: FullAnswer[]) {
   const answered = answers.filter((answer) => !answer.isSkipped).length;
   const skipped = answers.length - answered;
@@ -132,8 +171,7 @@ function quality(presented: number, answers: FullAnswer[]) {
 export function calculateFull(role: AssessmentRole, answers: FullAnswer[]): Record<string, unknown> {
   const questions = QUESTIONS_BY_ROLE[role];
   const byId = new Map(answers.map((answer) => [answer.questionId, answer]));
-  const showDeeper = shouldShowDeeper(questions, answers);
-  const presented = questions.filter((question) => !question.conditional || showDeeper);
+  const presented = questions.filter((question) => !question.conditional);
   const expectedIds = new Set(presented.map((question) => question.id));
   if (answers.some((answer) => !expectedIds.has(answer.questionId))) throw new AssessmentValidationError("Answers do not match the active question set.");
 
@@ -176,18 +214,24 @@ export function calculateFull(role: AssessmentRole, answers: FullAnswer[]): Reco
     domainScorable[domain.label] = scorable;
     if (scorable) domainScores[domain.label] = score;
     const band = scorable ? concernBand(score) : {name: "insufficient", label: "Insufficient responses"};
+    const wellBeingStatus = scorable ? statusFor(score) : "Insufficient responses";
+    const pattern = responsePattern(scorable ? score : null);
     domainResults.push({
       domain: domain.label,
       score,
       band: band.name,
-      bandLabel: band.label,
+      bandLabel: wellBeingStatus,
+      concernBandLabel: band.label,
+      wellBeingStatus,
+      responsePatternCode: pattern.code,
+      responsePatternLabel: pattern.label,
       answeredCount: scores.length,
       skippedCount: domainQuestions.length - scores.length,
       presentedCount: domainQuestions.length,
       completionPercent,
       isScorable: scorable,
       interpretation: scorable
-        ? `${domain.label} responses currently show a ${band.label.toLowerCase()} concern pattern.`
+        ? domainNarrative(domain.label, band.name)
         : `${domain.label} needs more answered questions before a dependable category result can be shown.`,
       suggestedAction: scorable ? actionFor(domain.label, band.name) : `Answer more ${domain.label.toLowerCase()} questions when you feel comfortable, or discuss this area directly with a counselor.`,
       elevatedIndicators: elevatedByDomain.get(domain.label) ?? [],
@@ -208,6 +252,7 @@ export function calculateFull(role: AssessmentRole, answers: FullAnswer[]): Reco
     ? round(ROLE_DOMAINS[role].reduce((total, domain) => total + (domainScores[domain.label] ?? 0) * domain.weight, 0))
     : null;
   const status = overallScore === null ? "Insufficient Responses" : statusFor(overallScore);
+  const overallPattern = responsePattern(overallScore);
   const q = quality(presented.length, answers);
   const insufficient = q.confidence === "limited" || !allScorable;
   const scorableDomains = domainResults.filter((domain) => domain.isScorable);
@@ -217,7 +262,7 @@ export function calculateFull(role: AssessmentRole, answers: FullAnswer[]): Reco
   const priority = insufficient ? "insufficientResponses" : above80 >= PRIORITY_RULES.prompt.highDomains || above60 >= PRIORITY_RULES.prompt.elevatedDomains || functionalFlags.length >= PRIORITY_RULES.prompt.functionalImpacts
     ? "promptFollowUp" : above60 >= PRIORITY_RULES.followUp.elevatedDomains || above40 >= PRIORITY_RULES.followUp.moderateDomains || functionalFlags.length >= PRIORITY_RULES.followUp.functionalImpacts
       ? "followUpSuggested" : above40 >= PRIORITY_RULES.monitor.moderateDomains || functionalFlags.length >= PRIORITY_RULES.monitor.functionalImpacts ? "monitor" : "routine";
-  const priorityLabel: Record<string, string> = {routine: "Routine monitoring", monitor: "Monitor", followUpSuggested: "Follow-up suggested", promptFollowUp: "Prompt follow-up", insufficientResponses: "Insufficient responses"};
+  const priorityLabel: Record<string, string> = {routine: "Routine check-in", monitor: "Continue monitoring", followUpSuggested: "Consider additional support", promptFollowUp: "Timely support encouraged", insufficientResponses: "Complete more responses"};
   const priorityRationale = insufficient
     ? `Priority is limited because one or more core domains do not meet the completion rule.${functionalFlags.length ? ` ${functionalFlags.length} explicit follow-up or impact indicator${functionalFlags.length === 1 ? "" : "s"} were also recorded separately from scoring.` : ""}`
     : [
@@ -234,7 +279,7 @@ export function calculateFull(role: AssessmentRole, answers: FullAnswer[]): Reco
   ];
   if (!priorityReasonCodes.length) priorityReasonCodes.push("no_elevated_priority_trigger");
   const focus = scorableDomains.filter((domain) => Number(domain.score) > INDICATOR_BOUNDARIES.focus).slice(0, 3);
-  const rationale = focus.map((domain) => `${domain.domain}: ${Number(domain.score).toFixed(0)}/100 (${domain.band})`);
+  const rationale = focus.map((domain) => `${domain.domain}: ${domain.responsePatternLabel}`);
   if (functionalFlags.length) rationale.push(`${functionalFlags.length} response${functionalFlags.length === 1 ? "" : "s"} indicated possible day-to-day impact`);
   if (!rationale.length) rationale.push("Responses did not show a moderate or higher concern pattern");
   if (insufficient) rationale.unshift("Some categories do not have enough answered questions for a dependable overall interpretation");
@@ -247,11 +292,19 @@ export function calculateFull(role: AssessmentRole, answers: FullAnswer[]): Reco
     actions.push("Continue mood check-ins to observe changes over time.");
   }
   const focusText = focus.length ? `The main areas to review are ${focus.map((item) => item.domain).join(", ")}.` : "No wellness domain showed a moderate or higher concern pattern.";
+  const strengthInsights: string[] = [];
+  for (const domain of scorableDomains) {
+    if (Number(domain.score) <= SCORE_BOUNDARIES.low) strengthInsights.push(`${domain.domain} currently shows supportive patterns.`);
+    else if (Number(domain.score) <= SCORE_BOUNDARIES.watchful) strengthInsights.push(`${domain.domain} appears generally manageable.`);
+    if (Array.isArray(domain.protectiveIndicators) && domain.protectiveIndicators.length) strengthInsights.push(protectiveInsight(String(domain.domain)));
+  }
+  const focusInsights = focus.map((domain) => String(domain.interpretation));
+  if (functionalFlags.length) focusInsights.push("Some responses suggest that current pressures may be affecting everyday focus, rest, motivation, or routines.");
   const opening: Record<string, string> = {
-    routine: "Your responses suggest generally manageable current well-being.",
-    monitor: "Your responses suggest an area that may benefit from monitoring and supportive habits.",
-    followUpSuggested: "Your responses suggest notable strain that may benefit from a conversation with a counselor or trusted support person.",
-    promptFollowUp: "Your responses suggest several elevated estimates under the internal framework. This does not confirm a condition; consider direct support from a qualified professional.",
+    routine: "Your responses show several supportive habits and generally manageable day-to-day well-being.",
+    monitor: "Most areas appear manageable, with opportunities for small adjustments and continued awareness.",
+    followUpSuggested: "You are managing some areas well, while other parts of daily life may benefit from more attention and support.",
+    promptFollowUp: "One or more areas may be placing extra pressure on daily life. You do not have to work through those challenges alone.",
     insufficientResponses: "There were not enough answered questions for a dependable interpretation.",
   };
   const interpretation: Interpretation = {
@@ -269,14 +322,19 @@ export function calculateFull(role: AssessmentRole, answers: FullAnswer[]): Reco
     protectiveFactors: [...new Set([...protectiveByDomain.values()].flat())].slice(0, 5),
     functionalImpactFlags: [...new Set(functionalFlags)].slice(0, 5),
     rationale,
-    userSummary: `${opening[priority]} ${focusText} This screening result is not a diagnosis.`,
+    userSummary: `${opening[priority]} ${focusText}`,
     counselorSummary: `${ROLE_LABELS[role]} screening: ${priorityLabel[priority]}. ${focusText} Response confidence: ${q.confidenceLabel.toLowerCase()} (${q.completionPercent.toFixed(0)}% completed).`,
     suggestedActions: actions,
+    strengthInsights: [...new Set(strengthInsights)].slice(0, 3),
+    focusInsights: [...new Set(focusInsights)].slice(0, 4),
   };
   return {
     userType: ROLE_LABELS[role],
     overallScore,
     status,
+    wellBeingStatus: status,
+    responsePatternCode: overallPattern.code,
+    responsePatternLabel: overallPattern.label,
     subscaleScores: domainScores,
     mainConcernAreas: scorableDomains.filter((domain) => Number(domain.score) > SCORE_BOUNDARIES.moderate).map((domain) => domain.domain),
     message: overallScore === null ? "Some wellness categories did not have enough responses for a dependable summary. Review the category results that are available." : status,
@@ -312,6 +370,16 @@ export function calculateQuick(role: string, name: string, answers: QuickAnswer[
     .filter((item) => item.score >= QUICK_BOUNDARIES.moderate)
     .sort((a, b) => b.score - a.score || a.area.localeCompare(b.area)).slice(0, 3).map((item) => item.area);
   const priority = level === "low" ? "routine" : level === "moderate" ? "monitor" : level === "high" ? "followUpSuggested" : "promptFollowUp";
+  const overallPattern = responsePattern(concernScore);
+  const quickSummary: Record<string, string> = {
+    wellBeingSupported: "Your brief check-in shows several supportive patterns worth continuing.",
+    generallySteady: "Your brief check-in appears generally balanced, with some opportunities for continued awareness.",
+    someStrain: "Your brief check-in highlights one or more areas you may want to explore more closely.",
+    supportMayHelp: "Your brief check-in highlights areas where support may make current challenges easier to manage.",
+  };
+  const quickFocus = topConcernAreas.length ? `Areas you may want to explore are ${topConcernAreas.join(", ")}.` : "No quick-check answer stood out as an immediate area to explore.";
+  const quickStrengths = responses.filter((response) => response.concernScore <= SCORE_BOUNDARIES.watchful).sort((a, b) => b.concernScore - a.concernScore).slice(0, 3).map((response) => `${QUICK_QUESTIONS.find((item) => item.id === response.questionId)!.area} showed a supportive or balanced response.`);
+  const quickFocusInsights = responses.filter((response) => response.concernScore > SCORE_BOUNDARIES.watchful).sort((a, b) => b.concernScore - a.concernScore).slice(0, 3).map((response) => `${QUICK_QUESTIONS.find((item) => item.id === response.questionId)!.area} may be worth reflecting on or exploring in the full assessment.`);
   const interpretation: Interpretation = {
     algorithmVersion: ALGORITHM_VERSION,
     questionSetVersion: QUICK_QUESTION_SET_VERSION,
@@ -321,15 +389,21 @@ export function calculateQuick(role: string, name: string, answers: QuickAnswer[
     priorityReasonCodes: ["quick_classification_" + level, ...(topConcernAreas.length ? ["ranked_quick_concern_areas"] : [])],
     policySource: POLICY_SOURCE,
     validationStatus: POLICY_VALIDATION_STATUS,
-    supportPriorityLabel: priority === "routine" ? "Routine monitoring" : priority === "monitor" ? "Monitor" : priority === "followUpSuggested" ? "Follow-up suggested" : "Prompt follow-up",
+    supportPriorityLabel: supportGuidance(priority),
     responseQuality: {presented: responses.length, answered: responses.length, skipped: 0, completionPercent: 100, confidence: "high", confidenceLabel: "High confidence"},
-    domainResults: responses.map((response) => ({domain: QUICK_QUESTIONS.find((item) => item.id === response.questionId)!.area, score: response.concernScore, band: concernBand(response.concernScore).name, bandLabel: concernBand(response.concernScore).label, answeredCount: 1, skippedCount: 0, presentedCount: 1, completionPercent: 100, isScorable: true, interpretation: "This area is a wellness screening signal, not a diagnosis.", suggestedAction: "Review this area and choose one manageable support step."})),
+    domainResults: responses.map((response) => {
+      const pattern = responsePattern(response.concernScore);
+      const nextStep = level === "low" ? "Continue regular MindMate check-ins and wellness habits." : level === "moderate" ? "Complete the full role-based assessment for more personalized insight." : level === "high" ? "Complete the full assessment and consider contacting PACC counseling support." : "Reach out to PACC counseling support or another trusted support person as soon as possible.";
+      return {domain: QUICK_QUESTIONS.find((item) => item.id === response.questionId)!.area, score: response.concernScore, band: concernBand(response.concernScore).name, bandLabel: pattern.label, concernBandLabel: concernBand(response.concernScore).label, wellBeingStatus: statusFor(response.concernScore), responsePatternCode: pattern.code, responsePatternLabel: pattern.label, answeredCount: 1, skippedCount: 0, presentedCount: 1, completionPercent: 100, isScorable: true, interpretation: `${pattern.label} based on this single quick-check response.`, suggestedAction: nextStep, elevatedIndicators: [], protectiveIndicators: []};
+    }),
     protectiveFactors: [],
     functionalImpactFlags: [],
-    rationale: [topConcernAreas.length ? `Higher signals appeared in ${topConcernAreas.join(", ")}.` : "No quick-screen area showed a moderate concern signal."],
-    userSummary: `Responses suggest a ${level} current wellness signal. This is not a diagnosis.`,
-    counselorSummary: `Quick wellness screen: ${priority}. Complete the full role-based assessment for domain-level interpretation.`,
-    suggestedActions: [level === "low" ? "Continue regular MindMate check-ins and wellness habits." : "Complete the full role-based assessment for more personalized insight."],
+    rationale: [quickFocus],
+    userSummary: `${quickSummary[overallPattern.code]} ${quickFocus}`,
+    counselorSummary: `Quick wellness screen: ${supportGuidance(priority)}. The five indicators each represent one response; use the full role-based assessment for category-level interpretation.`,
+    suggestedActions: [level === "low" ? "Continue regular MindMate check-ins and wellness habits." : level === "moderate" ? "Complete the full role-based assessment for more personalized insight." : level === "high" ? "Complete the full assessment and consider contacting PACC counseling support." : "Reach out to PACC counseling support or another trusted support person as soon as possible."],
+    strengthInsights: quickStrengths,
+    focusInsights: quickFocusInsights,
   };
   return {
     role,
@@ -337,7 +411,9 @@ export function calculateQuick(role: string, name: string, answers: QuickAnswer[
     responses,
     concernScore,
     overallLevel: level,
-    summary: interpretation.userSummary,
+    responsePatternCode: overallPattern.code,
+    responsePatternLabel: overallPattern.label,
+    summary: quickSummary[overallPattern.code],
     topConcernAreas,
     recommendedNextStep: interpretation.suggestedActions[0],
     mentalStatusSignal: signal,
@@ -352,8 +428,8 @@ export function calculateQuick(role: string, name: string, answers: QuickAnswer[
 }
 
 export function activeQuestions(role: AssessmentRole, answers: FullAnswer[]): AssessmentQuestion[] {
-  const questions = QUESTIONS_BY_ROLE[role];
-  return questions.filter((question) => !question.conditional || shouldShowDeeper(questions, answers));
+  void answers;
+  return QUESTIONS_BY_ROLE[role].filter((question) => !question.conditional);
 }
 
 export function validateFullAnswers(role: AssessmentRole, answers: FullAnswer[]): void {
@@ -363,7 +439,7 @@ export function validateFullAnswers(role: AssessmentRole, answers: FullAnswer[])
   const questionById = new Map(questions.map((question) => [question.id, question]));
   for (const answer of answers) {
     const question = questionById.get(answer.questionId);
-    if (!question || typeof answer.answer !== "string" || !["never", "rarely", "sometimes", "often", "always"].includes(answer.answer) || typeof answer.isSkipped !== "boolean") throw new AssessmentValidationError("Invalid full-assessment answer.");
+    if (!question || typeof answer.answer !== "string" || !["never", "rarely", "often", "always"].includes(answer.answer) || typeof answer.isSkipped !== "boolean") throw new AssessmentValidationError("Invalid full-assessment answer.");
   }
   const expected = new Set(activeQuestions(role, answers).map((question) => question.id));
   if (answers.some((answer) => !expected.has(answer.questionId)) || answers.length !== expected.size) throw new AssessmentValidationError("Answers do not match the active question set.");

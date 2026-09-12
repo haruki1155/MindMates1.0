@@ -1,0 +1,65 @@
+name: Verify Android flavors
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_production_release:
+        description: Build the signed production release (requires signing secrets)
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  staging-debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter clean
+      - run: flutter build apk --debug --flavor staging --dart-define=APP_ENV=staging
+      - run: |
+          aapt dump badging build/app/outputs/flutter-apk/app-staging-debug.apk | grep "package: name='com.example.mind_mates.staging'"
+          aapt dump permissions build/app/outputs/flutter-apk/app-staging-debug.apk | grep 'android.permission.INTERNET'
+
+  functions:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  production-release:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_production_release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - name: Restore signing material
+        env:
+          ANDROID_KEY_PROPERTIES_B64: ${{ secrets.ANDROID_KEY_PROPERTIES_B64 }}
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          test -n "$ANDROID_KEY_PROPERTIES_B64" && test -n "$ANDROID_KEYSTORE_B64"
+          echo "$ANDROID_KEY_PROPERTIES_B64" | base64 --decode > android/key.properties
+          echo "$ANDROID_KEYSTORE_B64" | base64 --decode > android/release-upload.jks
+      - run: flutter clean
+      - run: flutter build appbundle --release --flavor production --dart-define=APP_ENV=production

@@ -19,6 +19,7 @@ class FirestoreCollections {
   static const analyticsDaily = 'analytics_daily';
   static const analyticsEvents = '_analytics_events';
   static const inquiries = 'inquiries';
+  static const paccAvailability = 'pacc_availability';
   static const recommendations = 'recommendations';
   static const reports = 'reports';
   static const insightCategories = 'insight_categories';

@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "mind-mates-cd2cf"
+    "default": "mindmate-staging",
+    "staging": "mindmate-staging",
+    "production": "mind-mates-cd2cf",
+    "development": "mindmate-dev-4e91c"
   }
 }

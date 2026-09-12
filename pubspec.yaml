@@ -1,5 +1,5 @@
 name: mind_mates
-description: "A new Flutter project."
+description: "MindMate wellness app and staff administration portal."
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -16,6 +16,7 @@ dependencies:
   firebase_messaging: ^16.1.1
   firebase_remote_config: ^6.2.0
   firebase_storage: ^13.4.3
+  excel_plus: ^2.20.0
   flutter:
     sdk: flutter
   http: ^1.6.0
@@ -23,17 +24,31 @@ dependencies:
   image_picker: ^1.2.3
   just_audio: ^0.10.6
   permission_handler: ^12.0.3
+  pdf: ^3.11.3
+  printing: ^5.14.2
   provider: ^6.1.5+1
+  web: ^1.1.1
   flutter_secure_storage: ^9.2.4
+  google_sign_in: ^7.2.0
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.14.4
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
 
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/APP LOGO/MindMate_LOGO.jpg"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/APP LOGO/MindMate_LOGO.jpg"
+  adaptive_icon_foreground_inset: 16
+
 flutter:
   uses-material-design: true
   assets:
+    - assets/images/APP LOGO/
     - assets/images/Login/
     - assets/images/Create Account/
     - assets/images/ONBOARDING_1/

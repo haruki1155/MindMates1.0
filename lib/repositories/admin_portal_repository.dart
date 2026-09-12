@@ -7,9 +7,13 @@ import '../models/admin_inquiry_model.dart';
 import '../models/admin_activity_analytics_model.dart';
 import '../models/admin_mind_aid_analytics_model.dart';
 import '../models/appointment_model.dart';
+import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
 import '../models/profile_roles.dart';
+import '../models/pacc_availability_model.dart';
 import '../features/admin/domain/admin_management_models.dart';
+import '../features/admin/domain/report_generation_models.dart';
+import '../services/firebase/firebase_callable_router.dart';
 import '../services/firebase/firestore_service.dart';
 
 class AdminAssessmentRecord {
@@ -21,6 +25,7 @@ class AdminAssessmentRecord {
     this.score,
     this.status,
     this.role,
+    this.archivedAt,
   });
 
   final String id;
@@ -30,6 +35,19 @@ class AdminAssessmentRecord {
   final num? score;
   final String? status;
   final String? role;
+  final DateTime? archivedAt;
+  bool get isArchived => archivedAt != null;
+  bool get isQuickAssessment {
+    final normalizedType = type.trim().toLowerCase().replaceAll(
+      RegExp(r'[^a-z]'),
+      '',
+    );
+    return normalizedType == 'quick' ||
+        normalizedType == 'quickassessment' ||
+        id.toLowerCase().startsWith('quick_');
+  }
+
+  bool get isMainAssessment => !isQuickAssessment;
 
   factory AdminAssessmentRecord.fromJson(Map<String, dynamic> data) =>
       AdminAssessmentRecord(
@@ -42,6 +60,9 @@ class AdminAssessmentRecord {
             : num.tryParse('${data['score']}'),
         status: _text(data['status'] ?? data['overallLevel']),
         role: _text(data['populationRole'] ?? data['role']),
+        archivedAt: data['archivedAt'] == null
+            ? null
+            : _date(data['archivedAt']),
       );
 
   static DateTime _date(Object? value) {
@@ -120,9 +141,17 @@ class AdminPortalRepository {
     final status = StaffAccountStatus.parse(profile?['staffAccountStatus']);
     _mustChangePassword = profile?['mustChangePassword'] == true;
     if (status == StaffAccountStatus.pending) {
-      throw StateError(
-        'Your staff registration is awaiting administrator approval.',
+      final requested = AccessRole.parse(
+        profile?['requestedRole'] ?? profile?['requestedAccessRole'],
       );
+      final roleLabel = requested == AccessRole.counselor
+          ? 'Counselor'
+          : 'PAACC Staff';
+      final requestState =
+          profile?['registrationStatus'] == 'more_information_required'
+          ? 'More information is required from you. Contact the PAACC administrator.'
+          : 'Your PAACC portal access request for $roleLabel is awaiting administrator review.';
+      throw StateError(requestState);
     }
     if (status == StaffAccountStatus.rejected) {
       await FirebaseAuth.instance.signOut();
@@ -142,6 +171,10 @@ class AdminPortalRepository {
     if (role == AccessRole.admin) {
       _isSuperAdmin = await _confirmSuperAdmin();
     }
+    await _tryRecordAudit(
+      action: 'STAFF_SIGNED_IN',
+      category: 'AUTHENTICATION',
+    );
   }
 
   User? get currentAuthUser => FirebaseAuth.instance.currentUser;
@@ -179,10 +212,7 @@ class AdminPortalRepository {
     required String lastName,
     required String employeeId,
     required String position,
-    required String department,
-    String departmentId = '',
-    String collegeId = '',
-    String courseId = '',
+    required AccessRole requestedRole,
   }) async {
     final credential = await FirebaseAuth.instance
         .createUserWithEmailAndPassword(
@@ -197,24 +227,50 @@ class AdminPortalRepository {
             'lastName': lastName.trim(),
             'employeeId': employeeId.trim(),
             'position': position.trim(),
-            'department': department.trim(),
-            'departmentId': departmentId,
-            'collegeId': collegeId,
-            'courseId': courseId,
+            'requestedRole': requestedRole.storedValue,
           });
+      await credential.user?.sendEmailVerification();
     } catch (_) {
       await credential.user?.delete();
       rethrow;
     }
   }
 
-  Future<void> sendPasswordReset(String email) =>
-      FirebaseAuth.instance.sendPasswordResetEmail(email: email.trim());
+  Future<void> sendPasswordReset(String email) async {
+    await FirebaseFunctions.instance
+        .routedCallable('requestAdminPasswordReset')
+        .call<void>({'email': email.trim()});
+  }
+
   Future<void> signOut() async {
+    await _tryRecordAudit(
+      action: 'STAFF_SIGNED_OUT',
+      category: 'AUTHENTICATION',
+    );
     _currentAccessRole = AccessRole.appUser;
     _isSuperAdmin = false;
     _mustChangePassword = false;
     await FirebaseAuth.instance.signOut();
+  }
+
+  Future<void> _tryRecordAudit({
+    required String action,
+    required String category,
+    String? targetType,
+    String? targetId,
+    Map<String, dynamic>? metadata,
+  }) async {
+    try {
+      await recordAuditEvent(
+        action: action,
+        category: category,
+        targetType: targetType,
+        targetId: targetId,
+        metadata: metadata,
+      );
+    } catch (_) {
+      // Authentication and navigation must not fail because audit delivery is unavailable.
+    }
   }
 
   Future<bool> _confirmSuperAdmin() async {
@@ -275,6 +331,79 @@ class AdminPortalRepository {
                 ),
               ),
           );
+
+  Future<({List<AdminAuditEvent> events, bool hasMore})> fetchAuditLogPage({
+    required String targetUserId,
+    String category = '',
+    String action = '',
+    DateTime? before,
+    DateTime? after,
+    int pageSize = 25,
+  }) async {
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('getAuditLogPage')
+          .call<Map<String, dynamic>>({
+            'targetUserId': targetUserId,
+            if (category.isNotEmpty) 'category': category,
+            if (action.isNotEmpty) 'action': action,
+            if (before != null) 'beforeMillis': before.millisecondsSinceEpoch,
+            if (after != null) 'afterMillis': after.millisecondsSinceEpoch,
+            'pageSize': pageSize,
+          });
+      final raw = result.data['events'];
+      final events = raw is List
+          ? raw
+                .whereType<Map>()
+                .map(
+                  (item) =>
+                      AdminAuditEvent.fromJson(Map<String, dynamic>.from(item)),
+                )
+                .toList()
+          : <AdminAuditEvent>[];
+      return (events: events, hasMore: result.data['hasMore'] == true);
+    } catch (_) {
+      // The caller is already an authorized portal administrator. Fall back to
+      // the protected Firestore read while a callable/index is propagating.
+      final items = await _firestoreService.getDocuments(
+        FirestoreCollections.adminAuditLogs,
+        whereEquals: {'targetUserId': targetUserId},
+        orderBy: 'createdAt',
+        limit: pageSize,
+      );
+      final events = items.map((item) => AdminAuditEvent.fromJson(item)).where((
+        event,
+      ) {
+        final matchesCategory = category.isEmpty || event.category == category;
+        final matchesAction = action.isEmpty || event.action == action;
+        final matchesAfter =
+            after == null || (event.createdAt?.isAfter(after) ?? false);
+        final matchesBefore =
+            before == null || (event.createdAt?.isBefore(before) ?? false);
+        return matchesCategory &&
+            matchesAction &&
+            matchesAfter &&
+            matchesBefore;
+      }).toList();
+      return (events: events, hasMore: false);
+    }
+  }
+
+  Future<void> recordAuditEvent({
+    required String action,
+    required String category,
+    String? targetType,
+    String? targetId,
+    Map<String, dynamic>? metadata,
+  }) async {
+    await FirebaseFunctions.instance.httpsCallable('recordAuditEvent').call({
+      'action': action,
+      'category': category,
+      'targetType': ?targetType,
+      'targetId': ?targetId,
+      'metadata': ?metadata,
+    });
+  }
 
   Future<List<PublicAppUserRecord>> listPublicAppUsers() async {
     final result = await FirebaseFunctions.instance
@@ -339,6 +468,138 @@ class AdminPortalRepository {
               ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
       );
 
+  Stream<List<AppNotificationModel>> watchPortalNotifications() {
+    final userId = currentAuthUser?.uid;
+    if (userId == null || !currentAccessRole.canUsePortal) {
+      return Stream.value(const []);
+    }
+    return _firestoreService
+        .watchDocuments(
+          FirestoreCollections.notifications,
+          whereEquals: {'userId': userId},
+          orderBy: 'createdAt',
+          descending: true,
+          limit: 200,
+        )
+        .map(
+          (items) => items
+              .map(
+                (item) => AppNotificationModel.fromJson(
+                  item,
+                  id: item['id']?.toString(),
+                ),
+              )
+              .where((item) => item.audience == 'portal' && !item.isArchived)
+              .toList(growable: false),
+        );
+  }
+
+  Future<void> markPortalNotificationRead(String notificationId) {
+    if (!currentAccessRole.canUsePortal) {
+      throw StateError('Portal access is required.');
+    }
+    return _firestoreService.updateDocument(
+      FirestoreCollections.notifications,
+      notificationId,
+      {'readAt': FieldValue.serverTimestamp()},
+    );
+  }
+
+  Future<AdminReportAnalytics> fetchReportAnalytics({
+    String userCategory = 'all',
+    String appointmentDepartment = 'all',
+    String? schoolYear,
+  }) async {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('getReportAnalytics')
+        .call<Map<String, dynamic>>({
+          'userCategory': userCategory,
+          'appointmentDepartment': appointmentDepartment,
+          'schoolYear': ?schoolYear,
+        });
+    final raw = result.data['report'];
+    if (raw is! Map) {
+      throw StateError('The report service returned an invalid response.');
+    }
+    return AdminReportAnalytics.fromJson(Map<String, dynamic>.from(raw));
+  }
+
+  Future<CounselingPopulationConfig> fetchCounselingPopulation(
+    String schoolYear,
+  ) async {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('getCounselingPopulation')
+        .call<Map<String, dynamic>>({'schoolYear': schoolYear});
+    return CounselingPopulationConfig.fromJson(result.data);
+  }
+
+  Future<CounselingPopulationConfig> saveCounselingPopulation({
+    required String schoolYear,
+    required Map<String, int> populations,
+  }) async {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('saveCounselingPopulation')
+        .call<Map<String, dynamic>>({
+          'schoolYear': schoolYear,
+          'populations': populations,
+        });
+    return CounselingPopulationConfig.fromJson(result.data);
+  }
+
+  Future<List<AcademicYearRecord>> createAcademicYear({
+    required String schoolYear,
+    String? copyFrom,
+    bool copyPopulation = false,
+  }) async {
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('createAcademicYear')
+        .call<Map<String, dynamic>>({
+          'schoolYear': schoolYear,
+          'copyFrom': ?copyFrom,
+          'copyPopulation': copyPopulation,
+        });
+    return _academicYears(result.data);
+  }
+
+  Future<List<AcademicYearRecord>> closeAcademicYear(String schoolYear) async {
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('closeAcademicYear')
+        .call<Map<String, dynamic>>({'schoolYear': schoolYear});
+    return _academicYears(result.data);
+  }
+
+  static List<AcademicYearRecord> _academicYears(Map<String, dynamic> data) =>
+      (data['years'] is List ? data['years'] as List : const [])
+          .whereType<Map>()
+          .map(
+            (item) =>
+                AcademicYearRecord.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList(growable: false);
+
+  Future<int> importWalkInAppointments(
+    List<WalkInAppointmentImportRow> rows,
+  ) async {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('importWalkInAppointments')
+        .call<Map<String, dynamic>>({
+          'rows': rows.map((row) => row.toJson()).toList(growable: false),
+        });
+    return (result.data['imported'] as num?)?.toInt() ?? rows.length;
+  }
+
   Stream<List<AdminAssessmentRecord>> watchAssessments() => _firestoreService
       .watchDocuments(FirestoreCollections.assessments)
       .map(
@@ -346,6 +607,26 @@ class AdminPortalRepository {
             items.map(AdminAssessmentRecord.fromJson).toList()
               ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
       );
+
+  Future<void> setAssessmentArchived(String assessmentId, bool archived) {
+    final actor = FirebaseAuth.instance.currentUser;
+    if (actor == null || !currentAccessRole.canAccessClinicalData) {
+      throw StateError('Clinical staff access is required.');
+    }
+    return _firestoreService.updateDocument(
+      FirestoreCollections.assessments,
+      assessmentId,
+      archived
+          ? {
+              'archivedAt': FieldValue.serverTimestamp(),
+              'archivedBy': actor.uid,
+            }
+          : {
+              'archivedAt': FieldValue.delete(),
+              'archivedBy': FieldValue.delete(),
+            },
+    );
+  }
 
   Stream<List<AdminInquiryModel>> watchInquiries() => _firestoreService
       .watchDocuments(FirestoreCollections.inquiries)
@@ -433,12 +714,14 @@ class AdminPortalRepository {
     required bool approve,
     required AccessRole accessRole,
     required String reason,
+    String? decision,
   }) =>
       FirebaseFunctions.instance.httpsCallable('reviewStaffRegistration').call({
         'userId': userId,
         'approve': approve,
         'accessRole': accessRole.storedValue,
         'reason': reason.trim(),
+        'decision': ?decision,
       });
 
   Future<void> setStaffAccountEnabled({
@@ -497,10 +780,38 @@ class AdminPortalRepository {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
+  Future<void> acknowledgeInquiry(String id) => FirebaseFunctions.instance
+      .httpsCallable('acknowledgeInquiry')
+      .call({'inquiryId': id});
+
+  Stream<PaccAvailabilityModel?> watchPaccAvailability() => _firestoreService
+      .watchDocument(FirestoreCollections.paccAvailability, 'current')
+      .map(
+        (data) => data == null ? null : PaccAvailabilityModel.fromJson(data),
+      );
+
+  Future<void> savePaccAvailability(PaccAvailabilityModel availability) =>
+      _firestoreService.setDocument(
+        FirestoreCollections.paccAvailability,
+        'current',
+        {...availability.toJson(), 'updatedAt': FieldValue.serverTimestamp()},
+        merge: true,
+      );
+
   Future<void> updateOwnProfile(String userId, Map<String, dynamic> values) =>
       _firestoreService.updateDocument(
         FirestoreCollections.users,
         userId,
         values,
       );
+
+  /// Reads the signed-in portal user's Firestore profile. Staff registration
+  /// stores the submitted identity here rather than in Firebase Auth.
+  Future<Map<String, dynamic>?> getOwnProfile(String userId) =>
+      _firestoreService.getDocument(FirestoreCollections.users, userId);
+
+  /// Watches the signed-in portal user's profile so the header updates when
+  /// the profile name or phone number changes.
+  Stream<Map<String, dynamic>?> watchOwnProfile(String userId) =>
+      _firestoreService.watchDocument(FirestoreCollections.users, userId);
 }

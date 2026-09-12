@@ -28,6 +28,13 @@ void main() {
       expect(report['quickAssessmentScore'], 82);
       expect(report['quickAssessmentStatus'], 'veryHigh');
       expect(report['quickAssessmentSignal'], 'highSupport');
+      expect(
+        report['quickAssessmentSummary'],
+        'Exact quick assessment summary.',
+      );
+      expect(report['quickAssessmentAreaStatuses'], {
+        'Stress load': 'Elevated',
+      });
       expect(report['latestAssessmentSource'], 'quickAssessment');
       expect(report['mentalStatus'], 'severe');
       expect(report['mentalStatusLabel'], 'Needs support');
@@ -68,6 +75,13 @@ void main() {
         expect(report['fullAssessmentScore'], 72);
         expect(report['fullAssessmentStatus'], 'High Concern');
         expect(report['fullAssessmentTopConcernAreas'], ['Sleep and Rest']);
+        expect(
+          report['fullAssessmentSummary'],
+          'Exact full assessment summary.',
+        );
+        expect(report['fullAssessmentDomainStatuses'], {
+          'Sleep and Rest': 'Moderate',
+        });
         expect(report['quickAssessmentScore'], 58);
         expect(report['quickAssessmentStatus'], 'moderate');
         expect(report['mentalStatus'], 'severe');
@@ -303,6 +317,18 @@ Map<String, dynamic> _quickAssessment({
     'mentalStatusSignal': signal,
     'signalSource': 'quickAssessment',
     'topConcernAreas': ['Stress load'],
+    'summary': 'Exact quick assessment summary.',
+    'interpretation': {
+      'userSummary': 'Exact quick assessment summary.',
+      'domainResults': [
+        {
+          'domain': 'Stress load',
+          'band': level == 'low' ? 'low' : 'elevated',
+          'bandLabel': level == 'low' ? 'Low' : 'Elevated',
+          'isScorable': true,
+        },
+      ],
+    },
   };
 }
 
@@ -317,6 +343,17 @@ Map<String, dynamic> _fullAssessment({
     'overallScore': score,
     'status': status,
     'mainConcernAreas': ['Sleep and Rest'],
+    'interpretation': {
+      'userSummary': 'Exact full assessment summary.',
+      'domainResults': [
+        {
+          'domain': 'Sleep and Rest',
+          'band': 'moderate',
+          'bandLabel': 'Moderate',
+          'isScorable': true,
+        },
+      ],
+    },
   };
 }
 

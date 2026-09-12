@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'dart:ui';
 
 import 'app.dart';
 import 'app_bootstrap.dart';
-import 'firebase_options.dart';
+import 'core/config/app_environment.dart';
+import 'firebase_options_selector.dart';
 import 'providers/assessment_provider.dart';
 import 'providers/appointment_provider.dart';
 import 'providers/auth_provider.dart';
@@ -35,15 +37,11 @@ import 'repositories/sleep_repository.dart';
 import 'repositories/user_repository.dart';
 import 'services/auth/auth_service.dart';
 import 'services/firebase/firebase_app_check_service.dart';
+import 'services/firebase/firebase_runtime_diagnostics.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  try {
-    await FirebaseAppCheckService.activate();
-  } catch (error) {
-    debugPrint('Firebase App Check activation failed: $error');
-  }
+  _registerErrorHandlers();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -54,43 +52,103 @@ Future<void> main() async {
     ),
   );
 
-  final mobileApp = MultiProvider(
-    providers: [
-      ChangeNotifierProvider(
-        create: (_) => AuthProvider(AuthRepository(AuthService())),
-      ),
-      ChangeNotifierProvider(create: (_) => UserProvider(UserRepository())),
-      ChangeNotifierProvider(create: (_) => MoodProvider(MoodRepository())),
-      ChangeNotifierProvider(
-        create: (_) => AppointmentProvider(AppointmentRepository()),
-      ),
-      ChangeNotifierProvider(
-        create: (_) => JournalProvider(JournalRepository()),
-      ),
-      ChangeNotifierProvider(create: (_) => ReportProvider(ReportRepository())),
-      ChangeNotifierProvider(
-        create: (_) =>
-            MentalHealthActivityProvider(MentalHealthActivityRepository()),
-      ),
-      ChangeNotifierProvider(
-        create: (_) => InsightsProvider(InsightsRepository()),
-      ),
-      ChangeNotifierProvider(
-        create: (_) => MindAidProvider(MindAidRepository()),
-      ),
-      ChangeNotifierProvider(
-        create: (_) => SecretChatProvider(SecretChatRepository()),
-      ),
-      ChangeNotifierProvider(
-        create: (_) => AssessmentProvider(AssessmentRepository()),
-      ),
-      ChangeNotifierProvider(
-        create: (_) => BreathingProvider(BreathingRepository()),
-      ),
-      ChangeNotifierProvider(create: (_) => SleepProvider(SleepRepository())),
-    ],
-    child: const MindMateApp(),
+  runApp(
+    AppBootstrap(
+      initializer: _initializeFirebaseRuntime,
+      child: selectMindMateRoot(isWeb: kIsWeb, mobileApp: _mobileApp()),
+    ),
   );
+}
 
-  runApp(selectMindMateRoot(isWeb: kIsWeb, mobileApp: mobileApp));
+Widget _mobileApp() => MultiProvider(
+  providers: [
+    ChangeNotifierProvider(
+      create: (_) => AuthProvider(AuthRepository(AuthService())),
+    ),
+    ChangeNotifierProvider(create: (_) => UserProvider(UserRepository())),
+    ChangeNotifierProvider(create: (_) => MoodProvider(MoodRepository())),
+    ChangeNotifierProvider(
+      create: (_) => AppointmentProvider(AppointmentRepository()),
+    ),
+    ChangeNotifierProvider(create: (_) => JournalProvider(JournalRepository())),
+    ChangeNotifierProvider(create: (_) => ReportProvider(ReportRepository())),
+    ChangeNotifierProvider(
+      create: (_) =>
+          MentalHealthActivityProvider(MentalHealthActivityRepository()),
+    ),
+    ChangeNotifierProvider(
+      create: (_) => InsightsProvider(InsightsRepository()),
+    ),
+    ChangeNotifierProvider(create: (_) => MindAidProvider(MindAidRepository())),
+    ChangeNotifierProvider(
+      create: (_) => SecretChatProvider(SecretChatRepository()),
+    ),
+    ChangeNotifierProvider(
+      create: (_) => AssessmentProvider(AssessmentRepository()),
+    ),
+    ChangeNotifierProvider(
+      create: (_) => BreathingProvider(BreathingRepository()),
+    ),
+    ChangeNotifierProvider(create: (_) => SleepProvider(SleepRepository())),
+  ],
+  child: const MindMateApp(),
+);
+
+Future<void> _initializeFirebaseRuntime() async {
+  FirebaseRuntimeDiagnostics.log(event: 'startup_started');
+  try {
+    final options = MindMatesFirebaseOptions.currentPlatform;
+    AppEnvironmentConfig.validateFirebaseIdentity(
+      projectId: options.projectId,
+      callableRegion: AppEnvironmentConfig.functionsRegion,
+    );
+    try {
+      await Firebase.initializeApp(options: options);
+    } on FirebaseException catch (error) {
+      if (error.code != 'duplicate-app') rethrow;
+      final existing = Firebase.app();
+      if (existing.options.appId != options.appId ||
+          existing.options.projectId != options.projectId) {
+        throw StateError(
+          'firebase-identity-mismatch: native Firebase app does not match '
+          '${AppEnvironmentConfig.current.name}.',
+        );
+      }
+      FirebaseRuntimeDiagnostics.log(event: 'firebase_native_app_reused');
+    }
+    FirebaseRuntimeDiagnostics.log(event: 'firebase_initialized');
+  } catch (error) {
+    FirebaseRuntimeDiagnostics.logStartupFailure(
+      stage: 'firebase',
+      error: error,
+    );
+    rethrow;
+  }
+  try {
+    await FirebaseAppCheckService.activate();
+    FirebaseRuntimeDiagnostics.log(event: 'app_check_ready');
+  } catch (error) {
+    FirebaseRuntimeDiagnostics.logStartupFailure(
+      stage: 'app_check',
+      error: error,
+    );
+    rethrow;
+  }
+}
+
+void _registerErrorHandlers() {
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    FirebaseRuntimeDiagnostics.logStartupFailure(
+      stage: 'flutter',
+      error: details.exception,
+    );
+  };
+  PlatformDispatcher.instance.onError = (error, stackTrace) {
+    FirebaseRuntimeDiagnostics.logStartupFailure(
+      stage: 'platform',
+      error: error,
+    );
+    return true;
+  };
 }

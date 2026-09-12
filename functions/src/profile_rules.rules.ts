@@ -26,10 +26,13 @@ function profile(id: string, accessRole = "appUser") {
   };
 }
 
-test("owner can create a safe profile and edit display fields", async () => {
+test("only the backend creates profiles and owners can edit display fields", async () => {
   const db = environment.authenticatedContext("owner").firestore();
   const ref = doc(db, "users/owner");
-  await assertSucceeds(setDoc(ref, profile("owner")));
+  await assertFails(setDoc(ref, profile("owner")));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "users/owner"), profile("owner"));
+  });
   await assertSucceeds(updateDoc(ref, {firstName: "Updated", name: "Updated User"}));
 });
 

@@ -14,6 +14,16 @@ flutter analyze
 flutter build web --release --target lib/admin_main.dart --dart-define=RECAPTCHA_V3_SITE_KEY=YOUR_RECAPTCHA_V3_SITE_KEY
 ```
 
+For the staging Admin portal, explicitly select the staging Firebase project:
+
+```powershell
+flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=staging
+firebase deploy --only hosting --project mindmate-staging
+```
+
+Never omit `APP_ENV=staging` from a staging Admin build. The build validates
+that its Firebase project is `mindmate-staging` before initialization.
+
 The production web entry point must remain `lib/admin_main.dart`. The default
 `lib/main.dart` also selects the admin portal when compiled for web as a safety
 measure, but deployment automation uses the explicit admin target.

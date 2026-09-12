@@ -20,4 +20,9 @@ class MemoryEngine {
   bool isRepeatingIntent(String intent) {
     return _lastIntent == intent;
   }
+
+  void reset() {
+    _recentMessages.clear();
+    _lastIntent = null;
+  }
 }

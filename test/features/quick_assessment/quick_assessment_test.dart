@@ -109,7 +109,7 @@ void main() {
       ]);
       expect(
         QuickAssessmentScoring.summaryForLevel(QuickAssessmentLevel.high),
-        contains('elevated stress'),
+        contains('areas you may want to explore'),
       );
       expect(
         QuickAssessmentScoring.recommendedNextStepForLevel(
@@ -230,6 +230,8 @@ void main() {
         expect(payload!['userId'], 'user_123');
         expect(payload['type'], 'quick');
         expect(payload['overallLevel'], QuickAssessmentLevel.veryHigh.name);
+        expect(payload['responsePatternCode'], 'supportMayHelp');
+        expect(payload['responsePatternLabel'], 'Support may be useful');
         expect(payload['summary'], isA<String>());
         expect(payload['topConcernAreas'], isA<List<String>>());
         expect(payload['recommendedNextStep'], isA<String>());
@@ -240,6 +242,14 @@ void main() {
         expect(payload['signalSource'], 'quickAssessment');
         expect(payload['signalGeneratedAt'], isA<String>());
         expect(payload['responses'], isA<List<Object>>());
+        final interpretation = Map<String, dynamic>.from(
+          payload['interpretation']! as Map,
+        );
+        final domains = interpretation['domainResults']! as List;
+        expect(
+          (domains.first as Map)['bandLabel'],
+          isNot(anyOf('Low', 'Watchful', 'Moderate', 'Elevated', 'High')),
+        );
         expect(firestore.collection, 'assessments');
         expect(firestore.createdDocumentId, 'quick_user_123');
         expect(firestore.createdDocument?['userId'], 'user_123');

@@ -33,7 +33,8 @@ class MoodProvider extends ChangeNotifier {
     try {
       final referenceNow = now ?? _nowProvider();
       _moods = await _repository.fetchRecentMoods(userId);
-      if (_todayMood == null || !_matchesToday(_todayMood!, now: referenceNow)) {
+      if (_todayMood == null ||
+          !_matchesToday(_todayMood!, now: referenceNow)) {
         _todayMood = _moodForToday(_moods, now: referenceNow);
       }
     } catch (error) {
@@ -46,8 +47,7 @@ class MoodProvider extends ChangeNotifier {
 
   Future<void> loadTodayMood(String userId, {DateTime? now}) async {
     final referenceNow = now ?? _nowProvider();
-    if (_todayMood != null &&
-        !_matchesToday(_todayMood!, now: referenceNow)) {
+    if (_todayMood != null && !_matchesToday(_todayMood!, now: referenceNow)) {
       _todayMood = null;
       _dailySaveResult = null;
     }

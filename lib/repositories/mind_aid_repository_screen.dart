@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../database/firestore_collections.dart';
 import '../features/mind_aid/ai_engine/mind_aid_chat_engine.dart';
 import '../features/mind_aid/ai_engine/mind_aid_engine.dart';
+import '../features/mind_aid/ai_engine/mind_aid_safety_classifier.dart';
+import '../features/mind_aid/ai_engine/score_engine.dart';
 import '../features/mind_aid/data/mind_aid_dataset_loader.dart';
 import '../features/mind_aid/domain/mind_aid_chat_models.dart';
 import '../features/mind_aid/domain/mind_aid_context.dart';
@@ -51,6 +53,11 @@ class MindAidRepository {
 
   MindAidCloudService get _cloudService =>
       _cloudServiceOverride ?? (_createdCloudService ??= MindAidCloudService());
+
+  void resetSession() {
+    _engine.resetSession();
+    _chatEngine.resetSession();
+  }
 
   Future<MindAidPreferences> loadPreferences(String userId) async {
     if (userId.isEmpty || userId == 'guest') {
@@ -156,7 +163,12 @@ class MindAidRepository {
         ? preferences!.conversationId
         : userId;
     final analysis = _engine.process(text, dataset, context: context);
+    final safety = const MindAidSafetyClassifier().classify(
+      normalizedInput: ScoreEngine.normalize(text),
+      matches: const [],
+    );
     final isHighRisk =
+        safety.level.blocksCloud ||
         analysis.requiresEscalation ||
         analysis.severity == MindAidSeverity.high ||
         analysis.severity == MindAidSeverity.crisis;
@@ -308,8 +320,9 @@ class MindAidRepository {
     required String userId,
     required MindAidMessageModel message,
   }) {
-    return _firestoreService.createDocument(
+    return _firestoreService.setDocument(
       FirestoreCollections.mindAidMessages,
+      message.id,
       {
         'userId': userId,
         ...message.toMap(),

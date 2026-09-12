@@ -90,14 +90,28 @@ class QuickAssessmentScoring {
   static String summaryForLevel(QuickAssessmentLevel level) {
     switch (level) {
       case QuickAssessmentLevel.low:
-        return 'Responses suggest low current concern and generally stable day-to-day well-being.';
+        return 'Your brief check-in shows several supportive patterns worth continuing.';
       case QuickAssessmentLevel.moderate:
-        return 'Responses suggest some areas of strain that may benefit from regular check-ins and supportive habits.';
+        return 'Your brief check-in appears generally balanced, with some opportunities for continued awareness.';
       case QuickAssessmentLevel.high:
-        return 'Responses suggest elevated stress or reduced well-being that may benefit from a fuller assessment and support.';
+        return 'Your brief check-in highlights one or more areas you may want to explore more closely.';
       case QuickAssessmentLevel.veryHigh:
-        return 'Responses suggest a very high level of concern and a strong need for timely support from a trusted person or counselor.';
+        return 'Your brief check-in highlights areas where support may make current challenges easier to manage.';
     }
+  }
+
+  static String summaryForScore(double score) {
+    final pattern = AssessmentResponsePattern.codeForScore(score);
+    return switch (pattern) {
+      'wellBeingSupported' =>
+        'Your brief check-in shows several supportive patterns worth continuing.',
+      'generallySteady' =>
+        'Your brief check-in appears generally balanced, with some opportunities for continued awareness.',
+      'someStrain' =>
+        'Your brief check-in highlights one or more areas you may want to explore more closely.',
+      _ =>
+        'Your brief check-in highlights areas where support may make current challenges easier to manage.',
+    };
   }
 
   static String recommendedNextStepForLevel(QuickAssessmentLevel level) {
@@ -128,7 +142,7 @@ class QuickAssessmentScoring {
         completionPercent: 100,
         isScorable: true,
         interpretation:
-            '${entry.key} is currently in the ${band.label.toLowerCase()} screening range.',
+            '${AssessmentResponsePattern.labelForScore(entry.value)} based on this single quick-check response.',
         suggestedAction: recommendedNextStepForLevel(
           overallLevel(averageConcernScore(responses)),
         ),
@@ -143,8 +157,24 @@ class QuickAssessmentScoring {
     };
     final top = domains.where((domain) => domain.score >= 30).take(3).toList();
     final focus = top.isEmpty
-        ? 'No quick-screen area showed a moderate concern signal.'
-        : 'Higher signals appeared in ${top.map((domain) => domain.domain).join(', ')}.';
+        ? 'No quick-check answer stood out as an immediate area to explore.'
+        : 'Areas you may want to explore are ${top.map((domain) => domain.domain).join(', ')}.';
+    final strengths = domains
+        .where((domain) => domain.score <= 40)
+        .take(3)
+        .map(
+          (domain) =>
+              '${domain.domain} showed a supportive or balanced response.',
+        )
+        .toList();
+    final focusInsights = domains
+        .where((domain) => domain.score > 40)
+        .take(3)
+        .map(
+          (domain) =>
+              '${domain.domain} may be worth reflecting on or exploring in the full assessment.',
+        )
+        .toList();
     return AssessmentInterpretation(
       supportPriority: priority,
       responseQuality: AssessmentResponseQuality(
@@ -156,9 +186,11 @@ class QuickAssessmentScoring {
       ),
       domainResults: domains,
       rationale: [focus],
-      userSummary: '${summaryForLevel(level)} $focus This is not a diagnosis.',
+      strengthInsights: strengths,
+      focusInsights: focusInsights,
+      userSummary: '${summaryForScore(averageConcernScore(responses))} $focus',
       counselorSummary:
-          'Quick wellness screen: ${priority.label}. $focus Complete the full role-based assessment for domain-level interpretation.',
+          'Quick wellness screen: ${priority.label}. The five indicators each represent one response; use the full role-based assessment for category-level interpretation.',
       suggestedActions: [recommendedNextStepForLevel(level)],
       questionSetVersion: 'quick_v2',
     );

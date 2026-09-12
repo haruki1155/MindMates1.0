@@ -1,11 +1,17 @@
 import {randomUUID} from "node:crypto";
+import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
-import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
+
+if (!getApps().length) initializeApp();
 
 const db = getFirestore();
 const POPULATION_ROLES = ["student", "teaching", "nonTeaching"] as const;
 type PopulationRole = typeof POPULATION_ROLES[number];
+const GENDERS = ["Male", "Female", "Non-binary", "Prefer not to say"] as const;
+// Source allowlist contains every ID in these five year blocks, 0001-9999.
+const STUDENT_ID_PATTERN = /^(2022|2023|2024|2025|2026)[0-9]{4}$/;
 
 function safeErrorCode(error: unknown): string {
   if (error instanceof HttpsError) return error.code;
@@ -47,14 +53,38 @@ function populationRole(value: unknown): PopulationRole {
   return value as PopulationRole;
 }
 
-function schoolIdFromAuthEmail(email: string | undefined): string {
+function schoolIdFromAccount(email: string | undefined, data: Record<string, unknown>): string {
   const normalized = String(email ?? "").trim().toLowerCase();
   if (!normalized.endsWith("@mindmate.local")) {
-    throw new HttpsError("failed-precondition", "This account is not a School-ID account.");
+    return requiredText(data, "schoolId", "School ID", 40);
   }
   const schoolId = normalized.slice(0, -"@mindmate.local".length);
   if (!schoolId) throw new HttpsError("failed-precondition", "The School ID is unavailable.");
   return schoolId;
+}
+
+export function registrationRoleForEmail(email: string | undefined): "student" | "teaching" {
+  const normalized = String(email ?? "").trim().toLowerCase();
+  const parts = normalized.split("@");
+  return parts.length === 2 && parts[0].length > 0 && parts[1] === "ucu.edu.ph"
+    ? "teaching"
+    : "student";
+}
+
+function canonicalEmployeeId(value: string): string {
+  const employeeId = value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (employeeId.length < 3) {
+    throw new HttpsError("invalid-argument", "Enter a valid employee ID.");
+  }
+  return employeeId;
+}
+
+export function canonicalStudentId(value: string): string {
+  const id = value.trim().toUpperCase();
+  if (!STUDENT_ID_PATTERN.test(id)) {
+    throw new HttpsError("invalid-argument", "Enter a valid student ID from the approved list.");
+  }
+  return id;
 }
 
 export function validatedProfileInput(raw: unknown): Record<string, string> {
@@ -69,6 +99,16 @@ export function validatedProfileInput(raw: unknown): Record<string, string> {
   const sector = optionalText(data, "sector");
   const position = optionalText(data, "position");
   const employeeId = optionalText(data, "employeeId", 40);
+  const gender = requiredText(data, "gender", "Sex / gender", 40);
+  if (!GENDERS.includes(gender as typeof GENDERS[number])) {
+    throw new HttpsError("invalid-argument", "Choose a valid sex / gender option.");
+  }
+  const dateOfBirthText = requiredText(data, "dateOfBirth", "Date of birth", 40);
+  const dateOfBirth = new Date(dateOfBirthText);
+  const today = new Date();
+  if (Number.isNaN(dateOfBirth.getTime()) || dateOfBirth > today || dateOfBirth.getUTCFullYear() < today.getUTCFullYear() - 120) {
+    throw new HttpsError("invalid-argument", "Choose a valid date of birth.");
+  }
 
   if (role === "student" && (!department || !course || !yearLevel)) {
     throw new HttpsError("invalid-argument", "Students must provide college, course, and year level.");
@@ -80,7 +120,7 @@ export function validatedProfileInput(raw: unknown): Record<string, string> {
     throw new HttpsError("invalid-argument", "Staff must provide employee ID, sector, and position.");
   }
   return {firstName, middleName, lastName, populationRole: role, department, course,
-    yearLevel, sector, position, employeeId};
+    yearLevel, sector, position, employeeId, gender, dateOfBirth: dateOfBirth.toISOString()};
 }
 
 function legacyRole(role: PopulationRole): string {
@@ -90,20 +130,35 @@ function legacyRole(role: PopulationRole): string {
 function profileIsReady(profile: FirebaseFirestore.DocumentData): boolean {
   const role = profile.populationRole as PopulationRole;
   const present = (value: unknown) => typeof value === "string" && value.trim().length > 0;
-  if (!present(profile.firstName) || !present(profile.lastName) || !POPULATION_ROLES.includes(role)) return false;
-  if (role === "student") return present(profile.schoolId) && present(profile.department) && present(profile.course) && present(profile.yearLevel);
+  if (!present(profile.firstName) || !present(profile.lastName) || !present(profile.gender) || !POPULATION_ROLES.includes(role)) return false;
+  if (role === "student") return present(profile.schoolId) && present(profile.department) && present(profile.course) && present(profile.yearLevel) && profile.dateOfBirth instanceof Timestamp;
   if (role === "teaching") return present(profile.employeeId) && present(profile.department) && present(profile.position);
   return present(profile.employeeId) && present(profile.sector) && present(profile.position);
 }
 
-export const provisionAppUserProfile = onCall({enforceAppCheck: true}, async (request) => {
+async function provisionAppUserProfileHandler(request: CallableRequest) {
   const correlationId = randomUUID();
   const uid = requireUid(request);
   try {
     const authUser = await getAuth().getUser(uid);
     const input = validatedProfileInput(request.data);
-    const schoolId = schoolIdFromAuthEmail(authUser.email);
+    const assignedRole = registrationRoleForEmail(authUser.email);
+    if (input.populationRole !== assignedRole) {
+      throw new HttpsError(
+        "failed-precondition",
+        assignedRole === "teaching"
+          ? "Official UCU email accounts must register as Teaching personnel."
+          : "Teaching personnel must verify an official @ucu.edu.ph email address.",
+      );
+    }
+    const schoolId = assignedRole === "student"
+      ? schoolIdFromAccount(authUser.email, objectData(request.data))
+      : "";
+    if (assignedRole === "student") canonicalStudentId(schoolId);
     const profileRef = db.collection("users").doc(uid);
+    const reservationRef = assignedRole === "student"
+      ? db.collection("student_id_reservations").doc(canonicalStudentId(schoolId))
+      : db.collection("employee_id_reservations").doc(canonicalEmployeeId(input.employeeId));
     let created = false;
     await db.runTransaction(async (transaction) => {
       const existing = await transaction.get(profileRef);
@@ -114,17 +169,40 @@ export const provisionAppUserProfile = onCall({enforceAppCheck: true}, async (re
         }
         return;
       }
+      if (reservationRef) {
+        const reservation = await transaction.get(reservationRef);
+        if (reservation.exists && reservation.data()?.userId !== uid) {
+          throw new HttpsError(
+            "already-exists",
+            assignedRole === "student"
+              ? "That student ID is already registered."
+              : "That employee ID is already registered.",
+          );
+        }
+        if (!reservation.exists) {
+          transaction.create(reservationRef, {
+            userId: uid,
+            ...(assignedRole === "student"
+              ? {studentId: schoolId}
+              : {employeeId: input.employeeId}),
+            createdAt: FieldValue.serverTimestamp(),
+          });
+        }
+      }
       created = true;
       transaction.create(profileRef, {
-        id: uid, email: authUser.email ?? "", schoolId,
+        id: uid, email: authUser.email ?? "", emailVerified: authUser.emailVerified === true, schoolId,
         ...input,
+        dateOfBirth: Timestamp.fromDate(new Date(input.dateOfBirth)),
         name: [input.firstName, input.middleName, input.lastName].filter(Boolean).join(" "),
         role: legacyRole(input.populationRole as PopulationRole),
         declaredRole: input.populationRole,
-        accessRole: "appUser", verificationStatus: "pending", profileVersion: 3,
-        verifiedAt: null, verifiedBy: "", dayStreak: 0, longestStreak: 0,
+        accessRole: "appUser", verificationStatus: "verified", profileVersion: 3,
+        verifiedAt: FieldValue.serverTimestamp(), verifiedBy: "automatic-registration",
+        dayStreak: 0, longestStreak: 0,
         lastActivityDateKey: "", activeDateKeys: [], avatarAssetName: "",
         quickAssessmentCompleted: false, quickAssessmentCompletedAt: null,
+        profileSetupCompleted: false,
         lastActiveAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -136,14 +214,17 @@ export const provisionAppUserProfile = onCall({enforceAppCheck: true}, async (re
     if (error instanceof HttpsError) throw error;
     throw new HttpsError("internal", "Profile setup could not be completed.", {correlationId});
   }
-});
+}
+
+export const provisionAppUserProfile = onCall({enforceAppCheck: true}, provisionAppUserProfileHandler);
+export const provisionAppUserProfileDev = onCall({enforceAppCheck: false}, provisionAppUserProfileHandler);
 
 function isVerifiedQuick(data: FirebaseFirestore.DocumentData | undefined, uid: string): boolean {
   return data?.userId === uid && data?.type === "quick" &&
     data?.calculationAuthority === "server" && data?.verificationStatus === "verified";
 }
 
-export const getAssessmentStatus = onCall({enforceAppCheck: true}, async (request) => {
+async function getAssessmentStatusHandler(request: CallableRequest) {
   const correlationId = randomUUID();
   const uid = requireUid(request);
   try {
@@ -184,4 +265,7 @@ export const getAssessmentStatus = onCall({enforceAppCheck: true}, async (reques
     if (error instanceof HttpsError) throw error;
     throw new HttpsError("unavailable", "Assessment status is temporarily unavailable.", {correlationId});
   }
-});
+}
+
+export const getAssessmentStatus = onCall({enforceAppCheck: true}, getAssessmentStatusHandler);
+export const getAssessmentStatusDev = onCall({enforceAppCheck: false}, getAssessmentStatusHandler);

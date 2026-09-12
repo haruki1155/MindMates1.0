@@ -526,7 +526,7 @@ const insightSeedRules = [
     'matchType': 'any',
     'conditions': {
       'mentalStatus': ['moderate', 'severe'],
-      'fullAssessmentStatus': ['High Concern', 'Very High Concern'],
+      'fullAssessmentStatus': ['At Risk', 'High Concern', 'Very High Concern'],
     },
     'isActive': true,
   },
