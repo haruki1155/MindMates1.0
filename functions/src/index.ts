@@ -816,21 +816,57 @@ export const saveOrganizationRecord = onCall(async (request) => {
   const name = requiredText(request.data?.name, "Name", 2, 120);
   const code = requiredText(request.data?.code, "Code", 1, 30).toUpperCase();
   const active = request.data?.active !== false;
-  const collegeId = kind === "course" ? requiredText(request.data?.collegeId, "College", 1, 128) : "";
-  if (kind === "course") {
+  const collegeId = kind !== "college" ? requiredText(request.data?.collegeId, "College", 1, 128) : "";
+  const departmentId = kind === "course" ? requiredText(request.data?.departmentId, "Department", 1, 128) : "";
+  if (kind !== "college") {
     const college = await db.collection("colleges").doc(collegeId).get();
     if (!college.exists || college.data()?.active !== true) {
       throw new HttpsError("failed-precondition", "Choose an active college.");
     }
   }
-  const duplicate = await db.collection(collection).where("normalizedName", "==", name.toLowerCase()).limit(1).get();
-  if (duplicate.docs.some((doc) => doc.id !== recordId)) {
+  if (kind === "course") {
+    const department = await db.collection("departments").doc(departmentId).get();
+    if (!department.exists || department.data()?.active !== true || department.data()?.collegeId !== collegeId) {
+      throw new HttpsError("failed-precondition", "Choose a department under the selected college.");
+    }
+  }
+  const duplicate = await db.collection(collection).where("normalizedName", "==", name.toLowerCase()).limit(10).get();
+  const duplicateCode = await db.collection(collection).where("normalizedCode", "==", code.toLowerCase()).limit(10).get();
+  if (duplicate.docs.some((doc) => doc.id !== recordId) || duplicateCode.docs.some((doc) => doc.id !== recordId)) {
     throw new HttpsError("already-exists", `A ${kind} with that name already exists.`);
   }
-  await db.collection(collection).doc(recordId).set({name, code, normalizedName: name.toLowerCase(), active,
-    ...(kind === "course" ? {collegeId} : {}), updatedBy: actorId, updatedAt: FieldValue.serverTimestamp(),
-    createdAt: FieldValue.serverTimestamp()}, {merge: true});
+  await db.collection(collection).doc(recordId).set({name, code, normalizedName: name.toLowerCase(), normalizedCode: code.toLowerCase(), active, status: active ? "ACTIVE" : "INACTIVE",
+    ...(kind !== "college" ? {collegeId} : {}), ...(kind === "course" ? {departmentId} : {}), updatedBy: actorId, updatedAt: FieldValue.serverTimestamp(),
+    ...(typeof request.data?.id === "string" && request.data.id.trim() ? {} : {createdBy: actorId, createdAt: FieldValue.serverTimestamp()})}, {merge: true});
   return {ok: true, id: recordId};
+});
+
+export const archiveOrganizationRecord = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  await requireSuperAdmin(actorId);
+  const kind = String(request.data?.kind ?? "");
+  const collection = ({college: "colleges", department: "departments", course: "courses"} as const)[kind as "college" | "department" | "course"];
+  const id = requiredText(request.data?.id, "Record", 1, 128);
+  const archived = request.data?.archived === true;
+  if (!collection) throw new HttpsError("invalid-argument", "Choose a valid academic structure type.");
+  const ref = db.collection(collection).doc(id);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) throw new HttpsError("not-found", "Academic structure record not found.");
+  const data = snapshot.data() ?? {};
+  if (archived && collection === "colleges") {
+    const [departments, courses] = await Promise.all([
+      db.collection("departments").where("collegeId", "==", id).where("active", "==", true).limit(1).get(),
+      db.collection("courses").where("collegeId", "==", id).where("active", "==", true).limit(1).get(),
+    ]);
+    if (!departments.empty || !courses.empty) throw new HttpsError("failed-precondition", "Archive its active departments and courses first.");
+  }
+  if (archived && collection === "departments") {
+    const courses = await db.collection("courses").where("departmentId", "==", id).where("active", "==", true).limit(1).get();
+    if (!courses.empty) throw new HttpsError("failed-precondition", "Archive its active courses first.");
+  }
+  await ref.update({active: !archived, status: archived ? "ARCHIVED" : "ACTIVE", updatedBy: actorId, updatedAt: FieldValue.serverTimestamp()});
+  await db.collection("admin_audit_logs").add({actorId, action: `${kind.toUpperCase()}_${archived ? "ARCHIVED" : "RESTORED"}`, category: AUDIT_CATEGORIES.userManagement, targetType: collection, targetId: id, metadata: {before: {active: data.active === true}, after: {active: !archived}}, createdAt: FieldValue.serverTimestamp()});
+  return {ok: true};
 });
 
 export const updateStaffOrganization = onCall(async (request) => {

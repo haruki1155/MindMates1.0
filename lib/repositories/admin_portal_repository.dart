@@ -896,6 +896,7 @@ class AdminPortalRepository {
     required String code,
     required bool active,
     String collegeId = '',
+    String departmentId = '',
   }) =>
       FirebaseFunctions.instance.httpsCallable('saveOrganizationRecord').call({
         'kind': kind,
@@ -904,7 +905,18 @@ class AdminPortalRepository {
         'code': code,
         'active': active,
         'collegeId': collegeId,
+        'departmentId': departmentId,
       });
+
+  Future<void> archiveOrganizationRecord({
+    required String kind,
+    required String id,
+    required bool archived,
+  }) => FirebaseFunctions.instance.httpsCallable('archiveOrganizationRecord').call({
+    'kind': kind,
+    'id': id,
+    'archived': archived,
+  });
 
   Future<void> updateStaffOrganization({
     required String userId,

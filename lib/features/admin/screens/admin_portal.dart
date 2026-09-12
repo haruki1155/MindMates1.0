@@ -17,6 +17,7 @@ import 'profile_management_page.dart';
 import 'report_generation_page.dart';
 import 'admin_notifications_page.dart';
 import 'admin_change_password_screen.dart';
+import 'academic_structure_page.dart';
 import 'admin_operations_dashboard.dart';
 import 'staff_operations_dashboard.dart';
 import 'counselor_operations_dashboard.dart';
@@ -39,6 +40,7 @@ String _headerRoleLabel(AccessRole role) => switch (role) {
 enum AdminPortalPage {
   dashboard,
   users,
+  academicStructure,
   profiling,
   appointments,
   cases,
@@ -55,6 +57,7 @@ extension on AdminPortalPage {
   String get label => switch (this) {
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
+    AdminPortalPage.academicStructure => 'Academic Structure',
     AdminPortalPage.profiling => 'Profiling Management',
     AdminPortalPage.appointments => 'Appointments',
     AdminPortalPage.cases => 'My Cases',
@@ -77,6 +80,7 @@ extension on AdminPortalPage {
   IconData get icon => switch (this) {
     AdminPortalPage.dashboard => Icons.home_outlined,
     AdminPortalPage.users => Icons.group_outlined,
+    AdminPortalPage.academicStructure => Icons.account_tree_outlined,
     AdminPortalPage.profiling => Icons.badge_outlined,
     AdminPortalPage.appointments => Icons.calendar_month_outlined,
     AdminPortalPage.cases => Icons.folder_shared_outlined,
@@ -469,6 +473,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
               onNavigate: _setPage,
             ),
     AdminPortalPage.users => UserManagementPage(repository: _repository),
+    AdminPortalPage.academicStructure => AcademicStructurePage(repository: _repository),
     AdminPortalPage.profiling => ProfileManagementPage(repository: _repository),
     AdminPortalPage.appointments => _AppointmentsPage(
       repository: _repository,
@@ -520,6 +525,7 @@ class _Nav extends StatelessWidget {
 
   bool _allowed(AdminPortalPage page) => switch (page) {
     AdminPortalPage.users => isSuperAdmin,
+    AdminPortalPage.academicStructure => isSuperAdmin,
     // Counselor case/profile access must come through an assigned-case
     // surface. The legacy organization-wide profiling screen is admin-only.
     AdminPortalPage.profiling => isSuperAdmin,
@@ -542,6 +548,7 @@ class _Nav extends StatelessWidget {
       const _NavSection('People', [
         AdminPortalPage.users,
         AdminPortalPage.profiling,
+        AdminPortalPage.academicStructure,
       ]),
       const _NavSection('Counseling', [
         AdminPortalPage.appointments,
@@ -1499,6 +1506,7 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
                     'department',
                     'Departments',
                     departments.data ?? const [],
+                    colleges: colleges.data ?? const [],
                   ),
                   _directoryRow(
                     context,
@@ -1506,6 +1514,7 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
                     'Courses',
                     courses.data ?? const [],
                     colleges: colleges.data ?? const [],
+                    departments: departments.data ?? const [],
                   ),
                 ],
               ),
@@ -1522,6 +1531,7 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
     String label,
     List<OrganizationRecord> records, {
     List<College> colleges = const [],
+    List<Department> departments = const [],
   }) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -1529,7 +1539,7 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
         title: Text(label),
         trailing: IconButton(
           icon: const Icon(Icons.add),
-          onPressed: () => _edit(context, kind, colleges),
+          onPressed: () => _edit(context, kind, colleges, departments: departments),
         ),
       ),
       if (records.isEmpty)
@@ -1547,7 +1557,7 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
                   size: 18,
                 ),
                 label: Text('${record.code}: ${record.name}'),
-                onPressed: () => _edit(context, kind, colleges, record: record),
+                onPressed: () => _edit(context, kind, colleges, departments: departments, record: record),
               ),
             )
             .toList(),
@@ -1560,11 +1570,17 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
     BuildContext context,
     String kind,
     List<College> colleges, {
+    List<Department> departments = const [],
     OrganizationRecord? record,
   }) async {
     final name = TextEditingController(text: record?.name);
     final code = TextEditingController(text: record?.code);
-    String? collegeId = record is Course ? record.collegeId : null;
+    String? collegeId = record is Course
+        ? record.collegeId
+        : record is Department
+        ? record.collegeId
+        : null;
+    String? departmentId = record is Course ? record.departmentId : null;
     var active = record?.active ?? true;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1593,7 +1609,14 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
                             DropdownMenuItem(value: e.id, child: Text(e.name)),
                       )
                       .toList(),
-                  onChanged: (v) => setState(() => collegeId = v),
+                  onChanged: (v) => setState(() { collegeId = v; departmentId = null; }),
+                ),
+              if (kind == 'department' || kind == 'course')
+                DropdownButtonFormField<String>(
+                  initialValue: kind == 'department' ? collegeId : departmentId,
+                  decoration: InputDecoration(labelText: kind == 'department' ? 'College' : 'Department'),
+                  items: (kind == 'department' ? colleges.where((e) => e.active).map((e) => DropdownMenuItem(value: e.id, child: Text(e.name))) : departments.where((e) => e.active && e.collegeId == collegeId).map((e) => DropdownMenuItem(value: e.id, child: Text(e.name)))).toList(),
+                  onChanged: (v) => setState(() { if (kind == 'department') collegeId = v; else departmentId = v; }),
                 ),
               SwitchListTile(
                 value: active,
@@ -1618,7 +1641,8 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
     if (confirmed == true &&
         name.text.trim().length >= 2 &&
         code.text.trim().isNotEmpty &&
-        (kind != 'course' || collegeId != null)) {
+        (kind == 'college' || collegeId != null) &&
+        (kind != 'course' || departmentId != null)) {
       await repository.saveOrganizationRecord(
         kind: kind,
         id: record?.id,
@@ -1626,6 +1650,7 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
         code: code.text,
         active: active,
         collegeId: collegeId ?? '',
+        departmentId: departmentId ?? '',
       );
     }
     name.dispose();

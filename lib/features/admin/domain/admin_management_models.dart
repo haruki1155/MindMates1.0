@@ -82,6 +82,7 @@ class OrganizationRecord {
   final String name;
   final String code;
   final bool active;
+  String get status => active ? 'ACTIVE' : 'INACTIVE';
 }
 
 class College extends OrganizationRecord {
@@ -105,12 +106,15 @@ class Department extends OrganizationRecord {
     required super.name,
     required super.code,
     required super.active,
+    this.collegeId = '',
   });
+  final String collegeId;
   factory Department.fromJson(Map<String, dynamic> json) => Department(
     id: '${json['id'] ?? ''}',
     name: '${json['name'] ?? ''}',
     code: '${json['code'] ?? ''}',
     active: json['active'] == true,
+    collegeId: '${json['collegeId'] ?? ''}',
   );
 }
 
@@ -121,14 +125,17 @@ class Course extends OrganizationRecord {
     required super.code,
     required super.active,
     required this.collegeId,
+    this.departmentId = '',
   });
   final String collegeId;
+  final String departmentId;
   factory Course.fromJson(Map<String, dynamic> json) => Course(
     id: '${json['id'] ?? ''}',
     name: '${json['name'] ?? ''}',
     code: '${json['code'] ?? ''}',
     active: json['active'] == true,
     collegeId: '${json['collegeId'] ?? ''}',
+    departmentId: '${json['departmentId'] ?? ''}',
   );
 }
 
