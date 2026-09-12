@@ -1014,6 +1014,52 @@ export function isNormalNotificationType(type: unknown): boolean {
   return type === "appointment" || type === "inquiry";
 }
 
+export const managePortalNotification = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
+  const notificationId = String(request.data?.notificationId ?? "").trim();
+  const action = String(request.data?.action ?? "");
+  if (!notificationId || notificationId.length > 180 || notificationId.includes("/")) {
+    throw new HttpsError("invalid-argument", "Choose a valid notification.");
+  }
+  if (!["archive", "restore", "delete"].includes(action)) {
+    throw new HttpsError("invalid-argument", "Choose a valid notification action.");
+  }
+  const ref = db.collection("notifications").doc(notificationId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists) throw new HttpsError("not-found", "Notification no longer exists.");
+    const data = snapshot.data() ?? {};
+    if (data.userId !== uid || data.audience !== "portal") {
+      throw new HttpsError("permission-denied", "You cannot manage this notification.");
+    }
+    if (action === "restore") {
+      if (!data.archivedAt) return;
+      transaction.update(ref, {
+        archivedAt: null,
+        expiresAt: null,
+        archiveEligibleAt: null,
+      });
+      return;
+    }
+    if (!data.readAt && !data.resolvedAt) {
+      throw new HttpsError("failed-precondition", "Open the notification before clearing it.");
+    }
+    if (action === "delete") {
+      transaction.delete(ref);
+      return;
+    }
+    if (data.archivedAt) return;
+    const archivedAt = Timestamp.now();
+    transaction.update(ref, {
+      archivedAt,
+      archiveEligibleAt: null,
+      expiresAt: Timestamp.fromMillis(notificationDeleteAtMillis(archivedAt.toMillis())),
+    });
+  });
+  return {success: true};
+});
+
 export function portalNotificationPayload(
   kind: PortalNotificationKind,
   recipientId: string,

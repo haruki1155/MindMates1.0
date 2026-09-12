@@ -29,12 +29,20 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
   _NotificationFilter _filter = _NotificationFilter.all;
   bool _unreadOnly = false;
   bool _markingAll = false;
+  bool _showArchived = false;
+  String? _busyId;
+
+  Stream<List<AppNotificationModel>> _source() =>
+      !_showArchived && widget.notifications != null
+      ? widget.notifications!
+      : _showArchived
+      ? widget.repository.watchArchivedPortalNotifications()
+      : widget.repository.watchPortalNotifications();
 
   @override
   void initState() {
     super.initState();
-    _notifications =
-        widget.notifications ?? widget.repository.watchPortalNotifications();
+    _notifications = _source();
   }
 
   @override
@@ -42,8 +50,7 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.notifications != widget.notifications ||
         oldWidget.repository != widget.repository) {
-      _notifications =
-          widget.notifications ?? widget.repository.watchPortalNotifications();
+      _notifications = _source();
     }
   }
 
@@ -80,7 +87,7 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                 final unread = all.where((item) => !item.isRead).toList();
                 final visible = all
                     .where((item) {
-                      if (_unreadOnly && item.isRead) return false;
+                      if (!_showArchived && _unreadOnly && item.isRead) return false;
                       return switch (_filter) {
                         _NotificationFilter.all => true,
                         _NotificationFilter.appointments =>
@@ -141,10 +148,26 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                               Icons.mark_email_unread_outlined,
                               size: 17,
                             ),
-                            onSelected: (value) =>
-                                setState(() => _unreadOnly = value),
+                            onSelected: _showArchived
+                                ? null
+                                : (value) => setState(() => _unreadOnly = value),
                           ),
-                          if (unread.isNotEmpty)
+                          SegmentedButton<bool>(
+                            showSelectedIcon: false,
+                            segments: const [
+                              ButtonSegment(value: false, label: Text('Active')),
+                              ButtonSegment(value: true, label: Text('Archived')),
+                            ],
+                            selected: {_showArchived},
+                            onSelectionChanged: (value) {
+                              setState(() {
+                                _showArchived = value.first;
+                                _unreadOnly = false;
+                                _notifications = _source();
+                              });
+                            },
+                          ),
+                          if (!_showArchived && unread.isNotEmpty)
                             OutlinedButton.icon(
                               onPressed: _markingAll
                                   ? null
@@ -171,6 +194,17 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                                 notification: visible[index],
                                 showDivider: index < visible.length - 1,
                                 onTap: () => _open(visible[index]),
+                                busy: _busyId == visible[index].id,
+                                actionsEnabled: _busyId == null,
+                                onArchive: visible[index].isRead ||
+                                        visible[index].resolvedAt != null
+                                    ? () => _manage(visible[index], 'archive')
+                                    : null,
+                                onRestore: () => _manage(visible[index], 'restore'),
+                                onDelete: visible[index].isRead ||
+                                        visible[index].resolvedAt != null
+                                    ? () => _manage(visible[index], 'delete')
+                                    : null,
                               ),
                           ],
                         ),
@@ -213,6 +247,51 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
       }
     } finally {
       if (mounted) setState(() => _markingAll = false);
+    }
+  }
+
+  Future<void> _manage(AppNotificationModel notification, String action) async {
+    if (action == 'delete') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Delete notification?'),
+          content: const Text('This notification will be permanently removed.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    setState(() => _busyId = notification.id);
+    try {
+      await widget.repository.managePortalNotification(
+        notification.id,
+        action: action,
+      );
+      if (!mounted) return;
+      final message = switch (action) {
+        'archive' => 'Notification archived.',
+        'restore' => 'Notification restored.',
+        _ => 'Notification deleted.',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not update the notification. Try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busyId = null);
     }
   }
 }
@@ -290,10 +369,20 @@ class _NotificationTile extends StatelessWidget {
     required this.notification,
     required this.showDivider,
     required this.onTap,
+    required this.busy,
+    required this.actionsEnabled,
+    required this.onArchive,
+    required this.onRestore,
+    required this.onDelete,
   });
   final AppNotificationModel notification;
   final bool showDivider;
   final VoidCallback onTap;
+  final bool busy;
+  final bool actionsEnabled;
+  final VoidCallback? onArchive;
+  final VoidCallback onRestore;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -374,7 +463,35 @@ class _NotificationTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Icon(Icons.chevron_right, color: AdminColors.muted),
+                if (busy)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  PopupMenuButton<String>(
+                    tooltip: 'Notification actions',
+                    enabled: actionsEnabled,
+                    onSelected: (action) {
+                      switch (action) {
+                        case 'archive':
+                          onArchive?.call();
+                        case 'restore':
+                          onRestore();
+                        case 'delete':
+                          onDelete?.call();
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      if (notification.isArchived)
+                        const PopupMenuItem(value: 'restore', child: Text('Restore'))
+                      else if (onArchive != null)
+                        const PopupMenuItem(value: 'archive', child: Text('Archive')),
+                      if (onDelete != null)
+                        const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                    ],
+                  ),
               ],
             ),
           ),

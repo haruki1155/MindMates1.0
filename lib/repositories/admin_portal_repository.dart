@@ -523,7 +523,15 @@ class AdminPortalRepository {
               ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
       );
 
-  Stream<List<AppNotificationModel>> watchPortalNotifications() {
+  Stream<List<AppNotificationModel>> watchPortalNotifications() =>
+      _watchPortalNotifications(archived: false);
+
+  Stream<List<AppNotificationModel>> watchArchivedPortalNotifications() =>
+      _watchPortalNotifications(archived: true);
+
+  Stream<List<AppNotificationModel>> _watchPortalNotifications({
+    required bool archived,
+  }) {
     final userId = currentAuthUser?.uid;
     if (userId == null || !currentAccessRole.canAccessClinicalData) {
       return Stream.value(const []);
@@ -544,9 +552,26 @@ class AdminPortalRepository {
                   id: item['id']?.toString(),
                 ),
               )
-              .where((item) => item.audience == 'portal' && !item.isArchived)
+              .where(
+                (item) => item.audience == 'portal' && item.isArchived == archived,
+              )
               .toList(growable: false),
         );
+  }
+
+  Future<void> managePortalNotification(
+    String notificationId, {
+    required String action,
+  }) async {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    await FirebaseFunctions.instance
+        .httpsCallable('managePortalNotification')
+        .call<Map<String, dynamic>>({
+          'notificationId': notificationId,
+          'action': action,
+        });
   }
 
   Future<void> markPortalNotificationRead(String notificationId) {
