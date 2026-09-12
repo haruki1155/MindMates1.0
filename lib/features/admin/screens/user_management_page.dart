@@ -11,8 +11,9 @@ import 'profile_management_page.dart';
 enum UserManagementCategory { appUsers, staff, admin }
 
 class UserManagementPage extends StatefulWidget {
-  const UserManagementPage({super.key, required this.repository});
+  const UserManagementPage({super.key, required this.repository, this.onOpenAcademicStructure});
   final AdminPortalRepository repository;
+  final VoidCallback? onOpenAcademicStructure;
 
   @override
   State<UserManagementPage> createState() => _UserManagementPageState();
@@ -94,9 +95,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                       ],
                     );
                     final directory = OutlinedButton.icon(
-                      onPressed: _showOrganizationDirectory,
+                      onPressed: widget.onOpenAcademicStructure ?? _showOrganizationDirectory,
                       icon: const Icon(Icons.account_tree_outlined),
-                      label: const Text('Organization directory'),
+                      label: const Text('Academic structure'),
                     );
                     if (box.maxWidth < 620) {
                       return Column(

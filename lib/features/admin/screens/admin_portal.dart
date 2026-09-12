@@ -472,7 +472,10 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
               repository: _repository,
               onNavigate: _setPage,
             ),
-    AdminPortalPage.users => UserManagementPage(repository: _repository),
+    AdminPortalPage.users => UserManagementPage(
+      repository: _repository,
+      onOpenAcademicStructure: () => _setPage(AdminPortalPage.academicStructure),
+    ),
     AdminPortalPage.academicStructure => AcademicStructurePage(repository: _repository),
     AdminPortalPage.profiling => ProfileManagementPage(repository: _repository),
     AdminPortalPage.appointments => _AppointmentsPage(
