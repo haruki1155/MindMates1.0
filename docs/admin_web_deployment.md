@@ -30,6 +30,17 @@ measure, but deployment automation uses the explicit admin target.
 
 ## Deploy
 
+The GitHub Hosting workflows need an Actions secret named
+`FIREBASE_SERVICE_ACCOUNT_MIND_MATES_CD2CF` containing the complete JSON key for
+a service account in the `mind-mates-cd2cf` project. The older
+`FIREBASE_SERVICE_ACCOUNT` secret is accepted as a fallback only when it points
+to the same project. The workflows validate the key's JSON and project ID before
+calling the deploy action. The service account needs Firebase Hosting Admin and
+API Keys Viewer; preview deployments also need Firebase Authentication Admin.
+Configure the secret in the repository's Actions secrets and grant these roles
+in the production Firebase project. A local `firebase login` does not give
+GitHub Actions credentials.
+
 Configure the immutable administrator when prompted by Firebase Functions. Use
 the Firebase Authentication UID of the single super-administrator:
 
