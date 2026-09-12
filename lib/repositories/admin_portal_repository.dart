@@ -120,6 +120,20 @@ class AdminPortalRepository {
   bool _mustChangePassword = false;
   bool get mustChangePassword => _mustChangePassword;
 
+  AccessRole _profileAccessRole(Map<String, dynamic>? profile) {
+    final storedAccessRole = profile?['accessRole']?.toString().trim();
+    // `appUser` is the pre-approval placeholder. Once an account is
+    // approved, older records may retain it while `approvedRole` contains
+    // the actual portal role.
+    final effectiveRole =
+        storedAccessRole == null ||
+            storedAccessRole.isEmpty ||
+            storedAccessRole.toLowerCase() == 'appuser'
+        ? (profile?['approvedRole'])
+        : storedAccessRole;
+    return AccessRole.parse(effectiveRole, legacyRole: profile?['role']);
+  }
+
   Future<void> signInStaff({
     required String schoolId,
     required String password,
@@ -134,10 +148,7 @@ class AdminPortalRepository {
       FirestoreCollections.users,
       user.uid,
     );
-    final role = AccessRole.parse(
-      profile?['accessRole'] ?? profile?['approvedRole'],
-      legacyRole: profile?['role'],
-    );
+    final role = _profileAccessRole(profile);
     final status = StaffAccountStatus.parse(profile?['staffAccountStatus']);
     _mustChangePassword = profile?['mustChangePassword'] == true;
     if (status == StaffAccountStatus.pending) {
@@ -182,10 +193,7 @@ class AdminPortalRepository {
     );
     final status = StaffAccountStatus.parse(profile?['staffAccountStatus']);
     _mustChangePassword = profile?['mustChangePassword'] == true;
-    final role = AccessRole.parse(
-      profile?['accessRole'] ?? profile?['approvedRole'],
-      legacyRole: profile?['role'],
-    );
+    final role = _profileAccessRole(profile);
     if (status == StaffAccountStatus.approved ||
         (status == null && role.canUsePortal)) {
       _currentAccessRole = role;
