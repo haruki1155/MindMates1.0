@@ -45,7 +45,15 @@ enum AccessRole {
       RegExp(r'[\s_-]+'),
       '',
     );
-    if (normalized == 'portalstaff') return AccessRole.portalStaff;
+    // Keep older staff records compatible with the role-specific portal.
+    // Earlier staging data used values such as `staff` and `PAACC Staff`
+    // before `portalStaff` became the canonical value.
+    if (normalized == 'portalstaff' ||
+        normalized == 'staff' ||
+        normalized == 'paaccstaff' ||
+        normalized == 'paccstaff') {
+      return AccessRole.portalStaff;
+    }
     if (normalized == 'counselor' || normalized == 'counsellor') {
       return AccessRole.counselor;
     }

@@ -135,23 +135,15 @@ class AdminPortalRepository {
       user.uid,
     );
     final role = AccessRole.parse(
-      profile?['accessRole'],
+      profile?['accessRole'] ?? profile?['approvedRole'],
       legacyRole: profile?['role'],
     );
     final status = StaffAccountStatus.parse(profile?['staffAccountStatus']);
     _mustChangePassword = profile?['mustChangePassword'] == true;
     if (status == StaffAccountStatus.pending) {
-      final requested = AccessRole.parse(
-        profile?['requestedRole'] ?? profile?['requestedAccessRole'],
+      throw StateError(
+        'Your staff registration is awaiting administrator approval.',
       );
-      final roleLabel = requested == AccessRole.counselor
-          ? 'Counselor'
-          : 'PAACC Staff';
-      final requestState =
-          profile?['registrationStatus'] == 'more_information_required'
-          ? 'More information is required from you. Contact the PAACC administrator.'
-          : 'Your PAACC portal access request for $roleLabel is awaiting administrator review.';
-      throw StateError(requestState);
     }
     if (status == StaffAccountStatus.rejected) {
       await FirebaseAuth.instance.signOut();
@@ -191,7 +183,7 @@ class AdminPortalRepository {
     final status = StaffAccountStatus.parse(profile?['staffAccountStatus']);
     _mustChangePassword = profile?['mustChangePassword'] == true;
     final role = AccessRole.parse(
-      profile?['accessRole'],
+      profile?['accessRole'] ?? profile?['approvedRole'],
       legacyRole: profile?['role'],
     );
     if (status == StaffAccountStatus.approved ||
@@ -212,6 +204,10 @@ class AdminPortalRepository {
     required String lastName,
     required String employeeId,
     required String position,
+    String department = '',
+    String departmentId = '',
+    String collegeId = '',
+    String courseId = '',
     required AccessRole requestedRole,
   }) async {
     final credential = await FirebaseAuth.instance
@@ -227,31 +223,17 @@ class AdminPortalRepository {
             'lastName': lastName.trim(),
             'employeeId': employeeId.trim(),
             'position': position.trim(),
+            'department': department.trim(),
+            'departmentId': departmentId,
+            'collegeId': collegeId,
+            'courseId': courseId,
             'requestedRole': requestedRole.storedValue,
           });
-    } catch (error) {
-      // A callable response can be lost after its Firestore transaction has
-      // committed. Reconcile before deleting Auth, otherwise a valid request
-      // can be left with no sign-in account or an orphaned profile.
-      Map<String, dynamic>? profile;
-      try {
-        profile = await getOwnProfile(credential.user!.uid);
-      } catch (_) {
-        // Preserve the original registration error if reconciliation itself
-        // is unavailable.
-      }
-      if (profile == null || profile['accessRequestId'] == null) {
-        await credential.user?.delete();
-        rethrow;
-      }
-    }
-    try {
       await credential.user?.sendEmailVerification();
       return true;
     } catch (_) {
-      // The access request is already safely stored. Let the user retry the
-      // verification email from the normal verification flow.
-      return false;
+      await credential.user?.delete();
+      rethrow;
     }
   }
 
@@ -473,12 +455,7 @@ class AdminPortalRepository {
           );
 
   Stream<List<AppointmentModel>> watchAppointments() => _firestoreService
-      .watchDocuments(
-        FirestoreCollections.appointments,
-        whereEquals: currentAccessRole == AccessRole.counselor
-            ? {'assignedStaffId': currentAuthUser?.uid ?? ''}
-            : const {},
-      )
+      .watchDocuments(FirestoreCollections.appointments)
       .map(
         (items) =>
             items
@@ -494,7 +471,7 @@ class AdminPortalRepository {
 
   Stream<List<AppNotificationModel>> watchPortalNotifications() {
     final userId = currentAuthUser?.uid;
-    if (userId == null || !currentAccessRole.canUsePortal) {
+    if (userId == null || !currentAccessRole.canAccessClinicalData) {
       return Stream.value(const []);
     }
     return _firestoreService
@@ -519,8 +496,8 @@ class AdminPortalRepository {
   }
 
   Future<void> markPortalNotificationRead(String notificationId) {
-    if (!currentAccessRole.canUsePortal) {
-      throw StateError('Portal access is required.');
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
     }
     return _firestoreService.updateDocument(
       FirestoreCollections.notifications,
@@ -745,7 +722,7 @@ class AdminPortalRepository {
         'approve': approve,
         'accessRole': accessRole.storedValue,
         'reason': reason.trim(),
-        'decision': ?decision,
+        if (decision != null) 'decision': decision,
       });
 
   Future<void> setStaffAccountEnabled({
@@ -829,13 +806,9 @@ class AdminPortalRepository {
         values,
       );
 
-  /// Reads the signed-in portal user's Firestore profile. Staff registration
-  /// stores the submitted identity here rather than in Firebase Auth.
   Future<Map<String, dynamic>?> getOwnProfile(String userId) =>
       _firestoreService.getDocument(FirestoreCollections.users, userId);
 
-  /// Watches the signed-in portal user's profile so the header updates when
-  /// the profile name or phone number changes.
   Stream<Map<String, dynamic>?> watchOwnProfile(String userId) =>
       _firestoreService.watchDocument(FirestoreCollections.users, userId);
 }
