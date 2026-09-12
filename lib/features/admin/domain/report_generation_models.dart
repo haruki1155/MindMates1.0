@@ -39,12 +39,14 @@ class ImportedWalkInFile {
     required this.fileName,
     required this.rowCount,
     required this.importedAt,
+    required this.archived,
   });
 
   final String id;
   final String fileName;
   final int rowCount;
   final DateTime importedAt;
+  final bool archived;
 
   factory ImportedWalkInFile.fromJson(Map<String, dynamic> json) =>
       ImportedWalkInFile(
@@ -55,6 +57,7 @@ class ImportedWalkInFile {
             DateTime.fromMillisecondsSinceEpoch(
               (json['importedAtMillis'] as num?)?.toInt() ?? 0,
             ).toLocal(),
+        archived: json['archived'] == true,
       );
 }
 

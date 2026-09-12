@@ -37,6 +37,7 @@ export {
   importWalkInAppointments,
   listWalkInImports,
   deleteWalkInImport,
+  archiveWalkInImport,
 } from "./walk_in_import";
 export {
   getCounselingPopulation,

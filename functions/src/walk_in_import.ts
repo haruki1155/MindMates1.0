@@ -137,6 +137,7 @@ export const listWalkInImports = onCall(async (request) => {
         fileName: text(data.fileName) || "Imported walk-in entries",
         rowCount: Number(data.rowCount ?? 0),
         importedAtMillis: importedAt?.toMillis() ?? Date.now(),
+        archived: data.archived === true,
       };
     }),
   };
@@ -170,4 +171,28 @@ export const deleteWalkInImport = onCall(async (request) => {
     actorName: actorName(actor),
   });
   return {deleted: appointments.size};
+});
+
+export const archiveWalkInImport = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
+  await requireAdmin(uid);
+  const importId = text(request.data?.importId);
+  const archived = request.data?.archived === true;
+  if (!importId || importId.length > 120) {
+    throw new HttpsError("invalid-argument", "A valid imported file is required.");
+  }
+  const reference = db.collection("walk_in_imports").doc(importId);
+  const snapshot = await reference.get();
+  if (!snapshot.exists) {
+    throw new HttpsError("not-found", "This imported file no longer exists.");
+  }
+  await reference.update({
+    archived,
+    ...(archived
+      ? {archivedAt: FieldValue.serverTimestamp()}
+      : {archivedAt: FieldValue.delete()}),
+    archivedBy: archived ? uid : FieldValue.delete(),
+  });
+  return {archived};
 });

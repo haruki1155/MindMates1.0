@@ -610,6 +610,29 @@ class _ImportedFilesPanelState extends State<_ImportedFilesPanel> {
     }
   }
 
+  Future<void> _toggleArchive(ImportedWalkInFile file) async {
+    setState(() => _deletingId = file.id);
+    try {
+      await widget.repository.archiveWalkInImport(
+        file.id,
+        archived: !file.archived,
+      );
+      if (mounted) {
+        _showReportSnackBar(
+          context,
+          file.archived ? 'Imported file restored.' : 'Imported file archived.',
+        );
+        _reload();
+      }
+    } catch (error) {
+      if (mounted) {
+        _showReportSnackBar(context, _friendlyReportError(error), error: true);
+      }
+    } finally {
+      if (mounted) setState(() => _deletingId = null);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
@@ -675,8 +698,16 @@ class _ImportedFilesPanelState extends State<_ImportedFilesPanel> {
                   .map(
                     (file) => ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: const CircleAvatar(
-                        child: Icon(Icons.description_outlined, size: 19),
+                      leading: CircleAvatar(
+                        backgroundColor: file.archived
+                            ? AdminColors.surfaceMuted
+                            : AdminColors.accentFaint,
+                        child: Icon(
+                          file.archived
+                              ? Icons.archive_outlined
+                              : Icons.description_outlined,
+                          size: 19,
+                        ),
                       ),
                       title: Text(
                         file.fileName,
@@ -684,20 +715,40 @@ class _ImportedFilesPanelState extends State<_ImportedFilesPanel> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(
-                        '${file.rowCount} appointment${file.rowCount == 1 ? '' : 's'} • ${_importDate(file.importedAt)}',
+                        '${file.rowCount} appointment${file.rowCount == 1 ? '' : 's'} • ${_importDate(file.importedAt)}${file.archived ? ' • Archived' : ''}',
                       ),
-                      trailing: IconButton(
-                        tooltip: 'Delete imported file',
-                        onPressed: _deletingId == null
-                            ? () => _delete(file)
-                            : null,
-                        icon: _deletingId == file.id
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.delete_outline),
+                      trailing: Wrap(
+                        spacing: 2,
+                        children: [
+                          IconButton(
+                            tooltip: file.archived
+                                ? 'Restore imported file'
+                                : 'Archive imported file',
+                            onPressed: _deletingId == null
+                                ? () => _toggleArchive(file)
+                                : null,
+                            icon: _deletingId == file.id
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Icon(
+                                    file.archived
+                                        ? Icons.unarchive_outlined
+                                        : Icons.archive_outlined,
+                                  ),
+                          ),
+                          IconButton(
+                            tooltip: 'Delete imported file',
+                            onPressed: _deletingId == null
+                                ? () => _delete(file)
+                                : null,
+                            icon: const Icon(Icons.delete_outline),
+                          ),
+                        ],
                       ),
                     ),
                   )

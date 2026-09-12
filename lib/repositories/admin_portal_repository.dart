@@ -693,6 +693,18 @@ class AdminPortalRepository {
     return (result.data['deleted'] as num?)?.toInt() ?? 0;
   }
 
+  Future<void> archiveWalkInImport(
+    String importId, {
+    required bool archived,
+  }) async {
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
+    }
+    await FirebaseFunctions.instance
+        .httpsCallable('archiveWalkInImport')
+        .call<Map<String, dynamic>>({'importId': importId, 'archived': archived});
+  }
+
   Stream<List<AdminAssessmentRecord>> watchAssessments() => _firestoreService
       .watchDocuments(FirestoreCollections.assessments)
       .map(
