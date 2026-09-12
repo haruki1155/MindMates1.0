@@ -503,8 +503,9 @@ class _Nav extends StatelessWidget {
 
   bool _allowed(AdminPortalPage page) => switch (page) {
     AdminPortalPage.users => isSuperAdmin,
-    AdminPortalPage.profiling =>
-      isSuperAdmin || accessRole == AccessRole.counselor,
+    // Counselor case/profile access must come through an assigned-case
+    // surface. The legacy organization-wide profiling screen is admin-only.
+    AdminPortalPage.profiling => isSuperAdmin,
     AdminPortalPage.reports => accessRole.canAccessClinicalData,
     // Notifications are opened from the persistent header bell instead of
     // duplicating the destination in the workspace navigation.

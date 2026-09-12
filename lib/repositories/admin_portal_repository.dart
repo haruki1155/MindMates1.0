@@ -504,7 +504,12 @@ class AdminPortalRepository {
           );
 
   Stream<List<AppointmentModel>> watchAppointments() => _firestoreService
-      .watchDocuments(FirestoreCollections.appointments)
+      .watchDocuments(
+        FirestoreCollections.appointments,
+        whereEquals: currentAccessRole == AccessRole.counselor
+            ? {'assignedStaffId': currentAuthUser?.uid ?? ''}
+            : const {},
+      )
       .map(
         (items) =>
             items
@@ -683,7 +688,12 @@ class AdminPortalRepository {
   }
 
   Stream<List<AdminInquiryModel>> watchInquiries() => _firestoreService
-      .watchDocuments(FirestoreCollections.inquiries)
+      .watchDocuments(
+        FirestoreCollections.inquiries,
+        whereEquals: currentAccessRole == AccessRole.counselor
+            ? {'assignedStaffId': currentAuthUser?.uid ?? ''}
+            : const {},
+      )
       .map(
         (items) =>
             items
