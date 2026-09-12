@@ -181,43 +181,27 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       if (_reportType == AdminReportType.appointments) ...[
-        _AcademicYearFilter(
-          value: _schoolYear,
+        _AdminReportControls(
+          schoolYear: _schoolYear,
           years: report.population.years,
-          onAdd: widget.repository.currentAccessRole == AccessRole.admin
-              ? () => _createAcademicYear(report.population.schoolYear)
-              : null,
-          onChanged: (value) {
-            setState(() {
-              _schoolYear = value;
-            });
+          period: _period,
+          report: report,
+          chartType: _chartType,
+          dimension: _dimension,
+          department: _appointmentDepartment,
+          departmentOptions: report.appointmentDepartmentOptions,
+          onYearChanged: (value) {
+            setState(() => _schoolYear = value);
             _reloadReport();
           },
-        ),
-        const SizedBox(height: 18),
-      ],
-      _ControlPanel(
-        reportType: _reportType,
-        chartType: _chartType,
-        dimension: _dimension,
-        userCategory: _userCategory,
-        userCategories: report.userCategoryOptions,
-        appointmentDepartment: _appointmentDepartment,
-        departmentOptions: report.appointmentDepartmentOptions,
-        onChartChanged: (value) => setState(() => _chartType = value),
-        onDimensionChanged: (value) => setState(() => _dimension = value),
-        onUserCategoryChanged: _selectUserCategory,
-        onDepartmentChanged: _selectDepartment,
-      ),
-      if (_reportType == AdminReportType.appointments) ...[
-        const SizedBox(height: 12),
-        _PeriodFilter(
-          value: _period,
-          onChanged: (value) {
+          onAddYear: widget.repository.currentAccessRole == AccessRole.admin
+              ? () => _createAcademicYear(report.population.schoolYear)
+              : null,
+          onPeriodChanged: (value) {
             setState(() => _period = value);
             _reloadReport();
           },
-          onCustom: () async {
+          onCustomPeriod: () async {
             final range = await showDateRangePicker(
               context: context,
               firstDate: DateTime(2020),
@@ -231,6 +215,23 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
             });
             _reloadReport();
           },
+          onDepartmentChanged: _selectDepartment,
+          onDimensionChanged: (value) => setState(() => _dimension = value),
+          onChartChanged: (value) => setState(() => _chartType = value),
+        ),
+      ] else ...[
+        _ControlPanel(
+          reportType: _reportType,
+          chartType: _chartType,
+          dimension: _dimension,
+          userCategory: _userCategory,
+          userCategories: report.userCategoryOptions,
+          appointmentDepartment: _appointmentDepartment,
+          departmentOptions: report.appointmentDepartmentOptions,
+          onChartChanged: (value) => setState(() => _chartType = value),
+          onDimensionChanged: (value) => setState(() => _dimension = value),
+          onUserCategoryChanged: _selectUserCategory,
+          onDepartmentChanged: _selectDepartment,
         ),
       ],
       if (_reportType == AdminReportType.appointments &&
@@ -981,6 +982,252 @@ class _ReportToggle extends StatelessWidget {
   );
 }
 
+class _AdminReportControls extends StatelessWidget {
+  const _AdminReportControls({
+    required this.schoolYear,
+    required this.years,
+    required this.period,
+    required this.report,
+    required this.chartType,
+    required this.dimension,
+    required this.department,
+    required this.departmentOptions,
+    required this.onYearChanged,
+    required this.onAddYear,
+    required this.onPeriodChanged,
+    required this.onCustomPeriod,
+    required this.onDepartmentChanged,
+    required this.onDimensionChanged,
+    required this.onChartChanged,
+  });
+
+  final String schoolYear;
+  final List<AcademicYearRecord> years;
+  final _ReportPeriod period;
+  final AdminReportAnalytics report;
+  final ReportChartType chartType;
+  final AppointmentReportDimension dimension;
+  final String department;
+  final List<ReportFilterOption> departmentOptions;
+  final ValueChanged<String> onYearChanged;
+  final VoidCallback? onAddYear;
+  final ValueChanged<_ReportPeriod> onPeriodChanged;
+  final VoidCallback onCustomPeriod;
+  final ValueChanged<String> onDepartmentChanged;
+  final ValueChanged<AppointmentReportDimension> onDimensionChanged;
+  final ValueChanged<ReportChartType> onChartChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final options = years.isEmpty
+        ? [
+            AcademicYearRecord(
+              schoolYear: schoolYear,
+              startDate: '',
+              endDate: '',
+              status: 'current',
+            ),
+          ]
+        : years;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+      decoration: _panelDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'REPORT CONTROLS',
+                  style: TextStyle(
+                    color: AdminColors.muted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ),
+              if (onAddYear != null)
+                TextButton.icon(
+                  onPressed: onAddYear,
+                  icon: const Icon(Icons.add, size: 17),
+                  label: const Text('Add academic year'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final twoColumns = constraints.maxWidth >= 700;
+              final width = twoColumns
+                  ? (constraints.maxWidth - 14) / 2
+                  : constraints.maxWidth;
+              return Wrap(
+                spacing: 14,
+                runSpacing: 14,
+                children: [
+                  SizedBox(
+                    width: width,
+                    child: _LabeledControl(
+                      label: 'Academic year',
+                      child: DropdownButtonFormField<String>(
+                        initialValue: options.any((item) => item.schoolYear == schoolYear)
+                            ? schoolYear
+                            : options.first.schoolYear,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.school_outlined),
+                        ),
+                        items: options
+                            .map(
+                              (item) => DropdownMenuItem(
+                                value: item.schoolYear,
+                                child: Row(
+                                  children: [
+                                    Text(item.schoolYear),
+                                    if (item.status == 'current') ...[
+                                      const SizedBox(width: 8),
+                                      const _CurrentBadge(),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) onYearChanged(value);
+                        },
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: _LabeledControl(
+                      label: 'Reporting period',
+                      child: DropdownButtonFormField<_ReportPeriod>(
+                        initialValue: period,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.date_range_outlined),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: _ReportPeriod.wholeYear, child: Text('Whole year')),
+                          DropdownMenuItem(value: _ReportPeriod.firstSemester, child: Text('1st semester')),
+                          DropdownMenuItem(value: _ReportPeriod.secondSemester, child: Text('2nd semester')),
+                          DropdownMenuItem(value: _ReportPeriod.custom, child: Text('Custom dates')),
+                        ],
+                        onChanged: (value) {
+                          if (value == _ReportPeriod.custom) {
+                            onCustomPeriod();
+                          } else if (value != null) {
+                            onPeriodChanged(value);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final wide = constraints.maxWidth >= 950;
+              return wide
+                  ? Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(child: _scopeControl()),
+                        const SizedBox(width: 14),
+                        Expanded(child: _groupControl()),
+                        const SizedBox(width: 14),
+                        _visualControl(),
+                      ],
+                    )
+                  : Wrap(
+                      spacing: 14,
+                      runSpacing: 14,
+                      children: [_scopeControl(), _groupControl(), _visualControl()],
+                    );
+            },
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Icon(Icons.info_outline, size: 15, color: AdminColors.muted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Percentages are calculated using the population snapshot for ${report.population.schoolYear}.',
+                  style: const TextStyle(color: AdminColors.muted, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _scopeControl() => SizedBox(
+    width: 280,
+    child: _LabeledControl(
+      label: 'Department scope',
+      child: DropdownButtonFormField<String>(
+        initialValue: department,
+        isExpanded: true,
+        decoration: const InputDecoration(prefixIcon: Icon(Icons.account_balance_outlined)),
+        items: [
+          const DropdownMenuItem(value: 'all', child: Text('All departments')),
+          ...departmentOptions.map((item) => DropdownMenuItem(value: item.key, child: Text(item.label, overflow: TextOverflow.ellipsis))),
+        ],
+        onChanged: (value) {
+          if (value != null) onDepartmentChanged(value);
+        },
+      ),
+    ),
+  );
+
+  Widget _groupControl() => _LabeledControl(
+    label: 'Group by',
+    child: SegmentedButton<AppointmentReportDimension>(
+      showSelectedIcon: false,
+      segments: const [
+        ButtonSegment(value: AppointmentReportDimension.department, label: Text('Department')),
+        ButtonSegment(value: AppointmentReportDimension.course, label: Text('Course')),
+        ButtonSegment(value: AppointmentReportDimension.yearLevel, label: Text('Year level')),
+      ],
+      selected: {dimension},
+      onSelectionChanged: (values) => onDimensionChanged(values.first),
+    ),
+  );
+
+  Widget _visualControl() => _LabeledControl(
+    label: 'Visualization',
+    child: SegmentedButton<ReportChartType>(
+      showSelectedIcon: false,
+      segments: const [
+        ButtonSegment(value: ReportChartType.bar, icon: Icon(Icons.bar_chart, size: 18), label: Text('Bar')),
+        ButtonSegment(value: ReportChartType.pie, icon: Icon(Icons.pie_chart_outline, size: 18), label: Text('Pie')),
+      ],
+      selected: {chartType},
+      onSelectionChanged: (values) => onChartChanged(values.first),
+    ),
+  );
+}
+
+class _CurrentBadge extends StatelessWidget {
+  const _CurrentBadge();
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(color: AdminColors.accentSoft, borderRadius: BorderRadius.circular(6)),
+    child: const Text('Current', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
+  );
+}
+
 class _ControlPanel extends StatelessWidget {
   const _ControlPanel({
     required this.reportType,
@@ -1336,63 +1583,6 @@ class _AppointmentReport extends StatelessWidget {
   }
 }
 
-class _PeriodFilter extends StatelessWidget {
-  const _PeriodFilter({
-    required this.value,
-    required this.onChanged,
-    required this.onCustom,
-  });
-  final _ReportPeriod value;
-  final ValueChanged<_ReportPeriod> onChanged;
-  final VoidCallback onCustom;
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: _panelDecoration,
-    child: Wrap(
-      spacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        const Text(
-          'Reporting period',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        DropdownButton<_ReportPeriod>(
-          value: value,
-          items: const [
-            DropdownMenuItem(
-              value: _ReportPeriod.wholeYear,
-              child: Text('Whole year'),
-            ),
-            DropdownMenuItem(
-              value: _ReportPeriod.firstSemester,
-              child: Text('1st semester'),
-            ),
-            DropdownMenuItem(
-              value: _ReportPeriod.secondSemester,
-              child: Text('2nd semester'),
-            ),
-            DropdownMenuItem(
-              value: _ReportPeriod.custom,
-              child: Text('Custom dates'),
-            ),
-          ],
-          onChanged: (value) {
-            if (value == _ReportPeriod.custom)
-              onCustom();
-            else if (value != null)
-              onChanged(value);
-          },
-        ),
-        const Text(
-          'Percentages use the selected population snapshot.',
-          style: TextStyle(color: AdminColors.muted, fontSize: 12),
-        ),
-      ],
-    ),
-  );
-}
-
 class _ComparisonPanel extends StatelessWidget {
   const _ComparisonPanel({required this.report});
   final AdminReportAnalytics report;
@@ -1526,73 +1716,6 @@ class _TrendPanel extends StatelessWidget {
       ],
     ),
   );
-}
-
-class _AcademicYearFilter extends StatelessWidget {
-  const _AcademicYearFilter({
-    required this.value,
-    required this.years,
-    required this.onChanged,
-    this.onAdd,
-  });
-  final String value;
-  final List<AcademicYearRecord> years;
-  final ValueChanged<String> onChanged;
-  final VoidCallback? onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    final options = years.isEmpty
-        ? [
-            AcademicYearRecord(
-              schoolYear: value,
-              startDate: '',
-              endDate: '',
-              status: 'current',
-            ),
-          ]
-        : years;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: _panelDecoration,
-      child: Wrap(
-        spacing: 10,
-        crossAxisAlignment: WrapCrossAlignment.end,
-        children: [
-          SizedBox(
-            width: 280,
-            child: DropdownButtonFormField<String>(
-              initialValue: options.any((item) => item.schoolYear == value)
-                  ? value
-                  : options.first.schoolYear,
-              decoration: const InputDecoration(
-                labelText: 'Academic year',
-                prefixIcon: Icon(Icons.school_outlined),
-              ),
-              items: options
-                  .map(
-                    (item) => DropdownMenuItem(
-                      value: item.schoolYear,
-                      child: Text('${item.schoolYear} (${item.status})'),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (selected) {
-                if (selected != null) onChanged(selected);
-              },
-            ),
-          ),
-          if (onAdd != null)
-            FilledButton.icon(
-              onPressed: onAdd,
-              icon: const Icon(Icons.add),
-              label: const Text('Add academic year'),
-            ),
-        ],
-      ),
-    );
-  }
 }
 
 class _PopulationSetup extends StatefulWidget {
