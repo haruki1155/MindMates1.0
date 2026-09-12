@@ -53,10 +53,10 @@ extension on AdminPortalPage {
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
     AdminPortalPage.profiling => 'Profiling Management',
-    AdminPortalPage.appointments => 'PAACC Appointments',
-    AdminPortalPage.reports => 'Report Generation',
+    AdminPortalPage.appointments => 'Appointments',
+    AdminPortalPage.reports => 'Reports',
     AdminPortalPage.notifications => 'Notifications',
-    AdminPortalPage.availability => 'PAACC Schedule',
+    AdminPortalPage.availability => 'Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
     AdminPortalPage.assessments => 'Assessment Results',
     AdminPortalPage.profile => 'Profile',
@@ -2211,6 +2211,14 @@ class _AppointmentCard extends StatelessWidget {
                                 value: 'completed',
                                 child: Text('Mark session as completed'),
                               ),
+                              DropdownMenuItem(
+                                value: 'no_show',
+                                child: Text('Mark as no-show'),
+                              ),
+                              DropdownMenuItem(
+                                value: 'cancelled',
+                                child: Text('Cancel appointment'),
+                              ),
                             ]
                           : currentStatus == 'reschedule_required'
                           ? const [
@@ -2360,6 +2368,14 @@ class _AppointmentCard extends StatelessWidget {
     'reschedule_proposed' => const [
       'A different office time is available',
       'The requested time needs to be adjusted',
+    ],
+    'no_show' => const ['Student did not attend the confirmed appointment'],
+    'cancelled' => const [
+      'Student requested cancellation',
+      'Schedule conflict',
+      'Office closure',
+      'Counselor unavailable',
+      'Other legitimate reason',
     ],
     _ => const ['Counseling session completed'],
   };

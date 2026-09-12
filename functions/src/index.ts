@@ -329,6 +329,11 @@ export const registerStaffAccount = onCall(async (request) => {
       category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: userId,
       metadata: {after: {registrationStatus: "pending_review", requestedRole}, targetLabel: email}});
   });
+  try {
+    await notifyAccessRequestAdmins(requestRef.id, `${firstName} ${lastName}`, requestedRole);
+  } catch (error) {
+    console.warn('Access request was saved but administrator notification delivery failed.', error);
+  }
   return {ok: true, requestId: requestRef.id, reference: `REQ-${requestRef.id.slice(0, 8).toUpperCase()}`};
 });
 
@@ -375,8 +380,25 @@ export const reviewStaffRegistration = onCall(async (request) => {
       action: approve ? "STAFF_ACCESS_REQUEST_APPROVED" : moreInfo ? "STAFF_ACCESS_REQUEST_MORE_INFO_REQUIRED" : "STAFF_REGISTRATION_REJECTED",
       category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: targetUserId,
       metadata: {before: {registrationStatus: before.data()?.registrationStatus ?? "pending_review", accessRole: "appUser"}, after: {registrationStatus: status, approvedRole: approve ? accessRole : null}, reason}});
+    if (approve) {
+      writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole,
+        action: "STAFF_ROLE_ASSIGNED", category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: targetUserId,
+        metadata: {requestedRole: before.data()?.requestedRole ?? "", approvedRole: accessRole, reason}});
+      writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole,
+        action: "STAFF_ACCOUNT_ACTIVATED", category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: targetUserId,
+        metadata: {approvedRole: accessRole, reason}});
+    }
   });
   if (!approve) await getAuth().revokeRefreshTokens(targetUserId);
+  if (approve || moreInfo) {
+    const targetProfile = await target.get();
+    const targetData = targetProfile.data() ?? {};
+    try {
+      await notifyAccessRequestApplicant(targetUserId, targetData, approve, moreInfo, accessRole, reason);
+    } catch (error) {
+      console.warn('Access decision was saved but applicant notification delivery failed.', error);
+    }
+  }
   return {ok: true};
 });
 
@@ -1032,6 +1054,66 @@ async function notifyClinicalStaff(
   }));
 }
 
+async function notifyAccessRequestAdmins(
+  requestId: string,
+  applicantName: string,
+  requestedRole: string,
+): Promise<void> {
+  const admins = await db.collection("users").where("accessRole", "==", "admin").get();
+  await Promise.all(admins.docs.map(async (admin) => {
+    const notificationId = `access_request_${requestId}_${admin.id}`;
+    try {
+      await db.collection("notifications").doc(notificationId).create({
+        userId: admin.id,
+        audience: "portal",
+        type: "access_request",
+        title: "New PAACC access request",
+        body: `${applicantName} requested ${requestedRole === "counselor" ? "Counselor" : "PAACC Staff"} access.`,
+        accessRequestId: requestId,
+        createdAt: FieldValue.serverTimestamp(),
+        readAt: null,
+        resolvedAt: null,
+        archiveEligibleAt: null,
+        archivedAt: null,
+        expiresAt: null,
+      });
+    } catch (error: unknown) {
+      const code = typeof error === "object" && error !== null && "code" in error ?
+        String((error as {code?: unknown}).code) : "";
+      if (code !== "6" && code !== "already-exists") throw error;
+    }
+  }));
+}
+
+async function notifyAccessRequestApplicant(
+  userId: string,
+  profile: FirebaseFirestore.DocumentData,
+  approved: boolean,
+  moreInfo: boolean,
+  approvedRole: string,
+  reason: string,
+): Promise<void> {
+  const requestId = String(profile.accessRequestId ?? userId);
+  const roleLabel = approvedRole === "counselor" ? "Counselor" : "PAACC Staff";
+  await db.collection("notifications").doc(`access_request_status_${requestId}_${profile.registrationStatus ?? "updated"}`).set({
+    userId,
+    audience: "portal",
+    type: "access_request",
+    title: approved ? "PAACC portal access approved" : "More information is required",
+    body: approved
+      ? `Your PAACC portal access is active. Approved role: ${roleLabel}.`
+      : `Please review your PAACC access request. ${reason}`,
+    accessRequestId: requestId,
+    createdAt: FieldValue.serverTimestamp(),
+    readAt: null,
+    resolvedAt: null,
+    archiveEligibleAt: null,
+    archivedAt: null,
+    expiresAt: null,
+    status: approved ? "approved" : moreInfo ? "more_information_required" : "pending_review",
+  });
+}
+
 export const notifyPortalOfAppointment = onDocumentCreated(
   {document: "appointments/{appointmentId}", retry: true},
   async (event) => notifyClinicalStaff("appointment", event.params.appointmentId),
@@ -1186,7 +1268,7 @@ export const reviewAppointment = onCall(async (request) => {
   const proposedTime = String(input.proposedScheduledTime ?? "").trim();
   // Declined remains readable for legacy records, but is intentionally not a
   // valid action for new appointment decisions.
-  if (!appointmentId || !["confirmed", "reschedule_required", "reschedule_proposed", "completed"].includes(action)) {
+  if (!appointmentId || !["confirmed", "reschedule_required", "reschedule_proposed", "completed", "no_show", "cancelled"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
   if (!reply) throw new HttpsError("invalid-argument", "A reply to the student is required.");
@@ -1206,11 +1288,13 @@ export const reviewAppointment = onCall(async (request) => {
     }
     const before = String(data.status ?? "pending").toLowerCase();
     const allowed = before === "confirmed"
-      ? ["completed"]
+      ? ["completed", "no_show", "cancelled"]
       : before === "reschedule_required"
         ? ["reschedule_proposed"]
-        : ["confirmed", "reschedule_required", "reschedule_proposed"];
-    if (!["pending", "upcoming", "reschedule_required", "confirmed"].includes(before) || !allowed.includes(action)) {
+        : before === "reschedule_proposed"
+          ? ["confirmed", "reschedule_proposed"]
+          : ["confirmed", "reschedule_required", "reschedule_proposed"];
+    if (!["pending", "upcoming", "reschedule_required", "reschedule_proposed", "confirmed"].includes(before) || !allowed.includes(action)) {
       throw new HttpsError("failed-precondition", "This appointment has already been finalized.");
     }
     const userId = String(data.userId ?? "");
@@ -1225,6 +1309,10 @@ export const reviewAppointment = onCall(async (request) => {
       updatedAt: FieldValue.serverTimestamp(),
       proposedScheduledAt: action === "reschedule_proposed" ? Timestamp.fromMillis(proposedMillis) : null,
       proposedScheduledTime: action === "reschedule_proposed" ? proposedTime : "",
+      completedAt: action === "completed" ? FieldValue.serverTimestamp() : null,
+      noShowAt: action === "no_show" ? FieldValue.serverTimestamp() : null,
+      cancelledAt: action === "cancelled" ? FieldValue.serverTimestamp() : null,
+      cancellationReason: action === "cancelled" ? reply : null,
     };
     transaction.update(appointment, patch);
     transaction.create(history, {
@@ -1237,7 +1325,7 @@ export const reviewAppointment = onCall(async (request) => {
       staffName,
       createdAt: FieldValue.serverTimestamp(),
     });
-    const title = action === "confirmed" ? "Appointment confirmed" : action === "completed" ? "Appointment completed" : action === "reschedule_required" ? "Schedule adjustment needed" : "New appointment time proposed";
+    const title = action === "confirmed" ? "Appointment confirmed" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked no-show" : action === "cancelled" ? "Appointment cancelled" : action === "reschedule_required" ? "Schedule adjustment needed" : "New appointment time proposed";
     transaction.create(notification, {
       userId,
       appointmentId,
@@ -1249,7 +1337,9 @@ export const reviewAppointment = onCall(async (request) => {
     });
     const auditAction = action === "confirmed" ? "APPOINTMENT_CONFIRMED"
       : action === "completed" ? "APPOINTMENT_COMPLETED"
-        : action === "reschedule_proposed" ? "APPOINTMENT_RESCHEDULED" : "APPOINTMENT_ADJUSTMENT_REQUESTED";
+        : action === "no_show" ? "APPOINTMENT_MARKED_NO_SHOW"
+          : action === "cancelled" ? "APPOINTMENT_CANCELLED"
+      : action === "reschedule_proposed" ? "APPOINTMENT_RESCHEDULED" : "APPOINTMENT_ADJUSTMENT_REQUESTED";
     writeAudit(transaction, db, {
       actorId: staffId,
       actorNameSnapshot: actorName(staff),

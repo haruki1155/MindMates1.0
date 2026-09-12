@@ -183,7 +183,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                           'All account statuses',
                           'Active',
                           'Suspended',
-                          'Invited',
+                          'Pending review',
+                          'More information required',
                         ],
                         onChanged: (value) =>
                             setState(() => staffStatusFilter = value!),
@@ -519,6 +520,16 @@ class _UserManagementPageState extends State<UserManagementPage> {
   }
 
   Future<void> _verify(UserModel user) async {
+    try {
+      await widget.repository.recordAuditEvent(
+        action: 'STAFF_ACCESS_REQUEST_VIEWED',
+        category: 'USER_MANAGEMENT',
+        targetType: 'staff',
+        targetId: user.id,
+      );
+    } catch (_) {
+      // Reviewing a request remains available if audit delivery is temporarily unavailable.
+    }
     var role = user.requestedRole == AccessRole.counselor
         ? AccessRole.counselor
         : AccessRole.portalStaff;
@@ -531,6 +542,30 @@ class _UserManagementPageState extends State<UserManagementPage> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '${user.email}\nEmployee ID: ${user.employeeId ?? 'Not provided'}\nPosition: ${user.position ?? 'Not provided'}',
+                  style: const TextStyle(color: AdminColors.muted, height: 1.45),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Requested role: ${_accessRoleLabel(user.requestedRole == AccessRole.counselor ? AccessRole.counselor : AccessRole.portalStaff)}',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'PAACC Staff: appointments, schedules, inquiries, and limited administrative information.\nCounselor: authorized counseling profiles, assessment summaries, and counseling workflows.',
+                  style: TextStyle(color: AdminColors.muted, fontSize: 12, height: 1.4),
+                ),
+              ),
+              const SizedBox(height: 14),
               DropdownButtonFormField<AccessRole>(
                 initialValue: role,
                 decoration: const InputDecoration(labelText: 'New role'),
@@ -548,7 +583,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   if (value != null) setDialogState(() => role = value);
                 },
               ),
-              Text('Requested role: ${_accessRoleLabel(role)}'),
               const SizedBox(height: 10),
               TextField(
                 controller: reason,
@@ -1737,9 +1771,12 @@ class _UserBadge extends StatelessWidget {
 
 String _accountStatus(UserModel user) => switch (user.staffAccountStatus) {
   StaffAccountStatus.approved => 'Active',
-  StaffAccountStatus.pending => 'Invited',
+  StaffAccountStatus.pending => user.registrationStatus ==
+          'more_information_required'
+      ? 'More information required'
+      : 'Pending review',
   StaffAccountStatus.disabled => 'Suspended',
-  StaffAccountStatus.rejected => 'Invited',
+  StaffAccountStatus.rejected => 'Closed',
   null => 'Unknown',
 };
 

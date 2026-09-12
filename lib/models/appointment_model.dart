@@ -67,9 +67,10 @@ class AppointmentModel {
     'completed',
     'complete',
     'declined',
-    'reschedule_proposed',
     'cancelled',
     'canceled',
+    'no_show',
+    'noshow',
   }.contains(status.toLowerCase().trim());
 
   factory AppointmentModel.fromJson(Map<String, dynamic> json, {String? id}) {

@@ -109,6 +109,15 @@ class AdminReportAnalytics {
     required this.appointmentsByDepartment,
     required this.appointmentsByCourse,
     required this.appointmentsByYearLevel,
+    this.dateRange = const ReportDateRange(
+      startDate: null,
+      endDate: null,
+      label: 'Selected period',
+    ),
+    this.comparison,
+    this.trends = const [],
+    this.waitingTimeDays,
+    this.rescheduledAppointments = 0,
   });
 
   final DateTime generatedAt;
@@ -131,6 +140,11 @@ class AdminReportAnalytics {
   final List<ReportPercentageItem> appointmentsByDepartment;
   final List<ReportPercentageItem> appointmentsByCourse;
   final List<ReportPercentageItem> appointmentsByYearLevel;
+  final ReportDateRange dateRange;
+  final ReportComparison? comparison;
+  final List<ReportTrendPoint> trends;
+  final double? waitingTimeDays;
+  final int rescheduledAppointments;
 
   List<ReportPercentageItem> appointmentsFor(
     AppointmentReportDimension dimension,
@@ -171,8 +185,85 @@ class AdminReportAnalytics {
       appointmentsByDepartment: _percentageItems(appointments['department']),
       appointmentsByCourse: _percentageItems(appointments['course']),
       appointmentsByYearLevel: _percentageItems(appointments['yearLevel']),
+      dateRange: ReportDateRange.fromJson(_map(json['dateRange'])),
+      comparison: json['comparison'] is Map
+          ? ReportComparison.fromJson(_map(json['comparison']))
+          : null,
+      trends: _list(
+        json['trends'],
+      ).map(ReportTrendPoint.fromJson).toList(growable: false),
+      waitingTimeDays: _nullableNumber(appointments['waitingTimeDays']),
+      rescheduledAppointments: _integer(
+        appointments['rescheduledAppointments'],
+        0,
+      ),
     );
   }
+}
+
+double? _nullableNumber(Object? value) => value == null ? null : _number(value);
+
+class ReportDateRange {
+  const ReportDateRange({
+    required this.startDate,
+    required this.endDate,
+    required this.label,
+  });
+  final DateTime? startDate;
+  final DateTime? endDate;
+  final String label;
+  factory ReportDateRange.fromJson(Map<String, dynamic> json) =>
+      ReportDateRange(
+        startDate: DateTime.tryParse(json['startDate']?.toString() ?? ''),
+        endDate: DateTime.tryParse(json['endDate']?.toString() ?? ''),
+        label: json['label']?.toString() ?? 'Selected period',
+      );
+}
+
+class ReportComparison {
+  const ReportComparison({
+    required this.schoolYear,
+    required this.totalAppointments,
+    required this.uniqueStudentsServed,
+    required this.counselingReach,
+    required this.completionRate,
+  });
+  final String schoolYear;
+  final int totalAppointments;
+  final int uniqueStudentsServed;
+  final double counselingReach;
+  final double completionRate;
+  factory ReportComparison.fromJson(Map<String, dynamic> json) =>
+      ReportComparison(
+        schoolYear: json['schoolYear']?.toString() ?? '',
+        totalAppointments: _integer(json['totalAppointments'], 0),
+        uniqueStudentsServed: _integer(json['uniqueStudentsServed'], 0),
+        counselingReach: _number(json['counselingReach']),
+        completionRate: _number(json['completionRate']),
+      );
+}
+
+class ReportTrendPoint {
+  const ReportTrendPoint({
+    required this.schoolYear,
+    required this.totalAppointments,
+    required this.uniqueStudentsServed,
+    required this.counselingReach,
+    required this.completedAppointments,
+  });
+  final String schoolYear;
+  final int totalAppointments;
+  final int uniqueStudentsServed;
+  final double counselingReach;
+  final int completedAppointments;
+  factory ReportTrendPoint.fromJson(Map<String, dynamic> json) =>
+      ReportTrendPoint(
+        schoolYear: json['schoolYear']?.toString() ?? '',
+        totalAppointments: _integer(json['totalAppointments'], 0),
+        uniqueStudentsServed: _integer(json['uniqueStudentsServed'], 0),
+        counselingReach: _number(json['counselingReach']),
+        completedAppointments: _integer(json['completedAppointments'], 0),
+      );
 }
 
 class CounselingPopulationConfig {

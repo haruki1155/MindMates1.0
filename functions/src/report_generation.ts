@@ -30,6 +30,7 @@ export interface UserCategoryReport {
 export interface ReportAnalytics {
   generatedAt: string;
   activeWindowDays: number;
+  dateRange: {startDate: string; endDate: string; label: string};
   population: {
     schoolYear: string;
     departments: string[];
@@ -58,7 +59,23 @@ export interface ReportAnalytics {
     department: PercentageItem[];
     course: PercentageItem[];
     yearLevel: PercentageItem[];
+    waitingTimeDays: number | null;
+    rescheduledAppointments: number;
   };
+  comparison: {
+    schoolYear: string;
+    totalAppointments: number;
+    uniqueStudentsServed: number;
+    counselingReach: number;
+    completionRate: number;
+  } | null;
+  trends: Array<{
+    schoolYear: string;
+    totalAppointments: number;
+    uniqueStudentsServed: number;
+    counselingReach: number;
+    completedAppointments: number;
+  }>;
 }
 
 const roleLabels: Record<string, string> = {
@@ -156,7 +173,7 @@ export function buildReportAnalytics(
   users: Array<{id: string; data: RecordData}>,
   appointments: RecordData[],
   now = new Date(),
-  filters: {userCategory?: string; appointmentDepartment?: string} = {},
+  filters: {userCategory?: string; appointmentDepartment?: string; startDate?: string; endDate?: string} = {},
   population = {
     schoolYear: defaultSchoolYear(now),
     departments: [] as string[],
@@ -207,12 +224,19 @@ export function buildReportAnalytics(
   const eligibleAppointments = appointments.filter((appointment) =>
     appointment.source === "walk_in_import" || appUserIds.has(text(appointment.userId)),
   );
-  const range = academicYearRange(population.schoolYear);
+  const academicRange = academicYearRange(population.schoolYear);
+  const requestedStart = dateValue(filters.startDate);
+  const requestedEnd = dateValue(filters.endDate);
+  const range = requestedStart && requestedEnd ?
+    {start: requestedStart, end: requestedEnd} : academicRange;
   const yearAppointments = eligibleAppointments.filter((appointment) => {
+    const appointmentDate = dateValue(appointment.scheduledAt) || dateValue(appointment.createdAt);
+    if (requestedStart && requestedEnd) {
+      return !!appointmentDate && appointmentDate >= range.start && appointmentDate < range.end;
+    }
     if (text(appointment.academicYearId) === population.schoolYear) return true;
     if (text(appointment.academicYearId)) return false;
-    const date = dateValue(appointment.scheduledAt) || dateValue(appointment.createdAt);
-    return !date || (date >= range.start && date < range.end);
+    return !appointmentDate || (appointmentDate >= range.start && appointmentDate < range.end);
   });
   const userById = new Map(appUsers.map((user) => [user.id, user.data]));
   const appointmentDepartment = (appointment: RecordData): string => {
@@ -262,10 +286,28 @@ export function buildReportAnalytics(
   const scheduled = yearAppointments.filter((appointment) =>
     !["cancelled", "canceled", "no-show", "noshow"].includes(text(appointment.status).toLowerCase()),
   ).length;
+  const waitingTimes = yearAppointments.map((appointment) => {
+    const created = dateValue(appointment.createdAt);
+    const scheduledAt = dateValue(appointment.scheduledAt);
+    return created && scheduledAt && scheduledAt >= created ?
+      (scheduledAt.getTime() - created.getTime()) / 86400000 : null;
+  }).filter((value): value is number => value != null);
+  const waitingTimeDays = waitingTimes.length === 0 ? null :
+    Math.round(waitingTimes.reduce((sum, value) => sum + value, 0) / waitingTimes.length * 10) / 10;
+  const rescheduledAppointments = yearAppointments.filter((appointment) => {
+    const status = text(appointment.status).toLowerCase();
+    return status === "rescheduled" || status === "schedule_adjustment_needed" ||
+      status === "schedule-adjustment-needed";
+  }).length;
 
   return {
     generatedAt: now.toISOString(),
     activeWindowDays: 30,
+    dateRange: {
+      startDate: range.start.toISOString(),
+      endDate: range.end.toISOString(),
+      label: requestedStart && requestedEnd ? "Custom date range" : `Academic year ${population.schoolYear}`,
+    },
     population,
     users: {
       scopeKey: requestedUserCategory,
@@ -281,6 +323,8 @@ export function buildReportAnalytics(
       counselingReach: percent(studentKeys.size, population.totalPopulation),
       appointmentRate: percent(yearAppointments.length, population.totalPopulation),
       completionRate: percent(completed, scheduled),
+      waitingTimeDays,
+      rescheduledAppointments,
       statusCounts,
       departmentScopeKey: requestedDepartment,
       departmentScopeLabel: requestedDepartment === "all" ?
@@ -290,6 +334,8 @@ export function buildReportAnalytics(
       course: population.configured ? rateGroups(valuesFor("course"), selectedPopulation) : [],
       yearLevel: population.configured ? rateGroups(valuesFor("yearLevel"), selectedPopulation) : [],
     },
+    comparison: null,
+    trends: [],
   };
 }
 
@@ -325,6 +371,13 @@ export const getReportAnalytics = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "Use a school year such as 2026-2027.");
   }
 
+  const startDate = text(request.data?.startDate);
+  const endDate = text(request.data?.endDate);
+  if ((startDate && !dateValue(startDate)) || (endDate && !dateValue(endDate)) ||
+      (startDate && endDate && dateValue(startDate)! >= dateValue(endDate)!)) {
+    throw new HttpsError("invalid-argument", "The report date range is invalid.");
+  }
+
   const [usersSnapshot, appointmentsSnapshot, population, years] = await Promise.all([
     db.collection("users").where("accessRole", "==", "appUser").get(),
     db.collection("appointments").get(),
@@ -339,8 +392,45 @@ export const getReportAnalytics = onCall(async (request) => {
     })),
     appointmentsSnapshot.docs.map((document) => document.data() as RecordData),
     new Date(),
-    {userCategory, appointmentDepartment},
+    {userCategory, appointmentDepartment, startDate: startDate || undefined, endDate: endDate || undefined},
     populationWithYears,
   );
+  const previousYear = years
+    .filter((year) => year.schoolYear < schoolYear)
+    .sort((a, b) => b.schoolYear.localeCompare(a.schoolYear))[0];
+  if (previousYear) {
+    const previousPopulation = await readPopulationConfig(previousYear.schoolYear);
+    const previous = buildReportAnalytics(
+      usersSnapshot.docs.map((document) => ({id: document.id, data: document.data() as RecordData})),
+      appointmentsSnapshot.docs.map((document) => document.data() as RecordData),
+      new Date(),
+      {userCategory, appointmentDepartment},
+      {...previousPopulation, years: []},
+    );
+    result.comparison = {
+      schoolYear: previousYear.schoolYear,
+      totalAppointments: previous.appointments.totalAppointments,
+      uniqueStudentsServed: previous.appointments.uniqueStudentsServed,
+      counselingReach: previous.appointments.counselingReach,
+      completionRate: previous.appointments.completionRate,
+    };
+  }
+  result.trends = (await Promise.all(years.map(async (year) => {
+    const yearPopulation = await readPopulationConfig(year.schoolYear);
+    const yearReport = buildReportAnalytics(
+      usersSnapshot.docs.map((document) => ({id: document.id, data: document.data() as RecordData})),
+      appointmentsSnapshot.docs.map((document) => document.data() as RecordData),
+      new Date(),
+      {userCategory, appointmentDepartment},
+      {...yearPopulation, years: []},
+    );
+    return {
+      schoolYear: year.schoolYear,
+      totalAppointments: yearReport.appointments.totalAppointments,
+      uniqueStudentsServed: yearReport.appointments.uniqueStudentsServed,
+      counselingReach: yearReport.appointments.counselingReach,
+      completedAppointments: yearReport.appointments.statusCounts.completed ?? 0,
+    };
+  }))).sort((a, b) => a.schoolYear.localeCompare(b.schoolYear));
   return {report: result};
 });

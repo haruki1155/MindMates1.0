@@ -13,6 +13,8 @@ import '../domain/report_generation_models.dart';
 import '../theme/admin_theme.dart';
 import '../services/admin_import_file_picker.dart';
 
+enum _ReportPeriod { wholeYear, firstSemester, secondSemester, custom }
+
 class ReportGenerationPage extends StatefulWidget {
   const ReportGenerationPage({super.key, required this.repository});
 
@@ -30,6 +32,8 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   String _userCategory = 'all';
   String _appointmentDepartment = 'all';
   String _schoolYear = _currentSchoolYear();
+  _ReportPeriod _period = _ReportPeriod.wholeYear;
+  DateTimeRange? _customRange;
   bool _downloading = false;
   bool _filterLoading = false;
   int _reportRequestId = 0;
@@ -45,7 +49,28 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
         userCategory: _userCategory,
         appointmentDepartment: _appointmentDepartment,
         schoolYear: _schoolYear,
+        startDate: _period == _ReportPeriod.wholeYear
+            ? null
+            : _periodRange()?.start,
+        endDate: _period == _ReportPeriod.wholeYear
+            ? null
+            : _periodRange()?.end,
       );
+
+  DateTimeRange? _periodRange() {
+    if (_period == _ReportPeriod.custom) return _customRange;
+    final startYear =
+        int.tryParse(_schoolYear.split('-').first) ?? DateTime.now().year;
+    return _period == _ReportPeriod.firstSemester
+        ? DateTimeRange(
+            start: DateTime(startYear, 6, 1),
+            end: DateTime(startYear, 12, 1),
+          )
+        : DateTimeRange(
+            start: DateTime(startYear, 12, 1),
+            end: DateTime(startYear + 1, 6, 1),
+          );
+  }
 
   void _refresh() => _reloadReport();
 
@@ -184,6 +209,30 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
         onUserCategoryChanged: _selectUserCategory,
         onDepartmentChanged: _selectDepartment,
       ),
+      if (_reportType == AdminReportType.appointments) ...[
+        const SizedBox(height: 12),
+        _PeriodFilter(
+          value: _period,
+          onChanged: (value) {
+            setState(() => _period = value);
+            _reloadReport();
+          },
+          onCustom: () async {
+            final range = await showDateRangePicker(
+              context: context,
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2100),
+              initialDateRange: _customRange,
+            );
+            if (range == null || !mounted) return;
+            setState(() {
+              _customRange = range;
+              _period = _ReportPeriod.custom;
+            });
+            _reloadReport();
+          },
+        ),
+      ],
       if (_reportType == AdminReportType.appointments &&
           widget.repository.currentAccessRole == AccessRole.admin) ...[
         const SizedBox(height: 18),
@@ -242,6 +291,19 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
         userCategoryKey: _userCategory,
         appointmentDimension: _dimension,
       );
+      try {
+        await widget.repository.recordAuditEvent(
+          action: 'REPORT_EXPORTED_PDF',
+          category: 'REPORTS',
+          targetType: 'report',
+          targetId: report.population.schoolYear,
+          metadata: {
+            'reportType': _reportType.name,
+            'department': _appointmentDepartment,
+            'period': report.dateRange.label,
+          },
+        );
+      } catch (_) {}
     } catch (_) {
       if (mounted) {
         _showReportSnackBar(
@@ -256,6 +318,18 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   }
 
   Future<void> _preview(AdminReportAnalytics report) async {
+    try {
+      await widget.repository.recordAuditEvent(
+        action: 'REPORT_VIEWED',
+        category: 'REPORTS',
+        targetType: 'report',
+        targetId: report.population.schoolYear,
+        metadata: {
+          'reportType': _reportType.name,
+          'period': report.dateRange.label,
+        },
+      );
+    } catch (_) {}
     await showDialog<void>(
       context: context,
       barrierColor: Colors.black54,
@@ -1205,35 +1279,253 @@ class _AppointmentReport extends StatelessWidget {
               icon: Icons.task_alt_outlined,
             ),
             _SummaryValue(
-              label: 'Largest department rate',
-              value: items.isEmpty
-                  ? '0%'
-                  : _formatPercent(items.first.percentage),
-              note: items.isEmpty ? 'No data available' : items.first.label,
-              icon: Icons.insights_outlined,
+              label: 'Waiting time',
+              value: report.waitingTimeDays == null
+                  ? 'No data'
+                  : '${report.waitingTimeDays!.toStringAsFixed(1)} days',
+              note: 'Request to scheduled appointment',
+              icon: Icons.hourglass_bottom_outlined,
+            ),
+            _SummaryValue(
+              label: 'Rescheduled',
+              value: '${report.rescheduledAppointments}',
+              note: 'Schedule adjustments',
+              icon: Icons.event_repeat_outlined,
             ),
           ],
         ),
+        if (report.comparison != null) ...[
+          const SizedBox(height: 18),
+          _ComparisonPanel(report: report),
+        ],
+        if (report.trends.length > 1) ...[
+          const SizedBox(height: 18),
+          _TrendPanel(report: report),
+        ],
         const SizedBox(height: 18),
-        _ChartPanel(
-          title: 'Appointments by $label',
-          subtitle:
-              '${report.appointmentDepartmentScopeLabel} only | share within selected scope',
-          data: items,
-          chartType: chartType,
-        ),
+        if (report.uniqueStudentsServed < 5)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: _panelDecoration,
+            child: const Text(
+              'Distribution details are hidden because this report contains fewer than 5 unique students. Aggregate totals remain available.',
+              style: TextStyle(color: AdminColors.muted),
+            ),
+          )
+        else
+          _ChartPanel(
+            title: 'Appointments by $label',
+            subtitle:
+                '${report.appointmentDepartmentScopeLabel} only | share within selected scope',
+            data: items,
+            chartType: items.length > 6 ? ReportChartType.bar : chartType,
+          ),
         const SizedBox(height: 18),
-        _PercentageTable(
-          title:
-              '$label distribution - ${report.appointmentDepartmentScopeLabel}',
-          headers: const ['Category', 'Appointment share'],
-          rows: items
-              .map((item) => [item.label, _formatPercent(item.percentage)])
-              .toList(growable: false),
-        ),
+        if (report.uniqueStudentsServed >= 5)
+          _PercentageTable(
+            title:
+                '$label distribution - ${report.appointmentDepartmentScopeLabel}',
+            headers: const ['Category', 'Appointment share'],
+            rows: items
+                .map((item) => [item.label, _formatPercent(item.percentage)])
+                .toList(growable: false),
+          ),
       ],
     );
   }
+}
+
+class _PeriodFilter extends StatelessWidget {
+  const _PeriodFilter({
+    required this.value,
+    required this.onChanged,
+    required this.onCustom,
+  });
+  final _ReportPeriod value;
+  final ValueChanged<_ReportPeriod> onChanged;
+  final VoidCallback onCustom;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: _panelDecoration,
+    child: Wrap(
+      spacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        const Text(
+          'Reporting period',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        DropdownButton<_ReportPeriod>(
+          value: value,
+          items: const [
+            DropdownMenuItem(
+              value: _ReportPeriod.wholeYear,
+              child: Text('Whole year'),
+            ),
+            DropdownMenuItem(
+              value: _ReportPeriod.firstSemester,
+              child: Text('1st semester'),
+            ),
+            DropdownMenuItem(
+              value: _ReportPeriod.secondSemester,
+              child: Text('2nd semester'),
+            ),
+            DropdownMenuItem(
+              value: _ReportPeriod.custom,
+              child: Text('Custom dates'),
+            ),
+          ],
+          onChanged: (value) {
+            if (value == _ReportPeriod.custom)
+              onCustom();
+            else if (value != null)
+              onChanged(value);
+          },
+        ),
+        const Text(
+          'Percentages use the selected population snapshot.',
+          style: TextStyle(color: AdminColors.muted, fontSize: 12),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ComparisonPanel extends StatelessWidget {
+  const _ComparisonPanel({required this.report});
+  final AdminReportAnalytics report;
+  String change(num current, num previous, {bool points = false}) {
+    if (previous == 0) return current == 0 ? '—' : 'New';
+    final value = points
+        ? current - previous
+        : (current - previous) / previous * 100;
+    return '${value >= 0 ? '+' : ''}${value.toStringAsFixed(1)}${points ? ' pp' : '%'}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final previous = report.comparison!;
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: _panelDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Compared with ${previous.schoolYear}',
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 30,
+            runSpacing: 12,
+            children: [
+              _Change(
+                label: 'Appointments',
+                value: change(
+                  report.totalAppointments,
+                  previous.totalAppointments,
+                ),
+              ),
+              _Change(
+                label: 'Students served',
+                value: change(
+                  report.uniqueStudentsServed,
+                  previous.uniqueStudentsServed,
+                ),
+              ),
+              _Change(
+                label: 'Reach',
+                value: change(
+                  report.counselingReach,
+                  previous.counselingReach,
+                  points: true,
+                ),
+              ),
+              _Change(
+                label: 'Completion',
+                value: change(
+                  report.completionRate,
+                  previous.completionRate,
+                  points: true,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Change extends StatelessWidget {
+  const _Change({required this.label, required this.value});
+  final String label, value;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: const TextStyle(color: AdminColors.muted)),
+      const SizedBox(height: 3),
+      Text(
+        value,
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+      ),
+    ],
+  );
+}
+
+class _TrendPanel extends StatelessWidget {
+  const _TrendPanel({required this.report});
+  final AdminReportAnalytics report;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(18),
+    decoration: _panelDecoration,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Trend across academic years',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 12),
+        ...report.trends.map(
+          (item) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                SizedBox(width: 95, child: Text(item.schoolYear)),
+                Expanded(
+                  child: LinearProgressIndicator(
+                    value:
+                        report.trends
+                                .map((e) => e.totalAppointments)
+                                .reduce(math.max) ==
+                            0
+                        ? 0
+                        : item.totalAppointments /
+                              report.trends
+                                  .map((e) => e.totalAppointments)
+                                  .reduce(math.max),
+                    minHeight: 10,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text('${item.totalAppointments}'),
+              ],
+            ),
+          ),
+        ),
+        const Text(
+          'Total appointments by year. Use the comparison cards for reach and completion changes.',
+          style: TextStyle(color: AdminColors.muted, fontSize: 12),
+        ),
+      ],
+    ),
+  );
 }
 
 class _AcademicYearFilter extends StatelessWidget {

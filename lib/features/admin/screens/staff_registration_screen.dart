@@ -263,7 +263,7 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
     if (!(formKey.currentState?.validate() ?? false)) return;
     setState(() => busy = true);
     try {
-      final verificationSent = await widget.repository.registerStaff(
+      final submission = await widget.repository.registerStaff(
         email: email.text,
         password: password.text,
         firstName: first.text,
@@ -282,9 +282,11 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
         builder: (_) => AlertDialog(
           title: const Text('Access Request Submitted'),
           content: Text(
-            'Your $roleLabel access request is pending administrator review. '
-            '${verificationSent ? 'A verification email was sent to' : 'The request was saved, but we could not send a verification email to'} '
-            '${email.text.trim()}.',
+            'Your $roleLabel access request is pending administrator review.\n\n'
+            '${submission.verificationSent ? 'A verification email was sent to' : 'The request was saved, but we could not send a verification email to'} '
+            '${email.text.trim()}.\n\n'
+            'Reference: ${submission.reference ?? 'Pending'}\n'
+            'You will be able to access the PAACC portal after approval.',
           ),
           actions: [
             TextButton(

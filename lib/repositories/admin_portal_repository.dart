@@ -108,6 +108,18 @@ class AdminRoleCorrectionRequest {
       );
 }
 
+class StaffAccessRequestSubmission {
+  const StaffAccessRequestSubmission({
+    required this.verificationSent,
+    this.requestId,
+    this.reference,
+  });
+
+  final bool verificationSent;
+  final String? requestId;
+  final String? reference;
+}
+
 class AdminPortalRepository {
   AdminPortalRepository({FirestoreService? firestoreService})
     : _firestoreService = firestoreService ?? FirestoreService();
@@ -205,7 +217,7 @@ class AdminPortalRepository {
     return false;
   }
 
-  Future<bool> registerStaff({
+  Future<StaffAccessRequestSubmission> registerStaff({
     required String email,
     required String password,
     required String firstName,
@@ -223,10 +235,12 @@ class AdminPortalRepository {
           email: email.trim(),
           password: password,
         );
+    String? requestId;
+    String? reference;
     try {
-      await FirebaseFunctions.instance
+      final result = await FirebaseFunctions.instance
           .httpsCallable('registerStaffAccount')
-          .call({
+          .call<Map<String, dynamic>>({
             'firstName': firstName.trim(),
             'lastName': lastName.trim(),
             'employeeId': employeeId.trim(),
@@ -237,6 +251,8 @@ class AdminPortalRepository {
             'courseId': courseId,
             'requestedRole': requestedRole.storedValue,
           });
+      requestId = result.data['requestId']?.toString();
+      reference = result.data['reference']?.toString();
     } catch (error) {
       // The callable can commit the access request and then lose its response
       // over the network. Do not delete a valid Auth account in that case.
@@ -254,11 +270,19 @@ class AdminPortalRepository {
 
     try {
       await credential.user?.sendEmailVerification();
-      return true;
+      return StaffAccessRequestSubmission(
+        verificationSent: true,
+        requestId: requestId,
+        reference: reference,
+      );
     } catch (_) {
       // The access request is already safely stored. The user can resend
       // verification later without losing the registration.
-      return false;
+      return StaffAccessRequestSubmission(
+        verificationSent: false,
+        requestId: requestId,
+        reference: reference,
+      );
     }
   }
 
@@ -535,6 +559,8 @@ class AdminPortalRepository {
     String userCategory = 'all',
     String appointmentDepartment = 'all',
     String? schoolYear,
+    DateTime? startDate,
+    DateTime? endDate,
   }) async {
     if (!currentAccessRole.canAccessClinicalData) {
       throw StateError('Counselor or administrator access is required.');
@@ -545,6 +571,8 @@ class AdminPortalRepository {
           'userCategory': userCategory,
           'appointmentDepartment': appointmentDepartment,
           'schoolYear': ?schoolYear,
+          'startDate': ?startDate?.toUtc().toIso8601String(),
+          'endDate': ?endDate?.toUtc().toIso8601String(),
         });
     final raw = result.data['report'];
     if (raw is! Map) {
