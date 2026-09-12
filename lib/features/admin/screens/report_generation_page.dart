@@ -35,6 +35,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   _ReportPeriod _period = _ReportPeriod.wholeYear;
   DateTimeRange? _customRange;
   bool _downloading = false;
+  bool _previewing = false;
   bool _filterLoading = false;
   int _reportRequestId = 0;
 
@@ -143,6 +144,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
                       snapshot.connectionState == ConnectionState.waiting &&
                       !snapshot.hasData,
                   downloading: _downloading,
+                  previewing: _previewing,
                   canDownload: snapshot.hasData,
                   showImport: _reportType == AdminReportType.appointments,
                   onRefresh: _refresh,
@@ -319,77 +321,93 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   }
 
   Future<void> _preview(AdminReportAnalytics report) async {
+    if (_previewing) return;
+    setState(() => _previewing = true);
     try {
-      await widget.repository.recordAuditEvent(
-        action: 'REPORT_VIEWED',
-        category: 'REPORTS',
-        targetType: 'report',
-        targetId: report.population.schoolYear,
-        metadata: {
-          'reportType': _reportType.name,
-          'period': report.dateRange.label,
-        },
+      final pdfBytes = await AdminReportPdfService.build(
+        report: report,
+        reportType: _reportType,
+        chartType: _chartType,
+        userCategoryKey: _userCategory,
+        appointmentDimension: _dimension,
       );
-    } catch (_) {}
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black54,
-      builder: (dialogContext) => Dialog(
-        insetPadding: const EdgeInsets.all(24),
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-          width: 980,
-          height: 760,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
-                child: Row(
-                  children: [
-                    const Icon(Icons.picture_as_pdf_outlined),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Text(
-                        'PDF preview',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
+      if (!mounted) return;
+      try {
+        await widget.repository.recordAuditEvent(
+          action: 'REPORT_VIEWED',
+          category: 'REPORTS',
+          targetType: 'report',
+          targetId: report.population.schoolYear,
+          metadata: {
+            'reportType': _reportType.name,
+            'period': report.dateRange.label,
+          },
+        );
+      } catch (_) {}
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.black54,
+        builder: (dialogContext) => Dialog(
+          insetPadding: const EdgeInsets.all(24),
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            width: 980,
+            height: 760,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.picture_as_pdf_outlined),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'PDF preview',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
-                    ),
-                    IconButton(
-                      tooltip: 'Close preview',
-                      onPressed: () => Navigator.pop(dialogContext),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: PdfPreview(
-                  build: (format) => AdminReportPdfService.build(
-                    report: report,
-                    reportType: _reportType,
-                    chartType: _chartType,
-                    userCategoryKey: _userCategory,
-                    appointmentDimension: _dimension,
-                  ),
-                  allowPrinting: false,
-                  allowSharing: false,
-                  canChangeOrientation: false,
-                  canChangePageFormat: false,
-                  padding: const EdgeInsets.all(16),
-                  pdfPreviewPageDecoration: const BoxDecoration(
-                    color: Color(0xFFECEFF1),
+                      IconButton(
+                        tooltip: 'Close preview',
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+                const Divider(height: 1),
+                Expanded(
+                  child: PdfPreview(
+                    build: (format) async => pdfBytes,
+                    allowPrinting: false,
+                    allowSharing: false,
+                    canChangeOrientation: false,
+                    canChangePageFormat: false,
+                    padding: const EdgeInsets.all(16),
+                    pdfPreviewPageDecoration: const BoxDecoration(
+                      color: Color(0xFFECEFF1),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } catch (_) {
+      if (mounted) {
+        _showReportSnackBar(
+          context,
+          'Unable to prepare the PDF preview.',
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _previewing = false);
+    }
   }
 
   Future<void> _showBulkImport() async {
@@ -435,6 +453,7 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.loading,
     required this.downloading,
+    required this.previewing,
     required this.canDownload,
     required this.showImport,
     required this.onRefresh,
@@ -445,6 +464,7 @@ class _Header extends StatelessWidget {
 
   final bool loading;
   final bool downloading;
+  final bool previewing;
   final bool canDownload;
   final bool showImport;
   final VoidCallback onRefresh;
@@ -466,9 +486,15 @@ class _Header extends StatelessWidget {
               label: const Text('Bulk import'),
             ),
           OutlinedButton.icon(
-            onPressed: onPreview,
-            icon: const Icon(Icons.preview_outlined, size: 18),
-            label: const Text('Preview PDF'),
+            onPressed: previewing ? null : onPreview,
+            icon: previewing
+                ? const SizedBox(
+                    width: 17,
+                    height: 17,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.preview_outlined, size: 18),
+            label: Text(previewing ? 'Preparing preview' : 'Preview PDF'),
           ),
           OutlinedButton.icon(
             onPressed: loading ? null : onRefresh,
