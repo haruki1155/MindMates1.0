@@ -130,11 +130,18 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            FirebaseErrorMessage.describe(
-              error,
-              fallback:
-                  'We could not sign you in. Check your details and try again.',
-            ),
+            error is FirebaseAuthException &&
+                    const {
+                      'invalid-credential',
+                      'wrong-password',
+                      'user-not-found',
+                    }.contains(error.code)
+                ? 'Email or password is incorrect.'
+                : FirebaseErrorMessage.describe(
+                    error,
+                    fallback:
+                        'We could not sign you in. Check your details and try again.',
+                  ),
           ),
         ),
       );

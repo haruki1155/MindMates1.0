@@ -205,7 +205,7 @@ class AdminPortalRepository {
     return false;
   }
 
-  Future<void> registerStaff({
+  Future<bool> registerStaff({
     required String email,
     required String password,
     required String firstName,
@@ -229,10 +229,29 @@ class AdminPortalRepository {
             'position': position.trim(),
             'requestedRole': requestedRole.storedValue,
           });
+    } catch (error) {
+      // A callable response can be lost after its Firestore transaction has
+      // committed. Reconcile before deleting Auth, otherwise a valid request
+      // can be left with no sign-in account or an orphaned profile.
+      Map<String, dynamic>? profile;
+      try {
+        profile = await getOwnProfile(credential.user!.uid);
+      } catch (_) {
+        // Preserve the original registration error if reconciliation itself
+        // is unavailable.
+      }
+      if (profile == null || profile['accessRequestId'] == null) {
+        await credential.user?.delete();
+        rethrow;
+      }
+    }
+    try {
       await credential.user?.sendEmailVerification();
+      return true;
     } catch (_) {
-      await credential.user?.delete();
-      rethrow;
+      // The access request is already safely stored. Let the user retry the
+      // verification email from the normal verification flow.
+      return false;
     }
   }
 

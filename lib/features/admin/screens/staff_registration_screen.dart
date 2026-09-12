@@ -1,7 +1,7 @@
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import '../../../models/profile_roles.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../../../services/firebase/firebase_error_message.dart';
 
 class StaffRegistrationScreen extends StatefulWidget {
   const StaffRegistrationScreen({super.key, required this.repository});
@@ -24,7 +24,15 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
   bool busy = false, showPassword = false, showConfirm = false;
   @override
   void dispose() {
-    for (final c in [first, last, employee, email, position, password, confirm]) {
+    for (final c in [
+      first,
+      last,
+      employee,
+      email,
+      position,
+      password,
+      confirm,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -255,7 +263,7 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
     if (!(formKey.currentState?.validate() ?? false)) return;
     setState(() => busy = true);
     try {
-      await widget.repository.registerStaff(
+      final verificationSent = await widget.repository.registerStaff(
         email: email.text,
         password: password.text,
         firstName: first.text,
@@ -274,7 +282,9 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
         builder: (_) => AlertDialog(
           title: const Text('Access Request Submitted'),
           content: Text(
-            'Your $roleLabel access request is pending administrator review. A verification email was sent to ${email.text.trim()}.',
+            'Your $roleLabel access request is pending administrator review. '
+            '${verificationSent ? 'A verification email was sent to' : 'The request was saved, but we could not send a verification email to'} '
+            '${email.text.trim()}.',
           ),
           actions: [
             TextButton(
@@ -287,24 +297,24 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
       if (mounted) Navigator.pop(context);
     } catch (error) {
       if (!mounted) return;
-      final message = error is FirebaseException
-          ? switch (error.code) {
-              'email-already-in-use' => 'This email address is already in use.',
-              'invalid-email' => 'Enter a valid institutional email address.',
-              'weak-password' => 'Choose a stronger password.',
-              'already-exists' =>
-                'An account or pending request already exists for these details.',
-              'permission-denied' =>
-                'You are not allowed to submit this request.',
-              _ =>
-                'The access request could not be submitted. Please try again.',
-            }
-          : error is StateError
-          ? error.message
-          : 'The access request could not be submitted. Please try again.';
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      final message = FirebaseErrorMessage.describe(
+        error,
+        fallback:
+            'The access request could not be submitted. Please check your details and try again.',
+      );
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Request not submitted'),
+          content: Text(message),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
     } finally {
       if (mounted) setState(() => busy = false);
     }

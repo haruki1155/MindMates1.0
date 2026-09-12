@@ -25,5 +25,5 @@ jobs:
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MIND_MATES_CD2CF }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MIND_MATES_CD2CF || secrets.FIREBASE_SERVICE_ACCOUNT }}
           projectId: mind-mates-cd2cf
