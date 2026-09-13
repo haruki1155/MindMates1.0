@@ -983,8 +983,9 @@ async function once(eventId: string, apply: (
 export const syncSecretChatInteraction = onDocumentWritten(
   {document: "secret_chat_interactions/{interactionId}", retry: true},
   async (event) => {
-    const before = event.data?.before.data();
-    const after = event.data?.after.data();
+    if (!event.data) return;
+    const before = event.data.before.data();
+    const after = event.data.after.data();
     const postId = String(after?.postId ?? before?.postId ?? "");
     if (!postId) return;
     const reactionChange = reactionDelta(before?.liked, after?.liked);
@@ -1021,8 +1022,9 @@ export const syncSecretChatInteraction = onDocumentWritten(
 export const syncSecretChatComment = onDocumentWritten(
   {document: "secret_chat_comments/{commentId}", retry: true},
   async (event) => {
-    const before = event.data?.before.data();
-    const after = event.data?.after.data();
+    if (!event.data) return;
+    const before = event.data.before.data();
+    const after = event.data.after.data();
     const wasActive = before?.moderationStatus === "active";
     const isActive = after?.moderationStatus === "active";
     const delta = activeCommentDelta(
@@ -1302,8 +1304,10 @@ export const notifyPortalOfInquiry = onDocumentCreated(
 export const scheduleReadNotificationArchive = onDocumentUpdated(
   {document: "notifications/{notificationId}", retry: true},
   async (event) => {
-    const before = event.data?.before.data();
-    const after = event.data?.after.data();
+    const change = event.data;
+    if (!change) return;
+    const before = change.before.data();
+    const after = change.after.data();
     if (!after || !isNormalNotificationType(after.type) || after.archivedAt) return;
     if (before?.readAt || !(after.readAt instanceof Timestamp) || after.archiveEligibleAt) return;
     await event.data?.after.ref.update({
@@ -1556,6 +1560,23 @@ export const archiveAppointments = onCall(async (request) => {
   });
   return {ok: true, affected: appointmentIds.length};
 });
+
+// Keep the active queue operational: once an appointment reaches a terminal
+// outcome, preserve it in History automatically.
+export const archiveTerminalAppointment = onDocumentUpdated(
+  {document: "appointments/{appointmentId}", retry: true},
+  async (event) => {
+    const change = event.data;
+    if (!change) return;
+    const before = change.before.data();
+    const after = change.after.data();
+    if (!after || after.archivedAt) return;
+    const status = String(after.status ?? "").toLowerCase().trim();
+    const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow"].includes(status);
+    if (!terminal || String(before?.status ?? "").toLowerCase().trim() === status) return;
+    await change.after.ref.update({archivedAt: FieldValue.serverTimestamp(), archivedBy: "system", updatedAt: FieldValue.serverTimestamp()});
+  },
+);
 
 export const sendAppointmentNotification = onDocumentCreated(
   {document: "notifications/{notificationId}", retry: true},
