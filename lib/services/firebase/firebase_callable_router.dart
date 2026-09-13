@@ -9,6 +9,7 @@ class FirebaseCallableRouter {
     'provisionAppUserProfile',
     'resolveSchoolIdAuthEmail',
     'requestAdminPasswordReset',
+    'requestStaffEmailVerification',
     'getAssessmentStatus',
     'submitQuickAssessment',
     'submitFullAssessment',

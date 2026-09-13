@@ -2225,6 +2225,13 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
                         const SizedBox(height: 10),
                         _AccessDetail(label: 'Reference', value: widget.evaluation.reference!),
                       ],
+                      if (verificationRequired ||
+                          widget.evaluation.state == PortalAccessState.pendingAdminApproval) ...[
+                        const SizedBox(height: 22),
+                        _AccessProgress(
+                          verified: !verificationRequired,
+                        ),
+                      ],
                       if (_message != null) ...[
                         const SizedBox(height: 18),
                         Text(_message!, textAlign: TextAlign.center,
@@ -2269,6 +2276,43 @@ class _AccessDetail extends StatelessWidget {
       Flexible(child: Text(value, textAlign: TextAlign.end,
           style: const TextStyle(fontWeight: FontWeight.w700))),
     ],
+  );
+}
+
+class _AccessProgress extends StatelessWidget {
+  const _AccessProgress({required this.verified});
+  final bool verified;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: AdminColors.surfaceMuted,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Column(
+      children: [
+        _step(Icons.check_rounded, 'Access request', true),
+        _step(verified ? Icons.check_rounded : Icons.mail_outline_rounded,
+            'Email verification', verified),
+        _step(Icons.hourglass_top_rounded, 'Administrator approval', false),
+      ],
+    ),
+  );
+
+  Widget _step(IconData icon, String label, bool complete) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      children: [
+        Icon(icon, size: 17, color: complete ? AdminColors.success : AdminColors.muted),
+        const SizedBox(width: 8),
+        Text(label, style: TextStyle(fontWeight: complete ? FontWeight.w700 : FontWeight.w500)),
+        const Spacer(),
+        Text(complete ? 'Complete' : 'Pending',
+            style: const TextStyle(fontSize: 12, color: AdminColors.muted)),
+      ],
+    ),
   );
 }
 

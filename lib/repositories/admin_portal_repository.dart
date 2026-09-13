@@ -354,7 +354,9 @@ class AdminPortalRepository {
     }
 
     try {
-      await credential.user?.sendEmailVerification();
+      await FirebaseFunctions.instance
+          .routedCallable('requestStaffEmailVerification')
+          .call<void>();
       return StaffAccessRequestSubmission(
         verificationSent: true,
         requestId: requestId,
@@ -654,7 +656,9 @@ class AdminPortalRepository {
     if (previous != null && now.difference(previous) < const Duration(seconds: 60)) {
       return const Duration(seconds: 60) - now.difference(previous);
     }
-    await user.sendEmailVerification();
+    await FirebaseFunctions.instance
+        .routedCallable('requestStaffEmailVerification')
+        .call<void>();
     _lastVerificationEmailSentAt = now;
     return Duration.zero;
   }

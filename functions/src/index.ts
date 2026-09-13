@@ -23,6 +23,8 @@ export {
   resolveSchoolIdAuthEmailDev,
   requestAdminPasswordReset,
   requestAdminPasswordResetDev,
+  requestStaffEmailVerification,
+  requestStaffEmailVerificationDev,
 } from "./account_recovery";
 import {defineString} from "firebase-functions/params";
 import {randomBytes} from "node:crypto";

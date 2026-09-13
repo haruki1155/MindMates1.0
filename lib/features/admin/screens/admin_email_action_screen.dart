@@ -27,6 +27,7 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
   final _confirmation = TextEditingController();
   bool _loading = true;
   bool _complete = false;
+  bool _alreadyVerified = false;
   String? _email;
   String? _error;
 
@@ -53,9 +54,22 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
       } else {
         final info = await FirebaseAuth.instance.checkActionCode(_code);
         _email = info.data['email']?.toString();
+        if (_mode == 'verifyEmail') {
+          // A verification link has one clear purpose. Apply Firebase's
+          // signed action code automatically, then show the MindMate result.
+          await FirebaseAuth.instance.applyActionCode(_code);
+          await FirebaseAuth.instance.currentUser?.reload();
+          _complete = true;
+        }
       }
     } on FirebaseAuthException catch (error) {
-      _error = _messageFor(error);
+      if (_mode == 'verifyEmail' &&
+          error.code == 'invalid-action-code' &&
+          FirebaseAuth.instance.currentUser?.emailVerified == true) {
+        _alreadyVerified = true;
+      } else {
+        _error = _messageFor(error);
+      }
     } catch (_) {
       _error = 'This account link could not be verified. Request a new link.';
     } finally {
@@ -64,7 +78,7 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
   }
 
   Future<void> _submit() async {
-    if (_loading || _complete || _error != null) return;
+    if (_loading || _complete || _alreadyVerified || _error != null) return;
     if (_mode == 'resetPassword' &&
         !(_formKey.currentState?.validate() ?? false)) {
       return;
@@ -102,14 +116,14 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
     'user-disabled' => 'This account has been disabled.',
     'user-not-found' => 'The account for this link no longer exists.',
     'weak-password' => 'Choose a stronger password with at least 8 characters.',
-    _ => error.message ?? 'The account action could not be completed.',
+    _ => 'The account action could not be completed. Please request a new link and try again.',
   };
 
   String get _title {
-    if (_complete) {
+    if (_complete || _alreadyVerified) {
       return switch (_mode) {
         'resetPassword' => 'Password updated',
-        'verifyEmail' => 'Email verified',
+        'verifyEmail' => _alreadyVerified ? 'Email already verified' : 'Email verified',
         'recoverEmail' => 'Email restored',
         _ => 'Completed',
       };
@@ -123,11 +137,13 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
   }
 
   String get _description {
-    if (_complete) {
+    if (_complete || _alreadyVerified) {
       return switch (_mode) {
         'resetPassword' =>
           'Your password was changed successfully. You can now sign in.',
-        'verifyEmail' => 'Your email address is now verified.',
+        'verifyEmail' => _alreadyVerified
+            ? 'This email address has already been verified. Sign in to view your PAACC access request status.'
+            : 'Your email address has been verified. Sign in to continue your PAACC access request and administrator review.',
         'recoverEmail' => 'Your previous email address has been restored.',
         _ => 'Your request was completed successfully.',
       };
@@ -167,10 +183,18 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            const Column(
+                              children: [
+                                Text('MindMate', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                                SizedBox(height: 4),
+                                Text('COUNSELING MANAGEMENT SYSTEM', style: TextStyle(fontSize: 10, letterSpacing: 1, color: AdminColors.muted)),
+                                SizedBox(height: 24),
+                              ],
+                            ),
                             Icon(
                               _error != null
                                   ? Icons.link_off_rounded
-                                  : _complete
+                                  : (_complete || _alreadyVerified)
                                   ? Icons.check_circle_rounded
                                   : Icons.lock_reset_rounded,
                               size: 64,
@@ -238,7 +262,7 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
                               ),
                             ],
                             const SizedBox(height: 24),
-                            if (_error == null && !_complete)
+                            if (_error == null && !_complete && !_alreadyVerified && _mode != 'verifyEmail')
                               FilledButton.icon(
                                 onPressed: _loading ? null : _submit,
                                 icon: _loading
@@ -257,7 +281,7 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
                                       : 'Confirm',
                                 ),
                               ),
-                            if (_complete || _error != null)
+                            if (_complete || _alreadyVerified || _error != null)
                               FilledButton.icon(
                                 onPressed: () => _returnToAdmin(),
                                 icon: const Icon(Icons.login_rounded),
