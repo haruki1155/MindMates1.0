@@ -98,6 +98,8 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
         if (query.isEmpty) ...[
           const SizedBox(height: 16),
           FilledButton.icon(onPressed: () => _edit('college'), icon: const Icon(Icons.add), label: const Text('Add college')),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(onPressed: _initializeCatalog, icon: const Icon(Icons.download_outlined), label: const Text('Load current catalog')),
         ],
       ])),
     ),
@@ -113,6 +115,15 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
       ]),
     ),
   );
+
+  Future<void> _initializeCatalog() async {
+    try {
+      final count = await widget.repository.initializeAcademicStructure();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(count > 0 ? 'Current academic catalog loaded.' : 'Academic structure is already configured.')));
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The academic catalog could not be loaded. Please try again.')));
+    }
+  }
 
   Future<void> _edit(String kind, {College? college, Department? department, Course? course}) async {
     final name = TextEditingController(text: college?.name ?? department?.name ?? course?.name);

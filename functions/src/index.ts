@@ -806,6 +806,45 @@ export const getAuditLogPage = onCall(async (request) => {
   }), hasMore: snapshot.size === pageSize};
 });
 
+const DEFAULT_ACADEMIC_STRUCTURE: Record<string, string[]> = {
+  "College of Accountancy and Business Administration": ["BS Accountancy", "BS Business Administration", "BS Management"],
+  "College of Arts and Sciences / College of Arts and Languages": ["BA Communication / Mass Communication", "BA English", "BA Filipino", "BA Political Science", "BA Psychology"],
+  "College of Information and Technology Education / College of Computer Studies": ["BS Information Technology", "Bachelor of Library and Information Science", "Associate in Computer Technology"],
+  "College of Criminology": ["BS Criminology"],
+  "College of Education / College of Teacher Education": ["Bachelor of Elementary Education - Preschool Ed, Primary Ed", "Bachelor of Secondary Education - English, Filipino, Mathematics, Science, Social Studies", "Bachelor in Physical Education", "Bachelor in Music", "Bachelor in Fine Arts"],
+  "College of Engineering and Architecture": ["BS Architecture", "BS Civil Engineering", "BS Computer Engineering", "BS Electrical Engineering / Electronic Engineering", "BS Mechanical Engineering"],
+  "College of Law": ["Juris Doctor"],
+  "College of Nursing": ["BS Nursing"],
+  "College of Pharmacy": ["BS Pharmacy"],
+  "College of Science and Mathematics": ["BS Mathematics", "BS Biology / Natural Sciences"],
+  "College of Social Work": ["BS Social Work"],
+  "Graduate School / Institute of Graduate and Advanced Studies": ["Doctor of Education", "Master of Arts in Education - all major fields", "Master in Business Administration", "Master of Arts in Nursing"],
+  "School of Hotel and Restaurant Services and Tourism Management": ["BS Hotel and Restaurant Management", "BS Tourism Management"],
+  "School of Midwifery": ["Midwifery Program"],
+};
+
+export const initializeAcademicStructure = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  await requireSuperAdmin(actorId);
+  const colleges = await db.collection("colleges").limit(1).get();
+  if (!colleges.empty) return {created: false, message: "Academic structure is already configured."};
+  const batch = db.batch();
+  for (const [collegeName, courseNames] of Object.entries(DEFAULT_ACADEMIC_STRUCTURE)) {
+    const collegeId = `college-${collegeName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    const departmentId = `${collegeId}-programs`;
+    const collegeRef = db.collection("colleges").doc(collegeId);
+    const departmentRef = db.collection("departments").doc(departmentId);
+    batch.set(collegeRef, {name: collegeName, code: collegeId.replace("college-", "").slice(0, 12).toUpperCase(), normalizedName: collegeName.toLowerCase(), normalizedCode: collegeId, active: true, status: "ACTIVE", createdBy: actorId, updatedBy: actorId, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()});
+    batch.set(departmentRef, {name: "Academic Programs", code: "PROGRAMS", collegeId, normalizedName: `${collegeName.toLowerCase()} academic programs`, normalizedCode: `${collegeId}-programs`, active: true, status: "ACTIVE", createdBy: actorId, updatedBy: actorId, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()});
+    for (const courseName of courseNames) {
+      const courseId = `${departmentId}-${courseName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+      batch.set(db.collection("courses").doc(courseId), {name: courseName, code: courseName.replace(/[^A-Za-z0-9]/g, "").slice(0, 12).toUpperCase(), normalizedName: courseName.toLowerCase(), normalizedCode: courseId, collegeId, departmentId, active: true, status: "ACTIVE", createdBy: actorId, updatedBy: actorId, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()});
+    }
+  }
+  await batch.commit();
+  return {created: true, colleges: Object.keys(DEFAULT_ACADEMIC_STRUCTURE).length};
+});
+
 export const saveOrganizationRecord = onCall(async (request) => {
   const actorId = requireAuthenticatedUser(request);
   await requireSuperAdmin(actorId);

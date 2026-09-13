@@ -918,6 +918,13 @@ class AdminPortalRepository {
     'archived': archived,
   });
 
+  Future<int> initializeAcademicStructure() async {
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('initializeAcademicStructure')
+        .call<Map<String, dynamic>>();
+    return (result.data['colleges'] as num?)?.toInt() ?? 0;
+  }
+
   Future<void> updateStaffOrganization({
     required String userId,
     required String departmentId,
