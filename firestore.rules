@@ -26,6 +26,10 @@ service cloud.firestore {
       return currentAccessRole() in ['portalStaff', 'counselor', 'admin']
         && isVerifiedEmail()
         && (
+          // The guarded super-admin record predates the staff-request
+          // lifecycle. It is Auth-verified and is not an applicant request.
+          currentAccessRole() == 'admin'
+          ||
           !exists(/databases/$(database)/documents/users/$(request.auth.uid))
           || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.staffAccountStatus == null
           || (

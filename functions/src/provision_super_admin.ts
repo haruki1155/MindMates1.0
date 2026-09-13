@@ -117,6 +117,7 @@ async function main(): Promise<void> {
       employeeId, employeeIdKey, position, department, populationRole: "nonTeaching",
       declaredRole: "nonTeaching", role: "staff", accessRole: "admin",
       staffAccountStatus: "approved", verificationStatus: "verified", verifiedBy: user.uid,
+      approvedRole: "admin", registrationStatus: "approved", accountStatus: "active",
       verifiedAt: profile.data()?.verifiedAt ?? FieldValue.serverTimestamp(), mustChangePassword: true,
       profileVersion: 3, createdAt: profile.data()?.createdAt ?? FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),

@@ -257,7 +257,7 @@ async function requireStaff(uid: string): Promise<FirebaseFirestore.DocumentData
   // New PAACC access requests must pass all three gates.  Older privileged
   // records remain readable while they are migrated, but no newly registered
   // staff account can reach protected functions until verification is synced.
-  if (profile.staffAccountStatus != null) {
+  if (accessRole !== "admin" && profile.staffAccountStatus != null) {
     const authUser = await getAuth().getUser(uid);
     if (profile.staffAccountStatus !== "approved" ||
         profile.accountStatus !== "active" ||
