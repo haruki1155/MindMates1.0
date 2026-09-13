@@ -1755,6 +1755,9 @@ class _AppointmentsPage extends StatefulWidget {
 class _AppointmentsPageState extends State<_AppointmentsPage> {
   String filter = 'All';
   String departmentFilter = 'All departments';
+  bool showHistory = false;
+  final Set<String> selectedIds = <String>{};
+  bool archiving = false;
   final _search = TextEditingController();
 
   @override
@@ -1775,7 +1778,9 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
       stream: widget.repository.watchAppointments(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const _AccessPanel();
-        final all = snapshot.data ?? const <AppointmentModel>[];
+        final all = (snapshot.data ?? const <AppointmentModel>[])
+            .where((appointment) => appointment.isArchived == showHistory)
+            .toList();
         final query = _search.text.trim().toLowerCase();
         final items = all.where((a) {
           final status = a.status.toLowerCase().trim();
@@ -1840,9 +1845,21 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                 .toSet()
                 .toList()
               ..sort();
+        selectedIds.removeWhere((id) => !items.any((appointment) => appointment.id == id));
+        final selectable = items.where((appointment) => appointment.isFinalized).toList();
+        final allSelected = selectable.isNotEmpty && selectable.every((appointment) => selectedIds.contains(appointment.id));
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(value: false, icon: Icon(Icons.inbox_outlined), label: Text('Active queue')),
+                ButtonSegment(value: true, icon: Icon(Icons.history_outlined), label: Text('History')),
+              ],
+              selected: {showHistory},
+              onSelectionChanged: (value) => setState(() { showHistory = value.first; filter = 'All'; selectedIds.clear(); }),
+            ),
+            const SizedBox(height: 14),
             LayoutBuilder(
               builder: (context, constraints) {
                 final cards = <Widget>[
@@ -1973,16 +1990,48 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               style: const TextStyle(color: AdminColors.muted, fontSize: 12),
             ),
             const SizedBox(height: 8),
+            if (selectable.isNotEmpty)
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                    Row(mainAxisSize: MainAxisSize.min, children: [
+                      Checkbox(value: allSelected, tristate: selectedIds.isNotEmpty && !allSelected, onChanged: (value) => setState(() { if (allSelected || value == false) { selectedIds.clear(); } else { selectedIds.addAll(selectable.map((appointment) => appointment.id)); } })),
+                      Text('Select finished (${selectable.length})'),
+                    ]),
+                    if (selectedIds.isNotEmpty)
+                      FilledButton.icon(onPressed: archiving ? null : _bulkArchive, icon: Icon(showHistory ? Icons.unarchive_outlined : Icons.archive_outlined), label: Text(showHistory ? 'Restore selected (${selectedIds.length})' : 'Move to history (${selectedIds.length})')),
+                    if (selectedIds.isNotEmpty) TextButton(onPressed: () => setState(() => selectedIds.clear()), child: const Text('Clear selection')),
+                  ]),
+                ),
+              ),
             if (items.isNotEmpty && MediaQuery.sizeOf(context).width >= 760)
               const _AppointmentListHeader(),
             ...items.map(
-              (a) => _AppointmentCard(item: a, repository: widget.repository),
+              (a) => _AppointmentCard(item: a, repository: widget.repository, selected: selectedIds.contains(a.id), onSelected: a.isFinalized ? (value) => setState(() { if (value) { selectedIds.add(a.id); } else { selectedIds.remove(a.id); } }) : null, onArchive: () => _archiveOne(a)),
             ),
           ],
         );
       },
     ),
   );
+
+  Future<void> _archiveOne(AppointmentModel appointment) async {
+    final action = showHistory ? 'restore' : 'move to history';
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(title: Text('${action[0].toUpperCase()}${action.substring(1)} appointment?'), content: Text(showHistory ? 'This appointment will return to the active queue.' : 'This finished appointment will be kept safely in History.'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(action[0].toUpperCase() + action.substring(1)))]));
+    if (confirmed != true) return;
+    try { await widget.repository.archiveAppointments(appointmentIds: [appointment.id], archived: !showHistory); if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(showHistory ? 'Appointment restored.' : 'Appointment moved to History.'))); } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The appointment could not be updated. Please try again.'))); }
+  }
+
+  Future<void> _bulkArchive() async {
+    final ids = selectedIds.toList();
+    final action = showHistory ? 'restore' : 'move to History';
+    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(title: Text('${action[0].toUpperCase()}${action.substring(1)} ${ids.length} appointments?'), content: Text('Only finished appointments are included. They will remain available in the ${showHistory ? 'active queue' : 'History'} view.'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(action[0].toUpperCase() + action.substring(1)))]));
+    if (confirmed != true) return;
+    setState(() => archiving = true);
+    try { final count = await widget.repository.archiveAppointments(appointmentIds: ids, archived: !showHistory); if (mounted) { setState(() => selectedIds.clear()); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$count appointments ${showHistory ? 'restored' : 'moved to History'}.'))); } } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The selected appointments could not be updated. Please try again.'))); } finally { if (mounted) setState(() => archiving = false); }
+  }
 }
 
 class _AppointmentSummaryCard extends StatelessWidget {
@@ -2039,9 +2088,12 @@ class _AppointmentSummaryCard extends StatelessWidget {
 }
 
 class _AppointmentCard extends StatelessWidget {
-  const _AppointmentCard({required this.item, required this.repository});
+  const _AppointmentCard({required this.item, required this.repository, required this.selected, required this.onSelected, required this.onArchive});
   final AppointmentModel item;
   final AdminPortalRepository repository;
+  final bool selected;
+  final ValueChanged<bool>? onSelected;
+  final VoidCallback onArchive;
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: 8),
@@ -2094,11 +2146,18 @@ class _AppointmentCard extends StatelessWidget {
           ),
           label: Text(item.isFinalized ? 'View' : 'Review'),
         );
+        final historyAction = item.isFinalized
+            ? IconButton(
+                tooltip: item.isArchived ? 'Restore from history' : 'Move to history',
+                onPressed: onArchive,
+                icon: Icon(item.isArchived ? Icons.unarchive_outlined : Icons.archive_outlined, size: 19),
+              )
+            : const SizedBox.shrink();
         if (box.maxWidth < 700) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(children: [student, const SizedBox(width: 10), action]),
+              Row(children: [if (onSelected != null) Checkbox(value: selected, onChanged: (value) => onSelected!(value ?? false)), student, const SizedBox(width: 4), historyAction, action]),
               const SizedBox(height: 10),
               Row(children: [schedule, department]),
               const SizedBox(height: 8),
@@ -2114,6 +2173,7 @@ class _AppointmentCard extends StatelessWidget {
         }
         return Row(
           children: [
+            if (onSelected != null) Checkbox(value: selected, onChanged: (value) => onSelected!(value ?? false)),
             student,
             const SizedBox(width: 16),
             schedule,
@@ -2125,6 +2185,7 @@ class _AppointmentCard extends StatelessWidget {
               color: _statusColor(item.status),
             ),
             const SizedBox(width: 8),
+            historyAction,
             action,
           ],
         );

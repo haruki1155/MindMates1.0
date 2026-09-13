@@ -31,6 +31,7 @@ class AppointmentModel {
     this.proposedScheduledTime,
     this.department,
     this.academicYearId,
+    this.archivedAt,
   });
 
   final String id;
@@ -62,6 +63,9 @@ class AppointmentModel {
   final String? proposedScheduledTime;
   final String? department;
   final String? academicYearId;
+  final DateTime? archivedAt;
+
+  bool get isArchived => archivedAt != null;
 
   bool get isFinalized => const {
     'completed',
@@ -105,6 +109,7 @@ class AppointmentModel {
       proposedScheduledTime: _optionalString(json['proposedScheduledTime']),
       department: _optionalString(json['department']),
       academicYearId: _optionalString(json['academicYearId']),
+      archivedAt: dateTimeFromFirestore(json['archivedAt']),
     );
   }
 
@@ -171,6 +176,7 @@ class AppointmentModel {
     String? proposedScheduledTime,
     String? department,
     String? academicYearId,
+    DateTime? archivedAt,
   }) {
     return AppointmentModel(
       id: id ?? this.id,
@@ -204,6 +210,7 @@ class AppointmentModel {
           proposedScheduledTime ?? this.proposedScheduledTime,
       department: department ?? this.department,
       academicYearId: academicYearId ?? this.academicYearId,
+      archivedAt: archivedAt ?? this.archivedAt,
     );
   }
 

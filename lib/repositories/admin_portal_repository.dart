@@ -889,6 +889,14 @@ class AdminPortalRepository {
     return (result.data['affected'] as num?)?.toInt() ?? userIds.length;
   }
 
+  Future<int> archiveAppointments({required List<String> appointmentIds, required bool archived}) async {
+    final result = await FirebaseFunctions.instance.httpsCallable('archiveAppointments').call<Map<String, dynamic>>({
+      'appointmentIds': appointmentIds,
+      'archived': archived,
+    });
+    return (result.data['affected'] as num?)?.toInt() ?? appointmentIds.length;
+  }
+
   Future<void> saveOrganizationRecord({
     required String kind,
     String? id,
