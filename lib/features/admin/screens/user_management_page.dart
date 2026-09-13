@@ -34,6 +34,16 @@ class _UserManagementPageState extends State<UserManagementPage> {
   void initState() {
     super.initState();
     publicUsers = _loadPublicUsers();
+    _syncStaffAuthMetadata();
+  }
+
+  Future<void> _syncStaffAuthMetadata() async {
+    if (!widget.repository.isSuperAdmin) return;
+    try {
+      await widget.repository.backfillStaffAccountAuthMetadata();
+    } catch (_) {
+      // The Firestore records still render if a metadata refresh is delayed.
+    }
   }
 
   @override
@@ -982,7 +992,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         ),
                       ],
                     ),
-                    _detail('Last sign-in', _date(user.lastActiveAt)),
+                    _detail('Last sign-in', _date(user.lastSignInAt)),
+                    _detail('Last active', _date(user.lastActiveAt)),
+                    _detail('Account created', _date(user.createdAt)),
                     _detail('Department', user.department ?? user.departmentId),
                     const SizedBox(height: 10),
                     const Text(
@@ -1587,7 +1599,7 @@ class _StaffRecordCard extends StatelessWidget {
                     ],
                     const SizedBox(height: 3),
                     Text(
-                      'Last sign-in: ${_date(user.lastActiveAt)}',
+                      'Last active: ${_date(user.lastActiveAt)}',
                       style: const TextStyle(
                         color: AdminColors.muted,
                         fontSize: 12,

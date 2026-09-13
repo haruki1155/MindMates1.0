@@ -550,6 +550,74 @@ export const bulkManageStaffAccounts = onCall(async (request) => {
   return {ok: true, affected: userIds.length};
 });
 
+function authMetadataTimestamp(value: string | undefined): Timestamp | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : Timestamp.fromDate(date);
+}
+
+// The Admin SDK is the source of truth for sign-in metadata. This deliberately
+// writes into the existing user profile, so the real-time User Management
+// stream remains the single data source for the UI.
+export const recordPortalSessionActivity = onCall(async (request) => {
+  const userId = requireAuthenticatedUser(request);
+  await requireStaff(userId);
+  const authUser = await getAuth().getUser(userId);
+  const lastSignInAt = authMetadataTimestamp(authUser.metadata.lastSignInTime);
+  const profileRef = db.collection("users").doc(userId);
+  await db.runTransaction(async (transaction) => {
+    const profile = await transaction.get(profileRef);
+    if (!profile.exists) return;
+    const currentActive = profile.data()?.lastActiveAt;
+    const activeMillis = currentActive instanceof Timestamp ? currentActive.toMillis() : 0;
+    const values: Record<string, FirebaseFirestore.FieldValue | Timestamp> = {
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+    if (lastSignInAt) values.lastSignInAt = lastSignInAt;
+    // Refresh application activity at most once per fifteen minutes. This
+    // represents portal use, not merely Firebase credential authentication.
+    if (Date.now() - activeMillis >= 15 * 60 * 1000) {
+      values.lastActiveAt = FieldValue.serverTimestamp();
+    }
+    transaction.update(profileRef, values);
+  });
+  return {ok: true};
+});
+
+// One safe, idempotent migration for accounts created before portal activity
+// tracking existed. It imports only Firebase Auth metadata and never invents a
+// "last active" time for older accounts.
+export const backfillStaffAccountAuthMetadata = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  await requireSuperAdmin(actorId);
+  const profiles = await db.collection("users").get();
+  const staff = profiles.docs.filter((profile) => {
+    const data = profile.data();
+    return data.staffAccountStatus != null || ["portalStaff", "counselor", "admin"].includes(String(data.accessRole ?? ""));
+  });
+  let updated = 0;
+  for (let start = 0; start < staff.length; start += 100) {
+    const slice = staff.slice(start, start + 100);
+    const result = await getAuth().getUsers(slice.map((profile) => ({uid: profile.id})));
+    const authByUid = new Map(result.users.map((user) => [user.uid, user]));
+    const batch = db.batch();
+    let batchUpdates = 0;
+    for (const profile of slice) {
+      const authUser = authByUid.get(profile.id);
+      const lastSignInAt = authMetadataTimestamp(authUser?.metadata.lastSignInTime);
+      if (!lastSignInAt) continue;
+      const current = profile.data().lastSignInAt;
+      const currentMillis = current instanceof Timestamp ? current.toMillis() : 0;
+      if (currentMillis === lastSignInAt.toMillis()) continue;
+      batch.update(profile.ref, {lastSignInAt, updatedAt: FieldValue.serverTimestamp()});
+      updated++;
+      batchUpdates++;
+    }
+    if (batchUpdates > 0) await batch.commit();
+  }
+  return {ok: true, updated, scanned: staff.length};
+});
+
 const POPULATION_ROLES = ["student", "teaching", "nonTeaching"] as const;
 const ACCESS_ROLES = ["appUser", "portalStaff", "counselor", "admin"] as const;
 export type AccessRoleValue = typeof ACCESS_ROLES[number];

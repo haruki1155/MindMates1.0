@@ -185,7 +185,9 @@ class AdminPortalRepository {
     );
     final user = credential.user;
     if (user == null) throw StateError('Unable to identify staff account.');
-    return evaluatePortalAccess(refreshUser: true);
+    final evaluation = await evaluatePortalAccess(refreshUser: true);
+    if (evaluation.isGranted) await _recordPortalSessionActivity();
+    return evaluation;
   }
 
   Future<PortalAccessEvaluation> evaluatePortalAccess({
@@ -299,7 +301,25 @@ class AdminPortalRepository {
 
   Future<bool> restoreSession() async {
     final evaluation = await evaluatePortalAccess(refreshUser: true);
+    if (evaluation.isGranted) await _recordPortalSessionActivity();
     return evaluation.isGranted;
+  }
+
+  Future<void> _recordPortalSessionActivity() async {
+    try {
+      await FirebaseFunctions.instance
+          .httpsCallable('recordPortalSessionActivity')
+          .call<void>();
+    } catch (_) {
+      // Activity telemetry must never interrupt an otherwise valid login.
+    }
+  }
+
+  Future<int> backfillStaffAccountAuthMetadata() async {
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('backfillStaffAccountAuthMetadata')
+        .call<Map<String, dynamic>>();
+    return (result.data['updated'] as num?)?.toInt() ?? 0;
   }
 
   Future<StaffAccessRequestSubmission> registerStaff({

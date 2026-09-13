@@ -41,6 +41,7 @@ class UserModel {
     this.dayStreak = 0,
     this.longestStreak = 0,
     this.lastActivityDateKey,
+    this.lastSignInAt,
     this.lastActiveAt,
     this.activeDateKeys = const [],
     this.avatarAssetName,
@@ -90,6 +91,7 @@ class UserModel {
   final int dayStreak;
   final int longestStreak;
   final String? lastActivityDateKey;
+  final DateTime? lastSignInAt;
   final DateTime? lastActiveAt;
   final List<String> activeDateKeys;
   final String? avatarAssetName;
@@ -204,6 +206,7 @@ class UserModel {
     int? dayStreak,
     int? longestStreak,
     String? lastActivityDateKey,
+    DateTime? lastSignInAt,
     DateTime? lastActiveAt,
     List<String>? activeDateKeys,
     String? avatarAssetName,
@@ -251,6 +254,7 @@ class UserModel {
       dayStreak: dayStreak ?? this.dayStreak,
       longestStreak: longestStreak ?? this.longestStreak,
       lastActivityDateKey: lastActivityDateKey ?? this.lastActivityDateKey,
+      lastSignInAt: lastSignInAt ?? this.lastSignInAt,
       lastActiveAt: lastActiveAt ?? this.lastActiveAt,
       activeDateKeys: activeDateKeys ?? this.activeDateKeys,
       avatarAssetName: avatarAssetName ?? this.avatarAssetName,
@@ -333,6 +337,7 @@ class UserModel {
       dayStreak: _intOrZero(json['dayStreak']),
       longestStreak: _intOrZero(json['longestStreak']),
       lastActivityDateKey: _stringOrNull(json['lastActivityDateKey']),
+      lastSignInAt: _dateOrNull(json['lastSignInAt']),
       lastActiveAt: _dateOrNull(json['lastActiveAt']),
       activeDateKeys: _stringList(json['activeDateKeys']),
       avatarAssetName: _stringOrNull(json['avatarAssetName']),
@@ -391,6 +396,7 @@ class UserModel {
       'dayStreak': dayStreak,
       'longestStreak': longestStreak,
       'lastActivityDateKey': lastActivityDateKey ?? '',
+      'lastSignInAt': lastSignInAt?.toIso8601String(),
       'lastActiveAt': lastActiveAt?.toIso8601String(),
       'activeDateKeys': activeDateKeys,
       'avatarAssetName': avatarAssetName ?? '',
