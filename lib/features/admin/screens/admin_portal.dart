@@ -125,11 +125,22 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
     setState(() => _submitting = true);
     try {
       final repository = widget.repository ?? AdminPortalRepository();
-      await repository.signInStaff(
+      final access = await repository.signInStaff(
         schoolId: _schoolId.text,
         password: _password.text,
       );
       if (!mounted) return;
+      if (!access.isGranted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => PortalAccessStatusScreen(
+              repository: repository,
+              evaluation: access,
+            ),
+          ),
+        );
+        return;
+      }
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => repository.mustChangePassword
@@ -2032,6 +2043,233 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
     setState(() => archiving = true);
     try { final count = await widget.repository.archiveAppointments(appointmentIds: ids, archived: !showHistory); if (mounted) { setState(() => selectedIds.clear()); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$count appointments ${showHistory ? 'restored' : 'moved to History'}.'))); } } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The selected appointments could not be updated. Please try again.'))); } finally { if (mounted) setState(() => archiving = false); }
   }
+}
+
+class PortalAccessStatusScreen extends StatefulWidget {
+  const PortalAccessStatusScreen({
+    super.key,
+    required this.repository,
+    required this.evaluation,
+  });
+
+  final AdminPortalRepository repository;
+  final PortalAccessEvaluation evaluation;
+
+  @override
+  State<PortalAccessStatusScreen> createState() =>
+      _PortalAccessStatusScreenState();
+}
+
+class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
+  bool _busy = false;
+  String? _message;
+
+  String get _roleLabel => widget.evaluation.requestedRole == AccessRole.counselor
+      ? 'Counselor'
+      : 'PAACC Staff';
+
+  ({IconData icon, String title, String body}) get _content =>
+      switch (widget.evaluation.state) {
+        PortalAccessState.emailVerificationRequired => (
+          icon: Icons.mark_email_unread_outlined,
+          title: 'Email Verification Required',
+          body: 'Your password is correct, but your email address must be verified before your PAACC access request can be reviewed.',
+        ),
+        PortalAccessState.pendingAdminApproval => (
+          icon: Icons.hourglass_top_rounded,
+          title: 'Access Request Pending',
+          body: 'Your email has been verified. Your PAACC portal access request is waiting for administrator approval.',
+        ),
+        PortalAccessState.moreInformationRequired => (
+          icon: Icons.info_outline_rounded,
+          title: 'More Information Required',
+          body: widget.evaluation.reason?.trim().isNotEmpty == true
+              ? widget.evaluation.reason!
+              : 'An administrator needs more information before this access request can be approved.',
+        ),
+        PortalAccessState.suspended => (
+          icon: Icons.pause_circle_outline_rounded,
+          title: 'Account Access Suspended',
+          body: 'Your PAACC portal access is currently suspended. Contact an authorized MindMate administrator if you believe this is an error.',
+        ),
+        PortalAccessState.rejected => (
+          icon: Icons.cancel_outlined,
+          title: 'Access Request Closed',
+          body: 'This PAACC portal access request was not approved. Contact an authorized MindMate administrator for assistance.',
+        ),
+        PortalAccessState.disabled => (
+          icon: Icons.block_outlined,
+          title: 'Account Access Disabled',
+          body: 'This account is not currently enabled for PAACC portal access. Contact an authorized MindMate administrator.',
+        ),
+        PortalAccessState.accountNotFound => (
+          icon: Icons.person_search_outlined,
+          title: 'Portal Account Not Found',
+          body: 'This account does not have a PAACC portal access request. Request access or contact an authorized administrator.',
+        ),
+        PortalAccessState.noPortalRole => (
+          icon: Icons.lock_outline_rounded,
+          title: 'Portal Access Not Available',
+          body: 'This account does not currently have an approved PAACC portal role.',
+        ),
+        PortalAccessState.granted => (
+          icon: Icons.verified_outlined,
+          title: 'Access Approved',
+          body: 'Your PAACC portal account is active.',
+        ),
+      };
+
+  Future<void> _continue() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final latest = await widget.repository.evaluatePortalAccess(refreshUser: true);
+      if (!mounted) return;
+      if (latest.isGranted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => AdminPortalHome(repository: widget.repository)),
+        );
+        return;
+      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => PortalAccessStatusScreen(
+            repository: widget.repository,
+            evaluation: latest,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = FirebaseErrorMessage.describe(
+          error,
+          fallback: 'We could not refresh your access status. Please try again.',
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resend() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final cooldown = await widget.repository.resendStaffVerificationEmail();
+      if (!mounted) return;
+      setState(() {
+        _message = cooldown == Duration.zero
+            ? 'A new verification email was sent to ${widget.evaluation.email}.'
+            : 'Please wait ${cooldown.inSeconds} seconds before requesting another email.';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _message = FirebaseErrorMessage.describe(
+          error,
+          fallback: 'We could not send a verification email. Please try again.',
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _signOut() async {
+    await widget.repository.signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => AdminLoginScreen(repository: widget.repository)),
+      (_) => false,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final content = _content;
+    final verificationRequired = widget.evaluation.state ==
+        PortalAccessState.emailVerificationRequired;
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 500),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(content.icon, size: 52, color: _yellow),
+                      const SizedBox(height: 18),
+                      Text(content.title,
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 12),
+                      Text(content.body, textAlign: TextAlign.center,
+                          style: const TextStyle(color: AdminColors.muted, height: 1.45)),
+                      if (widget.evaluation.email.isNotEmpty) ...[
+                        const SizedBox(height: 18),
+                        _AccessDetail(label: 'Email', value: widget.evaluation.email),
+                      ],
+                      if (widget.evaluation.requestedRole != null) ...[
+                        const SizedBox(height: 10),
+                        _AccessDetail(label: 'Requested role', value: _roleLabel),
+                      ],
+                      if (widget.evaluation.reference != null) ...[
+                        const SizedBox(height: 10),
+                        _AccessDetail(label: 'Reference', value: widget.evaluation.reference!),
+                      ],
+                      if (_message != null) ...[
+                        const SizedBox(height: 18),
+                        Text(_message!, textAlign: TextAlign.center,
+                            style: const TextStyle(color: AdminColors.muted)),
+                      ],
+                      const SizedBox(height: 26),
+                      if (verificationRequired)
+                        SizedBox(width: double.infinity, child: FilledButton(
+                          onPressed: _busy ? null : _resend,
+                          child: Text(_busy ? 'Sending…' : 'Resend Verification Email'),
+                        )),
+                      if (verificationRequired) const SizedBox(height: 10),
+                      if (verificationRequired ||
+                          widget.evaluation.state == PortalAccessState.pendingAdminApproval)
+                        SizedBox(width: double.infinity, child: OutlinedButton(
+                          onPressed: _busy ? null : _continue,
+                          child: Text(_busy ? 'Checking…' : 'Continue'),
+                        )),
+                      const SizedBox(height: 4),
+                      TextButton(onPressed: _busy ? null : _signOut, child: const Text('Sign Out')),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AccessDetail extends StatelessWidget {
+  const _AccessDetail({required this.label, required this.value});
+  final String label;
+  final String value;
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: [
+      Text(label, style: const TextStyle(color: AdminColors.muted)),
+      Flexible(child: Text(value, textAlign: TextAlign.end,
+          style: const TextStyle(fontWeight: FontWeight.w700))),
+    ],
+  );
 }
 
 class _AppointmentSummaryCard extends StatelessWidget {

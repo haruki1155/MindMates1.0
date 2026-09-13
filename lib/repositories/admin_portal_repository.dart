@@ -120,6 +120,35 @@ class StaffAccessRequestSubmission {
   final String? reference;
 }
 
+enum PortalAccessState {
+  granted,
+  emailVerificationRequired,
+  pendingAdminApproval,
+  moreInformationRequired,
+  suspended,
+  disabled,
+  rejected,
+  accountNotFound,
+  noPortalRole,
+}
+
+class PortalAccessEvaluation {
+  const PortalAccessEvaluation({
+    required this.state,
+    this.email = '',
+    this.requestedRole,
+    this.reference,
+    this.reason,
+  });
+
+  final PortalAccessState state;
+  final String email;
+  final AccessRole? requestedRole;
+  final String? reference;
+  final String? reason;
+  bool get isGranted => state == PortalAccessState.granted;
+}
+
 class AdminPortalRepository {
   AdminPortalRepository({FirestoreService? firestoreService})
     : _firestoreService = firestoreService ?? FirestoreService();
@@ -146,7 +175,7 @@ class AdminPortalRepository {
     return AccessRole.parse(effectiveRole, legacyRole: profile?['role']);
   }
 
-  Future<void> signInStaff({
+  Future<PortalAccessEvaluation> signInStaff({
     required String schoolId,
     required String password,
   }) async {
@@ -156,31 +185,93 @@ class AdminPortalRepository {
     );
     final user = credential.user;
     if (user == null) throw StateError('Unable to identify staff account.');
+    return evaluatePortalAccess(refreshUser: true);
+  }
+
+  Future<PortalAccessEvaluation> evaluatePortalAccess({
+    bool refreshUser = false,
+  }) async {
+    var user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return const PortalAccessEvaluation(state: PortalAccessState.accountNotFound);
+    }
+    if (refreshUser) {
+      await user.reload();
+      user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        return const PortalAccessEvaluation(state: PortalAccessState.accountNotFound);
+      }
+      await user.getIdToken(true);
+    }
     final profile = await _firestoreService.getDocument(
       FirestoreCollections.users,
       user.uid,
     );
-    final role = _profileAccessRole(profile);
-    final status = StaffAccountStatus.parse(profile?['staffAccountStatus']);
-    _mustChangePassword = profile?['mustChangePassword'] == true;
+    if (profile == null) {
+      return PortalAccessEvaluation(
+        state: PortalAccessState.accountNotFound,
+        email: user.email ?? '',
+      );
+    }
+    final isStaffRequest = profile['staffAccountStatus'] != null;
+    if (isStaffRequest && !user.emailVerified) {
+      return PortalAccessEvaluation(
+        state: PortalAccessState.emailVerificationRequired,
+        email: user.email ?? '',
+        requestedRole: AccessRole.parse(profile['requestedRole']),
+        reference: _requestReference(profile),
+      );
+    }
+    if (isStaffRequest && user.emailVerified) {
+      try {
+        await FirebaseFunctions.instance
+            .httpsCallable('syncStaffEmailVerification')
+            .call<Map<String, dynamic>>();
+      } on FirebaseFunctionsException catch (error) {
+        // A missing request is handled below from the profile. A network or
+        // server error must be shown as such instead of advancing the user to
+        // a misleading pending-review state.
+        if (error.code != 'not-found') rethrow;
+      }
+    }
+    final refreshedProfile = isStaffRequest
+        ? await _firestoreService.getDocument(FirestoreCollections.users, user.uid)
+        : profile;
+    final resolvedProfile = refreshedProfile ?? profile;
+    final role = _profileAccessRole(resolvedProfile);
+    final status = StaffAccountStatus.parse(resolvedProfile['staffAccountStatus']);
+    final registrationStatus = resolvedProfile['registrationStatus']?.toString();
+    _mustChangePassword = resolvedProfile['mustChangePassword'] == true;
     if (status == StaffAccountStatus.pending) {
-      throw StateError(
-        'Your staff registration is awaiting administrator approval.',
+      return PortalAccessEvaluation(
+        state: registrationStatus == 'more_information_required'
+            ? PortalAccessState.moreInformationRequired
+            : PortalAccessState.pendingAdminApproval,
+        email: user.email ?? '',
+        requestedRole: AccessRole.parse(resolvedProfile['requestedRole']),
+        reference: _requestReference(resolvedProfile),
+        reason: resolvedProfile['moreInformationReason']?.toString(),
       );
     }
     if (status == StaffAccountStatus.rejected) {
-      await FirebaseAuth.instance.signOut();
-      throw StateError(
-        'Your staff registration was rejected. Contact the administrator.',
+      return PortalAccessEvaluation(
+        state: PortalAccessState.rejected,
+        email: user.email ?? '',
       );
     }
     if (status == StaffAccountStatus.disabled) {
-      await FirebaseAuth.instance.signOut();
-      throw StateError('This staff account is disabled.');
+      return PortalAccessEvaluation(
+        state: registrationStatus == 'approved'
+            ? PortalAccessState.suspended
+            : PortalAccessState.disabled,
+        email: user.email ?? '',
+      );
     }
     if (!role.canUsePortal) {
-      await FirebaseAuth.instance.signOut();
-      throw StateError('This account does not have staff access.');
+      return PortalAccessEvaluation(
+        state: PortalAccessState.noPortalRole,
+        email: user.email ?? '',
+      );
     }
     _currentAccessRole = role;
     if (role == AccessRole.admin) {
@@ -190,6 +281,16 @@ class AdminPortalRepository {
       action: 'STAFF_SIGNED_IN',
       category: 'AUTHENTICATION',
     );
+    return PortalAccessEvaluation(
+      state: PortalAccessState.granted,
+      email: user.email ?? '',
+    );
+  }
+
+  String? _requestReference(Map<String, dynamic> profile) {
+    final requestId = profile['accessRequestId']?.toString().trim() ?? '';
+    final end = requestId.length < 8 ? requestId.length : 8;
+    return requestId.isEmpty ? null : 'REQ-${requestId.substring(0, end).toUpperCase()}';
   }
 
   User? get currentAuthUser => FirebaseAuth.instance.currentUser;
@@ -197,24 +298,8 @@ class AdminPortalRepository {
       FirebaseAuth.instance.authStateChanges();
 
   Future<bool> restoreSession() async {
-    final user = currentAuthUser;
-    if (user == null) return false;
-    final profile = await _firestoreService.getDocument(
-      FirestoreCollections.users,
-      user.uid,
-    );
-    final status = StaffAccountStatus.parse(profile?['staffAccountStatus']);
-    _mustChangePassword = profile?['mustChangePassword'] == true;
-    final role = _profileAccessRole(profile);
-    if (status == StaffAccountStatus.approved ||
-        (status == null && role.canUsePortal)) {
-      _currentAccessRole = role;
-      if (role == AccessRole.admin) {
-        _isSuperAdmin = await _confirmSuperAdmin();
-      }
-      return role.canUsePortal;
-    }
-    return false;
+    final evaluation = await evaluatePortalAccess(refreshUser: true);
+    return evaluation.isGranted;
   }
 
   Future<StaffAccessRequestSubmission> registerStaff({
@@ -557,6 +642,21 @@ class AdminPortalRepository {
               )
               .toList(growable: false),
         );
+  }
+
+  static DateTime? _lastVerificationEmailSentAt;
+
+  Future<Duration> resendStaffVerificationEmail() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw StateError('Sign in is required to resend verification.');
+    final now = DateTime.now();
+    final previous = _lastVerificationEmailSentAt;
+    if (previous != null && now.difference(previous) < const Duration(seconds: 60)) {
+      return const Duration(seconds: 60) - now.difference(previous);
+    }
+    await user.sendEmailVerification();
+    _lastVerificationEmailSentAt = now;
+    return Duration.zero;
   }
 
   Future<void> managePortalNotification(

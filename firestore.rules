@@ -23,7 +23,16 @@ service cloud.firestore {
     }
 
     function hasPortalAccess() {
-      return currentAccessRole() in ['portalStaff', 'counselor', 'admin'];
+      return currentAccessRole() in ['portalStaff', 'counselor', 'admin']
+        && isVerifiedEmail()
+        && (
+          !exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.staffAccountStatus == null
+          || (
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.staffAccountStatus == 'approved'
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountStatus == 'active'
+          )
+        );
     }
 
     function hasClinicalAccess() {

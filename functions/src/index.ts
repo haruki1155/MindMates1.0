@@ -245,13 +245,25 @@ function manilaDateKey(date: Date): string {
 
 async function requireStaff(uid: string): Promise<FirebaseFirestore.DocumentData> {
   const user = await db.collection("users").doc(uid).get();
-  const legacyRole = String(user.data()?.role ?? "").toLowerCase();
-  const accessRole = String(user.data()?.accessRole ??
+  const profile = user.data() ?? {};
+  const legacyRole = String(profile.role ?? "").toLowerCase();
+  const accessRole = String(profile.accessRole ??
     (legacyRole === "admin" || legacyRole === "counselor" ? legacyRole : "appUser"));
   if (!["portalStaff", "counselor", "admin"].includes(accessRole)) {
     throw new HttpsError("permission-denied", "Staff access is required.");
   }
-  return {...(user.data() ?? {}), accessRole};
+  // New PAACC access requests must pass all three gates.  Older privileged
+  // records remain readable while they are migrated, but no newly registered
+  // staff account can reach protected functions until verification is synced.
+  if (profile.staffAccountStatus != null) {
+    const authUser = await getAuth().getUser(uid);
+    if (profile.staffAccountStatus !== "approved" ||
+        profile.accountStatus !== "active" ||
+        !authUser.emailVerified) {
+      throw new HttpsError("permission-denied", "Your PAACC portal access is not active.");
+    }
+  }
+  return {...profile, accessRole};
 }
 
 function configuredSuperAdminUid(): string {
@@ -320,26 +332,78 @@ export const registerStaffAccount = onCall(async (request) => {
       accessRole: "appUser", staffAccountStatus: "pending", verificationStatus: "pending",
       requestedRole, requestedAccessRole: requestedRole, approvedRole: null,
       accessRequestId: requestRef.id,
-      registrationStatus: "pending_review", accountStatus: "disabled",
+      registrationStatus: "email_verification_required", accountStatus: "pending",
       profileVersion: 3, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
     transaction.create(requestRef, {
       requestId: requestRef.id, applicantUserId: userId, firstName, lastName,
       employeeId, email, position, office: "PAACC / Guidance Office", requestedRole,
-      registrationStatus: "pending_review", submittedAt: FieldValue.serverTimestamp(),
+      registrationStatus: "email_verification_required", submittedAt: FieldValue.serverTimestamp(),
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
     writeAudit(transaction, db, {actorId: userId, actorNameSnapshot: `${firstName} ${lastName}`,
       actorRoleSnapshot: "appUser", action: "STAFF_ACCESS_REQUEST_SUBMITTED",
       category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: userId,
-      metadata: {after: {registrationStatus: "pending_review", requestedRole}, targetLabel: email}});
+      metadata: {after: {registrationStatus: "email_verification_required", requestedRole}, targetLabel: email}});
   });
-  try {
-    await notifyAccessRequestAdmins(requestRef.id, `${firstName} ${lastName}`, requestedRole);
-  } catch (error) {
-    console.warn('Access request was saved but administrator notification delivery failed.', error);
-  }
   return {ok: true, requestId: requestRef.id, reference: `REQ-${requestRef.id.slice(0, 8).toUpperCase()}`};
+});
+
+// Firebase Auth is the authority for email ownership.  The browser calls this
+// after a verification link is opened (and again on sign-in), allowing the
+// portal profile to advance to admin review without trusting client data.
+export const syncStaffEmailVerification = onCall(async (request) => {
+  const userId = requireAuthenticatedUser(request);
+  const authUser = await getAuth().getUser(userId);
+  const target = db.collection("users").doc(userId);
+  const profile = await target.get();
+  if (!profile.exists || profile.data()?.staffAccountStatus == null) {
+    throw new HttpsError("not-found", "PAACC access request not found.");
+  }
+  if (!authUser.emailVerified) {
+    return {emailVerified: false, registrationStatus: "email_verification_required"};
+  }
+  let notify = false;
+  let requestId = "";
+  let applicantName = "";
+  let requestedRole = "portalStaff";
+  await db.runTransaction(async (transaction) => {
+    const before = await transaction.get(target);
+    const data = before.data() ?? {};
+    requestId = String(data.accessRequestId ?? "");
+    applicantName = String(data.name ?? `${data.firstName ?? ""} ${data.lastName ?? ""}`).trim();
+    requestedRole = String(data.requestedRole ?? "portalStaff");
+    const status = String(data.registrationStatus ?? "");
+    if (status === "email_verification_required") {
+      notify = true;
+      transaction.update(target, {
+        verificationStatus: "verified",
+        emailVerifiedAt: FieldValue.serverTimestamp(),
+        registrationStatus: "pending_admin_review",
+        accountStatus: "pending",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      if (requestId) {
+        transaction.set(db.collection("staffAccessRequests").doc(requestId), {
+          emailVerifiedAt: FieldValue.serverTimestamp(),
+          registrationStatus: "pending_admin_review",
+          updatedAt: FieldValue.serverTimestamp(),
+        }, {merge: true});
+      }
+      writeAudit(transaction, db, {actorId: userId, actorNameSnapshot: applicantName || "PAACC applicant",
+        actorRoleSnapshot: "appUser", action: "STAFF_EMAIL_VERIFIED",
+        category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: userId,
+        metadata: {after: {registrationStatus: "pending_admin_review"}}});
+    }
+  });
+  if (notify && requestId) {
+    try {
+      await notifyAccessRequestAdmins(requestId, applicantName || "A PAACC applicant", requestedRole);
+    } catch (error) {
+      console.warn("Email verification was saved but administrator notification delivery failed.", error);
+    }
+  }
+  return {emailVerified: true, registrationStatus: notify ? "pending_admin_review" : String(profile.data()?.registrationStatus ?? "pending_admin_review")};
 });
 
 export const reviewStaffRegistration = onCall(async (request) => {
@@ -358,17 +422,21 @@ export const reviewStaffRegistration = onCall(async (request) => {
   const target = db.collection("users").doc(targetUserId);
   await db.runTransaction(async (transaction) => {
     const before = await transaction.get(target);
-    if (!before.exists || !["pending", "pending_review", "more_information_required"].includes(String(before.data()?.registrationStatus ?? "pending_review"))) {
+    if (!before.exists || !["pending_admin_review", "more_information_required"].includes(String(before.data()?.registrationStatus ?? "email_verification_required"))) {
       throw new HttpsError("failed-precondition", "This registration is no longer pending.");
+    }
+    if (approve) {
+      const authUser = await getAuth().getUser(targetUserId);
+      if (!authUser.emailVerified || before.data()?.emailVerifiedAt == null) {
+        throw new HttpsError("failed-precondition", "The applicant must verify their email before approval.");
+      }
     }
     const status = approve ? "approved" : moreInfo ? "more_information_required" : "rejected";
     transaction.update(target, {
       staffAccountStatus: approve ? "approved" : moreInfo ? "pending" : "rejected",
       accessRole: approve ? accessRole : "appUser", approvedRole: approve ? accessRole : null,
-      registrationStatus: status, accountStatus: approve ? "active" : "disabled",
-      verificationStatus: approve ? "verified" : moreInfo ? "pending" : "rejected",
-      verifiedBy: approve ? actorId : null,
-      verifiedAt: approve ? FieldValue.serverTimestamp() : null,
+      registrationStatus: status, accountStatus: approve ? "active" : moreInfo ? "pending" : "disabled",
+      verificationStatus: before.data()?.verificationStatus ?? "pending",
       approvedBy: approve ? actorId : null,
       approvedAt: approve ? FieldValue.serverTimestamp() : null,
       moreInformationReason: moreInfo ? reason : null, reviewReason: reason,

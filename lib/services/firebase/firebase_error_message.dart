@@ -85,7 +85,7 @@ class FirebaseErrorMessage {
       case 'invalid-credential':
       case 'wrong-password':
       case 'user-not-found':
-        return 'School ID or password is incorrect.';
+        return 'Email address or password is incorrect.';
       case 'password-reset-unavailable':
         return error is FirebaseAuthException &&
                 error.message?.trim().isNotEmpty == true

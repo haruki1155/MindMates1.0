@@ -642,6 +642,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
     var role = user.requestedRole == AccessRole.counselor
         ? AccessRole.counselor
         : AccessRole.portalStaff;
+    final emailVerified = user.verificationStatus == VerificationStatus.verified &&
+        user.registrationStatus != 'email_verification_required';
     final reason = TextEditingController();
     final decision = await showDialog<String>(
       context: context,
@@ -656,6 +658,29 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 child: Text(
                   '${user.email}\nEmployee ID: ${user.employeeId ?? 'Not provided'}\nPosition: ${user.position ?? 'Not provided'}',
                   style: const TextStyle(color: AdminColors.muted, height: 1.45),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  children: [
+                    Icon(
+                      emailVerified ? Icons.verified_outlined : Icons.mark_email_unread_outlined,
+                      size: 18,
+                      color: emailVerified ? AdminColors.accentStrong : AdminColors.muted,
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
+                      emailVerified
+                          ? 'Email verified — ready for review'
+                          : 'Waiting for email verification',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: emailVerified ? null : AdminColors.muted,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 14),
@@ -688,9 +713,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     child: Text('Counselor'),
                   ),
                 ],
-                onChanged: (value) {
+                onChanged: emailVerified ? (value) {
                   if (value != null) setDialogState(() => role = value);
-                },
+                } : null,
               ),
               const SizedBox(height: 10),
               TextField(
@@ -705,11 +730,15 @@ class _UserManagementPageState extends State<UserManagementPage> {
               child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'more_information'),
+              onPressed: emailVerified
+                  ? () => Navigator.pop(dialogContext, 'more_information')
+                  : null,
               child: const Text('Request more information'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, 'approve'),
+              onPressed: emailVerified
+                  ? () => Navigator.pop(dialogContext, 'approve')
+                  : null,
               child: const Text('Approve access'),
             ),
           ],
@@ -1886,6 +1915,8 @@ String _accountStatus(UserModel user) => switch (user.staffAccountStatus) {
   StaffAccountStatus.pending => user.registrationStatus ==
           'more_information_required'
       ? 'More information required'
+      : user.registrationStatus == 'email_verification_required'
+      ? 'Waiting for email'
       : 'Pending review',
   StaffAccountStatus.disabled => 'Suspended',
   StaffAccountStatus.rejected => 'Closed',

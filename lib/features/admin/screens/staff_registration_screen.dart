@@ -280,13 +280,14 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(
-          title: const Text('Access Request Submitted'),
+          title: const Text('Verify Your Email'),
           content: Text(
-            'Your $roleLabel access request is pending administrator review.\n\n'
-            '${submission.verificationSent ? 'A verification email was sent to' : 'The request was saved, but we could not send a verification email to'} '
+            'Your $roleLabel access request has been created.\n\n'
+            '${submission.verificationSent ? 'We sent a verification email to' : 'The request was saved, but a verification email could not be sent to'} '
             '${email.text.trim()}.\n\n'
+            'Verify your email address before your request can be reviewed by an administrator.\n\n'
             'Reference: ${submission.reference ?? 'Pending'}\n'
-            'You will be able to access the PAACC portal after approval.',
+            'After verification, sign in again to view the status of your request.',
           ),
           actions: [
             TextButton(
