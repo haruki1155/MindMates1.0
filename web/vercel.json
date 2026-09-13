@@ -3,6 +3,10 @@
     {
       "source": "/__/auth/action",
       "destination": "/index.html"
+    },
+    {
+      "source": "/verify-email",
+      "destination": "/index.html"
     }
   ]
 }
