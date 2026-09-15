@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=staging",
+  "buildCommand": "bash tool/vercel_build.sh",
   "outputDirectory": "build/web",
   "cleanUrls": true,
   "rewrites": [
