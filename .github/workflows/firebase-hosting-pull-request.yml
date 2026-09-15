@@ -21,7 +21,7 @@ jobs:
       - run: flutter pub get
       - run: flutter test test/app_bootstrap_test.dart
       - name: Build admin web portal
-        run: flutter build web --release --target lib/admin_main.dart --dart-define=RECAPTCHA_V3_SITE_KEY=${{ secrets.RECAPTCHA_V3_SITE_KEY }}
+        run: flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=production --dart-define=RECAPTCHA_V3_SITE_KEY=${{ secrets.RECAPTCHA_V3_SITE_KEY }}
       - name: Verify Firebase Hosting service account
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MIND_MATES_CD2CF || secrets.FIREBASE_SERVICE_ACCOUNT }}
