@@ -1,0 +1,33 @@
+{
+  "name": "mindmates-web",
+  "version": "0.1.0",
+  "description": "MindMate is a Flutter wellness app with a separate staff administration portal and Firebase backend. The mobile app uses `lib/main.dart`; the admin web portal uses `lib/admin_main.dart`.",
+  "private": true,
+  "directories": {
+    "doc": "docs",
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "flutter test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/haruki1155/MindMates1.0.git"
+  },
+  "keywords": [
+    "flutter",
+    "mindmates",
+    "wellness",
+    "vercel"
+  ],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/haruki1155/MindMates1.0/issues"
+  },
+  "homepage": "https://github.com/haruki1155/MindMates1.0#readme",
+  "dependencies": {
+    "@vercel/analytics": "^2.0.1"
+  }
+}
