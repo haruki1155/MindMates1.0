@@ -338,7 +338,10 @@ class AppointmentCard extends StatelessWidget {
 
   Widget _actions(BuildContext context, AppointmentUiState ui) {
     final status = appointment.lifecycleStatus;
-    if (status == AppointmentStatus.confirmed) {
+    if ({
+      AppointmentStatus.requested,
+      AppointmentStatus.confirmed,
+    }.contains(status)) {
       return Row(
         children: [
           _OutlineAction(label: 'View Details', onPressed: onView),
@@ -404,15 +407,19 @@ class AppointmentCard extends StatelessWidget {
     }
     return Row(
       children: [
-        _OutlineAction(label: 'View Details', onPressed: onView),
+        Expanded(
+          child: _OutlineAction(label: 'View Details', onPressed: onView),
+        ),
         const SizedBox(width: 8),
-        TextButton(
-          onPressed: isSaving ? null : onCancel,
-          style: TextButton.styleFrom(
-            minimumSize: const Size(44, 48),
-            foregroundColor: Colors.red.shade800,
+        Expanded(
+          child: TextButton(
+            onPressed: isSaving ? null : onCancel,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(44, 48),
+              foregroundColor: Colors.red.shade800,
+            ),
+            child: Text(isSaving ? 'Cancelling...' : 'Cancel Request'),
           ),
-          child: Text(isSaving ? 'Cancelling...' : 'Cancel Request'),
         ),
       ],
     );

@@ -322,9 +322,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('11:00 AM'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm Appointment').last);
+    await tester.tap(find.text('Submit Appointment Request'));
     await tester.pumpAndSettle();
-    expect(find.text('Confirm Appointment'), findsOneWidget);
+    expect(find.text('Appointment Request Submitted'), findsOneWidget);
 
     await tester.tap(find.text('View My Appointments'));
     await tester.pumpAndSettle();
@@ -353,6 +353,8 @@ void main() {
     Navigator.of(tester.element(find.text('Appointment Details'))).pop();
     await tester.pumpAndSettle();
 
+    await tester.tap(find.text('Manage'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Add to Calendar'));
     await tester.pumpAndSettle();
     expect(find.text('Appointment Calendar'), findsOneWidget);
@@ -434,7 +436,7 @@ Future<void> _createAppointment(WidgetTester tester) async {
   await tester.pumpAndSettle();
   await tester.tap(find.text('11:00 AM'));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Confirm Appointment').last);
+  await tester.tap(find.text('Submit Appointment Request'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('View My Appointments'));
   await tester.pumpAndSettle();

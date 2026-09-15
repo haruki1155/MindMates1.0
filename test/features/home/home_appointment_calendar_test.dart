@@ -85,9 +85,8 @@ void main() {
     await tester.tap(find.byTooltip('Calendar'));
     await tester.pumpAndSettle();
 
-    expect(find.byType(HomeAppointmentCalendarScreen), findsOneWidget);
-    expect(find.text('April 2026'), findsOneWidget);
-    expect(find.text('Appointment Calendar'), findsOneWidget);
+    expect(find.byType(PaccCounselingScreen), findsOneWidget);
+    expect(find.text('My Appointments'), findsOneWidget);
   });
 
   testWidgets('empty Home preview opens PACC intake booking flow', (
@@ -260,6 +259,10 @@ class _FakeAppointmentRepository extends AppointmentRepository {
   Future<List<AppointmentModel>> fetchAppointments(String userId) async {
     return items.where((item) => item.userId == userId).toList();
   }
+
+  @override
+  Stream<List<AppointmentModel>> watchAppointments(String userId) =>
+      Stream.value(items.where((item) => item.userId == userId).toList());
 }
 
 class _FakeUserRepository extends UserRepository {}
