@@ -1,19 +1,37 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 import '../database/firestore_collections.dart';
 import '../models/appointment_model.dart';
 import '../services/firebase/firestore_service.dart';
-import 'user_repository.dart';
+import '../services/firebase/firebase_callable_router.dart';
 
 class AppointmentRepository {
   AppointmentRepository({
     FirestoreService? firestoreService,
-    UserRepository? userRepository,
-  }) : _firestoreService = firestoreService ?? FirestoreService(),
-       _userRepository = userRepository ?? UserRepository();
+    this._functions,
+  }) : _firestoreService = firestoreService ?? FirestoreService();
 
   final FirestoreService _firestoreService;
-  final UserRepository _userRepository;
+  FirebaseFunctions? _functions;
+  FirebaseFunctions get _functionClient =>
+      _functions ??= FirebaseFunctions.instance;
+
+  Stream<List<AppointmentModel>> watchAppointments(String userId) =>
+      _firestoreService
+          .watchDocuments(
+            FirestoreCollections.appointments,
+            whereEquals: {'userId': userId},
+            orderBy: 'scheduledAt',
+            descending: false,
+          )
+          .map(
+            (docs) => docs
+                .map(
+                  (doc) =>
+                      AppointmentModel.fromJson(doc, id: doc['id']?.toString()),
+                )
+                .toList(growable: false),
+          );
 
   Future<List<AppointmentModel>> fetchAppointments(String userId) {
     return _firestoreService
@@ -37,26 +55,53 @@ class AppointmentRepository {
   Future<AppointmentModel> createAppointment(
     AppointmentModel appointment,
   ) async {
-    final profile = await _userRepository.fetchUserProfile(appointment.userId);
-    final data = appointment.toJson()
-      ..['populationRole'] = profile?.effectivePopulationRole?.storedValue ?? ''
-      ..['department'] = profile?.department ?? appointment.department ?? ''
-      ..['academicYearId'] = _academicYearFor(appointment.scheduledAt)
-      ..['createdAt'] = FieldValue.serverTimestamp()
-      ..['updatedAt'] = FieldValue.serverTimestamp();
-    final id = await _firestoreService.createDocument(
-      FirestoreCollections.appointments,
-      data,
+    // Callable data does not share Firestore's DateTime/Timestamp mapper.
+    // The backend contract intentionally uses epoch milliseconds so it can
+    // validate time without relying on a client serializer.
+    final payload = appointment.toJson()
+      ..['scheduledAt'] = appointment.scheduledAt.millisecondsSinceEpoch
+      ..remove('createdAt')
+      ..remove('updatedAt');
+    final result = await _functionClient
+        .routedCallable('createAppointmentRequest')
+        .call<Map<String, dynamic>>(payload);
+    final id = result.data['appointmentId']?.toString() ?? '';
+    if (id.isEmpty) throw StateError('Appointment request was not created.');
+    return appointment.copyWith(
+      id: id,
+      status: AppointmentStatus.requested.value,
+      updatedAt: DateTime.now(),
     );
-    await _userRepository.recordActivity(
-      appointment.userId,
-      UserActivityType.appointmentRequested,
-    );
-    return appointment.copyWith(id: id, updatedAt: DateTime.now());
   }
 
-  static String _academicYearFor(DateTime date) {
-    final start = date.month >= 6 ? date.year : date.year - 1;
-    return '$start-${start + 1}';
-  }
+  Future<void> cancelAppointment(String appointmentId, {String? reason}) =>
+      _action(appointmentId, 'cancel', reason: reason);
+
+  Future<void> acceptReschedule(String appointmentId) =>
+      _action(appointmentId, 'accept_reschedule');
+
+  Future<void> proposeReschedule(
+    String appointmentId,
+    DateTime scheduledAt,
+    String scheduledTime,
+  ) => _action(
+    appointmentId,
+    'propose_reschedule',
+    proposedScheduledAt: scheduledAt.millisecondsSinceEpoch,
+    proposedScheduledTime: scheduledTime,
+  );
+
+  Future<void> _action(
+    String appointmentId,
+    String action, {
+    String? reason,
+    int? proposedScheduledAt,
+    String? proposedScheduledTime,
+  }) => _functionClient.routedCallable('respondToAppointment').call({
+    'appointmentId': appointmentId,
+    'action': action,
+    if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+    'proposedScheduledAt': ?proposedScheduledAt,
+    'proposedScheduledTime': ?proposedScheduledTime,
+  });
 }

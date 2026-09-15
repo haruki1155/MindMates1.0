@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/appointment_model.dart';
 
 enum AppointmentDisplayStatus {
+  requested,
   pending,
   upcoming,
   confirmed,
@@ -15,7 +16,8 @@ enum AppointmentDisplayStatus {
 
 AppointmentDisplayStatus appointmentDisplayStatus(String value) {
   return switch (value.trim().toLowerCase()) {
-    'pending' => AppointmentDisplayStatus.pending,
+    'requested' => AppointmentDisplayStatus.requested,
+    'pending' => AppointmentDisplayStatus.requested,
     'upcoming' => AppointmentDisplayStatus.upcoming,
     'confirmed' => AppointmentDisplayStatus.confirmed,
     'reschedule_proposed' => AppointmentDisplayStatus.rescheduleProposed,
@@ -51,6 +53,7 @@ String formatAppointmentDate(DateTime date) {
 
 Color appointmentStatusColor(AppointmentDisplayStatus status) =>
     switch (status) {
+      AppointmentDisplayStatus.requested => const Color(0xFFF0A400),
       AppointmentDisplayStatus.pending => const Color(0xFFF0A400),
       AppointmentDisplayStatus.upcoming => const Color(0xFFE5AC00),
       AppointmentDisplayStatus.confirmed => const Color(0xFF3D8B68),
@@ -63,14 +66,14 @@ Color appointmentStatusColor(AppointmentDisplayStatus status) =>
 
 Future<void> showAppointmentDetailsSheet(
   BuildContext context,
-  AppointmentModel appointment,
-) {
+  AppointmentModel appointment, {
+  VoidCallback? onBookAppointment,
+}) {
   final contactSummary = [
     appointment.preferredContactMethod.trim(),
     appointment.contactNumber.trim(),
   ].where((value) => value.isNotEmpty).join(' | ');
   final details = <({IconData icon, String text})>[
-    (icon: Icons.person_outline, text: appointment.fullName),
     (
       icon: Icons.calendar_today_outlined,
       text: formatAppointmentDate(appointment.scheduledAt),
@@ -78,36 +81,19 @@ Future<void> showAppointmentDetailsSheet(
     (icon: Icons.schedule, text: appointment.scheduledTime),
     (icon: Icons.place_outlined, text: appointment.location),
     if (appointment.status.trim().isNotEmpty)
-      (icon: Icons.info_outline, text: appointment.status),
-    if ((appointment.counselorName ?? '').trim().isNotEmpty)
-      (icon: Icons.badge_outlined, text: appointment.counselorName!.trim()),
-    if ((appointment.staffReply ?? '').trim().isNotEmpty)
-      (icon: Icons.message_outlined, text: appointment.staffReply!.trim()),
+      (
+        icon: Icons.info_outline,
+        text: _friendlyStatus(appointment.lifecycleStatus),
+      ),
+    (icon: Icons.badge_outlined, text: _counselorText(appointment)),
     if (appointment.proposedScheduledAt != null)
       (
         icon: Icons.event_repeat_outlined,
         text:
-            'Proposed: ${formatAppointmentDate(appointment.proposedScheduledAt!)} ${appointment.proposedScheduledTime ?? ''}',
+            'Proposed schedule: ${formatAppointmentDate(appointment.proposedScheduledAt!)} ${appointment.proposedScheduledTime ?? ''}${appointment.proposedBy == null ? '' : ' (${appointment.proposedBy})'}',
       ),
     if (contactSummary.isNotEmpty)
       (icon: Icons.contact_phone_outlined, text: contactSummary),
-    if (appointment.email.trim().isNotEmpty)
-      (icon: Icons.email_outlined, text: appointment.email.trim()),
-    if ((appointment.address ?? '').trim().isNotEmpty)
-      (icon: Icons.home_outlined, text: appointment.address!.trim()),
-    if ((appointment.facebook ?? '').trim().isNotEmpty)
-      (icon: Icons.public, text: appointment.facebook!.trim()),
-    if ((appointment.sex ?? '').trim().isNotEmpty)
-      (icon: Icons.person, text: appointment.sex!.trim()),
-    if ((appointment.course ?? '').trim().isNotEmpty)
-      (icon: Icons.school_outlined, text: appointment.course!.trim()),
-    if ((appointment.yearLevel ?? '').trim().isNotEmpty)
-      (icon: Icons.auto_graph_outlined, text: appointment.yearLevel!.trim()),
-    if ((appointment.therapyBefore ?? '').trim().isNotEmpty)
-      (
-        icon: Icons.history,
-        text: 'Therapy before: ${appointment.therapyBefore!.trim()}',
-      ),
     if ((appointment.bestTime ?? '').trim().isNotEmpty)
       (
         icon: Icons.access_time,
@@ -172,10 +158,66 @@ Future<void> showAppointmentDetailsSheet(
                   style: const TextStyle(height: 1.45),
                 ),
               ],
+              if ((appointment.staffReply ?? '').trim().isNotEmpty) ...[
+                const Divider(height: 26),
+                const Text(
+                  'Appointment Activity',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  appointment.staffReply!.trim(),
+                  style: const TextStyle(height: 1.45),
+                ),
+              ],
+              if (onBookAppointment != null &&
+                  (appointment.lifecycleStatus == AppointmentStatus.cancelled ||
+                      appointment.lifecycleStatus ==
+                          AppointmentStatus.completed ||
+                      appointment.lifecycleStatus == AppointmentStatus.noShow ||
+                      appointment.lifecycleStatus ==
+                          AppointmentStatus.declined)) ...[
+                const Divider(height: 30),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      onBookAppointment();
+                    },
+                    icon: const Icon(Icons.add_circle_outline),
+                    label: Text(
+                      appointment.lifecycleStatus == AppointmentStatus.completed
+                          ? 'Book Follow-up'
+                          : 'Book Appointment',
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
       ),
     ),
   );
+}
+
+String _friendlyStatus(AppointmentStatus status) => switch (status) {
+  AppointmentStatus.requested ||
+  AppointmentStatus.legacyRequested => 'Awaiting Confirmation',
+  AppointmentStatus.confirmed => 'Confirmed',
+  AppointmentStatus.rescheduleProposed => 'Action Required',
+  AppointmentStatus.completed => 'Completed',
+  AppointmentStatus.cancelled => 'Cancelled',
+  AppointmentStatus.declined => 'Request Declined',
+  AppointmentStatus.noShow => 'Missed Appointment',
+  AppointmentStatus.unknown => 'Awaiting Confirmation',
+};
+
+String _counselorText(AppointmentModel appointment) {
+  final name = appointment.counselorName?.trim() ?? '';
+  if (name.isEmpty || name.toLowerCase() == 'admin') {
+    return 'PACC Counseling Staff';
+  }
+  return name;
 }

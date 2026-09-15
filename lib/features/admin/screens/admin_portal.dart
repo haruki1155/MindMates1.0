@@ -485,9 +485,12 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
             ),
     AdminPortalPage.users => UserManagementPage(
       repository: _repository,
-      onOpenAcademicStructure: () => _setPage(AdminPortalPage.academicStructure),
+      onOpenAcademicStructure: () =>
+          _setPage(AdminPortalPage.academicStructure),
     ),
-    AdminPortalPage.academicStructure => AcademicStructurePage(repository: _repository),
+    AdminPortalPage.academicStructure => AcademicStructurePage(
+      repository: _repository,
+    ),
     AdminPortalPage.profiling => ProfileManagementPage(repository: _repository),
     AdminPortalPage.appointments => _AppointmentsPage(
       repository: _repository,
@@ -543,8 +546,8 @@ class _Nav extends StatelessWidget {
     // Counselor case/profile access must come through an assigned-case
     // surface. The legacy organization-wide profiling screen is admin-only.
     AdminPortalPage.profiling => isSuperAdmin,
-    AdminPortalPage.cases || AdminPortalPage.followUps =>
-        accessRole == AccessRole.counselor,
+    AdminPortalPage.cases ||
+    AdminPortalPage.followUps => accessRole == AccessRole.counselor,
     AdminPortalPage.reports => accessRole.canAccessClinicalData,
     // Notifications are opened from the persistent header bell instead of
     // duplicating the destination in the workspace navigation.
@@ -1553,7 +1556,8 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
         title: Text(label),
         trailing: IconButton(
           icon: const Icon(Icons.add),
-          onPressed: () => _edit(context, kind, colleges, departments: departments),
+          onPressed: () =>
+              _edit(context, kind, colleges, departments: departments),
         ),
       ),
       if (records.isEmpty)
@@ -1571,7 +1575,13 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
                   size: 18,
                 ),
                 label: Text('${record.code}: ${record.name}'),
-                onPressed: () => _edit(context, kind, colleges, departments: departments, record: record),
+                onPressed: () => _edit(
+                  context,
+                  kind,
+                  colleges,
+                  departments: departments,
+                  record: record,
+                ),
               ),
             )
             .toList(),
@@ -1623,14 +1633,46 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
                             DropdownMenuItem(value: e.id, child: Text(e.name)),
                       )
                       .toList(),
-                  onChanged: (v) => setState(() { collegeId = v; departmentId = null; }),
+                  onChanged: (v) => setState(() {
+                    collegeId = v;
+                    departmentId = null;
+                  }),
                 ),
               if (kind == 'department' || kind == 'course')
                 DropdownButtonFormField<String>(
                   initialValue: kind == 'department' ? collegeId : departmentId,
-                  decoration: InputDecoration(labelText: kind == 'department' ? 'College' : 'Department'),
-                  items: (kind == 'department' ? colleges.where((e) => e.active).map((e) => DropdownMenuItem(value: e.id, child: Text(e.name))) : departments.where((e) => e.active && e.collegeId == collegeId).map((e) => DropdownMenuItem(value: e.id, child: Text(e.name)))).toList(),
-                  onChanged: (v) => setState(() { if (kind == 'department') collegeId = v; else departmentId = v; }),
+                  decoration: InputDecoration(
+                    labelText: kind == 'department' ? 'College' : 'Department',
+                  ),
+                  items:
+                      (kind == 'department'
+                              ? colleges
+                                    .where((e) => e.active)
+                                    .map(
+                                      (e) => DropdownMenuItem(
+                                        value: e.id,
+                                        child: Text(e.name),
+                                      ),
+                                    )
+                              : departments
+                                    .where(
+                                      (e) =>
+                                          e.active && e.collegeId == collegeId,
+                                    )
+                                    .map(
+                                      (e) => DropdownMenuItem(
+                                        value: e.id,
+                                        child: Text(e.name),
+                                      ),
+                                    ))
+                          .toList(),
+                  onChanged: (v) => setState(() {
+                    if (kind == 'department') {
+                      collegeId = v;
+                    } else {
+                      departmentId = v;
+                    }
+                  }),
                 ),
               SwitchListTile(
                 value: active,
@@ -1856,19 +1898,39 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                 .toSet()
                 .toList()
               ..sort();
-        selectedIds.removeWhere((id) => !items.any((appointment) => appointment.id == id));
-        final selectable = items.where((appointment) => appointment.isFinalized).toList();
-        final allSelected = selectable.isNotEmpty && selectable.every((appointment) => selectedIds.contains(appointment.id));
+        selectedIds.removeWhere(
+          (id) => !items.any((appointment) => appointment.id == id),
+        );
+        final selectable = items
+            .where((appointment) => appointment.isFinalized)
+            .toList();
+        final allSelected =
+            selectable.isNotEmpty &&
+            selectable.every(
+              (appointment) => selectedIds.contains(appointment.id),
+            );
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SegmentedButton<bool>(
               segments: const [
-                ButtonSegment(value: false, icon: Icon(Icons.inbox_outlined), label: Text('Active queue')),
-                ButtonSegment(value: true, icon: Icon(Icons.history_outlined), label: Text('History')),
+                ButtonSegment(
+                  value: false,
+                  icon: Icon(Icons.inbox_outlined),
+                  label: Text('Active queue'),
+                ),
+                ButtonSegment(
+                  value: true,
+                  icon: Icon(Icons.history_outlined),
+                  label: Text('History'),
+                ),
               ],
               selected: {showHistory},
-              onSelectionChanged: (value) => setState(() { showHistory = value.first; filter = 'All'; selectedIds.clear(); }),
+              onSelectionChanged: (value) => setState(() {
+                showHistory = value.first;
+                filter = 'All';
+                selectedIds.clear();
+              }),
             ),
             const SizedBox(height: 14),
             LayoutBuilder(
@@ -2005,22 +2067,77 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                    Row(mainAxisSize: MainAxisSize.min, children: [
-                      Checkbox(value: allSelected, tristate: selectedIds.isNotEmpty && !allSelected, onChanged: (value) => setState(() { if (allSelected || value == false) { selectedIds.clear(); } else { selectedIds.addAll(selectable.map((appointment) => appointment.id)); } })),
-                      Text('Select finished (${selectable.length})'),
-                    ]),
-                    if (selectedIds.isNotEmpty)
-                      FilledButton.icon(onPressed: archiving ? null : _bulkArchive, icon: Icon(showHistory ? Icons.unarchive_outlined : Icons.archive_outlined), label: Text(showHistory ? 'Restore selected (${selectedIds.length})' : 'Move to history (${selectedIds.length})')),
-                    if (selectedIds.isNotEmpty) TextButton(onPressed: () => setState(() => selectedIds.clear()), child: const Text('Clear selection')),
-                  ]),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(
+                            value: allSelected,
+                            tristate: selectedIds.isNotEmpty && !allSelected,
+                            onChanged: (value) => setState(() {
+                              if (allSelected || value == false) {
+                                selectedIds.clear();
+                              } else {
+                                selectedIds.addAll(
+                                  selectable.map(
+                                    (appointment) => appointment.id,
+                                  ),
+                                );
+                              }
+                            }),
+                          ),
+                          Text('Select finished (${selectable.length})'),
+                        ],
+                      ),
+                      if (selectedIds.isNotEmpty)
+                        FilledButton.icon(
+                          onPressed: archiving ? null : _bulkArchive,
+                          icon: Icon(
+                            showHistory
+                                ? Icons.unarchive_outlined
+                                : Icons.archive_outlined,
+                          ),
+                          label: Text(
+                            showHistory
+                                ? 'Restore selected (${selectedIds.length})'
+                                : 'Move to history (${selectedIds.length})',
+                          ),
+                        ),
+                      if (selectedIds.isNotEmpty)
+                        TextButton(
+                          onPressed: () => setState(() => selectedIds.clear()),
+                          child: const Text('Clear selection'),
+                        ),
+                    ],
+                  ),
                 ),
               ),
             if (items.isNotEmpty && MediaQuery.sizeOf(context).width >= 760)
               const _AppointmentListHeader(),
             ...items.map(
-              (a) => _AppointmentCard(item: a, repository: widget.repository, selected: selectedIds.contains(a.id), onSelected: a.isFinalized ? (value) => setState(() { if (value) { selectedIds.add(a.id); } else { selectedIds.remove(a.id); } }) : null, onArchive: () => _archiveOne(a)),
+              (a) => _AppointmentCard(
+                item: a,
+                repository: widget.repository,
+                selected: selectedIds.contains(a.id),
+                onSelected: a.isFinalized
+                    ? (value) => setState(() {
+                        if (value) {
+                          selectedIds.add(a.id);
+                        } else {
+                          selectedIds.remove(a.id);
+                        }
+                      })
+                    : null,
+                onArchive: () => _archiveOne(a),
+              ),
             ),
           ],
         );
@@ -2030,18 +2147,110 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
 
   Future<void> _archiveOne(AppointmentModel appointment) async {
     final action = showHistory ? 'restore' : 'move to history';
-    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(title: Text('${action[0].toUpperCase()}${action.substring(1)} appointment?'), content: Text(showHistory ? 'This appointment will return to the active queue.' : 'This finished appointment will be kept safely in History.'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(action[0].toUpperCase() + action.substring(1)))]));
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          '${action[0].toUpperCase()}${action.substring(1)} appointment?',
+        ),
+        content: Text(
+          showHistory
+              ? 'This appointment will return to the active queue.'
+              : 'This finished appointment will be kept safely in History.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(action[0].toUpperCase() + action.substring(1)),
+          ),
+        ],
+      ),
+    );
     if (confirmed != true) return;
-    try { await widget.repository.archiveAppointments(appointmentIds: [appointment.id], archived: !showHistory); if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(showHistory ? 'Appointment restored.' : 'Appointment moved to History.'))); } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The appointment could not be updated. Please try again.'))); }
+    try {
+      await widget.repository.archiveAppointments(
+        appointmentIds: [appointment.id],
+        archived: !showHistory,
+      );
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              showHistory
+                  ? 'Appointment restored.'
+                  : 'Appointment moved to History.',
+            ),
+          ),
+        );
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The appointment could not be updated. Please try again.',
+            ),
+          ),
+        );
+    }
   }
 
   Future<void> _bulkArchive() async {
     final ids = selectedIds.toList();
     final action = showHistory ? 'restore' : 'move to History';
-    final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(title: Text('${action[0].toUpperCase()}${action.substring(1)} ${ids.length} appointments?'), content: Text('Only finished appointments are included. They will remain available in the ${showHistory ? 'active queue' : 'History'} view.'), actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(action[0].toUpperCase() + action.substring(1)))]));
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          '${action[0].toUpperCase()}${action.substring(1)} ${ids.length} appointments?',
+        ),
+        content: Text(
+          'Only finished appointments are included. They will remain available in the ${showHistory ? 'active queue' : 'History'} view.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(action[0].toUpperCase() + action.substring(1)),
+          ),
+        ],
+      ),
+    );
     if (confirmed != true) return;
     setState(() => archiving = true);
-    try { final count = await widget.repository.archiveAppointments(appointmentIds: ids, archived: !showHistory); if (mounted) { setState(() => selectedIds.clear()); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$count appointments ${showHistory ? 'restored' : 'moved to History'}.'))); } } catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The selected appointments could not be updated. Please try again.'))); } finally { if (mounted) setState(() => archiving = false); }
+    try {
+      final count = await widget.repository.archiveAppointments(
+        appointmentIds: ids,
+        archived: !showHistory,
+      );
+      if (mounted) {
+        setState(() => selectedIds.clear());
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '$count appointments ${showHistory ? 'restored' : 'moved to History'}.',
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The selected appointments could not be updated. Please try again.',
+            ),
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => archiving = false);
+    }
   }
 }
 
@@ -2064,60 +2273,69 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
   bool _busy = false;
   String? _message;
 
-  String get _roleLabel => widget.evaluation.requestedRole == AccessRole.counselor
+  String get _roleLabel =>
+      widget.evaluation.requestedRole == AccessRole.counselor
       ? 'Counselor'
       : 'PAACC Staff';
 
-  ({IconData icon, String title, String body}) get _content =>
-      switch (widget.evaluation.state) {
-        PortalAccessState.emailVerificationRequired => (
-          icon: Icons.mark_email_unread_outlined,
-          title: 'Email Verification Required',
-          body: 'Your password is correct, but your email address must be verified before your PAACC access request can be reviewed.',
-        ),
-        PortalAccessState.pendingAdminApproval => (
-          icon: Icons.hourglass_top_rounded,
-          title: 'Access Request Pending',
-          body: 'Your email has been verified. Your PAACC portal access request is waiting for administrator approval.',
-        ),
-        PortalAccessState.moreInformationRequired => (
-          icon: Icons.info_outline_rounded,
-          title: 'More Information Required',
-          body: widget.evaluation.reason?.trim().isNotEmpty == true
-              ? widget.evaluation.reason!
-              : 'An administrator needs more information before this access request can be approved.',
-        ),
-        PortalAccessState.suspended => (
-          icon: Icons.pause_circle_outline_rounded,
-          title: 'Account Access Suspended',
-          body: 'Your PAACC portal access is currently suspended. Contact an authorized MindMate administrator if you believe this is an error.',
-        ),
-        PortalAccessState.rejected => (
-          icon: Icons.cancel_outlined,
-          title: 'Access Request Closed',
-          body: 'This PAACC portal access request was not approved. Contact an authorized MindMate administrator for assistance.',
-        ),
-        PortalAccessState.disabled => (
-          icon: Icons.block_outlined,
-          title: 'Account Access Disabled',
-          body: 'This account is not currently enabled for PAACC portal access. Contact an authorized MindMate administrator.',
-        ),
-        PortalAccessState.accountNotFound => (
-          icon: Icons.person_search_outlined,
-          title: 'Portal Account Not Found',
-          body: 'This account does not have a PAACC portal access request. Request access or contact an authorized administrator.',
-        ),
-        PortalAccessState.noPortalRole => (
-          icon: Icons.lock_outline_rounded,
-          title: 'Portal Access Not Available',
-          body: 'This account does not currently have an approved PAACC portal role.',
-        ),
-        PortalAccessState.granted => (
-          icon: Icons.verified_outlined,
-          title: 'Access Approved',
-          body: 'Your PAACC portal account is active.',
-        ),
-      };
+  ({IconData icon, String title, String body}) get _content => switch (widget
+      .evaluation
+      .state) {
+    PortalAccessState.emailVerificationRequired => (
+      icon: Icons.mark_email_unread_outlined,
+      title: 'Email Verification Required',
+      body:
+          'Your password is correct, but your email address must be verified before your PAACC access request can be reviewed.',
+    ),
+    PortalAccessState.pendingAdminApproval => (
+      icon: Icons.hourglass_top_rounded,
+      title: 'Access Request Pending',
+      body:
+          'Your email has been verified. Your PAACC portal access request is waiting for administrator approval.',
+    ),
+    PortalAccessState.moreInformationRequired => (
+      icon: Icons.info_outline_rounded,
+      title: 'More Information Required',
+      body: widget.evaluation.reason?.trim().isNotEmpty == true
+          ? widget.evaluation.reason!
+          : 'An administrator needs more information before this access request can be approved.',
+    ),
+    PortalAccessState.suspended => (
+      icon: Icons.pause_circle_outline_rounded,
+      title: 'Account Access Suspended',
+      body:
+          'Your PAACC portal access is currently suspended. Contact an authorized MindMate administrator if you believe this is an error.',
+    ),
+    PortalAccessState.rejected => (
+      icon: Icons.cancel_outlined,
+      title: 'Access Request Closed',
+      body:
+          'This PAACC portal access request was not approved. Contact an authorized MindMate administrator for assistance.',
+    ),
+    PortalAccessState.disabled => (
+      icon: Icons.block_outlined,
+      title: 'Account Access Disabled',
+      body:
+          'This account is not currently enabled for PAACC portal access. Contact an authorized MindMate administrator.',
+    ),
+    PortalAccessState.accountNotFound => (
+      icon: Icons.person_search_outlined,
+      title: 'Portal Account Not Found',
+      body:
+          'This account does not have a PAACC portal access request. Request access or contact an authorized administrator.',
+    ),
+    PortalAccessState.noPortalRole => (
+      icon: Icons.lock_outline_rounded,
+      title: 'Portal Access Not Available',
+      body:
+          'This account does not currently have an approved PAACC portal role.',
+    ),
+    PortalAccessState.granted => (
+      icon: Icons.verified_outlined,
+      title: 'Access Approved',
+      body: 'Your PAACC portal account is active.',
+    ),
+  };
 
   Future<void> _continue() async {
     setState(() {
@@ -2125,11 +2343,15 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
       _message = null;
     });
     try {
-      final latest = await widget.repository.evaluatePortalAccess(refreshUser: true);
+      final latest = await widget.repository.evaluatePortalAccess(
+        refreshUser: true,
+      );
       if (!mounted) return;
       if (latest.isGranted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => AdminPortalHome(repository: widget.repository)),
+          MaterialPageRoute(
+            builder: (_) => AdminPortalHome(repository: widget.repository),
+          ),
         );
         return;
       }
@@ -2143,10 +2365,13 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
       );
     } catch (error) {
       if (mounted) {
-        setState(() => _message = FirebaseErrorMessage.describe(
-          error,
-          fallback: 'We could not refresh your access status. Please try again.',
-        ));
+        setState(
+          () => _message = FirebaseErrorMessage.describe(
+            error,
+            fallback:
+                'We could not refresh your access status. Please try again.',
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -2168,10 +2393,13 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
       });
     } catch (error) {
       if (mounted) {
-        setState(() => _message = FirebaseErrorMessage.describe(
-          error,
-          fallback: 'We could not send a verification email. Please try again.',
-        ));
+        setState(
+          () => _message = FirebaseErrorMessage.describe(
+            error,
+            fallback:
+                'We could not send a verification email. Please try again.',
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -2182,7 +2410,9 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
     await widget.repository.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => AdminLoginScreen(repository: widget.repository)),
+      MaterialPageRoute(
+        builder: (_) => AdminLoginScreen(repository: widget.repository),
+      ),
       (_) => false,
     );
   }
@@ -2190,8 +2420,8 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
   @override
   Widget build(BuildContext context) {
     final content = _content;
-    final verificationRequired = widget.evaluation.state ==
-        PortalAccessState.emailVerificationRequired;
+    final verificationRequired =
+        widget.evaluation.state == PortalAccessState.emailVerificationRequired;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -2207,51 +2437,83 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
                     children: [
                       Icon(content.icon, size: 52, color: _yellow),
                       const SizedBox(height: 18),
-                      Text(content.title,
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+                      Text(
+                        content.title,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
                       const SizedBox(height: 12),
-                      Text(content.body, textAlign: TextAlign.center,
-                          style: const TextStyle(color: AdminColors.muted, height: 1.45)),
+                      Text(
+                        content.body,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: AdminColors.muted,
+                          height: 1.45,
+                        ),
+                      ),
                       if (widget.evaluation.email.isNotEmpty) ...[
                         const SizedBox(height: 18),
-                        _AccessDetail(label: 'Email', value: widget.evaluation.email),
+                        _AccessDetail(
+                          label: 'Email',
+                          value: widget.evaluation.email,
+                        ),
                       ],
                       if (widget.evaluation.requestedRole != null) ...[
                         const SizedBox(height: 10),
-                        _AccessDetail(label: 'Requested role', value: _roleLabel),
+                        _AccessDetail(
+                          label: 'Requested role',
+                          value: _roleLabel,
+                        ),
                       ],
                       if (widget.evaluation.reference != null) ...[
                         const SizedBox(height: 10),
-                        _AccessDetail(label: 'Reference', value: widget.evaluation.reference!),
+                        _AccessDetail(
+                          label: 'Reference',
+                          value: widget.evaluation.reference!,
+                        ),
                       ],
                       if (verificationRequired ||
-                          widget.evaluation.state == PortalAccessState.pendingAdminApproval) ...[
+                          widget.evaluation.state ==
+                              PortalAccessState.pendingAdminApproval) ...[
                         const SizedBox(height: 22),
-                        _AccessProgress(
-                          verified: !verificationRequired,
-                        ),
+                        _AccessProgress(verified: !verificationRequired),
                       ],
                       if (_message != null) ...[
                         const SizedBox(height: 18),
-                        Text(_message!, textAlign: TextAlign.center,
-                            style: const TextStyle(color: AdminColors.muted)),
+                        Text(
+                          _message!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: AdminColors.muted),
+                        ),
                       ],
                       const SizedBox(height: 26),
                       if (verificationRequired)
-                        SizedBox(width: double.infinity, child: FilledButton(
-                          onPressed: _busy ? null : _resend,
-                          child: Text(_busy ? 'Sending…' : 'Resend Verification Email'),
-                        )),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            onPressed: _busy ? null : _resend,
+                            child: Text(
+                              _busy ? 'Sending…' : 'Resend Verification Email',
+                            ),
+                          ),
+                        ),
                       if (verificationRequired) const SizedBox(height: 10),
                       if (verificationRequired ||
-                          widget.evaluation.state == PortalAccessState.pendingAdminApproval)
-                        SizedBox(width: double.infinity, child: OutlinedButton(
-                          onPressed: _busy ? null : _continue,
-                          child: Text(_busy ? 'Checking…' : 'Continue'),
-                        )),
+                          widget.evaluation.state ==
+                              PortalAccessState.pendingAdminApproval)
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton(
+                            onPressed: _busy ? null : _continue,
+                            child: Text(_busy ? 'Checking…' : 'Continue'),
+                          ),
+                        ),
                       const SizedBox(height: 4),
-                      TextButton(onPressed: _busy ? null : _signOut, child: const Text('Sign Out')),
+                      TextButton(
+                        onPressed: _busy ? null : _signOut,
+                        child: const Text('Sign Out'),
+                      ),
                     ],
                   ),
                 ),
@@ -2273,8 +2535,13 @@ class _AccessDetail extends StatelessWidget {
     mainAxisAlignment: MainAxisAlignment.spaceBetween,
     children: [
       Text(label, style: const TextStyle(color: AdminColors.muted)),
-      Flexible(child: Text(value, textAlign: TextAlign.end,
-          style: const TextStyle(fontWeight: FontWeight.w700))),
+      Flexible(
+        child: Text(
+          value,
+          textAlign: TextAlign.end,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
     ],
   );
 }
@@ -2294,8 +2561,11 @@ class _AccessProgress extends StatelessWidget {
     child: Column(
       children: [
         _step(Icons.check_rounded, 'Access request', true),
-        _step(verified ? Icons.check_rounded : Icons.mail_outline_rounded,
-            'Email verification', verified),
+        _step(
+          verified ? Icons.check_rounded : Icons.mail_outline_rounded,
+          'Email verification',
+          verified,
+        ),
         _step(Icons.hourglass_top_rounded, 'Administrator approval', false),
       ],
     ),
@@ -2305,12 +2575,23 @@ class _AccessProgress extends StatelessWidget {
     padding: const EdgeInsets.symmetric(vertical: 4),
     child: Row(
       children: [
-        Icon(icon, size: 17, color: complete ? AdminColors.success : AdminColors.muted),
+        Icon(
+          icon,
+          size: 17,
+          color: complete ? AdminColors.success : AdminColors.muted,
+        ),
         const SizedBox(width: 8),
-        Text(label, style: TextStyle(fontWeight: complete ? FontWeight.w700 : FontWeight.w500)),
+        Text(
+          label,
+          style: TextStyle(
+            fontWeight: complete ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
         const Spacer(),
-        Text(complete ? 'Complete' : 'Pending',
-            style: const TextStyle(fontSize: 12, color: AdminColors.muted)),
+        Text(
+          complete ? 'Complete' : 'Pending',
+          style: const TextStyle(fontSize: 12, color: AdminColors.muted),
+        ),
       ],
     ),
   );
@@ -2370,7 +2651,13 @@ class _AppointmentSummaryCard extends StatelessWidget {
 }
 
 class _AppointmentCard extends StatelessWidget {
-  const _AppointmentCard({required this.item, required this.repository, required this.selected, required this.onSelected, required this.onArchive});
+  const _AppointmentCard({
+    required this.item,
+    required this.repository,
+    required this.selected,
+    required this.onSelected,
+    required this.onArchive,
+  });
   final AppointmentModel item;
   final AdminPortalRepository repository;
   final bool selected;
@@ -2430,16 +2717,35 @@ class _AppointmentCard extends StatelessWidget {
         );
         final historyAction = item.isFinalized
             ? IconButton(
-                tooltip: item.isArchived ? 'Restore from history' : 'Move to history',
+                tooltip: item.isArchived
+                    ? 'Restore from history'
+                    : 'Move to history',
                 onPressed: onArchive,
-                icon: Icon(item.isArchived ? Icons.unarchive_outlined : Icons.archive_outlined, size: 19),
+                icon: Icon(
+                  item.isArchived
+                      ? Icons.unarchive_outlined
+                      : Icons.archive_outlined,
+                  size: 19,
+                ),
               )
             : const SizedBox.shrink();
         if (box.maxWidth < 700) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(children: [if (onSelected != null) Checkbox(value: selected, onChanged: (value) => onSelected!(value ?? false)), student, const SizedBox(width: 4), historyAction, action]),
+              Row(
+                children: [
+                  if (onSelected != null)
+                    Checkbox(
+                      value: selected,
+                      onChanged: (value) => onSelected!(value ?? false),
+                    ),
+                  student,
+                  const SizedBox(width: 4),
+                  historyAction,
+                  action,
+                ],
+              ),
               const SizedBox(height: 10),
               Row(children: [schedule, department]),
               const SizedBox(height: 8),
@@ -2455,7 +2761,11 @@ class _AppointmentCard extends StatelessWidget {
         }
         return Row(
           children: [
-            if (onSelected != null) Checkbox(value: selected, onChanged: (value) => onSelected!(value ?? false)),
+            if (onSelected != null)
+              Checkbox(
+                value: selected,
+                onChanged: (value) => onSelected!(value ?? false),
+              ),
             student,
             const SizedBox(width: 16),
             schedule,

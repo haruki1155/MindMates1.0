@@ -15,6 +15,9 @@ class NotificationRepository {
           .watchDocuments(
             FirestoreCollections.notifications,
             whereEquals: {'userId': userId},
+            orderBy: 'createdAt',
+            descending: true,
+            limit: 100,
           )
           .map(
             (items) =>
@@ -35,4 +38,12 @@ class NotificationRepository {
     id,
     {'readAt': FieldValue.serverTimestamp()},
   );
+
+  Future<void> markAllRead(Iterable<AppNotificationModel> notifications) async {
+    await Future.wait(
+      notifications
+          .where((item) => !item.isRead)
+          .map((item) => markRead(item.id)),
+    );
+  }
 }

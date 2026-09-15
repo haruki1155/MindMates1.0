@@ -1,5 +1,60 @@
 import '../core/utils/firestore_mapper.dart';
 
+/// The only lifecycle values written by the current appointment backend.
+/// [legacyRequested] is read-only compatibility for old `pending`/`upcoming`
+/// records; newly created appointments are always [requested].
+enum AppointmentStatus {
+  requested,
+  confirmed,
+  rescheduleProposed,
+  cancelled,
+  completed,
+  noShow,
+  declined,
+  legacyRequested,
+  unknown;
+
+  static AppointmentStatus parse(Object? value) =>
+      switch (value?.toString().trim().toLowerCase()) {
+        'requested' => requested,
+        'confirmed' => confirmed,
+        'reschedule_proposed' => rescheduleProposed,
+        'cancelled' || 'canceled' => cancelled,
+        'completed' || 'complete' => completed,
+        'no_show' || 'noshow' || 'no-show' => noShow,
+        'declined' => declined,
+        'pending' || 'upcoming' || 'reschedule_required' => legacyRequested,
+        _ => unknown,
+      };
+
+  String get value => switch (this) {
+    requested || legacyRequested => 'requested',
+    confirmed => 'confirmed',
+    rescheduleProposed => 'reschedule_proposed',
+    cancelled => 'cancelled',
+    completed => 'completed',
+    noShow => 'no_show',
+    declined => 'declined',
+    unknown => 'requested',
+  };
+
+  String get label => switch (this) {
+    requested || legacyRequested => 'REQUESTED',
+    confirmed => 'CONFIRMED',
+    rescheduleProposed => 'SCHEDULE CHANGE',
+    cancelled => 'CANCELLED',
+    completed => 'COMPLETED',
+    noShow => 'NO SHOW',
+    declined => 'DECLINED',
+    unknown => 'REQUESTED',
+  };
+
+  bool get isTerminal => switch (this) {
+    cancelled || completed || noShow || declined => true,
+    _ => false,
+  };
+}
+
 class AppointmentModel {
   const AppointmentModel({
     required this.id,
@@ -29,6 +84,8 @@ class AppointmentModel {
     this.reviewedAt,
     this.proposedScheduledAt,
     this.proposedScheduledTime,
+    this.proposedBy,
+    this.proposalStatus,
     this.department,
     this.academicYearId,
     this.archivedAt,
@@ -61,11 +118,14 @@ class AppointmentModel {
   final DateTime? reviewedAt;
   final DateTime? proposedScheduledAt;
   final String? proposedScheduledTime;
+  final String? proposedBy;
+  final String? proposalStatus;
   final String? department;
   final String? academicYearId;
   final DateTime? archivedAt;
 
   bool get isArchived => archivedAt != null;
+  AppointmentStatus get lifecycleStatus => AppointmentStatus.parse(status);
 
   bool get isFinalized => const {
     'completed',
@@ -107,6 +167,8 @@ class AppointmentModel {
       reviewedAt: dateTimeFromFirestore(json['reviewedAt']),
       proposedScheduledAt: dateTimeFromFirestore(json['proposedScheduledAt']),
       proposedScheduledTime: _optionalString(json['proposedScheduledTime']),
+      proposedBy: _optionalString(json['proposedBy']),
+      proposalStatus: _optionalString(json['proposalStatus']),
       department: _optionalString(json['department']),
       academicYearId: _optionalString(json['academicYearId']),
       archivedAt: dateTimeFromFirestore(json['archivedAt']),
@@ -139,6 +201,8 @@ class AppointmentModel {
       'reviewedAt': reviewedAt,
       'proposedScheduledAt': proposedScheduledAt,
       'proposedScheduledTime': proposedScheduledTime ?? '',
+      'proposedBy': proposedBy ?? '',
+      'proposalStatus': proposalStatus ?? '',
       'department': department ?? '',
       'academicYearId': academicYearId ?? '',
       'createdAt': createdAt,
@@ -174,6 +238,8 @@ class AppointmentModel {
     DateTime? reviewedAt,
     DateTime? proposedScheduledAt,
     String? proposedScheduledTime,
+    String? proposedBy,
+    String? proposalStatus,
     String? department,
     String? academicYearId,
     DateTime? archivedAt,
@@ -208,6 +274,8 @@ class AppointmentModel {
       proposedScheduledAt: proposedScheduledAt ?? this.proposedScheduledAt,
       proposedScheduledTime:
           proposedScheduledTime ?? this.proposedScheduledTime,
+      proposedBy: proposedBy ?? this.proposedBy,
+      proposalStatus: proposalStatus ?? this.proposalStatus,
       department: department ?? this.department,
       academicYearId: academicYearId ?? this.academicYearId,
       archivedAt: archivedAt ?? this.archivedAt,

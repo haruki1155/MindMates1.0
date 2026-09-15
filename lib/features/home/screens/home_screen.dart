@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../../../providers/assessment_provider.dart';
 import '../../../providers/appointment_provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/mood_provider.dart';
+import '../../../providers/notification_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../repositories/assessment_repository.dart';
@@ -20,11 +22,11 @@ import '../../../services/firebase/app_notification_service.dart';
 import '../../../models/pacc_availability_model.dart';
 import '../../../repositories/pacc_availability_repository.dart';
 import '../../notifications/screens/notifications_screen.dart';
+import '../../notifications/widgets/appointment_notification_banner.dart';
 import '../models/home_dashboard_data.dart';
 import '../widgets/home_dashboard_widgets.dart';
-import 'home_appointment_calendar_screen.dart';
 
-enum _HomeNavDestination { today, secretChat, insight, messages, profile }
+enum _HomeNavDestination { today, secretChat, insight, messages, appointments }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, this.data, DateTime Function()? nowProvider})
@@ -49,6 +51,9 @@ class _HomeScreenState extends State<HomeScreen> {
   _HomeNavDestination _activeDestination = _HomeNavDestination.today;
   String? _loadedBackendUserId;
   String? _loadedAppointmentUserId;
+  bool _appointmentBookingRequested = false;
+  String? _pendingAppointmentId;
+  final Set<String> _shownForegroundEvents = <String>{};
 
   HomeDashboardData get _data => widget.data ?? HomeDashboardData.mock();
 
@@ -76,7 +81,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _loadedBackendUserId = userId;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _notifications.initializeForUser(userId).catchError((_) {});
+        _notifications
+            .initializeForUser(
+              userId,
+              onAppointmentOpened: _openAppointmentFromNotification,
+              onForegroundMessage: _showForegroundNotification,
+            )
+            .catchError((_) {});
         _readProviderOrNull<UserProvider>(
           context,
         )?.recordActivity(userId, UserActivityType.appOpen);
@@ -93,12 +104,46 @@ class _HomeScreenState extends State<HomeScreen> {
     final appointmentProvider = _readProviderOrNull<AppointmentProvider>(
       context,
     );
+    _readProviderOrNull<NotificationProvider>(context)?.loadForUser(userId);
     if (appointmentProvider != null && _loadedAppointmentUserId != userId) {
       _loadedAppointmentUserId = userId;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) appointmentProvider.loadAppointments(userId);
       });
     }
+  }
+
+  void _openAppointmentFromNotification(String appointmentId) {
+    if (!mounted) return;
+    setState(() {
+      _activeDestination = _HomeNavDestination.appointments;
+      _showBottomNav = true;
+      _appointmentBookingRequested = false;
+      _pendingAppointmentId = appointmentId;
+    });
+    final provider = _readProviderOrNull<AppointmentProvider>(context);
+    final userId = _currentUserId();
+    if (userId != null) provider?.loadAppointments(userId);
+  }
+
+  void _showForegroundNotification(RemoteMessage message) {
+    if (!mounted) return;
+    final title = message.notification?.title ?? 'MindMate update';
+    final body = message.notification?.body ?? 'You have a new notification.';
+    final eventId =
+        message.messageId ??
+        '${message.data['appointmentId'] ?? ''}|$title|$body';
+    if (!_shownForegroundEvents.add(eventId)) return;
+    final appointmentId = message.data['appointmentId']?.toString();
+    showAppointmentNotificationBanner(
+      context,
+      title: title,
+      message: body,
+      appointmentId: appointmentId,
+      onView: appointmentId == null || appointmentId.isEmpty
+          ? null
+          : () => _openAppointmentFromNotification(appointmentId),
+    );
   }
 
   @override
@@ -109,6 +154,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final appointmentProvider = _watchProviderOrNull<AppointmentProvider>(
       context,
     );
+    final unreadNotifications =
+        _watchProviderOrNull<NotificationProvider>(context)?.unreadCount ?? 0;
     final user = _userFor(data, assessmentProvider);
     final nextAppointment = _nextAppointment(
       appointmentProvider?.appointments ?? const [],
@@ -123,181 +170,193 @@ class _HomeScreenState extends State<HomeScreen> {
           const Positioned.fill(child: HomeDashboardBackground()),
           SafeArea(
             bottom: false,
-            child: CustomScrollView(
-              controller: _scrollController,
-              physics: const BouncingScrollPhysics(),
-              slivers: [
-                SliverPadding(
-                  padding: EdgeInsets.fromLTRB(
-                    horizontalPadding,
-                    28,
-                    horizontalPadding,
-                    124,
-                  ),
-                  sliver: SliverList.list(
-                    children: [
-                      HomeAnimatedSection(
-                        delay: 70,
-                        child: HomeWelcomeCard(
-                          user: user,
-                          onNotificationTap: _openNotifications,
-                          onCalendarTap: _openAppointmentCalendar,
-                          onProfileTap: _openProfile,
+            child: _activeDestination == _HomeNavDestination.appointments
+                ? PaccCounselingScreen(
+                    key: ValueKey('appointments_$_appointmentBookingRequested'),
+                    startBooking: _appointmentBookingRequested,
+                    initialAppointmentId: _pendingAppointmentId,
+                    nowProvider: widget._nowProvider,
+                  )
+                : CustomScrollView(
+                    controller: _scrollController,
+                    physics: const BouncingScrollPhysics(),
+                    slivers: [
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                          horizontalPadding,
+                          28,
+                          horizontalPadding,
+                          124,
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      HomeAnimatedSection(
-                        delay: 74,
-                        child: HomeStreakCard(
-                          data: data.streak,
-                          onTap: _openLogMood,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      HomeAnimatedSection(
-                        delay: 78,
-                        child: StreamBuilder<PaccAvailabilityModel?>(
-                          stream: Firebase.apps.isEmpty
-                              ? const Stream<PaccAvailabilityModel?>.empty()
-                              : PaccAvailabilityRepository().watchCurrent(),
-                          builder: (context, snapshot) {
-                            final availability = snapshot.data;
-                            final open = availability?.isOpenAt(
-                              widget._nowProvider(),
-                            );
-                            final message = availability == null
-                                ? 'PAACC office availability has not been published yet.'
-                                : '${availability.presence.label}. ${availability.opensAt}–${availability.closesAt}. ${availability.acceptsWalkIns ? 'Walk-ins accepted.' : 'Appointment required.'}';
-                            return HomeAnnouncementCard(
-                              badge: availability == null
-                                  ? 'PAACC'
-                                  : availability.statusLabel(
-                                      widget._nowProvider(),
-                                    ),
-                              message: message,
-                              isOpen: open,
-                              onViewMore: _openNotifications,
-                              onViewDetail: () =>
-                                  _showAvailabilityDetails(availability),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      HomeAnimatedSection(
-                        delay: 86,
-                        child: HomeWideButton(
-                          label: context.watch<MoodProvider>().hasCheckedInToday
-                              ? 'View today’s mood'
-                              : 'Log your mood',
-                          icon: Icons.add,
-                          assetName: '+.png',
-                          onTap: _openLogMood,
-                        ),
-                      ),
-                      if (appointmentProvider != null) ...[
-                        const SizedBox(height: 14),
-                        const Text(
-                          'Upcoming Appointments',
-                          style: HomeTextStyles.sectionTitle,
-                        ),
-                        const SizedBox(height: 8),
-                        HomeAnimatedSection(
-                          delay: 95,
-                          child: _HomeAppointmentPreview(
-                            appointment: nextAppointment,
-                            isLoading:
-                                appointmentProvider.isLoading &&
-                                appointmentProvider.appointments.isEmpty,
-                            errorMessage: appointmentProvider.errorMessage,
-                            onOpen: nextAppointment == null
-                                ? _openAppointmentCalendar
-                                : () => showAppointmentDetailsSheet(
-                                    context,
-                                    nextAppointment,
-                                  ),
-                            onBook: _openAppointmentBooking,
-                            onRetry: () {
-                              final userId = _currentUserId();
-                              if (userId != null) {
-                                appointmentProvider.loadAppointments(userId);
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                      if (!_isAssessmentBannerDismissed) ...[
-                        const SizedBox(height: 14),
-                        HomeAnimatedSection(
-                          delay: 110,
-                          child: HomeAssessmentBanner(
-                            data: data.assessment,
-                            onStart: _openStudentAssessment,
-                            onClose: _dismissAssessmentBanner,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: HomeMetrics.sectionGap),
-                      HomeAnimatedSection(
-                        delay: 120,
-                        child: HomePaccServicesSection(
-                          services: data.services,
-                          onOpen: (_) => _openServices(),
-                          onViewAll: _openServices,
-                        ),
-                      ),
-                      const SizedBox(height: HomeMetrics.sectionGap),
-                      HomeAnimatedSection(
-                        delay: 170,
-                        child: HomeDailyInsightsSection(
-                          insights: data.insights,
-                          affirmation: data.affirmation,
-                          onOpen: _openPlaceholder,
-                          nowProvider: widget._nowProvider,
-                        ),
-                      ),
-                      const SizedBox(height: HomeMetrics.sectionGap),
-                      HomeAnimatedSection(
-                        delay: 220,
-                        child: HomeMentalHealthCheckCard(
-                          data: data.mentalHealthCheck,
-                          onStart: _openStudentAssessment,
-                          onViewSummary: () => Navigator.of(
-                            context,
-                          ).pushNamed(RouteNames.mentalHealthReport),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      HomeAnimatedSection(
-                        delay: 245,
-                        child: HomeCounselorCard(
-                          onContact: _openAppointmentBooking,
-                        ),
-                      ),
-                      const SizedBox(height: HomeMetrics.sectionGap),
-                      HomeAnimatedSection(
-                        delay: 270,
-                        child: HomeResourcesSection(
-                          resources: data.resources,
-                          onOpen: _openResource,
-                          onSeeAll: () => Navigator.of(
-                            context,
-                          ).pushNamed(RouteNames.mentalHealthInsights),
-                        ),
-                      ),
-                      const SizedBox(height: HomeMetrics.sectionGap),
-                      HomeAnimatedSection(
-                        delay: 320,
-                        child: HomeToolkitSection(
-                          items: data.toolkitItems,
-                          onOpen: _openPlaceholder,
+                        sliver: SliverList.list(
+                          children: [
+                            HomeAnimatedSection(
+                              delay: 70,
+                              child: HomeWelcomeCard(
+                                user: user,
+                                onNotificationTap: _openNotifications,
+                                unreadNotificationCount: unreadNotifications,
+                                onCalendarTap: _openAppointmentCalendar,
+                                onProfileTap: _openProfile,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            HomeAnimatedSection(
+                              delay: 74,
+                              child: HomeStreakCard(
+                                data: data.streak,
+                                onTap: _openLogMood,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            HomeAnimatedSection(
+                              delay: 78,
+                              child: StreamBuilder<PaccAvailabilityModel?>(
+                                stream: Firebase.apps.isEmpty
+                                    ? const Stream<
+                                        PaccAvailabilityModel?
+                                      >.empty()
+                                    : PaccAvailabilityRepository()
+                                          .watchCurrent(),
+                                builder: (context, snapshot) {
+                                  final availability = snapshot.data;
+                                  final open = availability?.isOpenAt(
+                                    widget._nowProvider(),
+                                  );
+                                  final message = availability == null
+                                      ? 'PAACC office availability has not been published yet.'
+                                      : '${availability.presence.label}. ${availability.opensAt}–${availability.closesAt}. ${availability.acceptsWalkIns ? 'Walk-ins accepted.' : 'Appointment required.'}';
+                                  return HomeAnnouncementCard(
+                                    badge: availability == null
+                                        ? 'PAACC'
+                                        : availability.statusLabel(
+                                            widget._nowProvider(),
+                                          ),
+                                    message: message,
+                                    isOpen: open,
+                                    onViewMore: _openNotifications,
+                                    onViewDetail: () =>
+                                        _showAvailabilityDetails(availability),
+                                  );
+                                },
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            HomeAnimatedSection(
+                              delay: 86,
+                              child: HomeWideButton(
+                                label:
+                                    context
+                                        .watch<MoodProvider>()
+                                        .hasCheckedInToday
+                                    ? 'View today’s mood'
+                                    : 'Log your mood',
+                                icon: Icons.add,
+                                assetName: '+.png',
+                                onTap: _openLogMood,
+                              ),
+                            ),
+                            if (appointmentProvider != null) ...[
+                              const SizedBox(height: 14),
+                              const Text(
+                                'Upcoming Appointments',
+                                style: HomeTextStyles.sectionTitle,
+                              ),
+                              const SizedBox(height: 8),
+                              HomeAnimatedSection(
+                                delay: 95,
+                                child: _HomeAppointmentPreview(
+                                  appointment: nextAppointment,
+                                  isLoading:
+                                      appointmentProvider.isLoading &&
+                                      appointmentProvider.appointments.isEmpty,
+                                  errorMessage:
+                                      appointmentProvider.errorMessage,
+                                  onOpen: _openAppointmentCalendar,
+                                  onBook: _openAppointmentBooking,
+                                  onRetry: () {
+                                    final userId = _currentUserId();
+                                    if (userId != null) {
+                                      appointmentProvider.loadAppointments(
+                                        userId,
+                                      );
+                                    }
+                                  },
+                                ),
+                              ),
+                            ],
+                            if (!_isAssessmentBannerDismissed) ...[
+                              const SizedBox(height: 14),
+                              HomeAnimatedSection(
+                                delay: 110,
+                                child: HomeAssessmentBanner(
+                                  data: data.assessment,
+                                  onStart: _openStudentAssessment,
+                                  onClose: _dismissAssessmentBanner,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: HomeMetrics.sectionGap),
+                            HomeAnimatedSection(
+                              delay: 120,
+                              child: HomePaccServicesSection(
+                                services: data.services,
+                                onOpen: (_) => _openServices(),
+                                onViewAll: _openServices,
+                              ),
+                            ),
+                            const SizedBox(height: HomeMetrics.sectionGap),
+                            HomeAnimatedSection(
+                              delay: 170,
+                              child: HomeDailyInsightsSection(
+                                insights: data.insights,
+                                affirmation: data.affirmation,
+                                onOpen: _openPlaceholder,
+                                nowProvider: widget._nowProvider,
+                              ),
+                            ),
+                            const SizedBox(height: HomeMetrics.sectionGap),
+                            HomeAnimatedSection(
+                              delay: 220,
+                              child: HomeMentalHealthCheckCard(
+                                data: data.mentalHealthCheck,
+                                onStart: _openStudentAssessment,
+                                onViewSummary: () => Navigator.of(
+                                  context,
+                                ).pushNamed(RouteNames.mentalHealthReport),
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            HomeAnimatedSection(
+                              delay: 245,
+                              child: HomeCounselorCard(
+                                onContact: _openAppointmentBooking,
+                              ),
+                            ),
+                            const SizedBox(height: HomeMetrics.sectionGap),
+                            HomeAnimatedSection(
+                              delay: 270,
+                              child: HomeResourcesSection(
+                                resources: data.resources,
+                                onOpen: _openResource,
+                                onSeeAll: () => Navigator.of(
+                                  context,
+                                ).pushNamed(RouteNames.mentalHealthInsights),
+                              ),
+                            ),
+                            const SizedBox(height: HomeMetrics.sectionGap),
+                            HomeAnimatedSection(
+                              delay: 320,
+                              child: HomeToolkitSection(
+                                items: data.toolkitItems,
+                                onOpen: _openPlaceholder,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
           ),
           Positioned(
             left: 12,
@@ -462,8 +521,12 @@ class _HomeScreenState extends State<HomeScreen> {
         Navigator.of(context).pushNamed(RouteNames.mentalHealthInsights);
       case _HomeNavDestination.messages:
         Navigator.of(context).pushNamed(RouteNames.mindAid);
-      case _HomeNavDestination.profile:
-        _openProfile();
+      case _HomeNavDestination.appointments:
+        setState(() {
+          _activeDestination = _HomeNavDestination.appointments;
+          _showBottomNav = true;
+          _appointmentBookingRequested = false;
+        });
     }
   }
 
@@ -503,6 +566,7 @@ class _HomeScreenState extends State<HomeScreen> {
               (item) =>
                   {
                     AppointmentDisplayStatus.pending,
+                    AppointmentDisplayStatus.requested,
                     AppointmentDisplayStatus.upcoming,
                     AppointmentDisplayStatus.confirmed,
                     AppointmentDisplayStatus.rescheduleProposed,
@@ -515,12 +579,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openAppointmentCalendar() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            HomeAppointmentCalendarScreen(nowProvider: widget._nowProvider),
-      ),
-    );
+    _handleNavDestination(_HomeNavDestination.appointments);
   }
 
   void _openNotifications() {
@@ -566,14 +625,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openAppointmentBooking() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => PaccCounselingScreen(
-          startBooking: true,
-          nowProvider: widget._nowProvider,
-        ),
-      ),
-    );
+    setState(() {
+      _activeDestination = _HomeNavDestination.appointments;
+      _showBottomNav = true;
+      _appointmentBookingRequested = true;
+    });
   }
 
   Future<void> _openStudentAssessment() async {
@@ -1081,13 +1137,11 @@ class _HomeBottomNav extends StatelessWidget {
                     ),
                   ),
                   _HomeBottomNavItem(
-                    icon: Icons.person,
-                    assetName: 'Customer.png',
-                    assetColor: HomePalette.text,
-                    label: 'Profile',
-                    isActive: active == _HomeNavDestination.profile,
+                    icon: Icons.event_available_outlined,
+                    label: 'Appointments',
+                    isActive: active == _HomeNavDestination.appointments,
                     onTap: () => onDestinationSelected?.call(
-                      _HomeNavDestination.profile,
+                      _HomeNavDestination.appointments,
                     ),
                   ),
                 ],
@@ -1107,7 +1161,6 @@ class _HomeBottomNavItem extends StatelessWidget {
     required this.isActive,
     required this.onTap,
     this.assetName,
-    this.assetColor,
   });
 
   final IconData icon;
@@ -1115,7 +1168,6 @@ class _HomeBottomNavItem extends StatelessWidget {
   final bool isActive;
   final VoidCallback onTap;
   final String? assetName;
-  final Color? assetColor;
 
   @override
   Widget build(BuildContext context) {
@@ -1146,10 +1198,7 @@ class _HomeBottomNavItem extends StatelessWidget {
                     ? Icon(icon, size: 20, color: HomePalette.text)
                     : Padding(
                         padding: const EdgeInsets.all(4),
-                        child: HomeDashboardAssetImage(
-                          assetName: assetName!,
-                          color: assetColor,
-                        ),
+                        child: HomeDashboardAssetImage(assetName: assetName!),
                       ),
               ),
               const SizedBox(height: 2),

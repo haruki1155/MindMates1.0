@@ -265,7 +265,7 @@ void main() {
     expect(find.byType(PaccCounselingScreen), findsOneWidget);
     expect(find.text('PACC Counseling'), findsOneWidget);
     expect(find.text('No upcoming appointments'), findsOneWidget);
-    expect(find.text('Appoint a Session'), findsOneWidget);
+    expect(find.text('Book Appointment'), findsNWidgets(2));
   });
 
   testWidgets('appointment flow creates an in-memory appointment', (
@@ -277,7 +277,7 @@ void main() {
     await tester.pumpWidget(_paccApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Appoint New'));
+    await tester.tap(find.text('Book Appointment').first);
     await tester.pumpAndSettle();
     expect(find.text('Counseling Intake Form'), findsOneWidget);
 
@@ -326,10 +326,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Confirm Appointment'), findsOneWidget);
 
-    await tester.tap(find.text('Back to My Appointments'));
+    await tester.tap(find.text('View My Appointments'));
     await tester.pumpAndSettle();
-    expect(find.text('Molar, Leonardo M.'), findsOneWidget);
-    expect(find.text('Thursday, April 30, 2026'), findsOneWidget);
+    expect(find.text('Molar, Leonardo M.'), findsNothing);
+    expect(find.text('Thursday, April 30'), findsOneWidget);
     expect(find.text('11:00 AM'), findsOneWidget);
     expect(
       find.text('I feel overwhelmed and would like to talk to someone.'),
@@ -365,7 +365,7 @@ void main() {
 
     await tester.pumpWidget(_paccApp());
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Appoint New'));
+    await tester.tap(find.text('Book Appointment').first);
     await tester.pumpAndSettle();
     await _fillVisibleForm(tester);
     await _chooseVisibleOption(tester, 'Male');
@@ -418,7 +418,7 @@ Widget _paccApp({_FakeAppointmentRepository? appointmentRepository}) {
 }
 
 Future<void> _createAppointment(WidgetTester tester) async {
-  await tester.tap(find.text('Appoint New'));
+  await tester.tap(find.text('Book Appointment').first);
   await tester.pumpAndSettle();
   await _fillVisibleForm(tester);
   await _chooseVisibleOption(tester, 'Male');
@@ -436,7 +436,7 @@ Future<void> _createAppointment(WidgetTester tester) async {
   await tester.pumpAndSettle();
   await tester.tap(find.text('Confirm Appointment').last);
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Back to My Appointments'));
+  await tester.tap(find.text('View My Appointments'));
   await tester.pumpAndSettle();
 }
 
@@ -476,6 +476,12 @@ class _FakeAppointmentRepository extends AppointmentRepository {
     if (shouldFail) throw StateError('load failed');
     return appointments.where((item) => item.userId == userId).toList();
   }
+
+  @override
+  Stream<List<AppointmentModel>> watchAppointments(String userId) =>
+      Stream.value(
+        appointments.where((item) => item.userId == userId).toList(),
+      );
 
   @override
   Future<AppointmentModel> createAppointment(

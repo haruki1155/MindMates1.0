@@ -348,12 +348,14 @@ class HomeWelcomeCard extends StatelessWidget {
     super.key,
     required this.user,
     required this.onNotificationTap,
+    this.unreadNotificationCount = 0,
     required this.onCalendarTap,
     required this.onProfileTap,
   });
 
   final HomeUserData user;
   final VoidCallback onNotificationTap;
+  final int unreadNotificationCount;
   final VoidCallback onCalendarTap;
   final VoidCallback onProfileTap;
 
@@ -418,13 +420,9 @@ class HomeWelcomeCard extends StatelessWidget {
                 iconSize: 20,
               ),
               const SizedBox(width: 8),
-              HomeCircleIconButton(
-                icon: Icons.notifications_none,
-                assetName: 'Notification.png',
-                tooltip: 'Notifications',
+              _NotificationBell(
+                unreadCount: unreadNotificationCount,
                 onTap: onNotificationTap,
-                size: 36,
-                iconSize: 20,
               ),
             ],
           ),
@@ -437,6 +435,63 @@ class HomeWelcomeCard extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NotificationBell extends StatelessWidget {
+  const _NotificationBell({required this.unreadCount, required this.onTap});
+  final int unreadCount;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final label = unreadCount == 0
+        ? 'Notifications'
+        : 'Notifications, $unreadCount unread';
+    return Semantics(
+      label: label,
+      button: true,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          HomeCircleIconButton(
+            icon: Icons.notifications_none,
+            assetName: 'Notification.png',
+            tooltip: label,
+            onTap: onTap,
+            size: 36,
+            iconSize: 20,
+          ),
+          if (unreadCount > 0)
+            Positioned(
+              right: -3,
+              top: -4,
+              child: ExcludeSemantics(
+                child: Container(
+                  constraints: const BoxConstraints(
+                    minWidth: 17,
+                    minHeight: 17,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFB3261E),
+                    border: Border.all(color: Colors.white, width: 1.5),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    unreadCount > 9 ? '9+' : '$unreadCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

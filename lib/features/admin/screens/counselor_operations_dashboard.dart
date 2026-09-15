@@ -253,7 +253,7 @@ class _Panel extends StatelessWidget {
                 ),
               ),
             ),
-            if (action != null) action!,
+            ?action,
           ],
         ),
         const SizedBox(height: 14),

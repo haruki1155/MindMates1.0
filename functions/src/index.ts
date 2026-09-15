@@ -1434,6 +1434,29 @@ export const notifyPortalOfAppointment = onDocumentCreated(
   async (event) => notifyClinicalStaff("appointment", event.params.appointmentId),
 );
 
+export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
+  {document: "appointments/{appointmentId}", retry: true},
+  async (event) => {
+    const before = event.data?.before.data() ?? {};
+    const after = event.data?.after.data() ?? {};
+    const beforeStatus = canonicalAppointmentStatus(before.status);
+    const afterStatus = canonicalAppointmentStatus(after.status);
+    const isStudentProposal = afterStatus === "reschedule_proposed" && after.proposedBy === "student";
+    const isStudentCancellation = afterStatus === "cancelled" && after.cancelledBy === after.userId;
+    const acceptedCounselorProposal = beforeStatus === "reschedule_proposed" && before.proposedBy === "counselor" && afterStatus === "confirmed";
+    if (!isStudentProposal && !isStudentCancellation && !acceptedCounselorProposal) return;
+    const label = isStudentProposal ? "Schedule change requested" : isStudentCancellation ? "Appointment cancelled by student" : "Schedule change accepted";
+    await notifyClinicalStaff("appointment", event.params.appointmentId);
+    // Keep a durable, action-specific staff record alongside the existing
+    // new-appointment notification, without exposing the student's concern.
+    const staff = await db.collection("users").where("accessRole", "in", ["portalStaff", "counselor", "admin"]).get();
+    await Promise.all(staff.docs.map((recipient) => db.collection("notifications").doc(`portal_appointment_action_${event.params.appointmentId}_${afterStatus}_${recipient.id}`).set({
+      userId: recipient.id, audience: "portal", type: "appointment", appointmentId: event.params.appointmentId,
+      title: label, body: "An appointment needs your review.", createdAt: FieldValue.serverTimestamp(), readAt: null,
+    }, {merge: true})));
+  },
+);
+
 export const notifyPortalOfInquiry = onDocumentCreated(
   {document: "inquiries/{inquiryId}", retry: true},
   async (event) => notifyClinicalStaff("inquiry", event.params.inquiryId),
@@ -1573,6 +1596,114 @@ export const archiveReadNotifications = onSchedule(
   },
 );
 
+const APPOINTMENT_ACTIVE_STATUSES = new Set(["requested", "confirmed", "reschedule_proposed"]);
+const APPOINTMENT_TERMINAL_STATUSES = new Set(["cancelled", "completed", "no_show", "declined"]);
+
+function canonicalAppointmentStatus(value: unknown): string {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (status === "pending" || status === "upcoming" || status === "reschedule_required") return "requested";
+  return status;
+}
+
+function appointmentSlotId(timestamp: Timestamp, staffId = "pacc"): string {
+  return `${staffId}_${timestamp.toMillis()}`;
+}
+
+function callableMillis(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (value instanceof Timestamp) return value.toMillis();
+  if (value && typeof value === "object" && "_seconds" in value) {
+    const seconds = Number((value as {_seconds?: unknown})._seconds);
+    const nanos = Number((value as {_nanoseconds?: unknown})._nanoseconds ?? 0);
+    return Number.isFinite(seconds) ? seconds * 1000 + Math.floor(nanos / 1000000) : Number.NaN;
+  }
+  return Number(value ?? 0);
+}
+
+function createAppointmentEvent(transaction: FirebaseFirestore.Transaction, appointment: FirebaseFirestore.DocumentReference, type: string, actorId: string, previousStatus: string, newStatus: string, metadata: Record<string, unknown> = {}) {
+  transaction.create(appointment.collection("history").doc(), {
+    type, performedBy: actorId, performedByRole: "system", previousStatus,
+    newStatus, metadata, timestamp: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
+export const createAppointmentRequest = onCall(async (request) => {
+  const userId = requireAuthenticatedUser(request);
+  const input = (request.data ?? {}) as Record<string, unknown>;
+  const scheduledMillis = callableMillis(input.scheduledAt);
+  const scheduledTime = String(input.scheduledTime ?? "").trim();
+  const concern = String(input.concern ?? "").trim();
+  if (!Number.isFinite(scheduledMillis) || scheduledMillis <= Date.now() || !scheduledTime || !concern) {
+    throw new HttpsError("invalid-argument", "Choose a future appointment time and provide a concern.");
+  }
+  const scheduledAt = Timestamp.fromMillis(scheduledMillis);
+  const appointment = db.collection("appointments").doc();
+  const slot = db.collection("appointment_slots").doc(appointmentSlotId(scheduledAt));
+  const profile = await db.collection("users").doc(userId).get();
+  await db.runTransaction(async (transaction) => {
+    const occupied = await transaction.get(slot);
+    if (occupied.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
+    const source = profile.data() ?? {};
+    transaction.create(slot, {appointmentId: appointment.id, scheduledAt, createdAt: FieldValue.serverTimestamp()});
+    transaction.create(appointment, {
+      userId, fullName: String(input.fullName ?? source.name ?? "").trim(),
+      contactNumber: String(input.contactNumber ?? source.phone ?? "").trim(), email: String(input.email ?? source.email ?? "").trim(),
+      preferredContactMethod: String(input.preferredContactMethod ?? "").trim(), concern,
+      bestTime: String(input.bestTime ?? "").trim(), location: String(input.location ?? "PACC Office, 2nd Floor, Main Building"),
+      scheduledAt, scheduledTime, status: "requested", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      department: String(source.department ?? input.department ?? ""), academicYearId: String(input.academicYearId ?? ""),
+      age: input.age ?? null, address: String(input.address ?? ""), facebook: String(input.facebook ?? ""), sex: String(input.sex ?? ""), course: String(input.course ?? ""), yearLevel: String(input.yearLevel ?? ""), therapyBefore: String(input.therapyBefore ?? ""),
+    });
+    createAppointmentEvent(transaction, appointment, "appointment_requested", userId, "", "requested");
+  });
+  return {ok: true, appointmentId: appointment.id};
+});
+
+export const respondToAppointment = onCall(async (request) => {
+  const userId = requireAuthenticatedUser(request);
+  const input = (request.data ?? {}) as Record<string, unknown>;
+  const appointmentId = String(input.appointmentId ?? "").trim();
+  const action = String(input.action ?? "").trim();
+  if (!appointmentId || !["cancel", "accept_reschedule", "propose_reschedule"].includes(action)) throw new HttpsError("invalid-argument", "A valid appointment action is required.");
+  const appointment = db.collection("appointments").doc(appointmentId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(appointment);
+    if (!snapshot.exists || String(snapshot.data()?.userId ?? "") !== userId) throw new HttpsError("permission-denied", "This appointment is unavailable.");
+    const data = snapshot.data()!;
+    const before = canonicalAppointmentStatus(data.status);
+    if (!APPOINTMENT_ACTIVE_STATUSES.has(before)) throw new HttpsError("failed-precondition", "This appointment can no longer be changed.");
+    const notification = db.collection("notifications").doc();
+    if (action === "cancel") {
+      transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason: String(input.reason ?? "").trim(), updatedAt: FieldValue.serverTimestamp()});
+      transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
+      createAppointmentEvent(transaction, appointment, "appointment_cancelled", userId, before, "cancelled");
+      if (data.assignedStaffId) transaction.create(notification, {userId: data.assignedStaffId, appointmentId, type: "appointment", title: "Appointment cancelled", body: "A student cancelled an appointment.", createdAt: FieldValue.serverTimestamp(), readAt: null});
+      return;
+    }
+    if (action === "accept_reschedule") {
+      if (before !== "reschedule_proposed" || !data.proposedScheduledAt) throw new HttpsError("failed-precondition", "There is no active schedule proposal.");
+      const proposedAt = data.proposedScheduledAt as Timestamp;
+      const oldSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp));
+      // Existing bookings reserve the shared PACC slot. Keep every lifecycle
+      // transition on that same key until counselor-specific availability is
+      // introduced as a compatible, server-side migration.
+      const newSlot = db.collection("appointment_slots").doc(appointmentSlotId(proposedAt));
+      const claimed = await transaction.get(newSlot);
+      if (claimed.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
+      transaction.delete(oldSlot); transaction.create(newSlot, {appointmentId, scheduledAt: proposedAt, createdAt: FieldValue.serverTimestamp()});
+      transaction.update(appointment, {status: "confirmed", scheduledAt: proposedAt, scheduledTime: data.proposedScheduledTime ?? "", proposedScheduledAt: FieldValue.delete(), proposedScheduledTime: FieldValue.delete(), proposedBy: FieldValue.delete(), proposalStatus: FieldValue.delete(), reminders: {}, updatedAt: FieldValue.serverTimestamp()});
+      createAppointmentEvent(transaction, appointment, "reschedule_accepted", userId, before, "confirmed");
+      return;
+    }
+    if (before !== "confirmed") throw new HttpsError("failed-precondition", "Only confirmed appointments can be rescheduled.");
+    const millis = Number(input.proposedScheduledAt ?? 0); const time = String(input.proposedScheduledTime ?? "").trim();
+    if (!Number.isFinite(millis) || millis <= Date.now() || !time) throw new HttpsError("invalid-argument", "Choose a future proposed schedule.");
+    transaction.update(appointment, {status: "reschedule_proposed", proposedScheduledAt: Timestamp.fromMillis(millis), proposedScheduledTime: time, proposedBy: "student", proposalStatus: "awaiting_counselor", updatedAt: FieldValue.serverTimestamp()});
+    createAppointmentEvent(transaction, appointment, "reschedule_proposed", userId, before, "reschedule_proposed");
+  });
+  return {ok: true};
+});
+
 export const reviewAppointment = onCall(async (request) => {
   const staffId = request.auth?.uid;
   if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
@@ -1585,7 +1716,7 @@ export const reviewAppointment = onCall(async (request) => {
   const proposedTime = String(input.proposedScheduledTime ?? "").trim();
   // Declined remains readable for legacy records, but is intentionally not a
   // valid action for new appointment decisions.
-  if (!appointmentId || !["confirmed", "reschedule_required", "reschedule_proposed", "completed", "no_show", "cancelled"].includes(action)) {
+  if (!appointmentId || !["confirmed", "declined", "reschedule_proposed", "completed", "no_show", "cancelled"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
   if (!reply) throw new HttpsError("invalid-argument", "A reply to the student is required.");
@@ -1600,23 +1731,31 @@ export const reviewAppointment = onCall(async (request) => {
     const current = await transaction.get(appointment);
     if (!current.exists) throw new HttpsError("not-found", "Appointment not found.");
     const data = current.data()!;
-    if (staff.accessRole === "counselor" && String(data.assignedStaffId ?? "") !== staffId) {
+    // A counselor may claim an unassigned request while reviewing it. Once
+    // assigned, only that counselor (or an administrator) may transition it.
+    if (staff.accessRole === "counselor" && data.assignedStaffId && String(data.assignedStaffId) !== staffId) {
       throw new HttpsError("permission-denied", "This appointment is not assigned to your caseload.");
     }
-    const before = String(data.status ?? "pending").toLowerCase();
+    const before = canonicalAppointmentStatus(data.status);
     const allowed = before === "confirmed"
       ? ["completed", "no_show", "cancelled"]
-      : before === "reschedule_required"
-        ? ["reschedule_proposed"]
-        : before === "reschedule_proposed"
-          ? ["confirmed", "reschedule_proposed"]
-          : ["confirmed", "reschedule_required", "reschedule_proposed"];
-    if (!["pending", "upcoming", "reschedule_required", "reschedule_proposed", "confirmed"].includes(before) || !allowed.includes(action)) {
+      : before === "reschedule_proposed"
+        ? ["confirmed", "reschedule_proposed", "cancelled"]
+        : ["confirmed", "declined", "reschedule_proposed", "cancelled"];
+    if (!APPOINTMENT_ACTIVE_STATUSES.has(before) || !allowed.includes(action)) {
       throw new HttpsError("failed-precondition", "This appointment has already been finalized.");
     }
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Appointment has no student.");
     const staffName = String(staff.name ?? staff.email ?? "Counseling staff");
+    const acceptingProposal = before === "reschedule_proposed" && action === "confirmed" && data.proposedScheduledAt instanceof Timestamp;
+    if (acceptingProposal) {
+      const proposedSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.proposedScheduledAt as Timestamp));
+      const occupied = await transaction.get(proposedSlot);
+      if (occupied.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
+      transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
+      transaction.create(proposedSlot, {appointmentId, scheduledAt: data.proposedScheduledAt, createdAt: FieldValue.serverTimestamp()});
+    }
     const patch: Record<string, unknown> = {
       status: action,
       assignedStaffId: staffId,
@@ -1626,6 +1765,9 @@ export const reviewAppointment = onCall(async (request) => {
       updatedAt: FieldValue.serverTimestamp(),
       proposedScheduledAt: action === "reschedule_proposed" ? Timestamp.fromMillis(proposedMillis) : null,
       proposedScheduledTime: action === "reschedule_proposed" ? proposedTime : "",
+      proposedBy: action === "reschedule_proposed" ? "counselor" : FieldValue.delete(),
+      proposalStatus: action === "reschedule_proposed" ? "awaiting_student" : FieldValue.delete(),
+      ...(acceptingProposal ? {scheduledAt: data.proposedScheduledAt, scheduledTime: data.proposedScheduledTime ?? "", reminders: {}} : {}),
       completedAt: action === "completed" ? FieldValue.serverTimestamp() : null,
       noShowAt: action === "no_show" ? FieldValue.serverTimestamp() : null,
       cancelledAt: action === "cancelled" ? FieldValue.serverTimestamp() : null,
@@ -1642,11 +1784,11 @@ export const reviewAppointment = onCall(async (request) => {
       staffName,
       createdAt: FieldValue.serverTimestamp(),
     });
-    const title = action === "confirmed" ? "Appointment confirmed" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked no-show" : action === "cancelled" ? "Appointment cancelled" : action === "reschedule_required" ? "Schedule adjustment needed" : "New appointment time proposed";
+    const title = action === "confirmed" ? "PACC Appointment Confirmed" : action === "declined" ? "Appointment request declined" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked no-show" : action === "cancelled" ? "Appointment cancelled" : "Schedule Change Proposed";
     transaction.create(notification, {
       userId,
       appointmentId,
-      type: "appointment",
+      type: action === "confirmed" ? "appointment_confirmed" : action === "declined" ? "appointment_declined" : action === "completed" ? "appointment_completed" : action === "cancelled" ? "appointment_cancelled" : action === "reschedule_proposed" ? "reschedule_proposed" : "appointment_update",
       title,
       body: reply,
       createdAt: FieldValue.serverTimestamp(),
@@ -1656,7 +1798,7 @@ export const reviewAppointment = onCall(async (request) => {
       : action === "completed" ? "APPOINTMENT_COMPLETED"
         : action === "no_show" ? "APPOINTMENT_MARKED_NO_SHOW"
           : action === "cancelled" ? "APPOINTMENT_CANCELLED"
-      : action === "reschedule_proposed" ? "APPOINTMENT_RESCHEDULED" : "APPOINTMENT_ADJUSTMENT_REQUESTED";
+      : action === "reschedule_proposed" ? "APPOINTMENT_RESCHEDULED" : "APPOINTMENT_DECLINED";
     writeAudit(transaction, db, {
       actorId: staffId,
       actorNameSnapshot: actorName(staff),
@@ -1717,10 +1859,16 @@ export const archiveTerminalAppointment = onDocumentUpdated(
 );
 
 export const sendAppointmentNotification = onDocumentCreated(
-  {document: "notifications/{notificationId}", retry: true},
+  {
+    document: "notifications/{notificationId}",
+    retry: true,
+    // This trigger is already deployed in asia-east1. Keep its source
+    // definition explicit so a targeted deploy updates it in place.
+    region: "asia-east1",
+  },
   async (event) => {
     const notification = event.data?.data();
-    if (!notification || !["appointment", "inquiry"].includes(String(notification.type ?? ""))) return;
+    if (!notification || !(String(notification.type ?? "") === "inquiry" || String(notification.type ?? "").startsWith("appointment") || String(notification.type ?? "").startsWith("reschedule"))) return;
     const userId = String(notification.userId ?? "");
     if (!userId) return;
     const tokens = await db.collection("user_devices").doc(userId).collection("tokens").get();
@@ -1777,3 +1925,49 @@ export const acknowledgeInquiry = onCall(async (request) => {
   });
   return {ok: true};
 });
+
+const REMINDER_WINDOWS: Array<{key: "twentyFourHour" | "oneHour"; minutes: number}> = [
+  {key: "twentyFourHour", minutes: 24 * 60},
+  {key: "oneHour", minutes: 60},
+];
+
+/** Runs independently of Flutter so reminders are durable across devices. */
+export const sendAppointmentReminders = onSchedule(
+  {schedule: "every 10 minutes", timeZone: "Asia/Manila", retryCount: 3},
+  async () => {
+    const now = Timestamp.now();
+    const lower = Timestamp.fromMillis(now.toMillis() + 45 * 60 * 1000);
+    const upper = Timestamp.fromMillis(now.toMillis() + (24 * 60 + 15) * 60 * 1000);
+    const candidates = await db.collection("appointments")
+      .where("status", "==", "confirmed")
+      .where("scheduledAt", ">=", lower)
+      .where("scheduledAt", "<=", upper)
+      .get();
+    await Promise.all(candidates.docs.flatMap((appointment) => REMINDER_WINDOWS.map(async ({key, minutes}) => {
+      const data = appointment.data();
+      const scheduledAt = data.scheduledAt;
+      if (!(scheduledAt instanceof Timestamp)) return;
+      const target = scheduledAt.toMillis() - minutes * 60 * 1000;
+      // The scheduler may run late; only deliver within a bounded window.
+      if (now.toMillis() < target || now.toMillis() > target + 15 * 60 * 1000) return;
+      const notification = db.collection("notifications").doc(`appointment_reminder_${key}_${appointment.id}`);
+      try {
+        await db.runTransaction(async (transaction) => {
+          const fresh = await transaction.get(appointment.ref);
+          const current = fresh.data() ?? {};
+          if (canonicalAppointmentStatus(current.status) !== "confirmed" || current.reminders?.[key]) return;
+          transaction.create(notification, {
+            userId: String(current.userId ?? ""), appointmentId: appointment.id,
+            type: "appointment_reminder", title: "PACC Appointment Reminder",
+            body: minutes === 60 ? "You have a PACC appointment in about an hour." : "You have a PACC appointment tomorrow.",
+            reminderStage: key, createdAt: FieldValue.serverTimestamp(), readAt: null,
+          });
+          transaction.update(appointment.ref, {[`reminders.${key}`]: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()});
+        });
+      } catch (error: unknown) {
+        const code = typeof error === "object" && error !== null && "code" in error ? String((error as {code?: unknown}).code) : "";
+        if (code !== "6" && code !== "already-exists") throw error;
+      }
+    })));
+  },
+);

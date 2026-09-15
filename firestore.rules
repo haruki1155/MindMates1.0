@@ -491,16 +491,15 @@ service cloud.firestore {
     }
 
     match /appointments/{appointmentId} {
-      allow create: if isOwner(request.resource.data.userId);
+      // Appointment mutations are callable-only.  This prevents a student
+      // from confirming/completing their own record or bypassing slot locks.
+      allow create: if false;
       allow read: if isOwner(resource.data.userId)
         || currentAccessRole() == 'portalStaff'
         || currentAccessRole() == 'admin'
         || (currentAccessRole() == 'counselor'
           && resource.data.assignedStaffId == request.auth.uid);
-      allow update, delete: if currentAccessRole() == 'portalStaff'
-        || currentAccessRole() == 'admin'
-        || (currentAccessRole() == 'counselor'
-          && resource.data.assignedStaffId == request.auth.uid);
+      allow update, delete: if false;
       match /history/{historyId} {
         allow read: if isOwner(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId)
           || currentAccessRole() == 'portalStaff'
@@ -546,6 +545,10 @@ service cloud.firestore {
       allow update: if hasPortalAccess()
         && request.resource.data.userId == resource.data.userId;
       allow delete: if false;
+    }
+
+    match /appointment_slots/{slotId} {
+      allow read, write: if false;
     }
 
     match /pacc_availability/{documentId} {

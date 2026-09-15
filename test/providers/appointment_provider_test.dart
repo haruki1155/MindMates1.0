@@ -47,7 +47,7 @@ void main() {
 
     expect(saved, isFalse);
     expect(provider.appointments, isEmpty);
-    expect(provider.errorMessage, 'Unable to save appointment.');
+    expect(provider.errorMessage, 'Unable to save appointment. Please try again.');
     expect(provider.isSaving, isFalse);
   });
 
@@ -111,6 +111,10 @@ class _FakeAppointmentRepository extends AppointmentRepository {
   bool returnAllUsers = false;
   int createCalls = 0;
   Completer<AppointmentModel>? saveCompleter;
+
+  @override
+  Stream<List<AppointmentModel>> watchAppointments(String userId) =>
+      const Stream<List<AppointmentModel>>.empty();
 
   @override
   Future<List<AppointmentModel>> fetchAppointments(String userId) async {

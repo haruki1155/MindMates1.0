@@ -561,6 +561,7 @@ AppointmentModel? nextActiveAppointment(
                 !item.scheduledAt.isBefore(now) &&
                 const {
                   AppointmentDisplayStatus.pending,
+                  AppointmentDisplayStatus.requested,
                   AppointmentDisplayStatus.upcoming,
                   AppointmentDisplayStatus.confirmed,
                   AppointmentDisplayStatus.rescheduleProposed,
@@ -572,6 +573,7 @@ AppointmentModel? nextActiveAppointment(
 }
 
 String _statusLabel(AppointmentDisplayStatus status) => switch (status) {
+  AppointmentDisplayStatus.requested => 'Requested',
   AppointmentDisplayStatus.pending => 'Pending',
   AppointmentDisplayStatus.upcoming => 'Upcoming',
   AppointmentDisplayStatus.confirmed => 'Confirmed',
