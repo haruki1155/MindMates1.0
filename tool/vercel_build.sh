@@ -19,6 +19,10 @@ fi
 export PATH="$flutter_sdk/bin:$PATH"
 export PUB_CACHE="$PWD/.vercel/cache/pub"
 
+# Vercel restores its cache with a different owner from the build process.
+# Flutter uses Git internally, which requires this explicit trust declaration.
+git config --global --add safe.directory "$flutter_sdk"
+
 flutter --disable-analytics
 flutter pub get
 flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=staging
