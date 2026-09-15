@@ -57,3 +57,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Node.js dependencies (root level for web analytics)
+node_modules/
