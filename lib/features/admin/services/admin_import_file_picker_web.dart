@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:html' as html;
 import 'dart:js_interop';
 import 'dart:typed_data';
 
@@ -35,11 +34,15 @@ Future<AdminImportFile?> pickAdminImportFile() async {
 void downloadImportTemplate() {
   final csv =
       'Full name,Student ID,Department/Course,Year Level,Date of log-in\nExample Student,2026-0001,BS Psychology,Year 1,2026-09-11\n';
-  final blob = html.Blob([csv], 'text/csv;charset=utf-8');
-  final url = html.Url.createObjectUrlFromBlob(blob);
-  final anchor = html.AnchorElement(href: url)
-    ..setAttribute('download', 'mindmate_counseling_walkin_template.csv')
+  final blob = web.Blob(
+    [csv.toJS].toJS,
+    web.BlobPropertyBag(type: 'text/csv;charset=utf-8'),
+  );
+  final url = web.URL.createObjectURL(blob);
+  final anchor = web.HTMLAnchorElement()
+    ..href = url
+    ..download = 'mindmate_counseling_walkin_template.csv'
     ..click();
   anchor.remove();
-  html.Url.revokeObjectUrl(url);
+  web.URL.revokeObjectURL(url);
 }

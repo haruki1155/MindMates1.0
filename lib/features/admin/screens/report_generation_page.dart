@@ -346,6 +346,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
           },
         );
       } catch (_) {}
+      if (!mounted) return;
       await showDialog<void>(
         context: context,
         barrierColor: Colors.black54,
@@ -585,9 +586,7 @@ class _ImportedFilesPanelState extends State<_ImportedFilesPanel> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: AdminColors.danger,
-            ),
+            style: FilledButton.styleFrom(backgroundColor: AdminColors.danger),
             child: const Text('Delete file'),
           ),
         ],
@@ -682,7 +681,10 @@ class _ImportedFilesPanelState extends State<_ImportedFilesPanel> {
                       style: TextStyle(color: AdminColors.danger),
                     ),
                   ),
-                  TextButton(onPressed: _reload, child: const Text('Try again')),
+                  TextButton(
+                    onPressed: _reload,
+                    child: const Text('Try again'),
+                  ),
                 ],
               );
             }
@@ -1371,7 +1373,8 @@ class _AdminReportControls extends StatelessWidget {
                     child: _LabeledControl(
                       label: 'Academic year',
                       child: DropdownButtonFormField<String>(
-                        initialValue: options.any((item) => item.schoolYear == schoolYear)
+                        initialValue:
+                            options.any((item) => item.schoolYear == schoolYear)
                             ? schoolYear
                             : options.first.schoolYear,
                         isExpanded: true,
@@ -1410,10 +1413,22 @@ class _AdminReportControls extends StatelessWidget {
                           prefixIcon: Icon(Icons.date_range_outlined),
                         ),
                         items: const [
-                          DropdownMenuItem(value: _ReportPeriod.wholeYear, child: Text('Whole year')),
-                          DropdownMenuItem(value: _ReportPeriod.firstSemester, child: Text('1st semester')),
-                          DropdownMenuItem(value: _ReportPeriod.secondSemester, child: Text('2nd semester')),
-                          DropdownMenuItem(value: _ReportPeriod.custom, child: Text('Custom dates')),
+                          DropdownMenuItem(
+                            value: _ReportPeriod.wholeYear,
+                            child: Text('Whole year'),
+                          ),
+                          DropdownMenuItem(
+                            value: _ReportPeriod.firstSemester,
+                            child: Text('1st semester'),
+                          ),
+                          DropdownMenuItem(
+                            value: _ReportPeriod.secondSemester,
+                            child: Text('2nd semester'),
+                          ),
+                          DropdownMenuItem(
+                            value: _ReportPeriod.custom,
+                            child: Text('Custom dates'),
+                          ),
                         ],
                         onChanged: (value) {
                           if (value == _ReportPeriod.custom) {
@@ -1447,19 +1462,30 @@ class _AdminReportControls extends StatelessWidget {
                   : Wrap(
                       spacing: 14,
                       runSpacing: 14,
-                      children: [_scopeControl(), _groupControl(), _visualControl()],
+                      children: [
+                        _scopeControl(),
+                        _groupControl(),
+                        _visualControl(),
+                      ],
                     );
             },
           ),
           const SizedBox(height: 10),
           Row(
             children: [
-              const Icon(Icons.info_outline, size: 15, color: AdminColors.muted),
+              const Icon(
+                Icons.info_outline,
+                size: 15,
+                color: AdminColors.muted,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   'Percentages are calculated using the population snapshot for ${report.population.schoolYear}.',
-                  style: const TextStyle(color: AdminColors.muted, fontSize: 12),
+                  style: const TextStyle(
+                    color: AdminColors.muted,
+                    fontSize: 12,
+                  ),
                 ),
               ),
             ],
@@ -1476,10 +1502,17 @@ class _AdminReportControls extends StatelessWidget {
       child: DropdownButtonFormField<String>(
         initialValue: department,
         isExpanded: true,
-        decoration: const InputDecoration(prefixIcon: Icon(Icons.account_balance_outlined)),
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.account_balance_outlined),
+        ),
         items: [
           const DropdownMenuItem(value: 'all', child: Text('All departments')),
-          ...departmentOptions.map((item) => DropdownMenuItem(value: item.key, child: Text(item.label, overflow: TextOverflow.ellipsis))),
+          ...departmentOptions.map(
+            (item) => DropdownMenuItem(
+              value: item.key,
+              child: Text(item.label, overflow: TextOverflow.ellipsis),
+            ),
+          ),
         ],
         onChanged: (value) {
           if (value != null) onDepartmentChanged(value);
@@ -1493,9 +1526,18 @@ class _AdminReportControls extends StatelessWidget {
     child: SegmentedButton<AppointmentReportDimension>(
       showSelectedIcon: false,
       segments: const [
-        ButtonSegment(value: AppointmentReportDimension.department, label: Text('Department')),
-        ButtonSegment(value: AppointmentReportDimension.course, label: Text('Course')),
-        ButtonSegment(value: AppointmentReportDimension.yearLevel, label: Text('Year level')),
+        ButtonSegment(
+          value: AppointmentReportDimension.department,
+          label: Text('Department'),
+        ),
+        ButtonSegment(
+          value: AppointmentReportDimension.course,
+          label: Text('Course'),
+        ),
+        ButtonSegment(
+          value: AppointmentReportDimension.yearLevel,
+          label: Text('Year level'),
+        ),
       ],
       selected: {dimension},
       onSelectionChanged: (values) => onDimensionChanged(values.first),
@@ -1507,8 +1549,16 @@ class _AdminReportControls extends StatelessWidget {
     child: SegmentedButton<ReportChartType>(
       showSelectedIcon: false,
       segments: const [
-        ButtonSegment(value: ReportChartType.bar, icon: Icon(Icons.bar_chart, size: 18), label: Text('Bar')),
-        ButtonSegment(value: ReportChartType.pie, icon: Icon(Icons.pie_chart_outline, size: 18), label: Text('Pie')),
+        ButtonSegment(
+          value: ReportChartType.bar,
+          icon: Icon(Icons.bar_chart, size: 18),
+          label: Text('Bar'),
+        ),
+        ButtonSegment(
+          value: ReportChartType.pie,
+          icon: Icon(Icons.pie_chart_outline, size: 18),
+          label: Text('Pie'),
+        ),
       ],
       selected: {chartType},
       onSelectionChanged: (values) => onChartChanged(values.first),
@@ -1521,8 +1571,14 @@ class _CurrentBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-    decoration: BoxDecoration(color: AdminColors.accentSoft, borderRadius: BorderRadius.circular(6)),
-    child: const Text('Current', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
+    decoration: BoxDecoration(
+      color: AdminColors.accentSoft,
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: const Text(
+      'Current',
+      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800),
+    ),
   );
 }
 

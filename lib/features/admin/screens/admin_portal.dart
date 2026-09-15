@@ -2176,7 +2176,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
         appointmentIds: [appointment.id],
         archived: !showHistory,
       );
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -2186,8 +2186,9 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
             ),
           ),
         );
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -2195,6 +2196,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
             ),
           ),
         );
+      }
     }
   }
 
@@ -2240,7 +2242,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
         );
       }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -2248,6 +2250,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
             ),
           ),
         );
+      }
     } finally {
       if (mounted) setState(() => archiving = false);
     }

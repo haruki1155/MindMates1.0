@@ -195,13 +195,17 @@ class AdminPortalRepository {
   }) async {
     var user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      return const PortalAccessEvaluation(state: PortalAccessState.accountNotFound);
+      return const PortalAccessEvaluation(
+        state: PortalAccessState.accountNotFound,
+      );
     }
     if (refreshUser) {
       await user.reload();
       user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        return const PortalAccessEvaluation(state: PortalAccessState.accountNotFound);
+        return const PortalAccessEvaluation(
+          state: PortalAccessState.accountNotFound,
+        );
       }
       await user.getIdToken(true);
     }
@@ -237,12 +241,18 @@ class AdminPortalRepository {
       }
     }
     final refreshedProfile = isStaffRequest
-        ? await _firestoreService.getDocument(FirestoreCollections.users, user.uid)
+        ? await _firestoreService.getDocument(
+            FirestoreCollections.users,
+            user.uid,
+          )
         : profile;
     final resolvedProfile = refreshedProfile ?? profile;
     final role = _profileAccessRole(resolvedProfile);
-    final status = StaffAccountStatus.parse(resolvedProfile['staffAccountStatus']);
-    final registrationStatus = resolvedProfile['registrationStatus']?.toString();
+    final status = StaffAccountStatus.parse(
+      resolvedProfile['staffAccountStatus'],
+    );
+    final registrationStatus = resolvedProfile['registrationStatus']
+        ?.toString();
     _mustChangePassword = resolvedProfile['mustChangePassword'] == true;
     if (status == StaffAccountStatus.pending) {
       return PortalAccessEvaluation(
@@ -292,7 +302,9 @@ class AdminPortalRepository {
   String? _requestReference(Map<String, dynamic> profile) {
     final requestId = profile['accessRequestId']?.toString().trim() ?? '';
     final end = requestId.length < 8 ? requestId.length : 8;
-    return requestId.isEmpty ? null : 'REQ-${requestId.substring(0, end).toUpperCase()}';
+    return requestId.isEmpty
+        ? null
+        : 'REQ-${requestId.substring(0, end).toUpperCase()}';
   }
 
   User? get currentAuthUser => FirebaseAuth.instance.currentUser;
@@ -660,7 +672,8 @@ class AdminPortalRepository {
                 ),
               )
               .where(
-                (item) => item.audience == 'portal' && item.isArchived == archived,
+                (item) =>
+                    item.audience == 'portal' && item.isArchived == archived,
               )
               .toList(growable: false),
         );
@@ -670,10 +683,13 @@ class AdminPortalRepository {
 
   Future<Duration> resendStaffVerificationEmail() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw StateError('Sign in is required to resend verification.');
+    if (user == null) {
+      throw StateError('Sign in is required to resend verification.');
+    }
     final now = DateTime.now();
     final previous = _lastVerificationEmailSentAt;
-    if (previous != null && now.difference(previous) < const Duration(seconds: 60)) {
+    if (previous != null &&
+        now.difference(previous) < const Duration(seconds: 60)) {
       return const Duration(seconds: 60) - now.difference(previous);
     }
     await FirebaseFunctions.instance
@@ -804,8 +820,7 @@ class AdminPortalRepository {
   Future<int> importWalkInAppointments(
     List<WalkInAppointmentImportRow> rows, {
     String? fileName,
-  }
-  ) async {
+  }) async {
     if (!currentAccessRole.canAccessClinicalData) {
       throw StateError('Counselor or administrator access is required.');
     }
@@ -858,7 +873,10 @@ class AdminPortalRepository {
     }
     await FirebaseFunctions.instance
         .httpsCallable('archiveWalkInImport')
-        .call<Map<String, dynamic>>({'importId': importId, 'archived': archived});
+        .call<Map<String, dynamic>>({
+          'importId': importId,
+          'archived': archived,
+        });
   }
 
   Stream<List<AdminAssessmentRecord>> watchAssessments() => _firestoreService
@@ -987,7 +1005,7 @@ class AdminPortalRepository {
         'approve': approve,
         'accessRole': accessRole.storedValue,
         'reason': reason.trim(),
-        if (decision != null) 'decision': decision,
+        'decision': ?decision,
       });
 
   Future<void> setStaffAccountEnabled({
@@ -1013,11 +1031,16 @@ class AdminPortalRepository {
     return (result.data['affected'] as num?)?.toInt() ?? userIds.length;
   }
 
-  Future<int> archiveAppointments({required List<String> appointmentIds, required bool archived}) async {
-    final result = await FirebaseFunctions.instance.httpsCallable('archiveAppointments').call<Map<String, dynamic>>({
-      'appointmentIds': appointmentIds,
-      'archived': archived,
-    });
+  Future<int> archiveAppointments({
+    required List<String> appointmentIds,
+    required bool archived,
+  }) async {
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('archiveAppointments')
+        .call<Map<String, dynamic>>({
+          'appointmentIds': appointmentIds,
+          'archived': archived,
+        });
     return (result.data['affected'] as num?)?.toInt() ?? appointmentIds.length;
   }
 
@@ -1044,11 +1067,9 @@ class AdminPortalRepository {
     required String kind,
     required String id,
     required bool archived,
-  }) => FirebaseFunctions.instance.httpsCallable('archiveOrganizationRecord').call({
-    'kind': kind,
-    'id': id,
-    'archived': archived,
-  });
+  }) => FirebaseFunctions.instance
+      .httpsCallable('archiveOrganizationRecord')
+      .call({'kind': kind, 'id': id, 'archived': archived});
 
   Future<int> initializeAcademicStructure() async {
     final result = await FirebaseFunctions.instance

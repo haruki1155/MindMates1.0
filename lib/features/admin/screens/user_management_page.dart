@@ -11,7 +11,11 @@ import 'profile_management_page.dart';
 enum UserManagementCategory { appUsers, staff, admin }
 
 class UserManagementPage extends StatefulWidget {
-  const UserManagementPage({super.key, required this.repository, this.onOpenAcademicStructure});
+  const UserManagementPage({
+    super.key,
+    required this.repository,
+    this.onOpenAcademicStructure,
+  });
   final AdminPortalRepository repository;
   final VoidCallback? onOpenAcademicStructure;
 
@@ -105,7 +109,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                       ],
                     );
                     final directory = OutlinedButton.icon(
-                      onPressed: widget.onOpenAcademicStructure ?? _showOrganizationDirectory,
+                      onPressed:
+                          widget.onOpenAcademicStructure ??
+                          _showOrganizationDirectory,
                       icon: const Icon(Icons.account_tree_outlined),
                       label: const Text('Academic structure'),
                     );
@@ -402,26 +408,38 @@ class _UserManagementPageState extends State<UserManagementPage> {
         .toList();
     if (staff.isEmpty) return const Text('No staff accounts found.');
     _selectedStaffIds.removeWhere((id) => !staff.any((user) => user.id == id));
-    final activeSelected = staff.where((user) => _selectedStaffIds.contains(user.id) && user.staffAccountStatus == StaffAccountStatus.approved).length;
-    final suspendedSelected = staff.where((user) => _selectedStaffIds.contains(user.id) && user.staffAccountStatus == StaffAccountStatus.disabled).length;
-    final allSelected = staff.isNotEmpty && _selectedStaffIds.length == staff.length;
+    final activeSelected = staff
+        .where(
+          (user) =>
+              _selectedStaffIds.contains(user.id) &&
+              user.staffAccountStatus == StaffAccountStatus.approved,
+        )
+        .length;
+    final suspendedSelected = staff
+        .where(
+          (user) =>
+              _selectedStaffIds.contains(user.id) &&
+              user.staffAccountStatus == StaffAccountStatus.disabled,
+        )
+        .length;
+    final allSelected =
+        staff.isNotEmpty && _selectedStaffIds.length == staff.length;
     final cards = staff
-          .map(
-            (user) =>
-                _StaffRecordCard(
-                  user: user,
-                  selected: _selectedStaffIds.contains(user.id),
-                  onSelected: (value) => setState(() {
-                    if (value) {
-                      _selectedStaffIds.add(user.id);
-                    } else {
-                      _selectedStaffIds.remove(user.id);
-                    }
-                  }),
-                  actions: _staffActions(user),
-                ),
-          )
-          .toList();
+        .map(
+          (user) => _StaffRecordCard(
+            user: user,
+            selected: _selectedStaffIds.contains(user.id),
+            onSelected: (value) => setState(() {
+              if (value) {
+                _selectedStaffIds.add(user.id);
+              } else {
+                _selectedStaffIds.remove(user.id);
+              }
+            }),
+            actions: _staffActions(user),
+          ),
+        )
+        .toList();
     final toolbar = Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Wrap(
@@ -429,20 +447,23 @@ class _UserManagementPageState extends State<UserManagementPage> {
         runSpacing: 8,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            Checkbox(
-              value: allSelected,
-              tristate: _selectedStaffIds.isNotEmpty && !allSelected,
-              onChanged: (value) => setState(() {
-                if (allSelected || value == false) {
-                  _selectedStaffIds.clear();
-                } else {
-                  _selectedStaffIds.addAll(staff.map((user) => user.id));
-                }
-              }),
-            ),
-            Text('Select all (${staff.length})'),
-          ]),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Checkbox(
+                value: allSelected,
+                tristate: _selectedStaffIds.isNotEmpty && !allSelected,
+                onChanged: (value) => setState(() {
+                  if (allSelected || value == false) {
+                    _selectedStaffIds.clear();
+                  } else {
+                    _selectedStaffIds.addAll(staff.map((user) => user.id));
+                  }
+                }),
+              ),
+              Text('Select all (${staff.length})'),
+            ],
+          ),
           if (_selectedStaffIds.isNotEmpty) ...[
             if (activeSelected > 0)
               OutlinedButton.icon(
@@ -471,16 +492,23 @@ class _UserManagementPageState extends State<UserManagementPage> {
   }
 
   Future<void> _bulkStaffAction(List<UserModel> staff, String action) async {
-    final selected = staff.where((user) => _selectedStaffIds.contains(user.id) &&
-        (action == 'suspend'
-            ? user.staffAccountStatus == StaffAccountStatus.approved
-            : user.staffAccountStatus == StaffAccountStatus.disabled)).toList();
+    final selected = staff
+        .where(
+          (user) =>
+              _selectedStaffIds.contains(user.id) &&
+              (action == 'suspend'
+                  ? user.staffAccountStatus == StaffAccountStatus.approved
+                  : user.staffAccountStatus == StaffAccountStatus.disabled),
+        )
+        .toList();
     if (selected.isEmpty) return;
     final reason = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('${action == 'suspend' ? 'Suspend' : 'Reactivate'} ${selected.length} staff account${selected.length == 1 ? '' : 's'}?'),
+        title: Text(
+          '${action == 'suspend' ? 'Suspend' : 'Reactivate'} ${selected.length} staff account${selected.length == 1 ? '' : 's'}?',
+        ),
         content: TextField(
           controller: reason,
           minLines: 2,
@@ -490,7 +518,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
             helperText: 'This reason will be recorded in the audit history.',
           ),
         ),
-        actions: _confirmActions(dialogContext, action == 'suspend' ? 'Suspend accounts' : 'Reactivate accounts'),
+        actions: _confirmActions(
+          dialogContext,
+          action == 'suspend' ? 'Suspend accounts' : 'Reactivate accounts',
+        ),
       ),
     );
     if (confirmed != true || reason.text.trim().length < 3) {
@@ -505,15 +536,39 @@ class _UserManagementPageState extends State<UserManagementPage> {
         reason: reason.text,
       );
       if (mounted) {
-        setState(() => _selectedStaffIds.removeAll(selected.map((user) => user.id)));
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$affected account${affected == 1 ? '' : 's'} updated successfully.')));
+        setState(
+          () => _selectedStaffIds.removeAll(selected.map((user) => user.id)),
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '$affected account${affected == 1 ? '' : 's'} updated successfully.',
+            ),
+          ),
+        );
       }
     } on FirebaseFunctionsException catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_friendlyAdminError(error))));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_friendlyAdminError(error))));
+      }
     } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('The selected accounts could not be updated. Please try again.')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The selected accounts could not be updated. Please try again.',
+            ),
+          ),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _updatingStaff.removeAll(selected.map((user) => user.id)));
+      if (mounted) {
+        setState(
+          () => _updatingStaff.removeAll(selected.map((user) => user.id)),
+        );
+      }
     }
     reason.dispose();
   }
@@ -649,10 +704,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
     } catch (_) {
       // Reviewing a request remains available if audit delivery is temporarily unavailable.
     }
+    if (!mounted) return;
     var role = user.requestedRole == AccessRole.counselor
         ? AccessRole.counselor
         : AccessRole.portalStaff;
-    final emailVerified = user.verificationStatus == VerificationStatus.verified &&
+    final emailVerified =
+        user.verificationStatus == VerificationStatus.verified &&
         user.registrationStatus != 'email_verification_required';
     final reason = TextEditingController();
     final decision = await showDialog<String>(
@@ -667,7 +724,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   '${user.email}\nEmployee ID: ${user.employeeId ?? 'Not provided'}\nPosition: ${user.position ?? 'Not provided'}',
-                  style: const TextStyle(color: AdminColors.muted, height: 1.45),
+                  style: const TextStyle(
+                    color: AdminColors.muted,
+                    height: 1.45,
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -676,9 +736,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 child: Row(
                   children: [
                     Icon(
-                      emailVerified ? Icons.verified_outlined : Icons.mark_email_unread_outlined,
+                      emailVerified
+                          ? Icons.verified_outlined
+                          : Icons.mark_email_unread_outlined,
                       size: 18,
-                      color: emailVerified ? AdminColors.accentStrong : AdminColors.muted,
+                      color: emailVerified
+                          ? AdminColors.accentStrong
+                          : AdminColors.muted,
                     ),
                     const SizedBox(width: 7),
                     Text(
@@ -706,7 +770,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'PAACC Staff: appointments, schedules, inquiries, and limited administrative information.\nCounselor: authorized counseling profiles, assessment summaries, and counseling workflows.',
-                  style: TextStyle(color: AdminColors.muted, fontSize: 12, height: 1.4),
+                  style: TextStyle(
+                    color: AdminColors.muted,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
                 ),
               ),
               const SizedBox(height: 14),
@@ -723,9 +791,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     child: Text('Counselor'),
                   ),
                 ],
-                onChanged: emailVerified ? (value) {
-                  if (value != null) setDialogState(() => role = value);
-                } : null,
+                onChanged: emailVerified
+                    ? (value) {
+                        if (value != null) setDialogState(() => role = value);
+                      }
+                    : null,
               ),
               const SizedBox(height: 10),
               TextField(
@@ -1511,7 +1581,12 @@ class _AppUserFact extends StatelessWidget {
 }
 
 class _StaffRecordCard extends StatelessWidget {
-  const _StaffRecordCard({required this.user, required this.actions, required this.selected, required this.onSelected});
+  const _StaffRecordCard({
+    required this.user,
+    required this.actions,
+    required this.selected,
+    required this.onSelected,
+  });
 
   final UserModel user;
   final List<Widget> actions;
@@ -1548,7 +1623,10 @@ class _StaffRecordCard extends StatelessWidget {
           final identity = Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Checkbox(value: selected, onChanged: (value) => onSelected(value ?? false)),
+              Checkbox(
+                value: selected,
+                onChanged: (value) => onSelected(value ?? false),
+              ),
               CircleAvatar(
                 radius: 20,
                 backgroundColor: AdminColors.accentSoft,
@@ -1924,12 +2002,12 @@ class _UserBadge extends StatelessWidget {
 
 String _accountStatus(UserModel user) => switch (user.staffAccountStatus) {
   StaffAccountStatus.approved => 'Active',
-  StaffAccountStatus.pending => user.registrationStatus ==
-          'more_information_required'
-      ? 'More information required'
-      : user.registrationStatus == 'email_verification_required'
-      ? 'Waiting for email'
-      : 'Pending review',
+  StaffAccountStatus.pending =>
+    user.registrationStatus == 'more_information_required'
+        ? 'More information required'
+        : user.registrationStatus == 'email_verification_required'
+        ? 'Waiting for email'
+        : 'Pending review',
   StaffAccountStatus.disabled => 'Suspended',
   StaffAccountStatus.rejected => 'Closed',
   null => 'Unknown',
