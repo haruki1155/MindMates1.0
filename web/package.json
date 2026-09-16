@@ -1,0 +1,12 @@
+{
+  "name": "mindmates-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MindMate web dependencies",
+  "dependencies": {
+    "@vercel/speed-insights": "^1.0.12"
+  },
+  "scripts": {
+    "postinstall": "echo 'Web dependencies installed'"
+  }
+}
