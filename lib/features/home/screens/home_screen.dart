@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_icons/phosphor_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -251,8 +252,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                         .hasCheckedInToday
                                     ? 'View today’s mood'
                                     : 'Log your mood',
-                                icon: Icons.add,
-                                assetName: '+.png',
+                                icon: PhosphorIcons.plusCircle(
+                                  PhosphorIconsStyle.regular,
+                                ),
                                 onTap: _openLogMood,
                               ),
                             ),
@@ -946,16 +948,17 @@ class _HomeAppointmentPreview extends StatelessWidget {
                 Align(
                   alignment: Alignment.centerRight,
                   child: HomeCircleIconButton(
-                    icon: Icons.calendar_today_outlined,
-                    assetName: 'Calendar.png',
+                    icon: PhosphorIcons.calendarBlank(
+                      PhosphorIconsStyle.regular,
+                    ),
                     tooltip: 'Open appointment calendar',
                     onTap: onOpen,
                     size: 38,
                     iconSize: 20,
                   ),
                 ),
-                const Icon(
-                  Icons.calendar_month_rounded,
+                Icon(
+                  PhosphorIcons.calendarBlank(PhosphorIconsStyle.regular),
                   size: 46,
                   color: HomePalette.muted,
                 ),
@@ -1031,7 +1034,9 @@ class _HomeAppointmentPreview extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const Icon(Icons.chevron_right),
+                  Icon(
+                    PhosphorIcons.caretRight(PhosphorIconsStyle.regular),
+                  ),
                 ],
               ),
             ),
@@ -1103,16 +1108,14 @@ class _HomeBottomNav extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   _HomeBottomNavItem(
-                    icon: Icons.calendar_today,
-                    assetName: 'Calendar.png',
+                    icon: PhosphorIcons.house(PhosphorIconsStyle.regular),
                     label: 'Today',
                     isActive: active == _HomeNavDestination.today,
                     onTap: () =>
                         onDestinationSelected?.call(_HomeNavDestination.today),
                   ),
                   _HomeBottomNavItem(
-                    icon: Icons.forum_outlined,
-                    assetName: '💭.png',
+                    icon: PhosphorIcons.chatCircle(PhosphorIconsStyle.regular),
                     label: 'Secret chat',
                     isActive: active == _HomeNavDestination.secretChat,
                     onTap: () => onDestinationSelected?.call(
@@ -1120,7 +1123,7 @@ class _HomeBottomNav extends StatelessWidget {
                     ),
                   ),
                   _HomeBottomNavItem(
-                    icon: Icons.show_chart,
+                    icon: PhosphorIcons.chartLineUp(PhosphorIconsStyle.regular),
                     label: 'Insight',
                     isActive: active == _HomeNavDestination.insight,
                     onTap: () => onDestinationSelected?.call(
@@ -1128,8 +1131,7 @@ class _HomeBottomNav extends StatelessWidget {
                     ),
                   ),
                   _HomeBottomNavItem(
-                    icon: Icons.chat_bubble_outline,
-                    assetName: 'mail.png',
+                    icon: PhosphorIcons.chatsCircle(PhosphorIconsStyle.regular),
                     label: 'Messages',
                     isActive: active == _HomeNavDestination.messages,
                     onTap: () => onDestinationSelected?.call(
@@ -1137,7 +1139,9 @@ class _HomeBottomNav extends StatelessWidget {
                     ),
                   ),
                   _HomeBottomNavItem(
-                    icon: Icons.event_available_outlined,
+                    icon: PhosphorIcons.calendarCheck(
+                      PhosphorIconsStyle.regular,
+                    ),
                     label: 'Appointments',
                     isActive: active == _HomeNavDestination.appointments,
                     onTap: () => onDestinationSelected?.call(
@@ -1160,14 +1164,12 @@ class _HomeBottomNavItem extends StatelessWidget {
     required this.label,
     required this.isActive,
     required this.onTap,
-    this.assetName,
   });
 
   final IconData icon;
   final String label;
   final bool isActive;
   final VoidCallback onTap;
-  final String? assetName;
 
   @override
   Widget build(BuildContext context) {
@@ -1194,12 +1196,7 @@ class _HomeBottomNavItem extends StatelessWidget {
                       : null,
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: assetName == null
-                    ? Icon(icon, size: 20, color: HomePalette.text)
-                    : Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: HomeDashboardAssetImage(assetName: assetName!),
-                      ),
+                child: Icon(icon, size: 20, color: HomePalette.text),
               ),
               const SizedBox(height: 2),
               FittedBox(

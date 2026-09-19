@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:phosphor_icons/phosphor_icons.dart';
 import 'package:mind_mates/features/home/data/daily_affirmation_quotes.dart';
+import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
 import 'package:mind_mates/models/mood_model.dart';
@@ -23,6 +25,34 @@ import 'package:mind_mates/routes/app_pages.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('home welcome controls use Phosphor icons', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomeWelcomeCard(
+            user: const HomeUserData(displayName: 'Leo', role: 'Student'),
+            onNotificationTap: () {},
+            onCalendarTap: () {},
+            onProfileTap: () {},
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.byIcon(PhosphorIcons.userCircle(PhosphorIconsStyle.regular)),
+      findsOneWidget,
+    );
+    expect(
+      find.byIcon(PhosphorIcons.calendarBlank(PhosphorIconsStyle.regular)),
+      findsOneWidget,
+    );
+    expect(
+      find.byIcon(PhosphorIcons.bell(PhosphorIconsStyle.regular)),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('announcement actions are interactive', (tester) async {
     var viewMoreCalls = 0;
     var detailCalls = 0;
@@ -141,6 +171,26 @@ void main() {
     );
     await tester.pump();
 
+    expect(
+      find.byIcon(PhosphorIcons.house(PhosphorIconsStyle.regular)),
+      findsOneWidget,
+    );
+    expect(
+      find.byIcon(PhosphorIcons.chatCircle(PhosphorIconsStyle.regular)),
+      findsOneWidget,
+    );
+    expect(
+      find.byIcon(PhosphorIcons.chartLineUp(PhosphorIconsStyle.regular)),
+      findsOneWidget,
+    );
+    expect(
+      find.byIcon(PhosphorIcons.chatsCircle(PhosphorIconsStyle.regular)),
+      findsOneWidget,
+    );
+    expect(
+      find.byIcon(PhosphorIcons.calendarCheck(PhosphorIconsStyle.regular)),
+      findsOneWidget,
+    );
     expect(find.text('Welcome back, Leonardo Molar!'), findsOneWidget);
     expect(find.text('Student'), findsOneWidget);
     expect(find.text('Day streak'), findsOneWidget);
@@ -243,6 +293,11 @@ void main() {
           home: const HomeScreen(),
         ),
       ),
+    );
+
+    expect(
+      find.byIcon(PhosphorIcons.plusCircle(PhosphorIconsStyle.regular)),
+      findsOneWidget,
     );
 
     await tester.tap(find.text('Log your mood').first);
@@ -396,13 +451,8 @@ void main() {
     );
 
     for (final assetName in [
-      'Customer.png',
-      'Calendar.png',
       'High Importance.png',
       'Forward.png',
-      'x.png',
-      'Notification.png',
-      '+.png',
       '🔥.png',
       'Thumbs up.png',
       'Good Quality.png',

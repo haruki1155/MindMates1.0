@@ -993,11 +993,9 @@ class _AppointmentActions extends StatelessWidget {
           label: 'Request Reschedule',
           onTap: onRequestReschedule,
         ),
-        _SmallYellowButton(label: 'Cancel Appointment', onTap: onCancel),
       ]);
     } else if (status == AppointmentStatus.requested ||
         status == AppointmentStatus.legacyRequested) {
-      actions.add(_SmallYellowButton(label: 'Cancel Request', onTap: onCancel));
     } else if (status == AppointmentStatus.rescheduleProposed) {
       actions.addAll([
         _SmallYellowButton(
@@ -1008,7 +1006,6 @@ class _AppointmentActions extends StatelessWidget {
           label: 'Request Another Time',
           onTap: onRequestReschedule,
         ),
-        _SmallYellowButton(label: 'Cancel Appointment', onTap: onCancel),
       ]);
     } else if (status == AppointmentStatus.cancelled) {
       actions.add(_SmallYellowButton(label: 'Book Again', onTap: onBookAgain));
@@ -1016,7 +1013,7 @@ class _AppointmentActions extends StatelessWidget {
       actions.add(
         _SmallYellowButton(label: 'Book Follow-up', onTap: onBookAgain),
       );
-    } else if (status == AppointmentStatus.noShow) {
+    } else if (status == AppointmentStatus.noShow || status == AppointmentStatus.notAttended) {
       actions.add(
         _SmallYellowButton(
           label: 'Book Another Appointment',

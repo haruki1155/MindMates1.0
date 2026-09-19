@@ -74,6 +74,7 @@ class AppointmentRepository {
     );
   }
 
+  // Legacy API retained for existing callers; server rejects new cancellation.
   Future<void> cancelAppointment(String appointmentId, {String? reason}) =>
       _action(appointmentId, 'cancel', reason: reason);
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_icons/phosphor_icons.dart';
 
 import '../../../core/constants/app_assets.dart';
 import '../data/daily_affirmation_quotes.dart';
@@ -153,9 +154,7 @@ class HomeCalendarHeader extends StatelessWidget {
           Row(
             children: [
               HomeCircleIconButton(
-                icon: Icons.person_outline,
-                assetName: 'Customer.png',
-                assetColor: HomePalette.text,
+                icon: PhosphorIcons.userCircle(PhosphorIconsStyle.regular),
                 tooltip: 'Profile',
                 onTap: onProfileTap,
               ),
@@ -174,8 +173,7 @@ class HomeCalendarHeader extends StatelessWidget {
                 ),
               ),
               HomeCircleIconButton(
-                icon: Icons.calendar_today_outlined,
-                assetName: 'Calendar.png',
+                icon: PhosphorIcons.calendarBlank(PhosphorIconsStyle.regular),
                 tooltip: 'Calendar',
                 onTap: onCalendarTap,
               ),
@@ -324,16 +322,14 @@ class HomeAssessmentBanner extends StatelessWidget {
                 const SizedBox(height: 10),
                 HomePillButton(
                   label: data.actionLabel,
-                  icon: Icons.arrow_forward,
-                  assetName: 'Forward.png',
+                  icon: PhosphorIcons.arrowRight(PhosphorIconsStyle.regular),
                   onTap: onStart,
                 ),
               ],
             ),
           ),
           HomePlainIconButton(
-            icon: Icons.close,
-            assetName: 'x.png',
+            icon: PhosphorIcons.x(PhosphorIconsStyle.regular),
             tooltip: 'Dismiss',
             onTap: onClose,
           ),
@@ -375,9 +371,7 @@ class HomeWelcomeCard extends StatelessWidget {
           Row(
             children: [
               HomeCircleIconButton(
-                icon: Icons.person_outline,
-                assetName: 'Customer.png',
-                assetColor: HomePalette.text,
+                icon: PhosphorIcons.userCircle(PhosphorIconsStyle.regular),
                 tooltip: 'Profile',
                 onTap: onProfileTap,
                 size: 36,
@@ -412,8 +406,7 @@ class HomeWelcomeCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               HomeCircleIconButton(
-                icon: Icons.calendar_today_outlined,
-                assetName: 'Calendar.png',
+                icon: PhosphorIcons.calendarBlank(PhosphorIconsStyle.regular),
                 tooltip: 'Calendar',
                 onTap: onCalendarTap,
                 size: 36,
@@ -457,8 +450,7 @@ class _NotificationBell extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           HomeCircleIconButton(
-            icon: Icons.notifications_none,
-            assetName: 'Notification.png',
+            icon: PhosphorIcons.bell(PhosphorIconsStyle.regular),
             tooltip: label,
             onTap: onTap,
             size: 36,
@@ -1405,8 +1397,8 @@ class HomeMentalHealthCheckCard extends StatelessWidget {
                     const SizedBox(height: 14),
                     Row(
                       children: [
-                        const Icon(
-                          Icons.notifications_active_outlined,
+                        Icon(
+                          PhosphorIcons.bellRinging(PhosphorIconsStyle.regular),
                           size: 16,
                           color: HomePalette.muted,
                         ),
@@ -1430,7 +1422,9 @@ class HomeMentalHealthCheckCard extends StatelessWidget {
                       alignment: Alignment.center,
                       child: HomePillButton(
                         label: data.actionLabel,
-                        assetName: 'Forward.png',
+                        icon: PhosphorIcons.arrowRight(
+                          PhosphorIconsStyle.regular,
+                        ),
                         onTap: onViewSummary,
                       ),
                     ),
@@ -1819,13 +1813,11 @@ class HomePillButton extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.icon,
-    this.assetName,
   });
 
   final String label;
   final VoidCallback onTap;
   final IconData? icon;
-  final String? assetName;
 
   @override
   Widget build(BuildContext context) {
@@ -1836,6 +1828,8 @@ class HomePillButton extends StatelessWidget {
       shadowColor: HomePalette.shadowStrong,
       child: InkWell(
         borderRadius: BorderRadius.circular(22),
+        splashColor: const Color(0x33FFFFFF),
+        highlightColor: const Color(0x22FFFFFF),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
@@ -1854,14 +1848,7 @@ class HomePillButton extends StatelessWidget {
                   ),
                 ),
               ),
-              if (assetName != null) ...[
-                const SizedBox(width: 4),
-                HomeDashboardAssetImage(
-                  assetName: assetName!,
-                  width: 14,
-                  height: 18,
-                ),
-              ] else if (icon != null) ...[
+              if (icon != null) ...[
                 const SizedBox(width: 4),
                 Icon(icon, color: Colors.white, size: 14),
               ],
@@ -1879,13 +1866,11 @@ class HomeWideButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onTap,
-    this.assetName,
   });
 
   final String label;
   final IconData icon;
   final VoidCallback onTap;
-  final String? assetName;
 
   @override
   Widget build(BuildContext context) {
@@ -1898,19 +1883,15 @@ class HomeWideButton extends StatelessWidget {
         shadowColor: HomePalette.shadowStrong,
         child: InkWell(
           borderRadius: BorderRadius.circular(24),
+          splashColor: const Color(0x334A3900),
+          highlightColor: const Color(0x224A3900),
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                assetName == null
-                    ? Icon(icon, color: HomePalette.text, size: 26)
-                    : HomeDashboardAssetImage(
-                        assetName: assetName!,
-                        width: 20,
-                        height: 20,
-                      ),
+                Icon(icon, color: HomePalette.text, size: 26),
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text(
@@ -1967,7 +1948,10 @@ class HomeOutlinedButton extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            const Icon(Icons.chevron_right, size: 20),
+            Icon(
+              PhosphorIcons.caretRight(PhosphorIconsStyle.regular),
+              size: 20,
+            ),
           ],
         ),
       ),
@@ -1981,8 +1965,6 @@ class HomeCircleIconButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onTap,
-    this.assetName,
-    this.assetColor,
     this.size = 44,
     this.iconSize = 22,
   });
@@ -1990,8 +1972,6 @@ class HomeCircleIconButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
-  final String? assetName;
-  final Color? assetColor;
   final double size;
   final double iconSize;
 
@@ -2006,20 +1986,13 @@ class HomeCircleIconButton extends StatelessWidget {
         shadowColor: HomePalette.shadowStrong,
         child: InkWell(
           customBorder: const CircleBorder(),
+          splashColor: const Color(0x334A3900),
+          highlightColor: const Color(0x224A3900),
           onTap: onTap,
           child: SizedBox(
             width: size,
             height: size,
-            child: assetName == null
-                ? Icon(icon, size: iconSize, color: HomePalette.text)
-                : Center(
-                    child: HomeDashboardAssetImage(
-                      assetName: assetName!,
-                      width: iconSize,
-                      height: iconSize,
-                      color: assetColor,
-                    ),
-                  ),
+            child: Icon(icon, size: iconSize, color: HomePalette.text),
           ),
         ),
       ),
@@ -2033,13 +2006,11 @@ class HomePlainIconButton extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onTap,
-    this.assetName,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
-  final String? assetName;
 
   @override
   Widget build(BuildContext context) {
@@ -2047,16 +2018,12 @@ class HomePlainIconButton extends StatelessWidget {
       message: tooltip,
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
+        splashColor: const Color(0x224A3900),
+        highlightColor: const Color(0x144A3900),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(6),
-          child: assetName == null
-              ? Icon(icon, size: 16, color: HomePalette.text)
-              : HomeDashboardAssetImage(
-                  assetName: assetName!,
-                  width: 12,
-                  height: 12,
-                ),
+          child: Icon(icon, size: 16, color: HomePalette.text),
         ),
       ),
     );
