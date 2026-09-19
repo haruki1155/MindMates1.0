@@ -30,6 +30,7 @@ dependencies:
   web: ^1.1.1
   flutter_secure_storage: ^9.2.4
   google_sign_in: ^7.2.0
+  phosphor_icons: ^3.0.1
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4

@@ -967,6 +967,25 @@ class AdminPortalRepository {
         .call(data);
   }
 
+  Future<String> createFollowUpAppointment({
+    required String sourceAppointmentId,
+    required DateTime scheduledAt,
+    required String scheduledTime,
+    required String reason,
+    required String message,
+  }) async {
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('createFollowUpAppointment')
+        .call<Map<String, dynamic>>({
+          'sourceAppointmentId': sourceAppointmentId,
+          'scheduledAt': scheduledAt.millisecondsSinceEpoch,
+          'scheduledTime': scheduledTime.trim(),
+          'reason': reason.trim(),
+          'message': message.trim(),
+        });
+    return result.data['appointmentId']?.toString() ?? '';
+  }
+
   Future<void> reviewProfileVerification({
     required String userId,
     required VerificationStatus decision,

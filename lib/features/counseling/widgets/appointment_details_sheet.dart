@@ -175,6 +175,7 @@ Future<void> showAppointmentDetailsSheet(
                       appointment.lifecycleStatus ==
                           AppointmentStatus.completed ||
                       appointment.lifecycleStatus == AppointmentStatus.noShow ||
+                      appointment.lifecycleStatus == AppointmentStatus.notAttended ||
                       appointment.lifecycleStatus ==
                           AppointmentStatus.declined)) ...[
                 const Divider(height: 30),
@@ -210,7 +211,7 @@ String _friendlyStatus(AppointmentStatus status) => switch (status) {
   AppointmentStatus.completed => 'Completed',
   AppointmentStatus.cancelled => 'Cancelled',
   AppointmentStatus.declined => 'Request Declined',
-  AppointmentStatus.noShow => 'Missed Appointment',
+  AppointmentStatus.noShow || AppointmentStatus.notAttended => 'Missed Appointment',
   AppointmentStatus.unknown => 'Awaiting Confirmation',
 };
 

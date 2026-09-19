@@ -28,6 +28,7 @@ export {
 } from "./account_recovery";
 import {defineString} from "firebase-functions/params";
 import {randomBytes} from "node:crypto";
+import {allowedAppointmentActions, appointmentDateHasArrived} from "./appointment_workflow";
 import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
 export {
   aggregateMindAidFeedback,
@@ -1507,7 +1508,7 @@ export const resolvePortalAppointmentNotifications = onDocumentUpdated(
   async (event) => {
     const before = String(event.data?.before.data()?.status ?? "").toLowerCase();
     const after = String(event.data?.after.data()?.status ?? "").toLowerCase();
-    const terminal = new Set(["completed", "complete", "declined", "cancelled", "canceled"]);
+    const terminal = new Set(["completed", "complete", "not_attended", "no_show", "declined", "cancelled", "canceled"]);
     if (terminal.has(after) && !terminal.has(before)) {
       await archiveResolvedPortalNotifications("appointment", event.params.appointmentId);
     }
@@ -1597,7 +1598,7 @@ export const archiveReadNotifications = onSchedule(
 );
 
 const APPOINTMENT_ACTIVE_STATUSES = new Set(["requested", "confirmed", "reschedule_proposed"]);
-const APPOINTMENT_TERMINAL_STATUSES = new Set(["cancelled", "completed", "no_show", "declined"]);
+const APPOINTMENT_TERMINAL_STATUSES = new Set(["cancelled", "completed", "no_show", "not_attended", "declined"]);
 
 function canonicalAppointmentStatus(value: unknown): string {
   const status = String(value ?? "").trim().toLowerCase();
@@ -1664,7 +1665,7 @@ export const respondToAppointment = onCall(async (request) => {
   const input = (request.data ?? {}) as Record<string, unknown>;
   const appointmentId = String(input.appointmentId ?? "").trim();
   const action = String(input.action ?? "").trim();
-  if (!appointmentId || !["cancel", "accept_reschedule", "propose_reschedule"].includes(action)) throw new HttpsError("invalid-argument", "A valid appointment action is required.");
+  if (!appointmentId || !["accept_reschedule", "propose_reschedule"].includes(action)) throw new HttpsError("invalid-argument", "A valid appointment action is required.");
   const appointment = db.collection("appointments").doc(appointmentId);
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(appointment);
@@ -1672,14 +1673,6 @@ export const respondToAppointment = onCall(async (request) => {
     const data = snapshot.data()!;
     const before = canonicalAppointmentStatus(data.status);
     if (!APPOINTMENT_ACTIVE_STATUSES.has(before)) throw new HttpsError("failed-precondition", "This appointment can no longer be changed.");
-    const notification = db.collection("notifications").doc();
-    if (action === "cancel") {
-      transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason: String(input.reason ?? "").trim(), updatedAt: FieldValue.serverTimestamp()});
-      transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
-      createAppointmentEvent(transaction, appointment, "appointment_cancelled", userId, before, "cancelled");
-      if (data.assignedStaffId) transaction.create(notification, {userId: data.assignedStaffId, appointmentId, type: "appointment", title: "Appointment cancelled", body: "A student cancelled an appointment.", createdAt: FieldValue.serverTimestamp(), readAt: null});
-      return;
-    }
     if (action === "accept_reschedule") {
       if (before !== "reschedule_proposed" || !data.proposedScheduledAt) throw new HttpsError("failed-precondition", "There is no active schedule proposal.");
       const proposedAt = data.proposedScheduledAt as Timestamp;
@@ -1716,7 +1709,7 @@ export const reviewAppointment = onCall(async (request) => {
   const proposedTime = String(input.proposedScheduledTime ?? "").trim();
   // Declined remains readable for legacy records, but is intentionally not a
   // valid action for new appointment decisions.
-  if (!appointmentId || !["confirmed", "declined", "reschedule_proposed", "completed", "no_show", "cancelled"].includes(action)) {
+  if (!appointmentId || !["confirmed", "declined", "reschedule_proposed", "completed", "not_attended"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
   if (!reply) throw new HttpsError("invalid-argument", "A reply to the student is required.");
@@ -1737,13 +1730,14 @@ export const reviewAppointment = onCall(async (request) => {
       throw new HttpsError("permission-denied", "This appointment is not assigned to your caseload.");
     }
     const before = canonicalAppointmentStatus(data.status);
-    const allowed = before === "confirmed"
-      ? ["completed", "no_show", "cancelled"]
-      : before === "reschedule_proposed"
-        ? ["confirmed", "reschedule_proposed", "cancelled"]
-        : ["confirmed", "declined", "reschedule_proposed", "cancelled"];
+    const allowed = allowedAppointmentActions(before);
     if (!APPOINTMENT_ACTIVE_STATUSES.has(before) || !allowed.includes(action)) {
       throw new HttpsError("failed-precondition", "This appointment has already been finalized.");
+    }
+    if ((action === "completed" || action === "not_attended") &&
+        (!(data.scheduledAt instanceof Timestamp) ||
+        !appointmentDateHasArrived(data.scheduledAt.toDate(), new Date()))) {
+      throw new HttpsError("failed-precondition", "The appointment date has not arrived yet.");
     }
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Appointment has no student.");
@@ -1769,11 +1763,14 @@ export const reviewAppointment = onCall(async (request) => {
       proposalStatus: action === "reschedule_proposed" ? "awaiting_student" : FieldValue.delete(),
       ...(acceptingProposal ? {scheduledAt: data.proposedScheduledAt, scheduledTime: data.proposedScheduledTime ?? "", reminders: {}} : {}),
       completedAt: action === "completed" ? FieldValue.serverTimestamp() : null,
-      noShowAt: action === "no_show" ? FieldValue.serverTimestamp() : null,
+      noShowAt: action === "not_attended" ? FieldValue.serverTimestamp() : null,
       cancelledAt: action === "cancelled" ? FieldValue.serverTimestamp() : null,
       cancellationReason: action === "cancelled" ? reply : null,
     };
     transaction.update(appointment, patch);
+    if (action === "completed" || action === "not_attended" || action === "declined") {
+      transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
+    }
     transaction.create(history, {
       previousStatus: before,
       status: action,
@@ -1784,11 +1781,11 @@ export const reviewAppointment = onCall(async (request) => {
       staffName,
       createdAt: FieldValue.serverTimestamp(),
     });
-    const title = action === "confirmed" ? "PACC Appointment Confirmed" : action === "declined" ? "Appointment request declined" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked no-show" : action === "cancelled" ? "Appointment cancelled" : "Schedule Change Proposed";
+    const title = action === "confirmed" ? "PACC Appointment Confirmed" : action === "declined" ? "Appointment request declined" : action === "completed" ? "Appointment completed" : action === "not_attended" ? "Appointment not attended" : "Schedule Change Proposed";
     transaction.create(notification, {
       userId,
       appointmentId,
-      type: action === "confirmed" ? "appointment_confirmed" : action === "declined" ? "appointment_declined" : action === "completed" ? "appointment_completed" : action === "cancelled" ? "appointment_cancelled" : action === "reschedule_proposed" ? "reschedule_proposed" : "appointment_update",
+      type: action === "confirmed" ? "appointment_confirmed" : action === "declined" ? "appointment_declined" : action === "completed" ? "appointment_completed" : action === "not_attended" ? "appointment_not_attended" : action === "reschedule_proposed" ? "reschedule_proposed" : "appointment_update",
       title,
       body: reply,
       createdAt: FieldValue.serverTimestamp(),
@@ -1796,7 +1793,7 @@ export const reviewAppointment = onCall(async (request) => {
     });
     const auditAction = action === "confirmed" ? "APPOINTMENT_CONFIRMED"
       : action === "completed" ? "APPOINTMENT_COMPLETED"
-        : action === "no_show" ? "APPOINTMENT_MARKED_NO_SHOW"
+        : action === "not_attended" ? "APPOINTMENT_NOT_ATTENDED"
           : action === "cancelled" ? "APPOINTMENT_CANCELLED"
       : action === "reschedule_proposed" ? "APPOINTMENT_RESCHEDULED" : "APPOINTMENT_DECLINED";
     writeAudit(transaction, db, {
@@ -1822,6 +1819,7 @@ export const archiveAppointments = onCall(async (request) => {
   const rawIds = Array.isArray(request.data?.appointmentIds) ? request.data.appointmentIds : [];
   const appointmentIds: string[] = Array.from(new Set<string>(rawIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)));
   const archived = request.data?.archived === true;
+  if (!archived) throw new HttpsError("invalid-argument", "Restoring archived appointments is not supported.");
   if (appointmentIds.length < 1 || appointmentIds.length > 200) throw new HttpsError("invalid-argument", "Select between 1 and 200 appointments.");
   const refs = appointmentIds.map((id) => db.collection("appointments").doc(id));
   await db.runTransaction(async (transaction) => {
@@ -1830,33 +1828,69 @@ export const archiveAppointments = onCall(async (request) => {
       if (!snapshot.exists) throw new HttpsError("not-found", "One or more appointments could not be found.");
       const data = snapshot.data() ?? {};
       const status = String(data.status ?? "").toLowerCase().trim();
-      const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow"].includes(status);
-      if (!archived && !data.archivedAt) throw new HttpsError("failed-precondition", "Only archived appointments can be restored.");
+      const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow", "not_attended"].includes(status);
+      if (data.archivedAt) throw new HttpsError("failed-precondition", "This appointment is already archived.");
       if (archived && !terminal) throw new HttpsError("failed-precondition", "Only finished appointments can be moved to history.");
       if (actor.accessRole === "counselor" && String(data.assignedStaffId ?? "") !== actorId) throw new HttpsError("permission-denied", "You can only manage your assigned appointments.");
-      transaction.update(snapshot.ref, {archivedAt: archived ? FieldValue.serverTimestamp() : FieldValue.delete(), archivedBy: archived ? actorId : FieldValue.delete(), updatedAt: FieldValue.serverTimestamp()});
-      writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole, action: archived ? "APPOINTMENT_MOVED_TO_HISTORY" : "APPOINTMENT_RESTORED_FROM_HISTORY", category: AUDIT_CATEGORIES.appointments, targetType: "appointment", targetId: snapshot.id, metadata: {status, bulk: appointmentIds.length > 1}});
+      transaction.update(snapshot.ref, {archivedAt: FieldValue.serverTimestamp(), archivedBy: actorId, updatedAt: FieldValue.serverTimestamp()});
+      writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole, action: "APPOINTMENT_MOVED_TO_HISTORY", category: AUDIT_CATEGORIES.appointments, targetType: "appointment", targetId: snapshot.id, metadata: {status, bulk: appointmentIds.length > 1}});
     }
   });
   return {ok: true, affected: appointmentIds.length};
 });
 
-// Keep the active queue operational: once an appointment reaches a terminal
-// outcome, preserve it in History automatically.
-export const archiveTerminalAppointment = onDocumentUpdated(
-  {document: "appointments/{appointmentId}", retry: true},
-  async (event) => {
-    const change = event.data;
-    if (!change) return;
-    const before = change.before.data();
-    const after = change.after.data();
-    if (!after || after.archivedAt) return;
-    const status = String(after.status ?? "").toLowerCase().trim();
-    const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow"].includes(status);
-    if (!terminal || String(before?.status ?? "").toLowerCase().trim() === status) return;
-    await change.after.ref.update({archivedAt: FieldValue.serverTimestamp(), archivedBy: "system", updatedAt: FieldValue.serverTimestamp()});
-  },
-);
+export const createFollowUpAppointment = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  const actor = await requireStaff(actorId);
+  const input = (request.data ?? {}) as Record<string, unknown>;
+  const sourceId = String(input.sourceAppointmentId ?? "").trim();
+  const reason = String(input.reason ?? "").trim();
+  const message = String(input.message ?? "").trim();
+  const scheduledTime = String(input.scheduledTime ?? "").trim();
+  const millis = callableMillis(input.scheduledAt);
+  if (!sourceId || !reason || !message || !scheduledTime || !Number.isFinite(millis) || millis <= Date.now()) {
+    throw new HttpsError("invalid-argument", "A future schedule, reason, and message are required.");
+  }
+  const source = db.collection("appointments").doc(sourceId);
+  const followUp = db.collection("appointments").doc(`followup_${sourceId}`);
+  const scheduledAt = Timestamp.fromMillis(millis);
+  const slot = db.collection("appointment_slots").doc(appointmentSlotId(scheduledAt));
+  await db.runTransaction(async (transaction) => {
+    const [original, existing, occupied] = await Promise.all([
+      transaction.get(source), transaction.get(followUp), transaction.get(slot),
+    ]);
+    if (!original.exists) throw new HttpsError("not-found", "The source appointment was not found.");
+    const data = original.data()!;
+    if (actor.accessRole === "counselor" && String(data.assignedStaffId ?? "") !== actorId) {
+      throw new HttpsError("permission-denied", "This appointment is not assigned to you.");
+    }
+    if (!["completed", "no_show", "not_attended"].includes(canonicalAppointmentStatus(data.status))) {
+      throw new HttpsError("failed-precondition", "Record the appointment outcome before creating a follow-up.");
+    }
+    if (existing.exists) throw new HttpsError("already-exists", "A follow-up already exists for this appointment.");
+    if (occupied.exists) throw new HttpsError("already-exists", "This time is no longer available.");
+    transaction.create(slot, {appointmentId: followUp.id, scheduledAt, createdAt: FieldValue.serverTimestamp()});
+    transaction.create(followUp, {
+      userId: data.userId, fullName: data.fullName ?? "", contactNumber: data.contactNumber ?? "",
+      email: data.email ?? "", preferredContactMethod: data.preferredContactMethod ?? "",
+      concern: data.concern ?? reason, location: data.location ?? "PACC Office, 2nd Floor, Main Building",
+      department: data.department ?? "", course: data.course ?? "", yearLevel: data.yearLevel ?? "",
+      scheduledAt, scheduledTime, status: "requested", parentAppointmentId: sourceId,
+      appointmentType: "follow_up", createdFrom: "staff_follow_up", followUpReason: reason,
+      followUpMessage: message, followUpRequestedAt: FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    createAppointmentEvent(transaction, source, "follow_up_requested", actorId, String(data.status), String(data.status), {followUpAppointmentId: followUp.id});
+    createAppointmentEvent(transaction, followUp, "appointment_requested", actorId, "", "requested", {parentAppointmentId: sourceId});
+    transaction.create(db.collection("notifications").doc(), {
+      userId: data.userId, appointmentId: followUp.id, parentAppointmentId: sourceId,
+      type: "appointment_follow_up_requested", title: "Follow-up appointment requested",
+      body: message, createdAt: FieldValue.serverTimestamp(), readAt: null,
+    });
+    writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole, action: "APPOINTMENT_FOLLOW_UP_REQUESTED", category: AUDIT_CATEGORIES.appointments, targetType: "appointment", targetId: followUp.id, metadata: {parentAppointmentId: sourceId}});
+  });
+  return {ok: true, appointmentId: followUp.id};
+});
 
 export const sendAppointmentNotification = onDocumentCreated(
   {
@@ -1950,7 +1984,7 @@ export const sendAppointmentReminders = onSchedule(
       const target = scheduledAt.toMillis() - minutes * 60 * 1000;
       // The scheduler may run late; only deliver within a bounded window.
       if (now.toMillis() < target || now.toMillis() > target + 15 * 60 * 1000) return;
-      const notification = db.collection("notifications").doc(`appointment_reminder_${key}_${appointment.id}`);
+      const notification = db.collection("notifications").doc(`appointment_reminder_${key}_${appointment.id}_${scheduledAt.toMillis()}`);
       try {
         await db.runTransaction(async (transaction) => {
           const fresh = await transaction.get(appointment.ref);

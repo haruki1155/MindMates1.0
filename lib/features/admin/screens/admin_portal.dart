@@ -8,6 +8,7 @@ import '../../../models/pacc_availability_model.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../domain/admin_management_models.dart';
+import '../domain/appointment_workflow.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/admin_status_repository.dart';
 import 'admin_assessment_detail_screen.dart';
@@ -1806,7 +1807,7 @@ class _AppointmentsPage extends StatefulWidget {
 }
 
 class _AppointmentsPageState extends State<_AppointmentsPage> {
-  String filter = 'All';
+  String filter = 'Needs action';
   String departmentFilter = 'All departments';
   bool showHistory = false;
   final Set<String> selectedIds = <String>{};
@@ -1831,68 +1832,41 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
       stream: widget.repository.watchAppointments(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const _AccessPanel();
-        final all = (snapshot.data ?? const <AppointmentModel>[])
+        final records = snapshot.data ?? const <AppointmentModel>[];
+        final now = DateTime.now();
+        final counts = appointmentQueueCounts(records, now);
+        final all = records
             .where((appointment) => appointment.isArchived == showHistory)
             .toList();
+        final selectedQueue = switch (filter) {
+          'Needs action' => AppointmentQueue.needsAction,
+          'Today' => AppointmentQueue.today,
+          'Upcoming' => AppointmentQueue.upcoming,
+          'Completed' => AppointmentQueue.completed,
+          _ => null,
+        };
+        final categoryRecords = appointmentRecordsForView(
+          records,
+          now,
+          showHistory: showHistory,
+          queue: selectedQueue,
+        );
         final query = _search.text.trim().toLowerCase();
-        final items = all.where((a) {
-          final status = a.status.toLowerCase().trim();
-          final tab = switch (filter) {
-            'Needs action' => const {
-              'pending',
-              'requested',
-              'reschedule_required',
-              'reschedule_proposed',
-            }.contains(status),
-            'Upcoming' =>
-              status == 'confirmed' && a.scheduledAt.isAfter(DateTime.now()),
-            'Completed' => const {'completed', 'complete'}.contains(status),
-            'Closed' => const {
-              'no_show',
-              'noshow',
-              'cancelled',
-              'canceled',
-              'declined',
-            }.contains(status),
-            _ => true,
-          };
-          return tab &&
-              (query.isEmpty ||
+        final items = categoryRecords.where((a) {
+          return (query.isEmpty ||
                   a.fullName.toLowerCase().contains(query) ||
                   a.userId.toLowerCase().contains(query)) &&
               (departmentFilter == 'All departments' ||
                   a.department == departmentFilter);
         }).toList();
-        final needsAction = all
-            .where(
-              (a) => const {
-                'pending',
-                'requested',
-                'reschedule_required',
-                'reschedule_proposed',
-              }.contains(a.status.toLowerCase().trim()),
-            )
-            .length;
-        final upcoming = all
-            .where(
-              (a) =>
-                  a.status.toLowerCase() == 'confirmed' &&
-                  a.scheduledAt.isAfter(DateTime.now()) &&
-                  a.scheduledAt.isBefore(
-                    DateTime.now().add(const Duration(days: 7)),
-                  ),
-            )
-            .length;
-        final completed = all
-            .where(
-              (a) => const {
-                'completed',
-                'complete',
-              }.contains(a.status.toLowerCase()),
-            )
-            .length;
+        if (filter == 'Upcoming') {
+          items.sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
+        }
+        final needsAction = counts[AppointmentQueue.needsAction] ?? 0;
+        final upcoming = counts[AppointmentQueue.upcoming] ?? 0;
+        final completed = counts[AppointmentQueue.completed] ?? 0;
         final departments =
-            all
+            (showHistory ? all : records)
                 .map((a) => a.department ?? '')
                 .where((a) => a.isNotEmpty)
                 .toSet()
@@ -1902,7 +1876,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
           (id) => !items.any((appointment) => appointment.id == id),
         );
         final selectable = items
-            .where((appointment) => appointment.isFinalized)
+            .where((appointment) => appointment.isFinalized && !appointment.isArchived)
             .toList();
         final allSelected =
             selectable.isNotEmpty &&
@@ -1928,12 +1902,13 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               selected: {showHistory},
               onSelectionChanged: (value) => setState(() {
                 showHistory = value.first;
-                filter = 'All';
+                filter = showHistory ? 'All' : 'Needs action';
+                departmentFilter = 'All departments';
                 selectedIds.clear();
               }),
             ),
             const SizedBox(height: 14),
-            LayoutBuilder(
+            if (!showHistory) LayoutBuilder(
               builder: (context, constraints) {
                 final cards = <Widget>[
                   _AppointmentSummaryCard(
@@ -1945,28 +1920,22 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                   ),
                   _AppointmentSummaryCard(
                     label: 'Today',
-                    value: all
-                        .where(
-                          (a) =>
-                              a.status.toLowerCase() == 'confirmed' &&
-                              _sameDay(a.scheduledAt, DateTime.now()),
-                        )
-                        .length,
-                    subtitle: 'Confirmed today',
+                    value: counts[AppointmentQueue.today] ?? 0,
+                    subtitle: 'Scheduled for today',
                     icon: Icons.today_outlined,
-                    onTap: () => setState(() => filter = 'Upcoming'),
+                    onTap: () => setState(() => filter = 'Today'),
                   ),
                   _AppointmentSummaryCard(
                     label: 'Upcoming',
                     value: upcoming,
-                    subtitle: 'Next 7 days',
+                    subtitle: 'Confirmed future dates',
                     icon: Icons.event_available_outlined,
                     onTap: () => setState(() => filter = 'Upcoming'),
                   ),
                   _AppointmentSummaryCard(
                     label: 'Completed',
                     value: completed,
-                    subtitle: 'This academic year',
+                    subtitle: 'Finished, including archived',
                     icon: Icons.task_alt_outlined,
                     onTap: () => setState(() => filter = 'Completed'),
                   ),
@@ -2004,6 +1973,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                   width: 230,
                   child: DropdownButtonFormField<String>(
                     isExpanded: true,
+                    key: ValueKey('$showHistory-$filter-$departmentFilter'),
                     initialValue: departmentFilter,
                     decoration: const InputDecoration(labelText: 'Department'),
                     items: ['All departments', ...departments]
@@ -2019,38 +1989,35 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                     ),
                   ),
                 ),
-                if (query.isNotEmpty || departmentFilter != 'All departments')
-                  TextButton(
-                    onPressed: () {
-                      _search.clear();
-                      setState(() => departmentFilter = 'All departments');
-                    },
-                    child: const Text('Clear filters'),
-                  ),
               ],
             ),
             const SizedBox(height: 16),
-            Wrap(
+            if (!showHistory) const Text(
+              'Appointment category',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            if (!showHistory) const SizedBox(height: 8),
+            if (!showHistory) Wrap(
               spacing: 8,
               children: [
                 for (final tab in const [
                   'All',
                   'Needs action',
+                  'Today',
                   'Upcoming',
                   'Completed',
-                  'Closed',
                 ])
                   ChoiceChip(
                     label: Text(
-                      '$tab ${tab == 'All'
+                      '${tab == 'All' ? 'All active' : tab} ${tab == 'All'
                           ? all.length
                           : tab == 'Needs action'
                           ? needsAction
+                          : tab == 'Today'
+                          ? counts[AppointmentQueue.today] ?? 0
                           : tab == 'Upcoming'
                           ? upcoming
-                          : tab == 'Completed'
-                          ? completed
-                          : all.length - needsAction - upcoming - completed}',
+                          : completed}',
                     ),
                     selected: filter == tab,
                     onSelected: (_) => setState(() => filter = tab),
@@ -2059,11 +2026,11 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Showing ${items.length} of ${all.length} appointments',
+              'Showing ${items.length} of ${!showHistory && selectedQueue == AppointmentQueue.completed ? completed : all.length} ${showHistory ? 'archived ' : ''}appointments${!showHistory && selectedQueue == AppointmentQueue.completed ? ' · includes archived records' : ''}',
               style: const TextStyle(color: AdminColors.muted, fontSize: 12),
             ),
             const SizedBox(height: 8),
-            if (selectable.isNotEmpty)
+            if (!showHistory && selectable.isNotEmpty)
               Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: Padding(
@@ -2100,16 +2067,8 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                       if (selectedIds.isNotEmpty)
                         FilledButton.icon(
                           onPressed: archiving ? null : _bulkArchive,
-                          icon: Icon(
-                            showHistory
-                                ? Icons.unarchive_outlined
-                                : Icons.archive_outlined,
-                          ),
-                          label: Text(
-                            showHistory
-                                ? 'Restore selected (${selectedIds.length})'
-                                : 'Move to history (${selectedIds.length})',
-                          ),
+                          icon: const Icon(Icons.archive_outlined),
+                          label: Text('Move to history (${selectedIds.length})'),
                         ),
                       if (selectedIds.isNotEmpty)
                         TextButton(
@@ -2122,23 +2081,30 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               ),
             if (items.isNotEmpty && MediaQuery.sizeOf(context).width >= 760)
               const _AppointmentListHeader(),
-            ...items.map(
-              (a) => _AppointmentCard(
-                item: a,
+            for (var index = 0; index < items.length; index++)
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                if (filter == 'Upcoming' &&
+                    (index == 0 || !_sameDay(items[index - 1].scheduledAt, items[index].scheduledAt)))
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text(_date(items[index].scheduledAt), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                  ),
+                _AppointmentCard(
+                item: items[index],
                 repository: widget.repository,
-                selected: selectedIds.contains(a.id),
-                onSelected: a.isFinalized
+                now: now,
+                selected: selectedIds.contains(items[index].id),
+                onSelected: items[index].isFinalized && !items[index].isArchived
                     ? (value) => setState(() {
                         if (value) {
-                          selectedIds.add(a.id);
+                          selectedIds.add(items[index].id);
                         } else {
-                          selectedIds.remove(a.id);
+                          selectedIds.remove(items[index].id);
                         }
                       })
                     : null,
-                onArchive: () => _archiveOne(a),
-              ),
-            ),
+                onArchive: items[index].isArchived ? null : () => _archiveOne(items[index]),
+              )]),
           ],
         );
       },
@@ -2146,7 +2112,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
   );
 
   Future<void> _archiveOne(AppointmentModel appointment) async {
-    final action = showHistory ? 'restore' : 'move to history';
+    const action = 'move to history';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2154,9 +2120,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
           '${action[0].toUpperCase()}${action.substring(1)} appointment?',
         ),
         content: Text(
-          showHistory
-              ? 'This appointment will return to the active queue.'
-              : 'This finished appointment will be kept safely in History.',
+          'This finished appointment will be kept safely in History.',
         ),
         actions: [
           TextButton(
@@ -2174,15 +2138,13 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
     try {
       await widget.repository.archiveAppointments(
         appointmentIds: [appointment.id],
-        archived: !showHistory,
+        archived: true,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              showHistory
-                  ? 'Appointment restored.'
-                  : 'Appointment moved to History.',
+              'Appointment moved to History.',
             ),
           ),
         );
@@ -2202,7 +2164,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
 
   Future<void> _bulkArchive() async {
     final ids = selectedIds.toList();
-    final action = showHistory ? 'restore' : 'move to History';
+    const action = 'move to History';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2210,7 +2172,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
           '${action[0].toUpperCase()}${action.substring(1)} ${ids.length} appointments?',
         ),
         content: Text(
-          'Only finished appointments are included. They will remain available in the ${showHistory ? 'active queue' : 'History'} view.',
+          'Only finished appointments are included. They will remain available in History.',
         ),
         actions: [
           TextButton(
@@ -2229,14 +2191,14 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
     try {
       final count = await widget.repository.archiveAppointments(
         appointmentIds: ids,
-        archived: !showHistory,
+        archived: true,
       );
       if (mounted) {
         setState(() => selectedIds.clear());
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '$count appointments ${showHistory ? 'restored' : 'moved to History'}.',
+              '$count appointments moved to History.',
             ),
           ),
         );
@@ -2660,12 +2622,14 @@ class _AppointmentCard extends StatelessWidget {
     required this.selected,
     required this.onSelected,
     required this.onArchive,
+    required this.now,
   });
   final AppointmentModel item;
   final AdminPortalRepository repository;
   final bool selected;
   final ValueChanged<bool>? onSelected;
-  final VoidCallback onArchive;
+  final VoidCallback? onArchive;
+  final DateTime now;
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: 8),
@@ -2708,28 +2672,25 @@ class _AppointmentCard extends StatelessWidget {
             style: const TextStyle(fontSize: 12),
           ),
         );
+        final queue = classifyAppointment(item, now);
+        final readOnly = item.isArchived || item.isFinalized ||
+            item.lifecycleStatus == AppointmentStatus.unknown ||
+            queue == AppointmentQueue.upcoming;
         final action = TextButton.icon(
           onPressed: () => _showReviewDialog(context),
           icon: Icon(
-            item.isFinalized
+            readOnly
                 ? Icons.visibility_outlined
                 : Icons.rate_review_outlined,
             size: 17,
           ),
-          label: Text(item.isFinalized ? 'View' : 'Review'),
+          label: Text(readOnly ? 'View' : 'Review'),
         );
-        final historyAction = item.isFinalized
+        final historyAction = item.isFinalized && !item.isArchived
             ? IconButton(
-                tooltip: item.isArchived
-                    ? 'Restore from history'
-                    : 'Move to history',
+                tooltip: 'Move to history',
                 onPressed: onArchive,
-                icon: Icon(
-                  item.isArchived
-                      ? Icons.unarchive_outlined
-                      : Icons.archive_outlined,
-                  size: 19,
-                ),
+                icon: const Icon(Icons.archive_outlined, size: 19),
               )
             : const SizedBox.shrink();
         if (box.maxWidth < 700) {
@@ -2754,9 +2715,16 @@ class _AppointmentCard extends StatelessWidget {
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
-                child: _Tag(
-                  label: _formalLabel(item.status),
-                  color: _statusColor(item.status),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _Tag(
+                      label: _formalLabel(item.status),
+                      color: _statusColor(item.status),
+                    ),
+                    if (item.isArchived) const Text('In history',
+                        style: TextStyle(color: AdminColors.muted, fontSize: 11)),
+                  ],
                 ),
               ),
             ],
@@ -2775,9 +2743,16 @@ class _AppointmentCard extends StatelessWidget {
             const SizedBox(width: 16),
             department,
             const SizedBox(width: 12),
-            _Tag(
-              label: _formalLabel(item.status),
-              color: _statusColor(item.status),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Tag(
+                  label: _formalLabel(item.status),
+                  color: _statusColor(item.status),
+                ),
+                if (item.isArchived) const Text('In history',
+                    style: TextStyle(color: AdminColors.muted, fontSize: 11)),
+              ],
             ),
             const SizedBox(width: 8),
             historyAction,
@@ -2790,14 +2765,28 @@ class _AppointmentCard extends StatelessWidget {
 
   Future<void> _showReviewDialog(BuildContext context) async {
     final currentStatus = item.status.toLowerCase().trim();
-    var action = currentStatus == 'confirmed'
+    final queue = classifyAppointment(item, DateTime.now());
+    final canFollowUp = const {
+      AppointmentStatus.completed,
+      AppointmentStatus.notAttended,
+      AppointmentStatus.noShow,
+    }.contains(item.lifecycleStatus);
+    final canReview = !item.isArchived &&
+        ((queue == AppointmentQueue.needsAction &&
+                item.lifecycleStatus != AppointmentStatus.unknown) ||
+            queue == AppointmentQueue.today || canFollowUp);
+    var action = canFollowUp
+        ? 'follow_up'
+        : currentStatus == 'confirmed'
         ? 'completed'
         : currentStatus == 'reschedule_required'
         ? 'reschedule_proposed'
         : 'confirmed';
     String reason = _appointmentReasons(action).first;
-    final proposedTime = TextEditingController();
+    TimeOfDay? proposedTime;
+    final followUpMessage = TextEditingController();
     DateTime? proposedDate;
+    bool processing = false;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -2813,7 +2802,7 @@ class _AppointmentCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                item.isFinalized ? 'Appointment details' : 'Review appointment',
+                canReview ? 'Review appointment' : 'Appointment details',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 5),
@@ -2894,12 +2883,19 @@ class _AppointmentCard extends StatelessWidget {
                         ),
                     ],
                   ),
-                  if (item.isFinalized) ...[
+                  if (!canReview) ...[
                     const SizedBox(height: 22),
-                    const _AppointmentNotice(
+                    _AppointmentNotice(
                       icon: Icons.lock_outline,
                       message:
-                          'This appointment has been finalized. The recorded decision is read-only.',
+                          item.isArchived
+                              ? 'This appointment is archived. Details are read-only.'
+                              : item.lifecycleStatus == AppointmentStatus.cancelled ||
+                                      item.lifecycleStatus == AppointmentStatus.declined
+                                  ? 'This request closed without a session. Its recorded status is read-only.'
+                                  : item.lifecycleStatus == AppointmentStatus.unknown
+                                      ? 'This record has an unrecognized status. Please contact an administrator before changing it.'
+                              : 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.',
                     ),
                   ] else ...[
                     const Divider(height: 34),
@@ -2911,19 +2907,19 @@ class _AppointmentCard extends StatelessWidget {
                     DropdownButtonFormField<String>(
                       initialValue: action,
                       decoration: const InputDecoration(labelText: 'Action'),
-                      items: currentStatus == 'confirmed'
+                      items: canFollowUp
+                          ? const [
+                              DropdownMenuItem(value: 'follow_up', child: Text('Create follow-up appointment')),
+                            ]
+                          : currentStatus == 'confirmed'
                           ? const [
                               DropdownMenuItem(
                                 value: 'completed',
                                 child: Text('Mark session as completed'),
                               ),
                               DropdownMenuItem(
-                                value: 'no_show',
-                                child: Text('Mark as no-show'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'cancelled',
-                                child: Text('Cancel appointment'),
+                                value: 'not_attended',
+                                child: Text('Record missed appointment'),
                               ),
                             ]
                           : currentStatus == 'reschedule_required'
@@ -2937,10 +2933,6 @@ class _AppointmentCard extends StatelessWidget {
                               DropdownMenuItem(
                                 value: 'confirmed',
                                 child: Text('Confirm appointment'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'reschedule_required',
-                                child: Text('Schedule adjustment needed'),
                               ),
                               DropdownMenuItem(
                                 value: 'reschedule_proposed',
@@ -2970,7 +2962,20 @@ class _AppointmentCard extends StatelessWidget {
                       onChanged: (value) =>
                           setDialogState(() => reason = value!),
                     ),
-                    if (action == 'reschedule_proposed') ...[
+                    if (action == 'reschedule_proposed' || action == 'follow_up') ...[
+                      if (action == 'follow_up') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: followUpMessage,
+                          maxLines: 3,
+                          decoration: const InputDecoration(labelText: 'Message to student', hintText: 'Explain the purpose of this follow-up'),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      _AppointmentField(
+                        label: 'Current schedule',
+                        value: '${_date(item.scheduledAt)} • ${item.scheduledTime}',
+                      ),
                       const SizedBox(height: 12),
                       Wrap(
                         spacing: 12,
@@ -2983,7 +2988,7 @@ class _AppointmentCard extends StatelessWidget {
                                 initialDate: DateTime.now().add(
                                   const Duration(days: 1),
                                 ),
-                                firstDate: DateTime.now(),
+                                firstDate: DateTime.now().add(const Duration(days: 1)),
                                 lastDate: DateTime.now().add(
                                   const Duration(days: 365),
                                 ),
@@ -2995,19 +3000,20 @@ class _AppointmentCard extends StatelessWidget {
                             icon: const Icon(Icons.calendar_today_outlined),
                             label: Text(
                               proposedDate == null
-                                  ? 'Select a date'
+                                  ? 'Select proposed date'
                                   : _date(proposedDate),
                             ),
                           ),
-                          SizedBox(
-                            width: 220,
-                            child: TextField(
-                              controller: proposedTime,
-                              decoration: const InputDecoration(
-                                labelText: 'Proposed time',
-                                hintText: 'e.g. 2:00 PM',
-                              ),
-                            ),
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              final picked = await showTimePicker(
+                                context: dialogContext,
+                                initialTime: const TimeOfDay(hour: 9, minute: 0),
+                              );
+                              if (picked != null) setDialogState(() => proposedTime = picked);
+                            },
+                            icon: const Icon(Icons.schedule_outlined),
+                            label: Text(proposedTime?.format(dialogContext) ?? 'Select proposed time'),
                           ),
                         ],
                       ),
@@ -3020,31 +3026,47 @@ class _AppointmentCard extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: Text(item.isFinalized ? 'Close' : 'Cancel'),
+              child: const Text('Close'),
             ),
-            if (!item.isFinalized)
+            if (canReview)
               FilledButton(
-                onPressed: () async {
-                  if (action == 'reschedule_proposed' &&
+                onPressed: processing ? null : () async {
+                  if ((action == 'reschedule_proposed' || action == 'follow_up') &&
                       (proposedDate == null ||
-                          proposedTime.text.trim().isEmpty)) {
+                          proposedTime == null ||
+                          (action == 'follow_up' && followUpMessage.text.trim().isEmpty))) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
                         content: Text(
-                          'Enter a reply and all proposed time details.',
+                          'Enter a future date, time, and required message.',
                         ),
                       ),
                     );
                     return;
                   }
+                  setDialogState(() => processing = true);
                   try {
-                    await repository.reviewAppointment(
-                      appointmentId: item.id,
-                      action: action,
-                      reply: reason,
-                      proposedScheduledAt: proposedDate,
-                      proposedScheduledTime: proposedTime.text.trim(),
-                    );
+                    final scheduled = proposedDate == null || proposedTime == null
+                        ? null
+                        : DateTime(proposedDate!.year, proposedDate!.month, proposedDate!.day,
+                            proposedTime!.hour, proposedTime!.minute);
+                    if (action == 'follow_up') {
+                      await repository.createFollowUpAppointment(
+                        sourceAppointmentId: item.id,
+                        scheduledAt: scheduled!,
+                        scheduledTime: proposedTime!.format(dialogContext),
+                        reason: reason,
+                        message: followUpMessage.text.trim(),
+                      );
+                    } else {
+                      await repository.reviewAppointment(
+                        appointmentId: item.id,
+                        action: action,
+                        reply: reason,
+                        proposedScheduledAt: scheduled,
+                        proposedScheduledTime: proposedTime?.format(dialogContext),
+                      );
+                    }
                     if (dialogContext.mounted) Navigator.pop(dialogContext);
                   } catch (_) {
                     if (context.mounted) {
@@ -3054,15 +3076,19 @@ class _AppointmentCard extends StatelessWidget {
                         ),
                       );
                     }
+                  } finally {
+                    if (dialogContext.mounted) setDialogState(() => processing = false);
                   }
                 },
-                child: const Text('Send decision'),
+                child: processing
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(action == 'follow_up' ? 'Create follow-up' : 'Send decision'),
               ),
           ],
         ),
       ),
     );
-    proposedTime.dispose();
+    followUpMessage.dispose();
   }
 
   static List<String> _appointmentReasons(String action) => switch (action) {
@@ -3070,19 +3096,12 @@ class _AppointmentCard extends StatelessWidget {
       'Schedule and counselor are available',
       'Appointment approved by PAACC',
     ],
-    'reschedule_required' => const ['Schedule adjustment needed'],
+    'follow_up' => const ['Follow-up session recommended', 'Additional counseling support requested'],
     'reschedule_proposed' => const [
       'A different office time is available',
       'The requested time needs to be adjusted',
     ],
-    'no_show' => const ['Student did not attend the confirmed appointment'],
-    'cancelled' => const [
-      'Student requested cancellation',
-      'Schedule conflict',
-      'Office closure',
-      'Counselor unavailable',
-      'Other legitimate reason',
-    ],
+    'not_attended' => const ['Student did not attend the confirmed appointment'],
     _ => const ['Counseling session completed'],
   };
 }
@@ -4933,7 +4952,8 @@ String _formalLabel(String value) {
       return 'Schedule adjustment needed';
     case 'no_show':
     case 'noshow':
-      return 'No-show';
+    case 'not_attended':
+      return 'Not attended';
     default:
       return value
           .replaceAllMapped(
