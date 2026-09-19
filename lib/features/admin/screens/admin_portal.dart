@@ -1838,19 +1838,22 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
         final all = records
             .where((appointment) => appointment.isArchived == showHistory)
             .toList();
+        final selectedQueue = switch (filter) {
+          'Needs action' => AppointmentQueue.needsAction,
+          'Today' => AppointmentQueue.today,
+          'Upcoming' => AppointmentQueue.upcoming,
+          'Completed' => AppointmentQueue.completed,
+          _ => null,
+        };
+        final categoryRecords = appointmentRecordsForView(
+          records,
+          now,
+          showHistory: showHistory,
+          queue: selectedQueue,
+        );
         final query = _search.text.trim().toLowerCase();
-        final items = all.where((a) {
-          final queue = classifyAppointment(a, now);
-          final tab = showHistory || filter == 'All' || switch (filter) {
-            'Needs action' => queue == AppointmentQueue.needsAction,
-            'Today' => queue == AppointmentQueue.today,
-            'Upcoming' => queue == AppointmentQueue.upcoming,
-            'Completed' => queue == AppointmentQueue.completed,
-            'Closed' => queue == AppointmentQueue.closed,
-            _ => true,
-          };
-          return tab &&
-              (query.isEmpty ||
+        final items = categoryRecords.where((a) {
+          return (query.isEmpty ||
                   a.fullName.toLowerCase().contains(query) ||
                   a.userId.toLowerCase().contains(query)) &&
               (departmentFilter == 'All departments' ||
@@ -1863,7 +1866,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
         final upcoming = counts[AppointmentQueue.upcoming] ?? 0;
         final completed = counts[AppointmentQueue.completed] ?? 0;
         final departments =
-            all
+            (showHistory ? all : records)
                 .map((a) => a.department ?? '')
                 .where((a) => a.isNotEmpty)
                 .toSet()
@@ -1873,7 +1876,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
           (id) => !items.any((appointment) => appointment.id == id),
         );
         final selectable = items
-            .where((appointment) => appointment.isFinalized)
+            .where((appointment) => appointment.isFinalized && !appointment.isArchived)
             .toList();
         final allSelected =
             selectable.isNotEmpty &&
@@ -1900,11 +1903,12 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               onSelectionChanged: (value) => setState(() {
                 showHistory = value.first;
                 filter = showHistory ? 'All' : 'Needs action';
+                departmentFilter = 'All departments';
                 selectedIds.clear();
               }),
             ),
             const SizedBox(height: 14),
-            LayoutBuilder(
+            if (!showHistory) LayoutBuilder(
               builder: (context, constraints) {
                 final cards = <Widget>[
                   _AppointmentSummaryCard(
@@ -1931,7 +1935,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                   _AppointmentSummaryCard(
                     label: 'Completed',
                     value: completed,
-                    subtitle: 'Including archived',
+                    subtitle: 'Finished, including archived',
                     icon: Icons.task_alt_outlined,
                     onTap: () => setState(() => filter = 'Completed'),
                   ),
@@ -1969,17 +1973,9 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                   width: 230,
                   child: DropdownButtonFormField<String>(
                     isExpanded: true,
+                    key: ValueKey('$showHistory-$filter-$departmentFilter'),
                     initialValue: departmentFilter,
-                    decoration: InputDecoration(
-                      labelText: 'Department',
-                      suffixIcon: departmentFilter == 'All departments'
-                          ? null
-                          : IconButton(
-                              tooltip: 'Show all departments',
-                              icon: const Icon(Icons.close),
-                              onPressed: () => setState(() => departmentFilter = 'All departments'),
-                            ),
-                    ),
+                    decoration: const InputDecoration(labelText: 'Department'),
                     items: ['All departments', ...departments]
                         .map(
                           (d) => DropdownMenuItem(
@@ -1996,7 +1992,12 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               ],
             ),
             const SizedBox(height: 16),
-            Wrap(
+            if (!showHistory) const Text(
+              'Appointment category',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            if (!showHistory) const SizedBox(height: 8),
+            if (!showHistory) Wrap(
               spacing: 8,
               children: [
                 for (final tab in const [
@@ -2005,11 +2006,10 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                   'Today',
                   'Upcoming',
                   'Completed',
-                  'Closed',
                 ])
                   ChoiceChip(
                     label: Text(
-                      '$tab ${tab == 'All'
+                      '${tab == 'All' ? 'All active' : tab} ${tab == 'All'
                           ? all.length
                           : tab == 'Needs action'
                           ? needsAction
@@ -2017,9 +2017,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                           ? counts[AppointmentQueue.today] ?? 0
                           : tab == 'Upcoming'
                           ? upcoming
-                          : tab == 'Completed'
-                          ? completed
-                          : counts[AppointmentQueue.closed] ?? 0}',
+                          : completed}',
                     ),
                     selected: filter == tab,
                     onSelected: (_) => setState(() => filter = tab),
@@ -2028,7 +2026,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
             ),
             const SizedBox(height: 12),
             Text(
-              'Showing ${items.length} of ${all.length} appointments',
+              'Showing ${items.length} of ${!showHistory && selectedQueue == AppointmentQueue.completed ? completed : all.length} ${showHistory ? 'archived ' : ''}appointments${!showHistory && selectedQueue == AppointmentQueue.completed ? ' · includes archived records' : ''}',
               style: const TextStyle(color: AdminColors.muted, fontSize: 12),
             ),
             const SizedBox(height: 8),
@@ -2096,7 +2094,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                 repository: widget.repository,
                 now: now,
                 selected: selectedIds.contains(items[index].id),
-                onSelected: items[index].isFinalized
+                onSelected: items[index].isFinalized && !items[index].isArchived
                     ? (value) => setState(() {
                         if (value) {
                           selectedIds.add(items[index].id);
@@ -2675,15 +2673,18 @@ class _AppointmentCard extends StatelessWidget {
           ),
         );
         final queue = classifyAppointment(item, now);
+        final readOnly = item.isArchived || item.isFinalized ||
+            item.lifecycleStatus == AppointmentStatus.unknown ||
+            queue == AppointmentQueue.upcoming;
         final action = TextButton.icon(
           onPressed: () => _showReviewDialog(context),
           icon: Icon(
-            item.isFinalized || queue == AppointmentQueue.upcoming
+            readOnly
                 ? Icons.visibility_outlined
                 : Icons.rate_review_outlined,
             size: 17,
           ),
-          label: Text(item.isFinalized || queue == AppointmentQueue.upcoming ? 'View' : 'Review'),
+          label: Text(readOnly ? 'View' : 'Review'),
         );
         final historyAction = item.isFinalized && !item.isArchived
             ? IconButton(
@@ -2714,9 +2715,16 @@ class _AppointmentCard extends StatelessWidget {
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
-                child: _Tag(
-                  label: _formalLabel(item.status),
-                  color: _statusColor(item.status),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _Tag(
+                      label: _formalLabel(item.status),
+                      color: _statusColor(item.status),
+                    ),
+                    if (item.isArchived) const Text('In history',
+                        style: TextStyle(color: AdminColors.muted, fontSize: 11)),
+                  ],
                 ),
               ),
             ],
@@ -2735,9 +2743,16 @@ class _AppointmentCard extends StatelessWidget {
             const SizedBox(width: 16),
             department,
             const SizedBox(width: 12),
-            _Tag(
-              label: _formalLabel(item.status),
-              color: _statusColor(item.status),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Tag(
+                  label: _formalLabel(item.status),
+                  color: _statusColor(item.status),
+                ),
+                if (item.isArchived) const Text('In history',
+                    style: TextStyle(color: AdminColors.muted, fontSize: 11)),
+              ],
             ),
             const SizedBox(width: 8),
             historyAction,
@@ -2751,10 +2766,16 @@ class _AppointmentCard extends StatelessWidget {
   Future<void> _showReviewDialog(BuildContext context) async {
     final currentStatus = item.status.toLowerCase().trim();
     final queue = classifyAppointment(item, DateTime.now());
+    final canFollowUp = const {
+      AppointmentStatus.completed,
+      AppointmentStatus.notAttended,
+      AppointmentStatus.noShow,
+    }.contains(item.lifecycleStatus);
     final canReview = !item.isArchived &&
-        (queue == AppointmentQueue.needsAction || queue == AppointmentQueue.today ||
-            queue == AppointmentQueue.completed);
-    var action = queue == AppointmentQueue.completed
+        ((queue == AppointmentQueue.needsAction &&
+                item.lifecycleStatus != AppointmentStatus.unknown) ||
+            queue == AppointmentQueue.today || canFollowUp);
+    var action = canFollowUp
         ? 'follow_up'
         : currentStatus == 'confirmed'
         ? 'completed'
@@ -2869,6 +2890,11 @@ class _AppointmentCard extends StatelessWidget {
                       message:
                           item.isArchived
                               ? 'This appointment is archived. Details are read-only.'
+                              : item.lifecycleStatus == AppointmentStatus.cancelled ||
+                                      item.lifecycleStatus == AppointmentStatus.declined
+                                  ? 'This request closed without a session. Its recorded status is read-only.'
+                                  : item.lifecycleStatus == AppointmentStatus.unknown
+                                      ? 'This record has an unrecognized status. Please contact an administrator before changing it.'
                               : 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.',
                     ),
                   ] else ...[
@@ -2881,7 +2907,7 @@ class _AppointmentCard extends StatelessWidget {
                     DropdownButtonFormField<String>(
                       initialValue: action,
                       decoration: const InputDecoration(labelText: 'Action'),
-                      items: queue == AppointmentQueue.completed
+                      items: canFollowUp
                           ? const [
                               DropdownMenuItem(value: 'follow_up', child: Text('Create follow-up appointment')),
                             ]
