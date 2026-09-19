@@ -10,6 +10,7 @@ enum AppointmentStatus {
   cancelled,
   completed,
   noShow,
+  notAttended,
   declined,
   legacyRequested,
   unknown;
@@ -22,6 +23,7 @@ enum AppointmentStatus {
         'cancelled' || 'canceled' => cancelled,
         'completed' || 'complete' => completed,
         'no_show' || 'noshow' || 'no-show' => noShow,
+        'not_attended' => notAttended,
         'declined' => declined,
         'pending' || 'upcoming' || 'reschedule_required' => legacyRequested,
         _ => unknown,
@@ -34,6 +36,7 @@ enum AppointmentStatus {
     cancelled => 'cancelled',
     completed => 'completed',
     noShow => 'no_show',
+    notAttended => 'not_attended',
     declined => 'declined',
     unknown => 'requested',
   };
@@ -45,12 +48,13 @@ enum AppointmentStatus {
     cancelled => 'CANCELLED',
     completed => 'COMPLETED',
     noShow => 'NO SHOW',
+    notAttended => 'NOT ATTENDED',
     declined => 'DECLINED',
     unknown => 'REQUESTED',
   };
 
   bool get isTerminal => switch (this) {
-    cancelled || completed || noShow || declined => true,
+    cancelled || completed || noShow || notAttended || declined => true,
     _ => false,
   };
 }
@@ -89,6 +93,12 @@ class AppointmentModel {
     this.department,
     this.academicYearId,
     this.archivedAt,
+    this.parentAppointmentId,
+    this.appointmentType,
+    this.createdFrom,
+    this.followUpReason,
+    this.followUpMessage,
+    this.followUpRequestedAt,
   });
 
   final String id;
@@ -123,6 +133,12 @@ class AppointmentModel {
   final String? department;
   final String? academicYearId;
   final DateTime? archivedAt;
+  final String? parentAppointmentId;
+  final String? appointmentType;
+  final String? createdFrom;
+  final String? followUpReason;
+  final String? followUpMessage;
+  final DateTime? followUpRequestedAt;
 
   bool get isArchived => archivedAt != null;
   AppointmentStatus get lifecycleStatus => AppointmentStatus.parse(status);
@@ -135,6 +151,7 @@ class AppointmentModel {
     'canceled',
     'no_show',
     'noshow',
+    'not_attended',
   }.contains(status.toLowerCase().trim());
 
   factory AppointmentModel.fromJson(Map<String, dynamic> json, {String? id}) {
@@ -172,6 +189,12 @@ class AppointmentModel {
       department: _optionalString(json['department']),
       academicYearId: _optionalString(json['academicYearId']),
       archivedAt: dateTimeFromFirestore(json['archivedAt']),
+      parentAppointmentId: _optionalString(json['parentAppointmentId']),
+      appointmentType: _optionalString(json['appointmentType']),
+      createdFrom: _optionalString(json['createdFrom']),
+      followUpReason: _optionalString(json['followUpReason']),
+      followUpMessage: _optionalString(json['followUpMessage']),
+      followUpRequestedAt: dateTimeFromFirestore(json['followUpRequestedAt']),
     );
   }
 
@@ -207,6 +230,12 @@ class AppointmentModel {
       'academicYearId': academicYearId ?? '',
       'createdAt': createdAt,
       'updatedAt': updatedAt,
+      'parentAppointmentId': parentAppointmentId,
+      'appointmentType': appointmentType,
+      'createdFrom': createdFrom,
+      'followUpReason': followUpReason,
+      'followUpMessage': followUpMessage,
+      'followUpRequestedAt': followUpRequestedAt,
     };
   }
 
@@ -243,6 +272,12 @@ class AppointmentModel {
     String? department,
     String? academicYearId,
     DateTime? archivedAt,
+    String? parentAppointmentId,
+    String? appointmentType,
+    String? createdFrom,
+    String? followUpReason,
+    String? followUpMessage,
+    DateTime? followUpRequestedAt,
   }) {
     return AppointmentModel(
       id: id ?? this.id,
@@ -279,6 +314,12 @@ class AppointmentModel {
       department: department ?? this.department,
       academicYearId: academicYearId ?? this.academicYearId,
       archivedAt: archivedAt ?? this.archivedAt,
+      parentAppointmentId: parentAppointmentId ?? this.parentAppointmentId,
+      appointmentType: appointmentType ?? this.appointmentType,
+      createdFrom: createdFrom ?? this.createdFrom,
+      followUpReason: followUpReason ?? this.followUpReason,
+      followUpMessage: followUpMessage ?? this.followUpMessage,
+      followUpRequestedAt: followUpRequestedAt ?? this.followUpRequestedAt,
     );
   }
 

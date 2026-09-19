@@ -33,6 +33,7 @@ migrate_working_dir/
 /build/
 /coverage/
 .firebase/
+/node_modules/
 
 # Local Firebase Admin credentials (never commit private keys)
 service-account*.json

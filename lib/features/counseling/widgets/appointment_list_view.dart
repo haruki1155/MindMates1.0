@@ -49,7 +49,7 @@ class AppointmentUiState {
       Icons.info_outline,
       Color(0xFFAA5842),
     ),
-    AppointmentStatus.noShow => const AppointmentUiState(
+    AppointmentStatus.noShow || AppointmentStatus.notAttended => const AppointmentUiState(
       'Missed Appointment',
       '',
       Icons.event_busy_outlined,
@@ -66,7 +66,7 @@ class AppointmentUiState {
   static AppointmentSection sectionFor(AppointmentStatus status) =>
       switch (status) {
         AppointmentStatus.completed ||
-        AppointmentStatus.noShow => AppointmentSection.past,
+        AppointmentStatus.noShow || AppointmentStatus.notAttended => AppointmentSection.past,
         AppointmentStatus.cancelled ||
         AppointmentStatus.declined => AppointmentSection.cancelled,
         _ => AppointmentSection.upcoming,
@@ -376,7 +376,7 @@ class AppointmentCard extends StatelessWidget {
     }
     final book = status == AppointmentStatus.completed
         ? 'Book Follow-up'
-        : status == AppointmentStatus.noShow
+        : status == AppointmentStatus.noShow || status == AppointmentStatus.notAttended
         ? 'Book Another Appointment'
         : status == AppointmentStatus.declined
         ? 'Book Appointment'
@@ -386,6 +386,7 @@ class AppointmentCard extends StatelessWidget {
       AppointmentStatus.cancelled,
       AppointmentStatus.declined,
       AppointmentStatus.noShow,
+      AppointmentStatus.notAttended,
     }.contains(status)) {
       return Row(
         children: [
@@ -405,24 +406,7 @@ class AppointmentCard extends StatelessWidget {
         ],
       );
     }
-    return Row(
-      children: [
-        Expanded(
-          child: _OutlineAction(label: 'View Details', onPressed: onView),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: TextButton(
-            onPressed: isSaving ? null : onCancel,
-            style: TextButton.styleFrom(
-              minimumSize: const Size(44, 48),
-              foregroundColor: Colors.red.shade800,
-            ),
-            child: Text(isSaving ? 'Cancelling...' : 'Cancel Request'),
-          ),
-        ),
-      ],
-    );
+    return _OutlineAction(label: 'View Details', onPressed: onView);
   }
 
   void _showManage(BuildContext context) => showModalBottomSheet<void>(
@@ -446,17 +430,6 @@ class AppointmentCard extends StatelessWidget {
             onTap: () {
               Navigator.pop(context);
               onReschedule();
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.cancel_outlined, color: Colors.red.shade700),
-            title: Text(
-              'Cancel Appointment',
-              style: TextStyle(color: Colors.red.shade700),
-            ),
-            onTap: () {
-              Navigator.pop(context);
-              onCancel();
             },
           ),
         ],
@@ -511,16 +484,6 @@ class AppointmentCard extends StatelessWidget {
                       onReschedule();
                     },
               child: const Text('Request Another Time'),
-            ),
-            TextButton(
-              onPressed: isSaving
-                  ? null
-                  : () {
-                      Navigator.pop(context);
-                      onCancel();
-                    },
-              style: TextButton.styleFrom(foregroundColor: Colors.red.shade800),
-              child: const Text('Cancel Appointment'),
             ),
           ],
         ),

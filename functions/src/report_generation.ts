@@ -284,7 +284,7 @@ export function buildReportAnalytics(
   }
   const completed = statusCounts.completed ?? statusCounts.complete ?? 0;
   const scheduled = yearAppointments.filter((appointment) =>
-    !["cancelled", "canceled", "no-show", "noshow"].includes(text(appointment.status).toLowerCase()),
+    !["cancelled", "canceled", "no-show", "noshow", "no_show", "not_attended"].includes(text(appointment.status).toLowerCase()),
   ).length;
   const waitingTimes = yearAppointments.map((appointment) => {
     const created = dateValue(appointment.createdAt);

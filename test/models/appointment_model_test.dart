@@ -3,6 +3,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/models/appointment_model.dart';
 
 void main() {
+  test('linked follow-up fields survive JSON round-trip', () {
+    final appointment = AppointmentModel.fromJson({
+      'id': 'followup_a',
+      'userId': 'student',
+      'parentAppointmentId': 'a',
+      'appointmentType': 'follow_up',
+      'createdFrom': 'staff_follow_up',
+      'followUpReason': 'Additional support',
+      'followUpMessage': 'Please meet with us again.',
+      'scheduledAt': DateTime(2026, 9, 22, 14),
+      'createdAt': DateTime(2026, 9, 19),
+    });
+    final restored = AppointmentModel.fromJson(appointment.toJson());
+    expect(restored.parentAppointmentId, 'a');
+    expect(restored.followUpReason, 'Additional support');
+    expect(restored.followUpMessage, 'Please meet with us again.');
+  });
   test('round-trips complete appointment data', () {
     final scheduledAt = DateTime(2026, 4, 30, 11);
     final createdAt = DateTime(2026, 4, 1, 9);
