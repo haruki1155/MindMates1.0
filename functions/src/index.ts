@@ -1632,7 +1632,7 @@ export const archiveReadNotifications = onSchedule(
   },
 );
 
-function appointmentSlotId(timestamp: Timestamp, staffId = "pacc"): string {
+export function appointmentSlotId(timestamp: Pick<Timestamp, "toMillis">, staffId = "pacc"): string {
   return `${staffId}_${timestamp.toMillis()}`;
 }
 

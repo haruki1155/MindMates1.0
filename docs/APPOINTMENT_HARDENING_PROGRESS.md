@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 9 — Resource Capacity Model Decision
-Last completed phase: Phase 8 — Reschedule Conflict Behavior
-Last commit: pending Phase 8 commit
+Current phase: Phase 10 — Dynamic Slot Authority
+Last completed phase: Phase 9 — Resource Capacity Model Decision
+Last commit: pending Phase 9 commit
 
 ## Completed
 
@@ -15,6 +15,7 @@ Last commit: pending Phase 8 commit
 * Phase 6 — PASS
 * Phase 7 — PASS
 * Phase 8 — PASS
+* Phase 9 — PASS
 
 ## Current blockers
 
@@ -37,3 +38,6 @@ Last commit: pending Phase 8 commit
   `appointment_policy/current`; enforcement is always server-side.
 * Reschedule proposals are tentative; accepted moves revalidate availability
   and atomically claim the new slot before releasing the original slot.
+* Model A is intentional: one shared PACC session per start timestamp. The
+  repository has no duration/end-time authority, so overlapping 1–2 hour
+  sessions with different starts remain a documented future integrity gap.
