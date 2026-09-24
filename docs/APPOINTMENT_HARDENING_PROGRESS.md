@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 14 — Reminder Regression Check
-Last completed phase: Phase 13 — Non-Production End-to-End Validation
-Last commit: `ad8702e` — staging appointment E2E validation runner
+Current phase: Phase 15 — Staging Deployment
+Last completed phase: Phase 14 — Reminder Regression Check
+Last commit: `0d58a5f` — preserve reminders during appointment proposals
 
 ## Completed
 
@@ -26,6 +26,7 @@ Last commit: `ad8702e` — staging appointment E2E validation runner
 * Phase 11G — PASS
 * Phase 12 — PASS
 * Phase 13 — PASS
+* Phase 14 — PASS
 
 ## Current blockers
 
@@ -76,3 +77,5 @@ Last commit: `ad8702e` — staging appointment E2E validation runner
   configuration was restored after the run.
 * The Phase 13 staging deployment contains the hardened appointment Functions
   and Firestore Rules. Admin/student app deployment remains Phase 15 work.
+* Reminders remain eligible while a reschedule proposal is unresolved because
+  the original appointment time is still authoritative until acceptance.
