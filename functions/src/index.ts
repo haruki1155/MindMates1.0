@@ -33,6 +33,10 @@ import {
   AppointmentSchedulingValidationError,
   validateAppointmentTimestamp,
 } from "./appointment_scheduling";
+import {
+  AppointmentAvailabilityValidationError,
+  validatePaccAppointmentAvailability,
+} from "./appointment_availability";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -1639,10 +1643,25 @@ export const createAppointmentRequest = onCall(async (request) => {
   const scheduledAt = Timestamp.fromMillis(schedule.millis);
   const appointment = db.collection("appointments").doc();
   const slot = db.collection("appointment_slots").doc(appointmentSlotId(scheduledAt));
+  const availability = db.collection("pacc_availability").doc("current");
   const profile = await db.collection("users").doc(userId).get();
   await db.runTransaction(async (transaction) => {
-    const occupied = await transaction.get(slot);
+    const [occupied, availabilitySnapshot] = await Promise.all([
+      transaction.get(slot),
+      transaction.get(availability),
+    ]);
     if (occupied.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
+    try {
+      validatePaccAppointmentAvailability(
+        schedule.millis,
+        availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
+      );
+    } catch (error: unknown) {
+      if (error instanceof AppointmentAvailabilityValidationError) {
+        throw new HttpsError("failed-precondition", error.message);
+      }
+      throw error;
+    }
     const source = profile.data() ?? {};
     transaction.create(slot, {appointmentId: appointment.id, scheduledAt, createdAt: FieldValue.serverTimestamp()});
     transaction.create(appointment, {
