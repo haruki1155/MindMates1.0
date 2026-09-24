@@ -25,4 +25,11 @@ git config --global --add safe.directory "$flutter_sdk"
 
 flutter --disable-analytics
 flutter pub get
-flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=staging
+app_env="staging"
+if [[ "${VERCEL_ENV:-}" == "production" ]]; then
+  app_env="production"
+fi
+echo "Building MindMate Admin Portal with APP_ENV=$app_env"
+flutter build web --release --target lib/admin_main.dart \
+  --dart-define=APP_ENV="$app_env" \
+  --dart-define=VERCEL_DEPLOYMENT_ENV="${VERCEL_ENV:-}"

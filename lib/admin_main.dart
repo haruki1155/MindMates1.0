@@ -31,7 +31,8 @@ Future<void> main() async {
 
 bool _isProductionBuildOnVercel() =>
     AppEnvironmentConfig.current == AppEnvironment.production &&
-    Uri.base.host.toLowerCase().endsWith('.vercel.app');
+    Uri.base.host.toLowerCase().endsWith('.vercel.app') &&
+    const String.fromEnvironment('VERCEL_DEPLOYMENT_ENV') != 'production';
 
 class _AdminDeploymentConfigurationError extends StatelessWidget {
   const _AdminDeploymentConfigurationError();
