@@ -979,10 +979,6 @@ class _AppointmentActions extends StatelessWidget {
           label: 'Accept New Schedule',
           onTap: onAcceptReschedule,
         ),
-        _SmallYellowButton(
-          label: 'Request Another Time',
-          onTap: onRequestReschedule,
-        ),
         _SmallYellowButton(label: 'Cancel Appointment', onTap: onCancel),
       ]);
     } else if (status == AppointmentStatus.cancelled) {

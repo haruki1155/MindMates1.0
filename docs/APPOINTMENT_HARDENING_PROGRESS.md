@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 6 — Align Student and Admin Actions
-Last completed phase: Phase 5 — Authoritative Lifecycle Matrix
-Last commit: pending Phase 5 commit
+Current phase: Phase 7 — Booking Policy and Abuse Controls
+Last completed phase: Phase 6 — Align Student and Admin Actions
+Last commit: pending Phase 6 commit
 
 ## Completed
 
@@ -12,6 +12,7 @@ Last commit: pending Phase 5 commit
 * Phase 3 — PASS
 * Phase 4 — PASS
 * Phase 5 — PASS
+* Phase 6 — PASS
 
 ## Current blockers
 
@@ -28,3 +29,5 @@ Last commit: pending Phase 5 commit
 * Portal staff read only the server-generated `appointment_queue` projection;
   appointment records and terminal history remain owner/assigned-counselor/admin only.
 * The server lifecycle matrix is the authority for student and staff transitions.
+* Student UI does not offer counter-proposals from a staff proposal; the server
+  supports acceptance or cancellation in that state.

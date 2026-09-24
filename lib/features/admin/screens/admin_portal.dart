@@ -2800,7 +2800,7 @@ class _AppointmentCard extends StatelessWidget {
     final currentStatus = item.status.toLowerCase().trim();
     var action = currentStatus == 'confirmed'
         ? 'completed'
-        : currentStatus == 'reschedule_required'
+        : currentStatus == 'reschedule_proposed'
         ? 'reschedule_proposed'
         : 'confirmed';
     String reason = _appointmentReasons(action).first;
@@ -2930,11 +2930,15 @@ class _AppointmentCard extends StatelessWidget {
                                 child: Text('Mark as no-show'),
                               ),
                               DropdownMenuItem(
+                                value: 'reschedule_proposed',
+                                child: Text('Propose new schedule'),
+                              ),
+                              DropdownMenuItem(
                                 value: 'cancelled',
                                 child: Text('Cancel appointment'),
                               ),
                             ]
-                          : currentStatus == 'reschedule_required'
+                          : currentStatus == 'reschedule_proposed'
                           ? const [
                               DropdownMenuItem(
                                 value: 'reschedule_proposed',
@@ -2947,8 +2951,8 @@ class _AppointmentCard extends StatelessWidget {
                                 child: Text('Confirm appointment'),
                               ),
                               DropdownMenuItem(
-                                value: 'reschedule_required',
-                                child: Text('Schedule adjustment needed'),
+                                value: 'declined',
+                                child: Text('Decline appointment'),
                               ),
                               DropdownMenuItem(
                                 value: 'reschedule_proposed',
@@ -3054,11 +3058,16 @@ class _AppointmentCard extends StatelessWidget {
                       proposedScheduledTime: proposedTime.text.trim(),
                     );
                     if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  } catch (_) {
+                  } catch (error) {
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Unable to update the appointment.'),
+                        SnackBar(
+                          content: Text(
+                            FirebaseErrorMessage.describe(
+                              error,
+                              fallback: 'Unable to update the appointment.',
+                            ),
+                          ),
                         ),
                       );
                     }
@@ -3078,7 +3087,7 @@ class _AppointmentCard extends StatelessWidget {
       'Schedule and counselor are available',
       'Appointment approved by PAACC',
     ],
-    'reschedule_required' => const ['Schedule adjustment needed'],
+    'declined' => const ['Requested schedule cannot be accommodated'],
     'reschedule_proposed' => const [
       'A different office time is available',
       'The requested time needs to be adjusted',

@@ -536,15 +536,6 @@ class AppointmentCard extends StatelessWidget {
                   ? null
                   : () {
                       Navigator.pop(context);
-                      onReschedule();
-                    },
-              child: const Text('Request Another Time'),
-            ),
-            TextButton(
-              onPressed: isSaving
-                  ? null
-                  : () {
-                      Navigator.pop(context);
                       onCancel();
                     },
               style: TextButton.styleFrom(foregroundColor: Colors.red.shade800),
