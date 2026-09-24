@@ -1545,7 +1545,7 @@ export const resolvePortalAppointmentNotifications = onDocumentUpdated(
   async (event) => {
     const before = String(event.data?.before.data()?.status ?? "").toLowerCase();
     const after = String(event.data?.after.data()?.status ?? "").toLowerCase();
-    const terminal = new Set(["completed", "complete", "declined", "cancelled", "canceled"]);
+    const terminal = new Set(["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow", "expired"]);
     if (terminal.has(after) && !terminal.has(before)) {
       await archiveResolvedPortalNotifications("appointment", event.params.appointmentId);
     }

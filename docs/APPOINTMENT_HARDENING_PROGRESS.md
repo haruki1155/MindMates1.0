@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 11F — No-Show Notification Cleanup
-Last completed phase: Phase 11E — Cancellation Policy
-Last commit: pending Phase 11E commit
+Current phase: Phase 11G — Follow-Up Appointment Linking
+Last completed phase: Phase 11F — No-Show Notification Cleanup
+Last commit: pending Phase 11F commit
 
 ## Completed
 
@@ -22,6 +22,7 @@ Last commit: pending Phase 11E commit
 * Phase 11C — PASS
 * Phase 11D — PASS
 * Phase 11E — PASS
+* Phase 11F — PASS
 
 ## Current blockers
 
@@ -58,3 +59,4 @@ Last commit: pending Phase 11E commit
   enabled expiry uses the explicit terminal `expired` status and releases slots.
 * Cancellation cutoff and reason requirements are server policies; requiring a
   reason is disabled unless explicitly published.
+* Portal appointment notifications resolve for no-show and other terminal states.
