@@ -49,6 +49,12 @@ class AppointmentUiState {
       Icons.info_outline,
       Color(0xFFAA5842),
     ),
+    AppointmentStatus.expired => const AppointmentUiState(
+      'Request Expired',
+      'This request was not reviewed in time. Please book a new appointment.',
+      Icons.timer_off_outlined,
+      Color(0xFF6C6C6C),
+    ),
     AppointmentStatus.noShow => const AppointmentUiState(
       'Missed Appointment',
       '',
@@ -68,7 +74,8 @@ class AppointmentUiState {
         AppointmentStatus.completed ||
         AppointmentStatus.noShow => AppointmentSection.past,
         AppointmentStatus.cancelled ||
-        AppointmentStatus.declined => AppointmentSection.cancelled,
+        AppointmentStatus.declined ||
+        AppointmentStatus.expired => AppointmentSection.cancelled,
         _ => AppointmentSection.upcoming,
       };
 }
@@ -413,6 +420,7 @@ class AppointmentCard extends StatelessWidget {
       AppointmentStatus.completed,
       AppointmentStatus.cancelled,
       AppointmentStatus.declined,
+      AppointmentStatus.expired,
       AppointmentStatus.noShow,
     }.contains(status)) {
       return Row(

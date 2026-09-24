@@ -14,3 +14,8 @@ test("enabled booking policy rejects lead-time and horizon violations", () => {
   assert.match(bookingPolicyViolation(policy, now + 8 * 86_400_000, now) ?? "", /booking window/);
   assert.equal(bookingPolicyViolation(policy, now + 2 * 86_400_000, now), null);
 });
+
+test("stale request expiry remains disabled unless a positive policy is published", () => {
+  assert.equal(appointmentBookingPolicy({}).staleRequestExpiryHours, null);
+  assert.equal(appointmentBookingPolicy({staleRequestExpiryHours: 24}).staleRequestExpiryHours, 24);
+});

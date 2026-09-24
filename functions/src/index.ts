@@ -2201,3 +2201,41 @@ export const sendAppointmentReminders = onSchedule(
     })));
   },
 );
+
+/** Expires only configured, still-unreviewed requests and releases their slot. */
+export const expireStaleAppointmentRequests = onSchedule(
+  {schedule: "every 60 minutes", timeZone: "Asia/Manila", retryCount: 3},
+  async () => {
+    const policySnapshot = await db.collection("appointment_policy").doc("current").get();
+    const hours = appointmentBookingPolicy(policySnapshot.exists ? policySnapshot.data() : null).staleRequestExpiryHours;
+    if (hours === null) return;
+    const cutoff = Timestamp.fromMillis(Date.now() - hours * 60 * 60 * 1000);
+    const candidates = await db.collection("appointments")
+      .where("status", "==", "requested")
+      .where("createdAt", "<=", cutoff)
+      .limit(400)
+      .get();
+    await Promise.all(candidates.docs.map(async (appointment) => {
+      await db.runTransaction(async (transaction) => {
+        const current = await transaction.get(appointment.ref);
+        const data = current.data();
+        if (!data || canonicalAppointmentStatus(data.status) !== "requested" ||
+            !(data.createdAt instanceof Timestamp) || data.createdAt.toMillis() > cutoff.toMillis()) return;
+        const userId = String(data.userId ?? "");
+        transaction.update(appointment.ref, {
+          status: "expired", expiredAt: FieldValue.serverTimestamp(),
+          expiryReason: "Request expired before PAACC review", updatedAt: FieldValue.serverTimestamp(),
+        });
+        if (data.scheduledAt instanceof Timestamp) {
+          transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt)));
+        }
+        createAppointmentEvent(transaction, appointment.ref, "appointment_expired", "system", "requested", "expired");
+        if (userId) transaction.create(db.collection("notifications").doc(), {
+          userId, appointmentId: appointment.id, type: "appointment_expired",
+          title: "Appointment request expired", body: "Your PACC appointment request was not reviewed in time. Please book a new appointment.",
+          createdAt: FieldValue.serverTimestamp(), readAt: null,
+        });
+      });
+    }));
+  },
+);

@@ -210,6 +210,7 @@ String _friendlyStatus(AppointmentStatus status) => switch (status) {
   AppointmentStatus.completed => 'Completed',
   AppointmentStatus.cancelled => 'Cancelled',
   AppointmentStatus.declined => 'Request Declined',
+  AppointmentStatus.expired => 'Request Expired',
   AppointmentStatus.noShow => 'Missed Appointment',
   AppointmentStatus.unknown => 'Awaiting Confirmation',
 };

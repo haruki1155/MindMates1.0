@@ -11,6 +11,7 @@ enum AppointmentStatus {
   completed,
   noShow,
   declined,
+  expired,
   legacyRequested,
   unknown;
 
@@ -23,6 +24,7 @@ enum AppointmentStatus {
         'completed' || 'complete' => completed,
         'no_show' || 'noshow' || 'no-show' => noShow,
         'declined' => declined,
+        'expired' => expired,
         'pending' || 'upcoming' || 'reschedule_required' => legacyRequested,
         _ => unknown,
       };
@@ -35,6 +37,7 @@ enum AppointmentStatus {
     completed => 'completed',
     noShow => 'no_show',
     declined => 'declined',
+    expired => 'expired',
     unknown => 'requested',
   };
 
@@ -46,11 +49,12 @@ enum AppointmentStatus {
     completed => 'COMPLETED',
     noShow => 'NO SHOW',
     declined => 'DECLINED',
+    expired => 'EXPIRED',
     unknown => 'REQUESTED',
   };
 
   bool get isTerminal => switch (this) {
-    cancelled || completed || noShow || declined => true,
+    cancelled || completed || noShow || declined || expired => true,
     _ => false,
   };
 }
@@ -135,6 +139,7 @@ class AppointmentModel {
     'canceled',
     'no_show',
     'noshow',
+    'expired',
   }.contains(status.toLowerCase().trim());
 
   factory AppointmentModel.fromJson(Map<String, dynamic> json, {String? id}) {

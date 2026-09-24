@@ -6,6 +6,7 @@ export type AppointmentBookingPolicy = {
   cancellationCutoffMinutes: number | null;
   rateLimitWindowMinutes: number | null;
   rateLimitCount: number | null;
+  staleRequestExpiryHours: number | null;
 };
 
 export const defaultAppointmentBookingPolicy: AppointmentBookingPolicy = {
@@ -16,6 +17,7 @@ export const defaultAppointmentBookingPolicy: AppointmentBookingPolicy = {
   cancellationCutoffMinutes: null,
   rateLimitWindowMinutes: null,
   rateLimitCount: null,
+  staleRequestExpiryHours: null,
 };
 
 const fields = Object.keys(defaultAppointmentBookingPolicy) as Array<keyof AppointmentBookingPolicy>;

@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 11D — Stale Request Expiry
-Last completed phase: Phase 11C — Holidays and Blackouts
-Last commit: pending Phase 11C commit
+Current phase: Phase 11E — Cancellation Policy
+Last completed phase: Phase 11D — Stale Request Expiry
+Last commit: pending Phase 11D commit
 
 ## Completed
 
@@ -20,6 +20,7 @@ Last commit: pending Phase 11C commit
 * Phase 11A — PASS
 * Phase 11B — PASS
 * Phase 11C — PASS
+* Phase 11D — PASS
 
 ## Current blockers
 
@@ -52,3 +53,5 @@ Last commit: pending Phase 11C commit
   editable contact and preference values remain server-validated intake data.
 * Optional `blackoutDates` extend the existing PACC availability document and
   are enforced by the shared availability validator.
+* Stale request expiry is disabled until `staleRequestExpiryHours` is published;
+  enabled expiry uses the explicit terminal `expired` status and releases slots.

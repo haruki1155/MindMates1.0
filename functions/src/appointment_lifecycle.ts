@@ -11,6 +11,7 @@ export const APPOINTMENT_TERMINAL_STATUSES = new Set([
   "completed",
   "no_show",
   "declined",
+  "expired",
 ]);
 
 export function canonicalAppointmentStatus(value: unknown): string {
