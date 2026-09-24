@@ -46,6 +46,7 @@ import {
   canonicalAppointmentStatus,
 } from "./appointment_lifecycle";
 import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
+import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_intake";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -1766,7 +1767,7 @@ export const getAvailableAppointmentSlots = onCall(async (request) => {
 export const createAppointmentRequest = onCall(async (request) => {
   const userId = requireAuthenticatedUser(request);
   const input = (request.data ?? {}) as Record<string, unknown>;
-  const concern = String(input.concern ?? "").trim();
+  const concern = boundedText(input.concern, "Concern", 2_000, {required: true});
   let schedule: {millis: number; scheduledTime: string};
   try {
     schedule = validateAppointmentTimestamp(input.scheduledAt);
@@ -1775,9 +1776,6 @@ export const createAppointmentRequest = onCall(async (request) => {
       throw new HttpsError("invalid-argument", error.message);
     }
     throw error;
-  }
-  if (!concern) {
-    throw new HttpsError("invalid-argument", "Provide a concern for your appointment.");
   }
   const scheduledAt = Timestamp.fromMillis(schedule.millis);
   const appointment = db.collection("appointments").doc();
@@ -1827,13 +1825,13 @@ export const createAppointmentRequest = onCall(async (request) => {
     const source = profile.data() ?? {};
     transaction.create(slot, {appointmentId: appointment.id, scheduledAt, createdAt: FieldValue.serverTimestamp()});
     transaction.create(appointment, {
-      userId, fullName: String(input.fullName ?? source.name ?? "").trim(),
-      contactNumber: String(input.contactNumber ?? source.phone ?? "").trim(), email: String(input.email ?? source.email ?? "").trim(),
-      preferredContactMethod: String(input.preferredContactMethod ?? "").trim(), concern,
-      bestTime: String(input.bestTime ?? "").trim(), location: String(input.location ?? "PACC Office, 2nd Floor, Main Building"),
+      userId, fullName: boundedText(input.fullName ?? source.name, "Full name", 160),
+      contactNumber: appointmentPhone(input.contactNumber ?? source.phone), email: appointmentEmail(input.email ?? source.email),
+      preferredContactMethod: boundedText(input.preferredContactMethod, "Preferred contact method", 64), concern,
+      bestTime: boundedText(input.bestTime, "Preferred time", 120), location: boundedText(input.location ?? "PACC Office, 2nd Floor, Main Building", "Location", 200),
       scheduledAt, scheduledTime: schedule.scheduledTime, status: "requested", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       department: String(source.department ?? input.department ?? ""), academicYearId: String(input.academicYearId ?? ""),
-      age: input.age ?? null, address: String(input.address ?? ""), facebook: String(input.facebook ?? ""), sex: String(input.sex ?? ""), course: String(input.course ?? ""), yearLevel: String(input.yearLevel ?? ""), therapyBefore: String(input.therapyBefore ?? ""),
+      age: input.age ?? null, address: boundedText(input.address, "Address", 300), facebook: boundedText(input.facebook, "Social contact", 120), sex: boundedText(input.sex, "Sex", 32), course: boundedText(input.course, "Course", 160), yearLevel: boundedText(input.yearLevel, "Year level", 64), therapyBefore: boundedText(input.therapyBefore, "Counseling history", 500),
     });
     createAppointmentEvent(transaction, appointment, "appointment_requested", userId, "", "requested");
   });
@@ -1871,7 +1869,7 @@ export const respondToAppointment = onCall(async (request) => {
       if (cutoff !== null && scheduledAt.toMillis() - Date.now() < cutoff * 60_000) {
         throw new HttpsError("failed-precondition", "This appointment is inside the cancellation cutoff window.");
       }
-      transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason: String(input.reason ?? "").trim(), updatedAt: FieldValue.serverTimestamp()});
+      transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason: boundedText(input.reason, "Cancellation reason", 500), updatedAt: FieldValue.serverTimestamp()});
       transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
       createAppointmentEvent(transaction, appointment, "appointment_cancelled", userId, before, "cancelled");
       if (data.assignedStaffId) transaction.create(notification, {userId: data.assignedStaffId, appointmentId, type: "appointment", title: "Appointment cancelled", body: "A student cancelled an appointment.", createdAt: FieldValue.serverTimestamp(), readAt: null});
@@ -1924,12 +1922,11 @@ export const reviewAppointment = onCall(async (request) => {
   const input = request.data as Record<string, unknown>;
   const appointmentId = String(input.appointmentId ?? "").trim();
   const action = String(input.action ?? "").trim();
-  const reply = String(input.reply ?? "").trim();
+  const reply = boundedText(input.reply, "Reply", 1_000, {required: true});
   let proposal: {millis: number; scheduledTime: string} | null = null;
   if (!appointmentId || !["confirmed", "declined", "reschedule_proposed", "completed", "no_show", "cancelled"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
-  if (!reply) throw new HttpsError("invalid-argument", "A reply to the student is required.");
   if (action === "reschedule_proposed") {
     try {
       proposal = validateAppointmentTimestamp(input.proposedScheduledAt);

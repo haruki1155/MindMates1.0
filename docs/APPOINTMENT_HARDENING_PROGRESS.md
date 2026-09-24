@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 11A — Input Bounds
-Last completed phase: Phase 10 — Dynamic Slot Authority
-Last commit: pending Phase 10 commit
+Current phase: Phase 11B — Trusted Profile Snapshot Policy
+Last completed phase: Phase 11A — Input Bounds
+Last commit: pending Phase 11A commit
 
 ## Completed
 
@@ -17,6 +17,7 @@ Last commit: pending Phase 10 commit
 * Phase 8 — PASS
 * Phase 9 — PASS
 * Phase 10 — PASS
+* Phase 11A — PASS
 
 ## Current blockers
 
@@ -44,3 +45,4 @@ Last commit: pending Phase 10 commit
   sessions with different starts remain a documented future integrity gap.
 * Student booking time choices are fetched from the trusted slot callable;
   display availability remains non-reserving and booking repeats validation.
+* Appointment intake and staff-response field bounds are enforced in Functions.
