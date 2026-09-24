@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 11B — Trusted Profile Snapshot Policy
-Last completed phase: Phase 11A — Input Bounds
-Last commit: pending Phase 11A commit
+Current phase: Phase 11C — Holidays and Blackouts
+Last completed phase: Phase 11B — Trusted Profile Snapshot Policy
+Last commit: pending Phase 11B commit
 
 ## Completed
 
@@ -18,6 +18,7 @@ Last commit: pending Phase 11A commit
 * Phase 9 — PASS
 * Phase 10 — PASS
 * Phase 11A — PASS
+* Phase 11B — PASS
 
 ## Current blockers
 
@@ -46,3 +47,5 @@ Last commit: pending Phase 11A commit
 * Student booking time choices are fetched from the trusted slot callable;
   display availability remains non-reserving and booking repeats validation.
 * Appointment intake and staff-response field bounds are enforced in Functions.
+* Appointment identity snapshots prefer trusted profile values; intentionally
+  editable contact and preference values remain server-validated intake data.

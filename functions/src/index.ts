@@ -1823,15 +1823,23 @@ export const createAppointmentRequest = onCall(async (request) => {
       throw error;
     }
     const source = profile.data() ?? {};
+    const profileName = String(
+      source.name ??
+          [source.firstName, source.middleName, source.lastName]
+            .filter((part) => typeof part === "string" && part.trim())
+            .join(" "),
+    ).trim();
     transaction.create(slot, {appointmentId: appointment.id, scheduledAt, createdAt: FieldValue.serverTimestamp()});
     transaction.create(appointment, {
-      userId, fullName: boundedText(input.fullName ?? source.name, "Full name", 160),
-      contactNumber: appointmentPhone(input.contactNumber ?? source.phone), email: appointmentEmail(input.email ?? source.email),
+      // Profile-derived identity wins over client payloads. Contact fields stay
+      // editable by design, with a profile value only as the initial fallback.
+      userId, fullName: boundedText(profileName || input.fullName, "Full name", 160),
+      contactNumber: appointmentPhone(input.contactNumber ?? source.phone), email: appointmentEmail(source.email ?? input.email),
       preferredContactMethod: boundedText(input.preferredContactMethod, "Preferred contact method", 64), concern,
       bestTime: boundedText(input.bestTime, "Preferred time", 120), location: boundedText(input.location ?? "PACC Office, 2nd Floor, Main Building", "Location", 200),
       scheduledAt, scheduledTime: schedule.scheduledTime, status: "requested", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-      department: String(source.department ?? input.department ?? ""), academicYearId: String(input.academicYearId ?? ""),
-      age: input.age ?? null, address: boundedText(input.address, "Address", 300), facebook: boundedText(input.facebook, "Social contact", 120), sex: boundedText(input.sex, "Sex", 32), course: boundedText(input.course, "Course", 160), yearLevel: boundedText(input.yearLevel, "Year level", 64), therapyBefore: boundedText(input.therapyBefore, "Counseling history", 500),
+      department: boundedText(source.department ?? input.department, "Department", 160), academicYearId: boundedText(input.academicYearId, "Academic year", 80),
+      age: input.age ?? null, address: boundedText(input.address, "Address", 300), facebook: boundedText(input.facebook, "Social contact", 120), sex: boundedText(input.sex, "Sex", 32), course: boundedText(source.course ?? input.course, "Course", 160), yearLevel: boundedText(input.yearLevel, "Year level", 64), therapyBefore: boundedText(input.therapyBefore, "Counseling history", 500),
     });
     createAppointmentEvent(transaction, appointment, "appointment_requested", userId, "", "requested");
   });
