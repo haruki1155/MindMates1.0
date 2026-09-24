@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 12 — Focused Security and Lifecycle Tests
-Last completed phase: Phase 11G — Follow-Up Appointment Linking
-Last commit: pending Phase 11G commit
+Current phase: Phase 13 — Non-Production End-to-End Validation
+Last completed phase: Phase 12 — Focused Security and Lifecycle Tests
+Last commit: pending Phase 12 commit
 
 ## Completed
 
@@ -24,6 +24,7 @@ Last commit: pending Phase 11G commit
 * Phase 11E — PASS
 * Phase 11F — PASS
 * Phase 11G — PASS
+* Phase 12 — PASS
 
 ## Current blockers
 
@@ -62,3 +63,5 @@ Last commit: pending Phase 11G commit
   reason is disabled unless explicitly published.
 * Portal appointment notifications resolve for no-show and other terminal states.
 * Follow-up bookings may link only to the requesting user's terminal appointment.
+* Functions unit coverage and Firestore emulator Rules coverage pass. Callable
+  concurrency and end-to-end role scenarios remain non-production validation work.
