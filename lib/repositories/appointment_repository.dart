@@ -76,6 +76,9 @@ class AppointmentRepository {
       ..['scheduledAt'] = appointment.scheduledAt.millisecondsSinceEpoch
       ..remove('createdAt')
       ..remove('updatedAt');
+    if ((appointment.parentAppointmentId ?? '').trim().isNotEmpty) {
+      payload['parentAppointmentId'] = appointment.parentAppointmentId!.trim();
+    }
     final result = await _functionClient
         .routedCallable('createAppointmentRequest')
         .call<Map<String, dynamic>>(payload);

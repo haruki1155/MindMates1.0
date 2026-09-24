@@ -93,6 +93,7 @@ class AppointmentModel {
     this.department,
     this.academicYearId,
     this.archivedAt,
+    this.parentAppointmentId,
   });
 
   final String id;
@@ -127,6 +128,7 @@ class AppointmentModel {
   final String? department;
   final String? academicYearId;
   final DateTime? archivedAt;
+  final String? parentAppointmentId;
 
   bool get isArchived => archivedAt != null;
   AppointmentStatus get lifecycleStatus => AppointmentStatus.parse(status);
@@ -177,6 +179,7 @@ class AppointmentModel {
       department: _optionalString(json['department']),
       academicYearId: _optionalString(json['academicYearId']),
       archivedAt: dateTimeFromFirestore(json['archivedAt']),
+      parentAppointmentId: _optionalString(json['parentAppointmentId']),
     );
   }
 
@@ -212,6 +215,7 @@ class AppointmentModel {
       'academicYearId': academicYearId ?? '',
       'createdAt': createdAt,
       'updatedAt': updatedAt,
+      'parentAppointmentId': parentAppointmentId ?? '',
     };
   }
 
@@ -248,6 +252,7 @@ class AppointmentModel {
     String? department,
     String? academicYearId,
     DateTime? archivedAt,
+    String? parentAppointmentId,
   }) {
     return AppointmentModel(
       id: id ?? this.id,
@@ -284,6 +289,7 @@ class AppointmentModel {
       department: department ?? this.department,
       academicYearId: academicYearId ?? this.academicYearId,
       archivedAt: archivedAt ?? this.archivedAt,
+      parentAppointmentId: parentAppointmentId ?? this.parentAppointmentId,
     );
   }
 

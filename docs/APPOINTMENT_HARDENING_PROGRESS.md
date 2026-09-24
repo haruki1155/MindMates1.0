@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 11G — Follow-Up Appointment Linking
-Last completed phase: Phase 11F — No-Show Notification Cleanup
-Last commit: pending Phase 11F commit
+Current phase: Phase 12 — Focused Security and Lifecycle Tests
+Last completed phase: Phase 11G — Follow-Up Appointment Linking
+Last commit: pending Phase 11G commit
 
 ## Completed
 
@@ -23,6 +23,7 @@ Last commit: pending Phase 11F commit
 * Phase 11D — PASS
 * Phase 11E — PASS
 * Phase 11F — PASS
+* Phase 11G — PASS
 
 ## Current blockers
 
@@ -60,3 +61,4 @@ Last commit: pending Phase 11F commit
 * Cancellation cutoff and reason requirements are server policies; requiring a
   reason is disabled unless explicitly published.
 * Portal appointment notifications resolve for no-show and other terminal states.
+* Follow-up bookings may link only to the requesting user's terminal appointment.

@@ -60,6 +60,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   bool _initialDetailsHandled = false;
   List<String> _availableTimes = const [];
   bool _loadingTimes = false;
+  String? _parentAppointmentId;
 
   DateTime get _today => DateUtils.dateOnly(widget._nowProvider());
 
@@ -314,7 +315,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     });
   }
 
-  void _startNewAppointment() {
+  void _startNewAppointment([String? parentAppointmentId]) {
     final today = _today;
     setState(() {
       _tab = _PaccAppointmentTab.appointNew;
@@ -322,6 +323,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _selectedDate = null;
       _selectedTime = null;
       _visibleMonth = DateTime(today.year, today.month);
+      _parentAppointmentId = parentAppointmentId;
     });
   }
 
@@ -391,6 +393,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       location: 'PACC Office, 2nd Floor, Main Building',
       status: AppointmentStatus.requested.value,
       createdAt: DateTime.now(),
+      parentAppointmentId: _parentAppointmentId,
     );
 
     final saved = await provider.createAppointment(appointment);
@@ -410,7 +413,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     showAppointmentDetailsSheet(
       context,
       appointment,
-      onBookAppointment: _startNewAppointment,
+      onBookAppointment: () => _startNewAppointment(appointment.id),
     );
   }
 

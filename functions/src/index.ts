@@ -1779,19 +1779,29 @@ export const createAppointmentRequest = onCall(async (request) => {
   }
   const scheduledAt = Timestamp.fromMillis(schedule.millis);
   const appointment = db.collection("appointments").doc();
+  const parentAppointmentId = boundedText(input.parentAppointmentId, "Parent appointment", 128);
   const slot = db.collection("appointment_slots").doc(appointmentSlotId(scheduledAt));
   const availability = db.collection("pacc_availability").doc("current");
   const policyDocument = db.collection("appointment_policy").doc("current");
   const rateLimit = db.collection("_appointment_rate_limits").doc(userId);
   const profile = await db.collection("users").doc(userId).get();
   await db.runTransaction(async (transaction) => {
-    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot] = await Promise.all([
+    const parent = parentAppointmentId ? db.collection("appointments").doc(parentAppointmentId) : null;
+    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, parentSnapshot] = await Promise.all([
       transaction.get(slot),
       transaction.get(availability),
       transaction.get(policyDocument),
       transaction.get(db.collection("appointments").where("userId", "==", userId)),
       transaction.get(rateLimit),
+      parent ? transaction.get(parent) : Promise.resolve(null),
     ]);
+    if (parentSnapshot) {
+      const parentData = parentSnapshot.data();
+      if (!parentData || String(parentData.userId ?? "") !== userId ||
+          !["completed", "no_show", "cancelled", "declined", "expired"].includes(canonicalAppointmentStatus(parentData.status))) {
+        throw new HttpsError("permission-denied", "This follow-up appointment is unavailable.");
+      }
+    }
     const policy = appointmentBookingPolicy(policySnapshot.exists ? policySnapshot.data() : null);
     const policyError = bookingPolicyViolation(policy, schedule.millis);
     if (policyError) throw new HttpsError("failed-precondition", policyError);
@@ -1839,6 +1849,7 @@ export const createAppointmentRequest = onCall(async (request) => {
       bestTime: boundedText(input.bestTime, "Preferred time", 120), location: boundedText(input.location ?? "PACC Office, 2nd Floor, Main Building", "Location", 200),
       scheduledAt, scheduledTime: schedule.scheduledTime, status: "requested", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       department: boundedText(source.department ?? input.department, "Department", 160), academicYearId: boundedText(input.academicYearId, "Academic year", 80),
+      ...(parentAppointmentId ? {parentAppointmentId} : {}),
       age: input.age ?? null, address: boundedText(input.address, "Address", 300), facebook: boundedText(input.facebook, "Social contact", 120), sex: boundedText(input.sex, "Sex", 32), course: boundedText(source.course ?? input.course, "Course", 160), yearLevel: boundedText(input.yearLevel, "Year level", 64), therapyBefore: boundedText(input.therapyBefore, "Counseling history", 500),
     });
     createAppointmentEvent(transaction, appointment, "appointment_requested", userId, "", "requested");
