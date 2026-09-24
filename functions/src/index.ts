@@ -44,6 +44,7 @@ import {
   canTransitionAppointment,
   canonicalAppointmentStatus,
 } from "./appointment_lifecycle";
+import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -1743,12 +1744,35 @@ export const createAppointmentRequest = onCall(async (request) => {
   const appointment = db.collection("appointments").doc();
   const slot = db.collection("appointment_slots").doc(appointmentSlotId(scheduledAt));
   const availability = db.collection("pacc_availability").doc("current");
+  const policyDocument = db.collection("appointment_policy").doc("current");
+  const rateLimit = db.collection("_appointment_rate_limits").doc(userId);
   const profile = await db.collection("users").doc(userId).get();
   await db.runTransaction(async (transaction) => {
-    const [occupied, availabilitySnapshot] = await Promise.all([
+    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot] = await Promise.all([
       transaction.get(slot),
       transaction.get(availability),
+      transaction.get(policyDocument),
+      transaction.get(db.collection("appointments").where("userId", "==", userId)),
+      transaction.get(rateLimit),
     ]);
+    const policy = appointmentBookingPolicy(policySnapshot.exists ? policySnapshot.data() : null);
+    const policyError = bookingPolicyViolation(policy, schedule.millis);
+    if (policyError) throw new HttpsError("failed-precondition", policyError);
+    const statuses = existingAppointments.docs.map((item) => canonicalAppointmentStatus(item.data().status));
+    if (policy.maxActiveAppointments !== null && statuses.filter((status) => APPOINTMENT_ACTIVE_STATUSES.has(status)).length >= policy.maxActiveAppointments) {
+      throw new HttpsError("resource-exhausted", "You have reached the active appointment limit.");
+    }
+    if (policy.maxPendingAppointments !== null && statuses.filter((status) => status === "requested").length >= policy.maxPendingAppointments) {
+      throw new HttpsError("resource-exhausted", "You have reached the pending appointment limit.");
+    }
+    if (policy.rateLimitWindowMinutes !== null && policy.rateLimitCount !== null) {
+      const now = Timestamp.now();
+      const started = rateLimitSnapshot.data()?.windowStartedAt as Timestamp | undefined;
+      const withinWindow = started && now.toMillis() - started.toMillis() < policy.rateLimitWindowMinutes * 60_000;
+      const count = withinWindow ? Number(rateLimitSnapshot.data()?.count ?? 0) : 0;
+      if (count >= policy.rateLimitCount) throw new HttpsError("resource-exhausted", "Too many appointment requests. Please try again later.");
+      transaction.set(rateLimit, {windowStartedAt: withinWindow ? started : now, count: count + 1, updatedAt: FieldValue.serverTimestamp()});
+    }
     if (occupied.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
     try {
       validatePaccAppointmentAvailability(
@@ -1784,8 +1808,12 @@ export const respondToAppointment = onCall(async (request) => {
   const action = String(input.action ?? "").trim();
   if (!appointmentId || !["cancel", "accept_reschedule", "propose_reschedule"].includes(action)) throw new HttpsError("invalid-argument", "A valid appointment action is required.");
   const appointment = db.collection("appointments").doc(appointmentId);
+  const policyDocument = db.collection("appointment_policy").doc("current");
   await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(appointment);
+    const [snapshot, policySnapshot] = await Promise.all([
+      transaction.get(appointment),
+      transaction.get(policyDocument),
+    ]);
     if (!snapshot.exists || String(snapshot.data()?.userId ?? "") !== userId) throw new HttpsError("permission-denied", "This appointment is unavailable.");
     const data = snapshot.data()!;
     const before = canonicalAppointmentStatus(data.status);
@@ -1794,6 +1822,13 @@ export const respondToAppointment = onCall(async (request) => {
     if (action === "cancel") {
       if (!canTransitionAppointment(before, "student", "cancelled")) {
         throw new HttpsError("failed-precondition", "This appointment cannot be cancelled in its current state.");
+      }
+      const cutoff = appointmentBookingPolicy(
+        policySnapshot.exists ? policySnapshot.data() : null,
+      ).cancellationCutoffMinutes;
+      const scheduledAt = data.scheduledAt as Timestamp;
+      if (cutoff !== null && scheduledAt.toMillis() - Date.now() < cutoff * 60_000) {
+        throw new HttpsError("failed-precondition", "This appointment is inside the cancellation cutoff window.");
       }
       transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason: String(input.reason ?? "").trim(), updatedAt: FieldValue.serverTimestamp()});
       transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));

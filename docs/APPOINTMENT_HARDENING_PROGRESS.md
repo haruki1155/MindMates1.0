@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 7 — Booking Policy and Abuse Controls
-Last completed phase: Phase 6 — Align Student and Admin Actions
-Last commit: pending Phase 6 commit
+Current phase: Phase 8 — Reschedule Conflict Behavior
+Last completed phase: Phase 7 — Booking Policy and Abuse Controls
+Last commit: pending Phase 7 commit
 
 ## Completed
 
@@ -13,6 +13,7 @@ Last commit: pending Phase 6 commit
 * Phase 4 — PASS
 * Phase 5 — PASS
 * Phase 6 — PASS
+* Phase 7 — PASS
 
 ## Current blockers
 
@@ -31,3 +32,5 @@ Last commit: pending Phase 6 commit
 * The server lifecycle matrix is the authority for student and staff transitions.
 * Student UI does not offer counter-proposals from a staff proposal; the server
   supports acceptance or cancellation in that state.
+* Booking policy values remain disabled until PACC publishes positive values in
+  `appointment_policy/current`; enforcement is always server-side.
