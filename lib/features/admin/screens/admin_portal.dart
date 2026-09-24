@@ -8,6 +8,7 @@ import '../../../models/pacc_availability_model.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../domain/admin_management_models.dart';
+import '../domain/appointment_workflow.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/admin_status_repository.dart';
 import 'admin_assessment_detail_screen.dart';
@@ -1814,7 +1815,7 @@ class _AppointmentsPage extends StatefulWidget {
 }
 
 class _AppointmentsPageState extends State<_AppointmentsPage> {
-  String filter = 'All';
+  String filter = 'Needs action';
   String departmentFilter = 'All departments';
   bool showHistory = false;
   final Set<String> selectedIds = <String>{};
@@ -1839,29 +1840,20 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
       stream: widget.repository.watchAppointments(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const _AccessPanel();
+        final now = DateTime.now();
         final all = (snapshot.data ?? const <AppointmentModel>[])
             .where((appointment) => appointment.isArchived == showHistory)
             .toList();
+        final counts = appointmentQueueCounts(all, now);
         final query = _search.text.trim().toLowerCase();
         final items = all.where((a) {
-          final status = a.status.toLowerCase().trim();
+          final queue = classifyAppointment(a, now);
           final tab = switch (filter) {
-            'Needs action' => const {
-              'pending',
-              'requested',
-              'reschedule_required',
-              'reschedule_proposed',
-            }.contains(status),
-            'Upcoming' =>
-              status == 'confirmed' && a.scheduledAt.isAfter(DateTime.now()),
-            'Completed' => const {'completed', 'complete'}.contains(status),
-            'Closed' => const {
-              'no_show',
-              'noshow',
-              'cancelled',
-              'canceled',
-              'declined',
-            }.contains(status),
+            'Needs action' => queue == AppointmentQueue.needsAction,
+            'Today' => queue == AppointmentQueue.today,
+            'Upcoming' => queue == AppointmentQueue.upcoming,
+            'Completed' => queue == AppointmentQueue.completed,
+            'Closed' => queue == AppointmentQueue.closed,
             _ => true,
           };
           return tab &&
@@ -1871,34 +1863,12 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               (departmentFilter == 'All departments' ||
                   a.department == departmentFilter);
         }).toList();
-        final needsAction = all
-            .where(
-              (a) => const {
-                'pending',
-                'requested',
-                'reschedule_required',
-                'reschedule_proposed',
-              }.contains(a.status.toLowerCase().trim()),
-            )
-            .length;
-        final upcoming = all
-            .where(
-              (a) =>
-                  a.status.toLowerCase() == 'confirmed' &&
-                  a.scheduledAt.isAfter(DateTime.now()) &&
-                  a.scheduledAt.isBefore(
-                    DateTime.now().add(const Duration(days: 7)),
-                  ),
-            )
-            .length;
-        final completed = all
-            .where(
-              (a) => const {
-                'completed',
-                'complete',
-              }.contains(a.status.toLowerCase()),
-            )
-            .length;
+        if (filter == 'Upcoming') {
+          items.sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
+        }
+        final needsAction = counts[AppointmentQueue.needsAction] ?? 0;
+        final upcoming = counts[AppointmentQueue.upcoming] ?? 0;
+        final completed = counts[AppointmentQueue.completed] ?? 0;
         final departments =
             all
                 .map((a) => a.department ?? '')
@@ -1936,7 +1906,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               selected: {showHistory},
               onSelectionChanged: (value) => setState(() {
                 showHistory = value.first;
-                filter = 'All';
+                filter = showHistory ? 'All' : 'Needs action';
                 selectedIds.clear();
               }),
             ),
@@ -1953,28 +1923,22 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                   ),
                   _AppointmentSummaryCard(
                     label: 'Today',
-                    value: all
-                        .where(
-                          (a) =>
-                              a.status.toLowerCase() == 'confirmed' &&
-                              _sameDay(a.scheduledAt, DateTime.now()),
-                        )
-                        .length,
-                    subtitle: 'Confirmed today',
+                    value: counts[AppointmentQueue.today] ?? 0,
+                    subtitle: 'Scheduled for today',
                     icon: Icons.today_outlined,
-                    onTap: () => setState(() => filter = 'Upcoming'),
+                    onTap: () => setState(() => filter = 'Today'),
                   ),
                   _AppointmentSummaryCard(
                     label: 'Upcoming',
                     value: upcoming,
-                    subtitle: 'Next 7 days',
+                    subtitle: 'Confirmed future dates',
                     icon: Icons.event_available_outlined,
                     onTap: () => setState(() => filter = 'Upcoming'),
                   ),
                   _AppointmentSummaryCard(
                     label: 'Completed',
                     value: completed,
-                    subtitle: 'This academic year',
+                    subtitle: 'Completed sessions',
                     icon: Icons.task_alt_outlined,
                     onTap: () => setState(() => filter = 'Completed'),
                   ),
@@ -2044,6 +2008,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                 for (final tab in const [
                   'All',
                   'Needs action',
+                  'Today',
                   'Upcoming',
                   'Completed',
                   'Closed',
@@ -2054,11 +2019,13 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                           ? all.length
                           : tab == 'Needs action'
                           ? needsAction
+                          : tab == 'Today'
+                          ? counts[AppointmentQueue.today] ?? 0
                           : tab == 'Upcoming'
                           ? upcoming
                           : tab == 'Completed'
                           ? completed
-                          : all.length - needsAction - upcoming - completed}',
+                          : counts[AppointmentQueue.closed] ?? 0}',
                     ),
                     selected: filter == tab,
                     onSelected: (_) => setState(() => filter = tab),
@@ -2130,23 +2097,40 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               ),
             if (items.isNotEmpty && MediaQuery.sizeOf(context).width >= 760)
               const _AppointmentListHeader(),
-            ...items.map(
-              (a) => _AppointmentCard(
-                item: a,
+            for (var index = 0; index < items.length; index++) ...[
+              if (filter == 'Upcoming' &&
+                  (index == 0 ||
+                      !_sameDay(
+                        items[index - 1].scheduledAt,
+                        items[index].scheduledAt,
+                      )))
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    _date(items[index].scheduledAt),
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              _AppointmentCard(
+                item: items[index],
                 repository: widget.repository,
-                selected: selectedIds.contains(a.id),
-                onSelected: a.isFinalized
+                now: now,
+                selected: selectedIds.contains(items[index].id),
+                onSelected: items[index].isFinalized
                     ? (value) => setState(() {
                         if (value) {
-                          selectedIds.add(a.id);
+                          selectedIds.add(items[index].id);
                         } else {
-                          selectedIds.remove(a.id);
+                          selectedIds.remove(items[index].id);
                         }
                       })
                     : null,
-                onArchive: () => _archiveOne(a),
+                onArchive: () => _archiveOne(items[index]),
               ),
-            ),
+            ],
           ],
         );
       },
@@ -2668,12 +2652,14 @@ class _AppointmentCard extends StatelessWidget {
     required this.selected,
     required this.onSelected,
     required this.onArchive,
+    required this.now,
   });
   final AppointmentModel item;
   final AdminPortalRepository repository;
   final bool selected;
   final ValueChanged<bool>? onSelected;
   final VoidCallback onArchive;
+  final DateTime now;
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: 8),
@@ -2716,15 +2702,14 @@ class _AppointmentCard extends StatelessWidget {
             style: const TextStyle(fontSize: 12),
           ),
         );
+        final canReview = canReviewAppointment(item, now);
         final action = TextButton.icon(
           onPressed: () => _showReviewDialog(context),
           icon: Icon(
-            item.isFinalized
-                ? Icons.visibility_outlined
-                : Icons.rate_review_outlined,
+            !canReview ? Icons.visibility_outlined : Icons.rate_review_outlined,
             size: 17,
           ),
-          label: Text(item.isFinalized ? 'View' : 'Review'),
+          label: Text(canReview ? 'Review' : 'View'),
         );
         final historyAction = item.isFinalized
             ? IconButton(
@@ -2797,11 +2782,14 @@ class _AppointmentCard extends StatelessWidget {
   );
 
   Future<void> _showReviewDialog(BuildContext context) async {
-    final currentStatus = item.status.toLowerCase().trim();
-    var action = currentStatus == 'confirmed'
+    final currentStatus = item.lifecycleStatus;
+    final canReview = canReviewAppointment(item, DateTime.now());
+    var action = currentStatus == AppointmentStatus.confirmed
         ? 'completed'
-        : currentStatus == 'reschedule_proposed'
-        ? 'reschedule_proposed'
+        : currentStatus == AppointmentStatus.rescheduleProposed
+        ? item.proposedBy == 'student'
+              ? 'confirmed'
+              : 'reschedule_proposed'
         : 'confirmed';
     String reason = _appointmentReasons(action).first;
     final proposedTime = TextEditingController();
@@ -2821,7 +2809,7 @@ class _AppointmentCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                item.isFinalized ? 'Appointment details' : 'Review appointment',
+                canReview ? 'Review appointment' : 'Appointment details',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 5),
@@ -2902,12 +2890,15 @@ class _AppointmentCard extends StatelessWidget {
                         ),
                     ],
                   ),
-                  if (item.isFinalized) ...[
+                  if (!canReview) ...[
                     const SizedBox(height: 22),
-                    const _AppointmentNotice(
+                    _AppointmentNotice(
                       icon: Icons.lock_outline,
-                      message:
-                          'This appointment has been finalized. The recorded decision is read-only.',
+                      message: item.isArchived
+                          ? 'This appointment is archived. Details are read-only.'
+                          : currentStatus == AppointmentStatus.confirmed
+                          ? 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.'
+                          : 'This appointment has been finalized. The recorded decision is read-only.',
                     ),
                   ] else ...[
                     const Divider(height: 34),
@@ -2919,7 +2910,7 @@ class _AppointmentCard extends StatelessWidget {
                     DropdownButtonFormField<String>(
                       initialValue: action,
                       decoration: const InputDecoration(labelText: 'Action'),
-                      items: currentStatus == 'confirmed'
+                      items: currentStatus == AppointmentStatus.confirmed
                           ? const [
                               DropdownMenuItem(
                                 value: 'completed',
@@ -2938,11 +2929,21 @@ class _AppointmentCard extends StatelessWidget {
                                 child: Text('Cancel appointment'),
                               ),
                             ]
-                          : currentStatus == 'reschedule_proposed'
-                          ? const [
-                              DropdownMenuItem(
+                          : currentStatus ==
+                                AppointmentStatus.rescheduleProposed
+                          ? [
+                              if (item.proposedBy == 'student')
+                                const DropdownMenuItem(
+                                  value: 'confirmed',
+                                  child: Text('Accept proposed schedule'),
+                                ),
+                              const DropdownMenuItem(
                                 value: 'reschedule_proposed',
                                 child: Text('Propose new schedule'),
+                              ),
+                              const DropdownMenuItem(
+                                value: 'cancelled',
+                                child: Text('Cancel appointment'),
                               ),
                             ]
                           : const [
@@ -3032,9 +3033,9 @@ class _AppointmentCard extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
-              child: Text(item.isFinalized ? 'Close' : 'Cancel'),
+              child: Text(canReview ? 'Cancel' : 'Close'),
             ),
-            if (!item.isFinalized)
+            if (canReview)
               FilledButton(
                 onPressed: () async {
                   if (action == 'reschedule_proposed' &&
