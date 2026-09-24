@@ -45,6 +45,10 @@ import {
   canTransitionAppointment,
   canonicalAppointmentStatus,
 } from "./appointment_lifecycle";
+import {
+  isReminderEligibleAppointmentStatus,
+  REMINDER_ELIGIBLE_APPOINTMENT_STATUSES,
+} from "./appointment_reminders";
 import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
 import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_intake";
 export {
@@ -2183,12 +2187,14 @@ export const sendAppointmentReminders = onSchedule(
     const now = Timestamp.now();
     const lower = Timestamp.fromMillis(now.toMillis() + 45 * 60 * 1000);
     const upper = Timestamp.fromMillis(now.toMillis() + (24 * 60 + 15) * 60 * 1000);
-    const candidates = await db.collection("appointments")
-      .where("status", "==", "confirmed")
-      .where("scheduledAt", ">=", lower)
-      .where("scheduledAt", "<=", upper)
-      .get();
-    await Promise.all(candidates.docs.flatMap((appointment) => REMINDER_WINDOWS.map(async ({key, minutes}) => {
+    const candidateSnapshots = await Promise.all(
+      REMINDER_ELIGIBLE_APPOINTMENT_STATUSES.map((status) => db.collection("appointments")
+        .where("status", "==", status)
+        .where("scheduledAt", ">=", lower)
+        .where("scheduledAt", "<=", upper)
+        .get()),
+    );
+    await Promise.all(candidateSnapshots.flatMap((snapshot) => snapshot.docs).flatMap((appointment) => REMINDER_WINDOWS.map(async ({key, minutes}) => {
       const data = appointment.data();
       const scheduledAt = data.scheduledAt;
       if (!(scheduledAt instanceof Timestamp)) return;
@@ -2200,7 +2206,7 @@ export const sendAppointmentReminders = onSchedule(
         await db.runTransaction(async (transaction) => {
           const fresh = await transaction.get(appointment.ref);
           const current = fresh.data() ?? {};
-          if (canonicalAppointmentStatus(current.status) !== "confirmed" || current.reminders?.[key]) return;
+          if (!isReminderEligibleAppointmentStatus(current.status) || current.reminders?.[key]) return;
           transaction.create(notification, {
             userId: String(current.userId ?? ""), appointmentId: appointment.id,
             type: "appointment_reminder", title: "PACC Appointment Reminder",
