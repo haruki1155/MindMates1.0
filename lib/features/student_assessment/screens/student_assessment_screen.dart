@@ -424,14 +424,12 @@ class _BackButton extends StatelessWidget {
 }
 
 String _categoryPurpose(AssessmentSection section) => switch (section) {
-  AssessmentSection.academicCore || AssessmentSection.academicDeeper =>
-    'Explores how academic demands may be affecting your daily well-being.',
+  AssessmentSection.academicCore ||
+  AssessmentSection.academicDeeper ||
   AssessmentSection.academic =>
-    'Explores planning, workload, focus, and access to academic support.',
-  AssessmentSection.financialConcern =>
+    'Explores how academic demands may be affecting your daily well-being.',
+  AssessmentSection.financialConcern || AssessmentSection.financial =>
     'Explores how financial concerns may be affecting study and well-being.',
-  AssessmentSection.financial =>
-    'Explores practical study-related costs, planning, and access to support.',
   AssessmentSection.socialAdjustment =>
     'Explores connection, belonging, and access to social support.',
   AssessmentSection.workplaceStressCore ||
