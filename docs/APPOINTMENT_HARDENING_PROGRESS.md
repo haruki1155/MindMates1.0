@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 13 — Non-Production End-to-End Validation
-Last completed phase: Phase 12 — Focused Security and Lifecycle Tests
-Last commit: `9273220` — archive expired appointment requests consistently
+Current phase: Phase 14 — Reminder Regression Check
+Last completed phase: Phase 13 — Non-Production End-to-End Validation
+Last commit: `ad8702e` — staging appointment E2E validation runner
 
 ## Completed
 
@@ -25,14 +25,11 @@ Last commit: `9273220` — archive expired appointment requests consistently
 * Phase 11F — PASS
 * Phase 11G — PASS
 * Phase 12 — PASS
+* Phase 13 — PASS
 
 ## Current blockers
 
-* Phase 13 requires an authenticated non-production run with two student,
-  two staff/counselor, and one admin account. The repository defines the
-  `mindmate-staging` target but contains no appointment E2E harness, seed
-  identities, or credentials; no staging deployment or account creation was
-  authorized for this work.
+* None
 
 ## Known pre-existing failures
 
@@ -71,3 +68,11 @@ Last commit: `9273220` — archive expired appointment requests consistently
   concurrency and end-to-end role scenarios remain non-production validation work.
 * Expired requests are terminal for lifecycle, notification resolution, and
   automatic/manual appointment history handling.
+* Phase 13 ran against `mindmate-staging` using two app-user, two active
+  counselor, and one admin test accounts. Direct appointment and availability
+  attacks were denied; normal booking, confirmation, cancellation, reschedule,
+  proposal conflict, same-slot concurrency, terminal archive, notification,
+  history, and audit assertions passed. The original `on_leave` availability
+  configuration was restored after the run.
+* The Phase 13 staging deployment contains the hardened appointment Functions
+  and Firestore Rules. Admin/student app deployment remains Phase 15 work.
