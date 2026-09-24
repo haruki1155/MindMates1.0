@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../models/appointment_model.dart';
+import '../../../models/appointment_queue_item.dart';
 import '../../../models/pacc_availability_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../theme/admin_theme.dart';
@@ -24,8 +24,8 @@ class StaffOperationsDashboardPage extends StatelessWidget {
     child: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 1440),
-        child: StreamBuilder<List<AppointmentModel>>(
-          stream: repository.watchAppointments(),
+        child: StreamBuilder<List<AppointmentQueueItem>>(
+          stream: repository.watchPortalAppointmentQueue(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return _StateCard(
@@ -54,7 +54,7 @@ class _DashboardContent extends StatelessWidget {
     required this.availability,
     required this.onNavigate,
   });
-  final List<AppointmentModel> appointments;
+  final List<AppointmentQueueItem> appointments;
   final Stream<PaccAvailabilityModel?> availability;
   final ValueChanged<AdminPortalPage> onNavigate;
 
@@ -146,7 +146,7 @@ class _DashboardContent extends StatelessWidget {
         _Panel(
           title: "Today's appointments",
           action: TextButton(
-            onPressed: () => onNavigate(AdminPortalPage.appointments),
+            onPressed: () => onNavigate(AdminPortalPage.dashboard),
             child: const Text('View all →'),
           ),
           child: today.isEmpty
@@ -172,7 +172,7 @@ class _DashboardContent extends StatelessWidget {
             runSpacing: 12,
             children: [
               OutlinedButton.icon(
-                onPressed: () => onNavigate(AdminPortalPage.appointments),
+                onPressed: () => onNavigate(AdminPortalPage.dashboard),
                 icon: const Icon(Icons.calendar_month_outlined),
                 label: const Text('View appointments'),
               ),
@@ -275,11 +275,12 @@ class _Panel extends StatelessWidget {
 
 class _AppointmentRow extends StatelessWidget {
   const _AppointmentRow({required this.appointment});
-  final AppointmentModel appointment;
+  final AppointmentQueueItem appointment;
   @override
   Widget build(BuildContext context) {
-    final id = appointment.userId.isEmpty ? appointment.id : appointment.userId;
-    final suffix = id.length > 4 ? id.substring(id.length - 4) : id;
+    final suffix = appointment.studentDisplayName.isEmpty
+        ? ''
+        : appointment.studentDisplayName;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(

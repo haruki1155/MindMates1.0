@@ -515,19 +515,24 @@ service cloud.firestore {
       // from confirming/completing their own record or bypassing slot locks.
       allow create: if false;
       allow read: if isOwner(resource.data.userId)
-        || currentAccessRole() == 'portalStaff'
         || currentAccessRole() == 'admin'
         || (currentAccessRole() == 'counselor'
           && resource.data.assignedStaffId == request.auth.uid);
       allow update, delete: if false;
       match /history/{historyId} {
         allow read: if isOwner(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId)
-          || currentAccessRole() == 'portalStaff'
           || currentAccessRole() == 'admin'
           || (currentAccessRole() == 'counselor'
             && get(/databases/$(database)/documents/appointments/$(appointmentId)).data.assignedStaffId == request.auth.uid);
         allow write: if false;
       }
+    }
+
+    // This is a server-generated, non-clinical scheduling projection. It is
+    // the only appointment collection general PAACC portal staff can read.
+    match /appointment_queue/{appointmentId} {
+      allow read: if currentAccessRole() == 'portalStaff';
+      allow write: if false;
     }
 
     match /notifications/{notificationId} {

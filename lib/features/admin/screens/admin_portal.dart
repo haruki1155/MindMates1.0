@@ -464,6 +464,11 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
 
   void _setPage(AdminPortalPage page) {
     Navigator.of(context).maybePop();
+    if (_repository.currentAccessRole == AccessRole.portalStaff &&
+        page == AdminPortalPage.appointments) {
+      setState(() => _page = AdminPortalPage.dashboard);
+      return;
+    }
     setState(() => _page = page);
   }
 
@@ -556,6 +561,9 @@ class _Nav extends StatelessWidget {
     AdminPortalPage.assessments => false,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
+    AdminPortalPage.appointments =>
+      accessRole != AccessRole.portalStaff &&
+          (accessRole.canUsePortal || accessRole == AccessRole.admin),
     _ => accessRole.canUsePortal || accessRole == AccessRole.admin,
   };
   @override

@@ -7,6 +7,7 @@ import '../models/admin_inquiry_model.dart';
 import '../models/admin_activity_analytics_model.dart';
 import '../models/admin_mind_aid_analytics_model.dart';
 import '../models/appointment_model.dart';
+import '../models/appointment_queue_item.dart';
 import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
 import '../models/profile_roles.dart';
@@ -660,6 +661,33 @@ class AdminPortalRepository {
                 .toList()
               ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
       );
+
+  Stream<List<AppointmentQueueItem>> watchPortalAppointmentQueue() {
+    if (currentAccessRole != AccessRole.portalStaff) {
+      return Stream.value(const <AppointmentQueueItem>[]);
+    }
+    return Stream.fromFuture(
+      FirebaseFunctions.instance
+          .routedCallable('refreshPortalAppointmentQueue')
+          .call(),
+    ).asyncExpand(
+      (_) => _firestoreService
+          .watchDocuments(FirestoreCollections.appointmentQueue)
+          .map(
+            (items) =>
+                items
+                    .map(
+                      (item) => AppointmentQueueItem.fromJson(
+                        item,
+                        id: item['id']?.toString(),
+                      ),
+                    )
+                    .where((item) => !item.isArchived)
+                    .toList()
+                  ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
+          ),
+    );
+  }
 
   Stream<List<AppNotificationModel>> watchPortalNotifications() =>
       _watchPortalNotifications(archived: false);

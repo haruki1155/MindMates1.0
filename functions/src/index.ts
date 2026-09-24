@@ -71,6 +71,7 @@ const secretChatProfiles = db.collection("secret_chat_profiles");
 const secretChatAliases = db.collection("secret_chat_aliases");
 const publicUserIds = db.collection("user_public_ids");
 const publicUserIdReservations = db.collection("public_user_id_reservations");
+const portalAppointmentQueue = db.collection("appointment_queue");
 
 const SECRET_CHAT_ALIAS_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/;
 const SECRET_CHAT_PHOTO_PATTERN = /^secret_chat_profiles\/([^/]+)\/avatar_[0-9]+\.(jpg|png)$/;
@@ -1444,6 +1445,25 @@ export const notifyPortalOfAppointment = onDocumentCreated(
   async (event) => notifyClinicalStaff("appointment", event.params.appointmentId),
 );
 
+// Keep the non-clinical PAACC queue current without granting portal staff a
+// direct read of sensitive appointment documents.
+export const syncPortalAppointmentQueue = onDocumentWritten(
+  {document: "appointments/{appointmentId}", retry: true},
+  async (event) => {
+    const queueDocument = portalAppointmentQueue.doc(event.params.appointmentId);
+    if (!event.data?.after.exists) {
+      await queueDocument.delete();
+      return;
+    }
+    await queueDocument.set(
+      portalAppointmentQueueProjection(
+        event.params.appointmentId,
+        event.data.after.data() ?? {},
+      ),
+    );
+  },
+);
+
 export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
   {document: "appointments/{appointmentId}", retry: true},
   async (event) => {
@@ -1625,6 +1645,48 @@ function createAppointmentEvent(transaction: FirebaseFirestore.Transaction, appo
     newStatus, metadata, timestamp: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
   });
 }
+
+/**
+ * Fields intentionally safe for the general PAACC scheduling queue. Keep this
+ * separate from the clinical appointment record: portal staff must never need
+ * a concern, contact information, demographics, or counseling history to run
+ * the front-desk schedule.
+ */
+export function portalAppointmentQueueProjection(
+  appointmentId: string,
+  appointment: FirebaseFirestore.DocumentData,
+): FirebaseFirestore.DocumentData {
+  return {
+    appointmentId,
+    studentDisplayName: String(appointment.fullName ?? "").trim(),
+    scheduledAt: appointment.scheduledAt ?? Timestamp.now(),
+    scheduledTime: String(appointment.scheduledTime ?? "").trim(),
+    status: String(appointment.status ?? "requested").trim().toLowerCase(),
+    assignedCounselor: String(appointment.counselorName ?? "").trim(),
+    isArchived: appointment.archivedAt != null,
+    sourceUpdatedAt: appointment.updatedAt ?? appointment.createdAt ?? Timestamp.now(),
+    projectedAt: FieldValue.serverTimestamp(),
+  };
+}
+
+export const refreshPortalAppointmentQueue = onCall(async (request) => {
+  const staffId = requireAuthenticatedUser(request);
+  const staff = await requireStaff(staffId);
+  if (staff.accessRole !== "portalStaff") {
+    throw new HttpsError("permission-denied", "PAACC staff access is required.");
+  }
+
+  const appointments = await db.collection("appointments").get();
+  const writer = db.bulkWriter();
+  for (const appointment of appointments.docs) {
+    writer.set(
+      portalAppointmentQueue.doc(appointment.id),
+      portalAppointmentQueueProjection(appointment.id, appointment.data()),
+    );
+  }
+  await writer.close();
+  return {refreshed: appointments.size};
+});
 
 export const savePaccAvailability = onCall(async (request) => {
   const actorId = requireAuthenticatedUser(request);

@@ -13,6 +13,7 @@ class FirestoreCollections {
   static const moods = 'moods';
   static const journals = 'journals';
   static const appointments = 'appointments';
+  static const appointmentQueue = 'appointment_queue';
   static const appointmentHistory = 'history';
   static const notifications = 'notifications';
   static const userDevices = 'user_devices';
