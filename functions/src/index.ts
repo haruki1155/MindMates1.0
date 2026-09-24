@@ -1809,10 +1809,12 @@ export const respondToAppointment = onCall(async (request) => {
   if (!appointmentId || !["cancel", "accept_reschedule", "propose_reschedule"].includes(action)) throw new HttpsError("invalid-argument", "A valid appointment action is required.");
   const appointment = db.collection("appointments").doc(appointmentId);
   const policyDocument = db.collection("appointment_policy").doc("current");
+  const availabilityDocument = db.collection("pacc_availability").doc("current");
   await db.runTransaction(async (transaction) => {
-    const [snapshot, policySnapshot] = await Promise.all([
+    const [snapshot, policySnapshot, availabilitySnapshot] = await Promise.all([
       transaction.get(appointment),
       transaction.get(policyDocument),
+      transaction.get(availabilityDocument),
     ]);
     if (!snapshot.exists || String(snapshot.data()?.userId ?? "") !== userId) throw new HttpsError("permission-denied", "This appointment is unavailable.");
     const data = snapshot.data()!;
@@ -1839,6 +1841,17 @@ export const respondToAppointment = onCall(async (request) => {
     if (action === "accept_reschedule") {
       if (!canTransitionAppointment(before, "student", "confirmed") || !data.proposedScheduledAt) throw new HttpsError("failed-precondition", "There is no active schedule proposal.");
       const proposedAt = data.proposedScheduledAt as Timestamp;
+      try {
+        validatePaccAppointmentAvailability(
+          proposedAt.toMillis(),
+          availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
+        );
+      } catch (error: unknown) {
+        if (error instanceof AppointmentAvailabilityValidationError) {
+          throw new HttpsError("failed-precondition", error.message);
+        }
+        throw error;
+      }
       const oldSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp));
       // Existing bookings reserve the shared PACC slot. Keep every lifecycle
       // transition on that same key until counselor-specific availability is
@@ -1890,8 +1903,12 @@ export const reviewAppointment = onCall(async (request) => {
   const appointment = db.collection("appointments").doc(appointmentId);
   const notification = db.collection("notifications").doc();
   const history = appointment.collection("history").doc();
+  const availabilityDocument = db.collection("pacc_availability").doc("current");
   await db.runTransaction(async (transaction) => {
-    const current = await transaction.get(appointment);
+    const [current, availabilitySnapshot] = await Promise.all([
+      transaction.get(appointment),
+      transaction.get(availabilityDocument),
+    ]);
     if (!current.exists) throw new HttpsError("not-found", "Appointment not found.");
     const data = current.data()!;
     // A counselor may claim an unassigned request while reviewing it. Once
@@ -1908,6 +1925,17 @@ export const reviewAppointment = onCall(async (request) => {
     const staffName = String(staff.name ?? staff.email ?? "Counseling staff");
     const acceptingProposal = before === "reschedule_proposed" && action === "confirmed" && data.proposedScheduledAt instanceof Timestamp;
     if (acceptingProposal) {
+      try {
+        validatePaccAppointmentAvailability(
+          (data.proposedScheduledAt as Timestamp).toMillis(),
+          availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
+        );
+      } catch (error: unknown) {
+        if (error instanceof AppointmentAvailabilityValidationError) {
+          throw new HttpsError("failed-precondition", error.message);
+        }
+        throw error;
+      }
       const proposedSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.proposedScheduledAt as Timestamp));
       const occupied = await transaction.get(proposedSlot);
       if (occupied.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");

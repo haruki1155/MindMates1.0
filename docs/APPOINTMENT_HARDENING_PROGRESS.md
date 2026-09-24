@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 8 — Reschedule Conflict Behavior
-Last completed phase: Phase 7 — Booking Policy and Abuse Controls
-Last commit: pending Phase 7 commit
+Current phase: Phase 9 — Resource Capacity Model Decision
+Last completed phase: Phase 8 — Reschedule Conflict Behavior
+Last commit: pending Phase 8 commit
 
 ## Completed
 
@@ -14,6 +14,7 @@ Last commit: pending Phase 7 commit
 * Phase 5 — PASS
 * Phase 6 — PASS
 * Phase 7 — PASS
+* Phase 8 — PASS
 
 ## Current blockers
 
@@ -34,3 +35,5 @@ Last commit: pending Phase 7 commit
   supports acceptance or cancellation in that state.
 * Booking policy values remain disabled until PACC publishes positive values in
   `appointment_policy/current`; enforcement is always server-side.
+* Reschedule proposals are tentative; accepted moves revalidate availability
+  and atomically claim the new slot before releasing the original slot.
