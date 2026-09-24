@@ -7,7 +7,7 @@ const String mindMateTermsAndConditions =
 
 Users accept the responsibility for providing, reviewing, and verifying the accuracy of the information they submit in MindMate. Incorrect or incomplete information may affect assessment results, counseling appointments, and other services provided through the system.
 
-MindMate psychological assessments are intended for self-awareness and support purposes only and do not constitute an official psychological or medical diagnosis. The AI chatbot and facial emotion recognition feature are supplementary tools and do not replace professional counseling, psychological assessment, medical treatment, or emergency services.
+MindMate psychological assessments are intended for self-awareness and support purposes only and do not constitute an official psychological or medical diagnosis. The AI chatbot and Expression Check-In feature are supplementary tools and do not replace professional counseling, psychological assessment, medical treatment, or emergency services.
 
 Users are responsible for using MindMate appropriately and respectfully. Content submitted through the Secret Chat must not contain harmful, abusive, threatening, discriminatory, or inappropriate material. Posts may be subject to moderation by authorized personnel.
 

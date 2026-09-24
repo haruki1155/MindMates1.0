@@ -4,10 +4,13 @@ import 'package:provider/provider.dart';
 import '../../../models/appointment_model.dart';
 import '../../../providers/appointment_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/notification_provider.dart';
 import '../../../providers/user_provider.dart';
+import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../home/screens/home_appointment_calendar_screen.dart';
 import '../widgets/appointment_details_sheet.dart';
 import '../widgets/appointment_list_view.dart';
+import '../../notifications/screens/notifications_screen.dart';
 
 class PaccCounselingScreen extends StatefulWidget {
   const PaccCounselingScreen({
@@ -15,6 +18,7 @@ class PaccCounselingScreen extends StatefulWidget {
     this.startBooking = false,
     this.initialConcern,
     this.initialAppointmentId,
+    this.showBottomNavigation = true,
     DateTime Function()? nowProvider,
   }) : _nowProvider = nowProvider ?? DateTime.now;
 
@@ -22,6 +26,7 @@ class PaccCounselingScreen extends StatefulWidget {
   final bool startBooking;
   final String? initialConcern;
   final String? initialAppointmentId;
+  final bool showBottomNavigation;
 
   @override
   State<PaccCounselingScreen> createState() => _PaccCounselingScreenState();
@@ -41,7 +46,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   final _bestTimeController = TextEditingController();
 
   late _PaccAppointmentTab _tab;
-  _PaccAppointmentStep _step = _PaccAppointmentStep.intake;
+  _PaccAppointmentStep _step = _PaccAppointmentStep.calendar;
   late DateTime _visibleMonth;
   DateTime? _selectedDate;
   String? _selectedTime;
@@ -131,11 +136,21 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     _watchProviderOrNull<AppointmentProvider>();
     return Scaffold(
       backgroundColor: _PaccColors.background,
+      bottomNavigationBar: widget.showBottomNavigation
+          ? const MindMateBottomNavigation(
+              active: MindMateNavDestination.appointments,
+            )
+          : null,
       body: SafeArea(
         bottom: false,
         child: Column(
           children: [
-            const _PaccHeader(),
+            _PaccHeader(
+              unreadCount:
+                  _watchProviderOrNull<NotificationProvider>()?.unreadCount ??
+                  0,
+              onNotificationsTap: _openNotifications,
+            ),
             Expanded(
               child: ListView(
                 physics: const BouncingScrollPhysics(),
@@ -146,20 +161,9 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
                   104 + MediaQuery.paddingOf(context).bottom,
                 ),
                 children: [
-                  if (_tab == _PaccAppointmentTab.appointNew)
-                    _PaccTabs(
-                      selected: _tab,
-                      onChanged: (tab) {
-                        setState(() {
-                          _tab = tab;
-                          if (tab == _PaccAppointmentTab.appointNew) {
-                            _step = _PaccAppointmentStep.intake;
-                            _selectedDate = null;
-                            _selectedTime = null;
-                          }
-                        });
-                      },
-                    ),
+                  if (_tab == _PaccAppointmentTab.appointNew &&
+                      _step != _PaccAppointmentStep.confirmation)
+                    _BookingStepper(step: _step),
                   const SizedBox(height: 20),
                   AnimatedSwitcher(
                     duration: const Duration(milliseconds: 220),
@@ -209,7 +213,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         visibleMonth: _visibleMonth,
         minimumDate: _today,
         selectedDate: _selectedDate,
-        onBack: () => setState(() => _step = _PaccAppointmentStep.intake),
+        onBack: () => setState(() => _tab = _PaccAppointmentTab.myAppointments),
         onPreviousMonth: () => setState(() {
           _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month - 1);
         }),
@@ -231,7 +235,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         isSaving: appointmentProvider?.isSaving ?? false,
         onBack: () => setState(() => _step = _PaccAppointmentStep.calendar),
         onTimeSelected: (time) => setState(() => _selectedTime = time),
-        onSubmit: _confirmAppointment,
+        onNext: () => setState(() => _step = _PaccAppointmentStep.intake),
       ),
       _PaccAppointmentStep.intake => _IntakeFormView(
         key: const ValueKey('intake'),
@@ -260,13 +264,25 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         onTherapyBeforeChanged: (value) {
           setState(() => _therapyBefore = value);
         },
+        onBack: () => setState(() => _step = _PaccAppointmentStep.time),
         onNext: _validateIntakeForm,
+      ),
+      _PaccAppointmentStep.review => _BookingReviewView(
+        key: const ValueKey('review'),
+        selectedDate: _selectedDate,
+        selectedTime: _selectedTime,
+        concern: _concernController.text.trim(),
+        isSaving: appointmentProvider?.isSaving ?? false,
+        onBack: () => setState(() => _step = _PaccAppointmentStep.intake),
+        onConfirm: _confirmAppointment,
       ),
       _PaccAppointmentStep.confirmation => _ConfirmationView(
         key: const ValueKey('confirmation'),
+        selectedDate: _selectedDate,
+        selectedTime: _selectedTime,
         onReturn: () => setState(() {
           _tab = _PaccAppointmentTab.myAppointments;
-          _step = _PaccAppointmentStep.intake;
+          _step = _PaccAppointmentStep.calendar;
         }),
       ),
     };
@@ -295,7 +311,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     final today = _today;
     setState(() {
       _tab = _PaccAppointmentTab.appointNew;
-      _step = _PaccAppointmentStep.intake;
+      _step = _PaccAppointmentStep.calendar;
       _selectedDate = null;
       _selectedTime = null;
       _visibleMonth = DateTime(today.year, today.month);
@@ -317,7 +333,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       return;
     }
 
-    setState(() => _step = _PaccAppointmentStep.calendar);
+    setState(() => _step = _PaccAppointmentStep.review);
   }
 
   Future<void> _confirmAppointment() async {
@@ -509,6 +525,16 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     }
   }
 
+  void _openNotifications() {
+    final userId = _currentUserId();
+    if (userId == null || userId.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => NotificationsScreen(userId: userId),
+      ),
+    );
+  }
+
   String? _currentUserId() {
     final auth = _readProviderOrNull<AuthProvider>();
     final authId = auth?.userId ?? auth?.hydrateCurrentUser();
@@ -551,14 +577,20 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
 }
 
 class _PaccHeader extends StatelessWidget {
-  const _PaccHeader();
+  const _PaccHeader({
+    required this.unreadCount,
+    required this.onNotificationsTap,
+  });
+
+  final int unreadCount;
+  final VoidCallback onNotificationsTap;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-      decoration: const BoxDecoration(color: _PaccColors.sun),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+      decoration: const BoxDecoration(color: _PaccColors.background),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -571,87 +603,30 @@ class _PaccHeader extends StatelessWidget {
                     Text('PACC Counseling', style: _PaccText.headerTitle),
                     SizedBox(height: 4),
                     Text(
-                      'Manage your appointments',
+                      'Your well-being matters',
                       style: _PaccText.headerSubtitle,
                     ),
                   ],
                 ),
               ),
+              Semantics(
+                button: true,
+                label: unreadCount == 0
+                    ? 'Notifications'
+                    : '$unreadCount unread notifications',
+                child: IconButton(
+                  tooltip: 'Notifications',
+                  onPressed: onNotificationsTap,
+                  icon: Badge.count(
+                    isLabelVisible: unreadCount > 0,
+                    count: unreadCount,
+                    child: const Icon(Icons.notifications_none_rounded),
+                  ),
+                ),
+              ),
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PaccTabs extends StatelessWidget {
-  const _PaccTabs({required this.selected, required this.onChanged});
-
-  final _PaccAppointmentTab selected;
-  final ValueChanged<_PaccAppointmentTab> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _PaccTabButton(
-            label: 'My Appointments',
-            selected: selected == _PaccAppointmentTab.myAppointments,
-            onTap: () => onChanged(_PaccAppointmentTab.myAppointments),
-          ),
-        ),
-        const SizedBox(width: 24),
-        Expanded(
-          child: _PaccTabButton(
-            label: 'Book Appointment',
-            selected: selected == _PaccAppointmentTab.appointNew,
-            onTap: () => onChanged(_PaccAppointmentTab.appointNew),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _PaccTabButton extends StatelessWidget {
-  const _PaccTabButton({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: selected ? _PaccColors.sunButton : Colors.white,
-      borderRadius: BorderRadius.circular(14),
-      elevation: 4,
-      shadowColor: const Color(0x33000000),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Container(
-          height: 38,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: selected ? null : Border.all(color: _PaccColors.sunButton),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: selected ? Colors.white : const Color(0xFF3B3329),
-              fontSize: 13,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -1170,7 +1145,7 @@ class _TimeSelectionView extends StatelessWidget {
     required this.isSaving,
     required this.onBack,
     required this.onTimeSelected,
-    required this.onSubmit,
+    required this.onNext,
   });
 
   final DateTime? selectedDate;
@@ -1179,7 +1154,7 @@ class _TimeSelectionView extends StatelessWidget {
   final bool isSaving;
   final VoidCallback onBack;
   final ValueChanged<String> onTimeSelected;
-  final VoidCallback onSubmit;
+  final VoidCallback onNext;
 
   @override
   Widget build(BuildContext context) {
@@ -1238,10 +1213,8 @@ class _TimeSelectionView extends StatelessWidget {
           child: SizedBox(
             width: 230,
             child: _YellowButton(
-              label: isSaving
-                  ? 'Submitting request...'
-                  : 'Submit Appointment Request',
-              onTap: onSubmit,
+              label: isSaving ? 'Saving...' : 'Continue to Details',
+              onTap: onNext,
               enabled: selectedTime != null && !isSaving,
             ),
           ),
@@ -1340,6 +1313,7 @@ class _IntakeFormView extends StatelessWidget {
     required this.onYearLevelChanged,
     required this.onPreferredContactMethodChanged,
     required this.onTherapyBeforeChanged,
+    required this.onBack,
     required this.onNext,
   });
 
@@ -1364,6 +1338,7 @@ class _IntakeFormView extends StatelessWidget {
   final ValueChanged<String?> onYearLevelChanged;
   final ValueChanged<String?> onPreferredContactMethodChanged;
   final ValueChanged<String?> onTherapyBeforeChanged;
+  final VoidCallback onBack;
   final VoidCallback onNext;
 
   @override
@@ -1373,6 +1348,19 @@ class _IntakeFormView extends StatelessWidget {
       child: Column(
         key: key,
         children: [
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Back to date and time',
+                onPressed: onBack,
+                icon: const Icon(Icons.arrow_back),
+              ),
+              const Expanded(
+                child: Text('Appointment Details', style: _PaccText.title),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
@@ -1380,7 +1368,7 @@ class _IntakeFormView extends StatelessWidget {
             child: const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Counseling Intake Form', style: _PaccText.title),
+                Text('Counseling Details', style: _PaccText.title),
                 SizedBox(height: 8),
                 Text(
                   'Please fill out all required fields (*) to schedule your counseling session with the PACC office.',
@@ -1554,11 +1542,11 @@ class _IntakeFormView extends StatelessWidget {
                   validator: _required,
                 ),
                 const SizedBox(height: 30),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: SizedBox(
-                    width: 170,
-                    child: _YellowButton(label: 'Next', onTap: onNext),
+                SizedBox(
+                  width: double.infinity,
+                  child: _YellowButton(
+                    label: 'Review Appointment',
+                    onTap: onNext,
                   ),
                 ),
               ],
@@ -1632,9 +1620,178 @@ class _FormSection extends StatelessWidget {
   }
 }
 
-class _ConfirmationView extends StatelessWidget {
-  const _ConfirmationView({super.key, required this.onReturn});
+class _BookingReviewView extends StatelessWidget {
+  const _BookingReviewView({
+    super.key,
+    required this.selectedDate,
+    required this.selectedTime,
+    required this.concern,
+    required this.isSaving,
+    required this.onBack,
+    required this.onConfirm,
+  });
 
+  final DateTime? selectedDate;
+  final String? selectedTime;
+  final String concern;
+  final bool isSaving;
+  final VoidCallback onBack;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final date = selectedDate == null
+        ? 'Not selected'
+        : _formatFullDate(selectedDate!);
+    return Column(
+      key: key,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              tooltip: 'Back to appointment details',
+              onPressed: isSaving ? null : onBack,
+              icon: const Icon(Icons.arrow_back),
+            ),
+            const Expanded(
+              child: Text('Confirm Appointment', style: _PaccText.title),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: _PaccDecor.card(radius: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _ReviewInfoRow(Icons.calendar_today_outlined, 'Date', date),
+              _ReviewInfoRow(
+                Icons.schedule_outlined,
+                'Time',
+                selectedTime ?? 'Not selected',
+              ),
+              const _ReviewInfoRow(
+                Icons.place_outlined,
+                'Location',
+                'PACC Office, 2nd Floor, Main Building',
+              ),
+              const _ReviewInfoRow(
+                Icons.person_outline,
+                'Counselor',
+                'To be assigned',
+              ),
+              if (concern.isNotEmpty) ...[
+                const Divider(height: 32),
+                const Text('Concern', style: _PaccText.cardTitle),
+                const SizedBox(height: 6),
+                Text(concern, style: _PaccText.body),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          child: _YellowButton(
+            label: isSaving ? 'Confirming...' : 'Confirm Appointment',
+            enabled: !isSaving,
+            onTap: onConfirm,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BookingStepper extends StatelessWidget {
+  const _BookingStepper({required this.step});
+
+  final _PaccAppointmentStep step;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = switch (step) {
+      _PaccAppointmentStep.calendar || _PaccAppointmentStep.time => 0,
+      _PaccAppointmentStep.intake => 1,
+      _PaccAppointmentStep.review => 2,
+      _PaccAppointmentStep.confirmation => 2,
+    };
+    const labels = ['Date & Time', 'Details', 'Confirm'];
+    return Semantics(
+      label: 'Booking progress: step ${active + 1} of 3',
+      child: Row(
+        children: [
+          for (var index = 0; index < labels.length; index++) ...[
+            Expanded(
+              child: Column(
+                children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: index <= active
+                          ? _PaccColors.sunButton
+                          : const Color(0xFFE5E7EB),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text('${index + 1}', style: _PaccText.tinyBold),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(labels[index], style: _PaccText.body),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ReviewInfoRow extends StatelessWidget {
+  const _ReviewInfoRow(this.icon, this.label, this.value);
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 14),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: _PaccText.body),
+              const SizedBox(height: 2),
+              Text(value, style: _PaccText.subtitle),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ConfirmationView extends StatelessWidget {
+  const _ConfirmationView({
+    super.key,
+    required this.selectedDate,
+    required this.selectedTime,
+    required this.onReturn,
+  });
+
+  final DateTime? selectedDate;
+  final String? selectedTime;
   final VoidCallback onReturn;
 
   @override
@@ -1671,7 +1828,7 @@ class _ConfirmationView extends StatelessWidget {
             ),
             const SizedBox(height: 22),
             const Text(
-              'Appointment Request Submitted',
+              'Appointment Request Sent!',
               style: _PaccText.confirmTitle,
             ),
             const SizedBox(height: 12),
@@ -1680,13 +1837,39 @@ class _ConfirmationView extends StatelessWidget {
               textAlign: TextAlign.center,
               style: _PaccText.body,
             ),
+            const SizedBox(height: 20),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: _PaccDecor.card(radius: 16),
+              child: Column(
+                children: [
+                  _DetailLine(
+                    icon: Icons.calendar_today_outlined,
+                    text: selectedDate == null
+                        ? ''
+                        : _formatFullDate(selectedDate!),
+                  ),
+                  _DetailLine(
+                    icon: Icons.schedule_outlined,
+                    text: selectedTime ?? '',
+                  ),
+                  const _DetailLine(
+                    icon: Icons.place_outlined,
+                    text: 'PACC Office, 2nd Floor, Main Building',
+                  ),
+                  const _DetailLine(
+                    icon: Icons.person_outline,
+                    text: 'Counselor: To be assigned',
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 24),
-            const Text('🎉', style: TextStyle(fontSize: 38)),
-            const SizedBox(height: 26),
             SizedBox(
-              width: 220,
+              width: double.infinity,
               child: _YellowButton(
-                label: 'View My Appointments',
+                label: 'Back to Appointments',
                 onTap: onReturn,
               ),
             ),
@@ -2042,7 +2225,7 @@ class _DetailLine extends StatelessWidget {
 
 enum _PaccAppointmentTab { myAppointments, appointNew }
 
-enum _PaccAppointmentStep { intake, calendar, time, confirmation }
+enum _PaccAppointmentStep { calendar, time, intake, review, confirmation }
 
 class _PaccColors {
   const _PaccColors._();
@@ -2056,14 +2239,14 @@ class _PaccText {
   const _PaccText._();
 
   static const headerTitle = TextStyle(
-    color: Colors.white,
-    fontSize: 26,
-    fontWeight: FontWeight.w700,
+    color: Color(0xFF111827),
+    fontSize: 22,
+    fontWeight: FontWeight.w800,
   );
 
   static const headerSubtitle = TextStyle(
-    color: Colors.black,
-    fontSize: 15,
+    color: Color(0xFF4B5563),
+    fontSize: 14,
     fontWeight: FontWeight.w400,
   );
 

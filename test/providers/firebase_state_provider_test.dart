@@ -143,6 +143,10 @@ class _FakeMoodRepository extends MoodRepository {
     required int level,
     String? label,
     String? note,
+    String? entryMethod,
+    bool? expressionAssistUsed,
+    bool? expressionSuggestionAccepted,
+    String? expressionModelVersion,
     DateTime? now,
   }) async {
     saveCalls += 1;

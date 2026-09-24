@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:phosphor_icons/phosphor_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -26,7 +27,7 @@ import '../../notifications/widgets/appointment_notification_banner.dart';
 import '../models/home_dashboard_data.dart';
 import '../widgets/home_dashboard_widgets.dart';
 
-enum _HomeNavDestination { today, secretChat, insight, messages, appointments }
+enum _HomeNavDestination { today, services, appointments, secretChat, messages }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, this.data, DateTime Function()? nowProvider})
@@ -40,8 +41,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  static const double _navVisibilityThreshold = 24;
-
   final ScrollController _scrollController = ScrollController();
   final AppNotificationService _notifications = AppNotificationService();
 
@@ -53,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _loadedAppointmentUserId;
   bool _appointmentBookingRequested = false;
   String? _pendingAppointmentId;
+  bool _handledInitialNavigation = false;
   final Set<String> _shownForegroundEvents = <String>{};
 
   HomeDashboardData get _data => widget.data ?? HomeDashboardData.mock();
@@ -74,6 +74,11 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!_handledInitialNavigation &&
+        ModalRoute.of(context)?.settings.arguments == true) {
+      _handledInitialNavigation = true;
+      _activeDestination = _HomeNavDestination.appointments;
+    }
     final userId = _currentUserId();
     if (userId == null || userId.isEmpty) return;
 
@@ -176,6 +181,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     startBooking: _appointmentBookingRequested,
                     initialAppointmentId: _pendingAppointmentId,
                     nowProvider: widget._nowProvider,
+                    showBottomNavigation: false,
                   )
                 : CustomScrollView(
                     controller: _scrollController,
@@ -494,22 +500,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _handleScroll() {
-    if (!_scrollController.hasClients) return;
-
-    final isAtTop = _scrollController.offset <= _navVisibilityThreshold;
-    if (isAtTop == _showBottomNav &&
-        (!isAtTop || _activeDestination == _HomeNavDestination.today)) {
-      return;
-    }
-
-    setState(() {
-      _showBottomNav = isAtTop;
-      if (isAtTop) {
-        _activeDestination = _HomeNavDestination.today;
-      }
-    });
-  }
+  void _handleScroll() {}
 
   void _handleNavDestination(_HomeNavDestination destination) {
     switch (destination) {
@@ -517,8 +508,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _scrollToTop();
       case _HomeNavDestination.secretChat:
         Navigator.of(context).pushNamed(RouteNames.secretChat);
-      case _HomeNavDestination.insight:
-        Navigator.of(context).pushNamed(RouteNames.mentalHealthInsights);
+      case _HomeNavDestination.services:
+        _openServices();
       case _HomeNavDestination.messages:
         Navigator.of(context).pushNamed(RouteNames.mindAid);
       case _HomeNavDestination.appointments:
@@ -1103,45 +1094,43 @@ class _HomeBottomNav extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   _HomeBottomNavItem(
-                    icon: Icons.calendar_today,
-                    assetName: 'Calendar.png',
-                    label: 'Today',
+                    icon: Icons.home_outlined,
+                    label: 'Home',
                     isActive: active == _HomeNavDestination.today,
                     onTap: () =>
                         onDestinationSelected?.call(_HomeNavDestination.today),
                   ),
                   _HomeBottomNavItem(
+                    icon: PhosphorIcons.briefcase(PhosphorIconsStyle.regular),
+                    label: 'Services',
+                    isActive: active == _HomeNavDestination.services,
+                    onTap: () => onDestinationSelected?.call(
+                      _HomeNavDestination.services,
+                    ),
+                  ),
+                  _HomeBottomNavItem(
+                    icon: Icons.event_available_outlined,
+                    label: 'Appointment',
+                    isActive: active == _HomeNavDestination.appointments,
+                    onTap: () => onDestinationSelected?.call(
+                      _HomeNavDestination.appointments,
+                    ),
+                  ),
+                  _HomeBottomNavItem(
                     icon: Icons.forum_outlined,
-                    assetName: '💭.png',
-                    label: 'Secret chat',
+                    label: 'Secret Chat',
                     isActive: active == _HomeNavDestination.secretChat,
                     onTap: () => onDestinationSelected?.call(
                       _HomeNavDestination.secretChat,
                     ),
                   ),
                   _HomeBottomNavItem(
-                    icon: Icons.show_chart,
-                    label: 'Insight',
-                    isActive: active == _HomeNavDestination.insight,
-                    onTap: () => onDestinationSelected?.call(
-                      _HomeNavDestination.insight,
-                    ),
-                  ),
-                  _HomeBottomNavItem(
                     icon: Icons.chat_bubble_outline,
                     assetName: 'mail.png',
-                    label: 'Messages',
+                    label: 'Message',
                     isActive: active == _HomeNavDestination.messages,
                     onTap: () => onDestinationSelected?.call(
                       _HomeNavDestination.messages,
-                    ),
-                  ),
-                  _HomeBottomNavItem(
-                    icon: Icons.event_available_outlined,
-                    label: 'Appointments',
-                    isActive: active == _HomeNavDestination.appointments,
-                    onTap: () => onDestinationSelected?.call(
-                      _HomeNavDestination.appointments,
                     ),
                   ),
                 ],

@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 
+import '../core/config/app_environment.dart';
 import '../features/quick_assessment/data/quick_assessment_questions.dart';
 import '../features/quick_assessment/models/quick_assessment_models.dart';
 import '../features/quick_assessment/services/quick_assessment_scoring.dart';
 import '../features/student_assessment/data/student_assessment_questions.dart';
+import '../features/student_assessment/data/student_assessment_v4_questions.dart';
 import '../features/student_assessment/models/student_assessment_models.dart';
 import '../features/student_assessment/services/student_assessment_calculator.dart';
 import '../repositories/assessment_repository.dart';
@@ -22,6 +24,7 @@ class AssessmentProvider extends ChangeNotifier {
   List<StudentAssessmentQuestion> _studentQuestions = const [];
   final List<StudentAssessmentAnswer> _studentAnswers = [];
   StudentAssessmentResult? _studentResult;
+  String? _studentV4SubmissionId;
   bool _isSavingQuickAssessment = false;
 
   AssessmentRole? get selectedRole => _selectedRole;
@@ -34,6 +37,9 @@ class AssessmentProvider extends ChangeNotifier {
       List.unmodifiable(_studentAnswers);
   StudentAssessmentResult? get studentResult => _studentResult;
   bool get isSavingQuickAssessment => _isSavingQuickAssessment;
+  bool get isStudentAssessmentV4 =>
+      AppEnvironmentConfig.isStaging &&
+      activeAssessmentUserType == AssessmentUserType.student;
 
   List<QuickAssessmentQuestion> get questions =>
       QuickAssessmentQuestions.questions;
@@ -74,7 +80,9 @@ class AssessmentProvider extends ChangeNotifier {
   String get activeAssessmentTitle {
     switch (activeAssessmentUserType) {
       case AssessmentUserType.student:
-        return 'Student Assessment';
+        return isStudentAssessmentV4
+            ? 'Student Well-Being Reflection'
+            : 'Student Assessment';
       case AssessmentUserType.faculty:
         return 'Teaching Assessment';
       case AssessmentUserType.staff:
@@ -231,6 +239,9 @@ class AssessmentProvider extends ChangeNotifier {
     _studentQuestionIndex = 0;
     _studentAnswers.clear();
     _studentResult = null;
+    _studentV4SubmissionId = isStudentAssessmentV4
+        ? 'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
+        : null;
     _studentQuestions = _questionsForActiveRole()
         .where((question) => !question.isConditional)
         .toList();
@@ -256,11 +267,13 @@ class AssessmentProvider extends ChangeNotifier {
     );
 
     if (isLastStudentQuestion) {
-      _studentResult = StudentAssessmentCalculator.calculate(
-        questions: _studentQuestions,
-        answers: _studentAnswers,
-        userType: activeAssessmentUserType,
-      );
+      if (!isStudentAssessmentV4) {
+        _studentResult = StudentAssessmentCalculator.calculate(
+          questions: _studentQuestions,
+          answers: _studentAnswers,
+          userType: activeAssessmentUserType,
+        );
+      }
       notifyListeners();
       return;
     }
@@ -277,6 +290,15 @@ class AssessmentProvider extends ChangeNotifier {
   }
 
   Future<Map<String, Object>?> saveStudentAssessmentForUser(String userId) {
+    if (isStudentAssessmentV4) {
+      return _repository.saveStudentV4Assessment(
+        userId: userId,
+        answers: _studentAnswers,
+        submissionId:
+            _studentV4SubmissionId ??
+            'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
+      );
+    }
     final result = _studentResult;
     if (result == null) return Future.value();
 
@@ -307,7 +329,9 @@ class AssessmentProvider extends ChangeNotifier {
   List<StudentAssessmentQuestion> _questionsForActiveRole() {
     switch (activeAssessmentUserType) {
       case AssessmentUserType.student:
-        return StudentAssessmentQuestions.questions;
+        return isStudentAssessmentV4
+            ? StudentAssessmentV4Questions.questions
+            : StudentAssessmentQuestions.questions;
       case AssessmentUserType.faculty:
         return StudentAssessmentQuestions.facultyQuestions;
       case AssessmentUserType.staff:

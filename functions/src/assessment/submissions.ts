@@ -14,6 +14,12 @@ import {
   validateFullAnswers,
   validateQuickAnswers,
 } from "./calculator";
+import {
+  calculateStudentV4,
+  StudentV4Answer,
+  validateStudentV4Answers,
+} from "./student_v4_calculator";
+import {STUDENT_V4_INSTRUMENT_VERSION} from "./student_v4_catalog";
 import {toHttpsError} from "./errors";
 import {quickProfileRoleDecision, submissionHashesMatch} from "./submission_policy";
 
@@ -89,6 +95,26 @@ function parseFullAnswers(value: unknown): FullAnswer[] {
       throw new HttpsError("invalid-argument", "Invalid full-assessment answer.");
     }
     return {questionId: data.questionId, answer: data.answer, isSkipped: data.isSkipped};
+  });
+}
+
+function parseStudentV4Answers(value: unknown): StudentV4Answer[] {
+  if (!Array.isArray(value) || value.length !== 50) throw new HttpsError("invalid-argument", "Student V4 requires 50 responses.");
+  return value.map((item) => {
+    const data = objectData(item);
+    if (typeof data.itemId !== "string" || data.itemId.length > 100 || typeof data.skipped !== "boolean") {
+      throw new HttpsError("invalid-argument", "Invalid Student V4 response.");
+    }
+    if (data.skipped) return {itemId: data.itemId, skipped: true};
+    if (typeof data.responseCode !== "string" || typeof data.responseValue !== "number" || !Number.isInteger(data.responseValue)) {
+      throw new HttpsError("invalid-argument", "Student V4 responses require a code and matching value.");
+    }
+    return {
+      itemId: data.itemId,
+      responseCode: data.responseCode as StudentV4Answer["responseCode"],
+      responseValue: data.responseValue,
+      skipped: false,
+    };
   });
 }
 
@@ -183,17 +209,37 @@ async function submitFullAssessmentHandler(request: CallableRequest) {
   const uid = uidFrom(request);
   const data = objectData(request.data);
   const submissionId = submissionIdFrom(data.submissionId);
-  const answers = parseFullAnswers(data.answers);
-  assessmentRequestSummary("submitFullAssessment", correlationId, submissionId, answers);
+  const requestedInstrument = data.instrumentVersion?.toString().trim() ?? "";
+  const isStudentV4 = requestedInstrument === STUDENT_V4_INSTRUMENT_VERSION;
+  if (requestedInstrument && !isStudentV4) throw new HttpsError("invalid-argument", "Unsupported assessment instrument version.");
+  const v4Answers = isStudentV4 ? parseStudentV4Answers(data.answers) : null;
+  const legacyAnswers = isStudentV4 ? null : parseFullAnswers(data.answers);
+  const answers = v4Answers ?? legacyAnswers!;
+  if (isStudentV4) {
+    console.info("assessment_submission_received", {
+      functionName: "submitFullAssessment",
+      correlationId,
+      submissionId,
+      instrumentVersion: requestedInstrument,
+      answerCount: answers.length,
+    });
+  } else {
+    assessmentRequestSummary("submitFullAssessment", correlationId, submissionId, legacyAnswers!);
+  }
   const ref = assessments.doc(fullDocumentId(uid, submissionId));
   const existing = await ref.get();
   if (existing.exists) return responsePayload(existing);
   const profile = await db.collection("users").doc(uid).get();
   const role = profileRole(profile.data() ?? {});
-  assessmentRequestSummary("submitFullAssessment", correlationId, submissionId, answers, role);
+  if (isStudentV4) {
+    if (role !== "student") throw new HttpsError("failed-precondition", "Student Well-Being V4 is available only to student profiles.");
+  } else {
+    assessmentRequestSummary("submitFullAssessment", correlationId, submissionId, legacyAnswers!, role);
+  }
   try {
-    validateFullAnswers(role, answers);
-    const result = calculateFull(role, answers);
+    if (isStudentV4) validateStudentV4Answers(v4Answers!);
+    else validateFullAnswers(role, legacyAnswers!);
+    const result = isStudentV4 ? calculateStudentV4(v4Answers!) : calculateFull(role, legacyAnswers!);
     const limitRef = limits.doc(uid);
     const now = Date.now();
     const windowStart = now - 7 * 24 * 60 * 60 * 1000;
@@ -212,7 +258,7 @@ async function submitFullAssessmentHandler(request: CallableRequest) {
       serverAlgorithmVersion: result.algorithmVersion,
       serverQuestionSetVersion: result.questionSetVersion,
       submissionId,
-      submissionHash: hashSubmission({role, answers}),
+      submissionHash: hashSubmission({role, instrumentVersion: requestedInstrument || undefined, answers}),
       createdAt: FieldValue.serverTimestamp(),
       submittedAt: FieldValue.serverTimestamp(),
       verifiedAt: FieldValue.serverTimestamp(),

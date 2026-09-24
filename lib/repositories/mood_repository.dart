@@ -69,6 +69,10 @@ class MoodRepository {
     required int level,
     String? label,
     String? note,
+    String? entryMethod,
+    bool? expressionAssistUsed,
+    bool? expressionSuggestionAccepted,
+    String? expressionModelVersion,
     DateTime? now,
   }) async {
     final instant = now ?? _nowProvider();
@@ -107,7 +111,7 @@ class MoodRepository {
         activeDateKeys: _stringList(userData?['activeDateKeys']),
       );
 
-      transaction.set(moodRef, {
+      final moodData = <String, dynamic>{
         'userId': userId,
         'level': level,
         'label': label?.trim() ?? '',
@@ -115,7 +119,18 @@ class MoodRepository {
         'dateKey': dateKey,
         'timezone': timezone,
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      };
+      if (expressionAssistUsed == true) {
+        moodData.addAll({
+          'entryMethod': entryMethod ?? 'expression_assisted',
+          'expressionAssistUsed': true,
+          'expressionSuggestionAccepted': expressionSuggestionAccepted ?? false,
+        });
+        if (expressionModelVersion case final version?) {
+          moodData['expressionModelVersion'] = version;
+        }
+      }
+      transaction.set(moodRef, moodData);
       transaction.set(activityRef, {
         'userId': userId,
         'type': UserActivityType.moodCheckIn.storedValue,
@@ -151,6 +166,16 @@ class MoodRepository {
         note: note?.trim(),
         dateKey: dateKey,
         timezone: timezone,
+        entryMethod: expressionAssistUsed == true
+            ? entryMethod ?? 'expression_assisted'
+            : null,
+        expressionAssistUsed: expressionAssistUsed == true ? true : null,
+        expressionSuggestionAccepted: expressionAssistUsed == true
+            ? expressionSuggestionAccepted ?? false
+            : null,
+        expressionModelVersion: expressionAssistUsed == true
+            ? expressionModelVersion
+            : null,
         createdAt: instant,
       ),
       created: true,

@@ -4,6 +4,8 @@ import '/features/counseling/screens/mind_aid_screen.dart';
 import '/features/mind_aid/domain/mind_aid_context.dart';
 import '/features/mind_aid/domain/mind_aid_integration_models.dart';
 import '/features/mind_aid/domain/mind_aid_safety.dart';
+import '/features/mind_aid/models/paacc_route_decision.dart';
+import '/features/mind_aid/services/paacc_intent_router.dart';
 import '/models/mind_aid_message_model.dart';
 import '/models/mind_aid_suggestion_model.dart';
 import '/repositories/mind_aid_repository_screen.dart';
@@ -24,8 +26,10 @@ class MindAidAnalyticsSnapshot {
 
 class MindAidProvider extends ChangeNotifier {
   final MindAidRepository repository;
+  final PaaccIntentRouter _paaccIntentRouter;
 
-  MindAidProvider(this.repository);
+  MindAidProvider(this.repository, {PaaccIntentRouter? paaccIntentRouter})
+    : _paaccIntentRouter = paaccIntentRouter ?? PaaccIntentRouter();
 
   List<MindAidMessage> messages = [];
   List<MindAidSuggestion> suggestions = [];
@@ -39,6 +43,8 @@ class MindAidProvider extends ChangeNotifier {
   String? _lastFailedText;
   String? _sessionUserId;
   bool _lastUserMessagePersisted = false;
+  PaaccRouteDecision? _lastPaaccRouteDecision;
+  String? _paaccRoutingError;
   int _selectedSuggestionCount = 0;
   int _highRiskTriggerCount = 0;
   int _fallbackCount = 0;
@@ -55,6 +61,8 @@ class MindAidProvider extends ChangeNotifier {
   bool get needsConsent => _preferences != null && !_preferences!.hasDecision;
   bool get usesDialogflow => _preferences?.cloudConsent == true;
   String? get lastFailedText => _lastFailedText;
+  PaaccRouteDecision? get lastPaaccRouteDecision => _lastPaaccRouteDecision;
+  String? get paaccRoutingError => _paaccRoutingError;
 
   Future<void> loadChat(
     String userId, {
@@ -146,6 +154,15 @@ class MindAidProvider extends ChangeNotifier {
 
     try {
       _lastFailedText = null;
+      _paaccRoutingError = null;
+      try {
+        _lastPaaccRouteDecision = await _paaccIntentRouter.route(trimmedText);
+      } catch (_) {
+        // Intent routing is an optional enhancement; retain the existing,
+        // independently safety-screened MindAid path on ML infrastructure failure.
+        _lastPaaccRouteDecision = null;
+        _paaccRoutingError = 'Intent routing is temporarily unavailable.';
+      }
       final userMessage = MindAidMessage(
         id: DateTime.now().toString(),
         sender: MindAidSender.user,
@@ -499,6 +516,12 @@ class MindAidProvider extends ChangeNotifier {
       ];
     }
     return const [];
+  }
+
+  @override
+  void dispose() {
+    _paaccIntentRouter.dispose();
+    super.dispose();
   }
 }
 

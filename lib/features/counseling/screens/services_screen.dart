@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_assets.dart';
+import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../../routes/route_names.dart';
 import 'pacc_counseling_screen.dart';
 import 'service_detail_screen.dart';
@@ -83,6 +84,9 @@ class ServicesScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _ServicesColors.background,
+      bottomNavigationBar: const MindMateBottomNavigation(
+        active: MindMateNavDestination.services,
+      ),
       body: SafeArea(
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),

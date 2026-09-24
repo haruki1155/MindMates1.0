@@ -89,7 +89,7 @@ void main() {
     expect(find.text('My Appointments'), findsOneWidget);
   });
 
-  testWidgets('empty Home preview opens PACC intake booking flow', (
+  testWidgets('empty Home preview opens PACC booking flow', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
@@ -102,7 +102,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(PaccCounselingScreen), findsOneWidget);
-    expect(find.text('Counseling Intake Form'), findsOneWidget);
+    expect(find.text('Appointment Schedule'), findsOneWidget);
   });
 
   testWidgets('selected calendar date shows ordered appointments and details', (

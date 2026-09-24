@@ -76,6 +76,10 @@ class MoodProvider extends ChangeNotifier {
     required int level,
     String? label,
     String? note,
+    String? entryMethod,
+    bool? expressionAssistUsed,
+    bool? expressionSuggestionAccepted,
+    String? expressionModelVersion,
     DateTime? now,
   }) async {
     final referenceNow = now ?? _nowProvider();
@@ -86,6 +90,10 @@ class MoodProvider extends ChangeNotifier {
         level: level,
         label: label,
         note: note,
+        entryMethod: entryMethod,
+        expressionAssistUsed: expressionAssistUsed,
+        expressionSuggestionAccepted: expressionSuggestionAccepted,
+        expressionModelVersion: expressionModelVersion,
         now: referenceNow,
       );
       _dailySaveResult = result;

@@ -25,6 +25,8 @@ class AdminAssessmentRecord {
     this.score,
     this.status,
     this.role,
+    this.instrumentVersion,
+    this.verificationStatus,
     this.archivedAt,
   });
 
@@ -35,6 +37,8 @@ class AdminAssessmentRecord {
   final num? score;
   final String? status;
   final String? role;
+  final String? instrumentVersion;
+  final String? verificationStatus;
   final DateTime? archivedAt;
   bool get isArchived => archivedAt != null;
   bool get isQuickAssessment {
@@ -48,22 +52,37 @@ class AdminAssessmentRecord {
   }
 
   bool get isMainAssessment => !isQuickAssessment;
+  String get displayStatus => status ?? 'Result unavailable';
 
-  factory AdminAssessmentRecord.fromJson(Map<String, dynamic> data) =>
-      AdminAssessmentRecord(
-        id: data['id']?.toString() ?? '',
-        userId: data['userId']?.toString() ?? '',
-        type: data['type']?.toString() ?? 'Assessment',
-        createdAt: _date(data['createdAt']),
-        score: data['score'] is num
-            ? data['score'] as num
-            : num.tryParse('${data['score']}'),
-        status: _text(data['status'] ?? data['overallLevel']),
-        role: _text(data['populationRole'] ?? data['role']),
-        archivedAt: data['archivedAt'] == null
-            ? null
-            : _date(data['archivedAt']),
-      );
+  factory AdminAssessmentRecord.fromJson(Map<String, dynamic> data) {
+    final result = data['result'] is Map
+        ? Map<String, dynamic>.from(data['result'] as Map)
+        : const <String, dynamic>{};
+    final instrument = data['instrument'] is Map
+        ? Map<String, dynamic>.from(data['instrument'] as Map)
+        : const <String, dynamic>{};
+    return AdminAssessmentRecord(
+      id: data['id']?.toString() ?? '',
+      userId: data['userId']?.toString() ?? '',
+      type:
+          data['assessmentKind']?.toString() ??
+          data['type']?.toString() ??
+          'Assessment',
+      createdAt: _date(data['createdAt']),
+      score: data['score'] is num
+          ? data['score'] as num
+          : num.tryParse('${data['score']}'),
+      status: _text(
+        data['status'] ?? data['overallLevel'] ?? result['profileStatus'],
+      ),
+      role: _text(data['populationRole'] ?? data['role']),
+      instrumentVersion: _text(
+        instrument['version'] ?? data['questionSetVersion'],
+      ),
+      verificationStatus: _text(data['verificationStatus']),
+      archivedAt: data['archivedAt'] == null ? null : _date(data['archivedAt']),
+    );
+  }
 
   static DateTime _date(Object? value) {
     if (value is Timestamp) return value.toDate();

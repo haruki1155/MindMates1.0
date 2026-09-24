@@ -58,11 +58,6 @@ class _MindAidPageState extends State<MindAidPage> {
       onSuggestionSelected: (suggestion) {
         _selectSuggestionAndRecordActivity(userId, suggestion, mindAidContext);
       },
-      onHomeTap: () {
-        Navigator.of(
-          context,
-        ).pushNamedAndRemoveUntil(RouteNames.home, (route) => false);
-      },
       onNotificationTap: () {},
       onActionSelected: (action) => _handleAction(action, launchContext),
       onFeedback: (messageId, helpful) async {

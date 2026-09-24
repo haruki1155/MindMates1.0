@@ -170,7 +170,7 @@ void main() {
     expect(find.text('Mental Health Summary'), findsOneWidget);
   });
 
-  testWidgets('home Insight destination opens the insights screen', (
+  testWidgets('home Services destination opens the services screen', (
     tester,
   ) async {
     final userProvider = UserProvider(_FakeUserRepository())
@@ -204,10 +204,10 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Insight'));
+    await tester.tap(find.text('Services'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Search insights...'), findsOneWidget);
+    expect(find.text('PACC Services'), findsOneWidget);
   });
 
   testWidgets('home Log your mood opens mood check-in screen', (tester) async {
@@ -498,6 +498,7 @@ void main() {
         await tester.pump();
         expect(tester.takeException(), isNull);
       }
+      expect(find.text('Home'), findsOneWidget);
     },
   );
 

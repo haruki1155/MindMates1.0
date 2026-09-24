@@ -3467,9 +3467,8 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
         final years = {
           for (final item in all) '${item.createdAt.year}',
         }.toList()..sort((a, b) => b.compareTo(a));
-        final statuses = {
-          for (final item in all) item.status ?? 'Pending',
-        }.toList()..sort();
+        final statuses = {for (final item in all) item.displayStatus}.toList()
+          ..sort();
         final roles = {for (final item in all) item.role ?? 'User'}.toList()
           ..sort();
         final types = [
@@ -3486,7 +3485,7 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
                   (yearFilter == 'All Years' ||
                       '${item.createdAt.year}' == yearFilter) &&
                   (statusFilter == 'All Statuses' ||
-                      (item.status ?? 'Pending') == statusFilter) &&
+                      item.displayStatus == statusFilter) &&
                   (roleFilter == 'All Roles' ||
                       (item.role ?? 'User') == roleFilter),
             )
@@ -3507,7 +3506,9 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
                 'With results': active
                     .where((a) => (a.status ?? '').isNotEmpty)
                     .length,
-                'Pending': active.where((a) => (a.status ?? '').isEmpty).length,
+                'Awaiting result': active
+                    .where((a) => (a.status ?? '').isEmpty)
+                    .length,
                 'Archived': all.where((a) => a.isArchived).length,
               },
             ),
@@ -3594,7 +3595,7 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
                           '${assessment.createdAt.year}',
                           _date(assessment.createdAt),
                           _Tag(
-                            label: _formalLabel(assessment.status ?? 'Pending'),
+                            label: _formalLabel(assessment.displayStatus),
                             color: (assessment.status ?? '').isEmpty
                                 ? AdminColors.accentSoft
                                 : AdminColors.surfaceMuted,

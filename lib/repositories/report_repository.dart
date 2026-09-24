@@ -909,8 +909,11 @@ class _AssessmentSummary {
 
   String? get quickStatus =>
       _firstText(latestQuick?['overallLevel'], latestQuick?['status']);
-  String? get fullStatus =>
-      _firstText(latestFull?['status'], latestFull?['overallLevel']);
+  String? get fullStatus => _firstText(
+    latestFull?['status'],
+    _v4Result(latestFull)?['profileStatus'],
+    latestFull?['overallLevel'],
+  );
   String? get quickSignal => _firstText(latestQuick?['mentalStatusSignal']);
   String? get quickSummary => _assessmentSummaryText(latestQuick);
   String? get fullSummary => _assessmentSummaryText(latestFull);
@@ -920,6 +923,8 @@ class _AssessmentSummary {
       ? null
       : AssessmentExplanationModel.fromAssessment(latestQuick!);
   AssessmentExplanationModel? get fullExplanation => latestFull == null
+      ? null
+      : _isV4(latestFull!)
       ? null
       : AssessmentExplanationModel.fromAssessment(latestFull!);
   String? get supportPriority => _supportPriority(preferredAssessment);
@@ -941,6 +946,7 @@ class _AssessmentSummary {
     final interpretation = assessment['interpretation'];
     return _firstText(
       interpretation is Map ? interpretation['supportPriority'] : null,
+      interpretation is Map ? interpretation['followUpGuidance'] : null,
       assessment['supportPriority'],
     );
   }
@@ -950,38 +956,71 @@ class _AssessmentSummary {
     final interpretation = assessment['interpretation'];
     return _firstText(
       interpretation is Map ? interpretation['userSummary'] : null,
+      interpretation is Map ? interpretation['studentSummary'] : null,
       assessment['summary'] ?? assessment['message'],
     );
   }
 
   static Map<String, String> _domainStatuses(Map<String, dynamic>? assessment) {
     if (assessment == null) return const {};
+    final v4Result = _v4Result(assessment);
     final interpretation = assessment['interpretation'];
-    final domains = interpretation is Map
-        ? interpretation['domainResults']
-        : null;
+    final domains =
+        v4Result?['domainResults'] ??
+        (interpretation is Map ? interpretation['domainResults'] : null);
     if (domains is! List) return const {};
     final result = <String, String>{};
     for (final value in domains) {
       if (value is! Map) continue;
-      final name = value['domain']?.toString().trim() ?? '';
+      final name =
+          _v4DomainLabel(value['domainId']?.toString()) ??
+          value['domain']?.toString().trim() ??
+          '';
       if (name.isEmpty) continue;
       final scorable = value['isScorable'] != false;
       final status = scorable
-          ? _firstText(value['bandLabel'], value['band'])
+          ? v4Result != null
+                ? _v4DomainStatus(value['status']?.toString())
+                : _firstText(value['bandLabel'], value['band'])
           : 'Insufficient responses';
       if (status != null) result[name] = status;
     }
     return result;
   }
 
-  static String? _firstText(Object? first, [Object? second]) {
-    for (final value in [first, second]) {
+  static String? _firstText(Object? first, [Object? second, Object? third]) {
+    for (final value in [first, second, third]) {
       final text = value?.toString().trim();
       if (text != null && text.isNotEmpty) return text;
     }
     return null;
   }
+
+  static bool _isV4(Map<String, dynamic> assessment) =>
+      assessment['schemaVersion'] == 'assessment_record_v4';
+
+  static Map<String, dynamic>? _v4Result(Map<String, dynamic>? assessment) {
+    if (assessment == null || !_isV4(assessment)) return null;
+    final result = assessment['result'];
+    return result is Map ? Map<String, dynamic>.from(result) : null;
+  }
+
+  static String? _v4DomainLabel(String? id) => switch (id) {
+    'academic' => 'Academic',
+    'financial' => 'Financial',
+    'socialAdjustment' => 'Social Adjustment',
+    'sleepRest' => 'Sleep and Rest',
+    'emotionalWellbeing' => 'Emotional Well-Being',
+    _ => null,
+  };
+
+  static String _v4DomainStatus(String? value) => switch (value) {
+    'supported' => 'Supported at present',
+    'mostlySupported' => 'Mostly supported; some areas to explore',
+    'someStrain' => 'Some strain indicated',
+    'supportMayHelp' => 'Support may be helpful',
+    _ => 'More responses needed',
+  };
 
   static List<String> _stringList(Object? value) {
     if (value is! List) return const [];
