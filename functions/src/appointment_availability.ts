@@ -9,6 +9,7 @@ export type PaccAvailabilityConfig = {
   presence: "in_office" | "out_of_office" | "on_leave";
   acceptsWalkIns: boolean;
   notice: string;
+  blackoutDates: string[];
 };
 
 const WEEKDAY_NUMBERS: Record<string, number> = {
@@ -28,6 +29,7 @@ const AVAILABILITY_FIELDS = new Set([
   "presence",
   "acceptsWalkIns",
   "notice",
+  "blackoutDates",
 ]);
 const PRESENCE_VALUES = new Set<PaccAvailabilityConfig["presence"]>([
   "in_office",
@@ -58,6 +60,13 @@ function appointmentLocalTime(millis: number): {weekday: number; minutes: number
   return {weekday, minutes: hours * 60 + minutes};
 }
 
+function appointmentLocalDate(millis: number): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APPOINTMENT_TIME_ZONE,
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(millis));
+}
+
 function normalizeAvailability(value: unknown, {allowMissingNotice}: {allowMissingNotice: boolean}): PaccAvailabilityConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new AppointmentAvailabilityValidationError("PACC availability is not configured correctly.");
@@ -72,6 +81,7 @@ function normalizeAvailability(value: unknown, {allowMissingNotice}: {allowMissi
   const presence = data.presence;
   const acceptsWalkIns = data.acceptsWalkIns;
   const notice = data.notice ?? "";
+  const blackoutDates = data.blackoutDates ?? [];
   if (!Array.isArray(openDays) || openDays.length === 0 ||
       !openDays.every((day) => Number.isInteger(day) && day >= 1 && day <= 7) ||
       new Set(openDays).size !== openDays.length ||
@@ -80,7 +90,10 @@ function normalizeAvailability(value: unknown, {allowMissingNotice}: {allowMissi
       minutesSinceMidnight(opensAt) >= minutesSinceMidnight(closesAt) ||
       typeof acceptsWalkIns !== "boolean" ||
       typeof presence !== "string" || !PRESENCE_VALUES.has(presence as PaccAvailabilityConfig["presence"]) ||
-      typeof notice !== "string" || notice.trim().length > 500) {
+      typeof notice !== "string" || notice.trim().length > 500 ||
+      !Array.isArray(blackoutDates) || blackoutDates.length > 366 ||
+      !blackoutDates.every((date) => typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)) ||
+      new Set(blackoutDates).size !== blackoutDates.length) {
     throw new AppointmentAvailabilityValidationError("PACC availability is not configured correctly.");
   }
   return {
@@ -90,6 +103,7 @@ function normalizeAvailability(value: unknown, {allowMissingNotice}: {allowMissi
     presence: presence as PaccAvailabilityConfig["presence"],
     acceptsWalkIns,
     notice: notice.trim(),
+    blackoutDates: [...blackoutDates].sort(),
   };
 }
 
@@ -111,6 +125,7 @@ function normalizeStoredAvailability(value: unknown): PaccAvailabilityConfig {
     presence: data.presence,
     acceptsWalkIns: data.acceptsWalkIns,
     notice: data.notice ?? "",
+    blackoutDates: data.blackoutDates ?? [],
   }, {allowMissingNotice: true});
 }
 
@@ -130,6 +145,9 @@ export function validatePaccAppointmentAvailability(
     throw new AppointmentAvailabilityValidationError("PACC is not available for appointments at this time.");
   }
   const local = appointmentLocalTime(scheduledMillis);
+  if (config.blackoutDates.includes(appointmentLocalDate(scheduledMillis))) {
+    throw new AppointmentAvailabilityValidationError("PACC is closed on the selected date.");
+  }
   if (!config.openDays.includes(local.weekday)) {
     throw new AppointmentAvailabilityValidationError("PACC is closed on the selected day.");
   }

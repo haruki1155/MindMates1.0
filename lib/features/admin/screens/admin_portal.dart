@@ -3379,6 +3379,23 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
                 value: value.acceptsWalkIns,
                 onChanged: (enabled) => _update(value, acceptsWalkIns: enabled),
               ),
+              const SizedBox(height: 12),
+              TextFormField(
+                initialValue: value.blackoutDates.join(', '),
+                decoration: const InputDecoration(
+                  labelText: 'Closed dates',
+                  hintText: 'YYYY-MM-DD, YYYY-MM-DD',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (raw) => _update(
+                  value,
+                  blackoutDates: raw
+                      .split(',')
+                      .map((date) => date.trim())
+                      .where((date) => date.isNotEmpty)
+                      .toList(),
+                ),
+              ),
               const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
@@ -3404,6 +3421,7 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
     String? closesAt,
     CounselorPresence? presence,
     bool? acceptsWalkIns,
+    List<String>? blackoutDates,
   }) {
     setState(
       () => _draft = PaccAvailabilityModel(
@@ -3413,6 +3431,7 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
         presence: presence ?? current.presence,
         acceptsWalkIns: acceptsWalkIns ?? current.acceptsWalkIns,
         notice: current.notice,
+        blackoutDates: blackoutDates ?? current.blackoutDates,
         updatedAt: current.updatedAt,
       ),
     );

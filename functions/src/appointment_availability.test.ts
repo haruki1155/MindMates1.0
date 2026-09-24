@@ -53,6 +53,13 @@ test("rejects unavailable counselors, missing schedules, and malformed published
   );
 });
 
+test("rejects a configured PACC blackout date", () => {
+  assert.throws(
+    () => validatePaccAppointmentAvailability(openSlot, {...availability, blackoutDates: ["2026-09-24"]}),
+    AppointmentAvailabilityValidationError,
+  );
+});
+
 test("accepts only clinical staff as availability managers", () => {
   assert.equal(canManagePaccAvailability("admin"), true);
   assert.equal(canManagePaccAvailability("counselor"), true);
@@ -64,6 +71,7 @@ test("validates availability payload shape, time ordering, and bounded notice te
   assert.deepEqual(validatePaccAvailabilityPayload({...availability, notice: " Office hours "}), {
     ...availability,
     notice: "Office hours",
+    blackoutDates: [],
   });
   for (const invalid of [
     {...availability, opensAt: "9 AM"},

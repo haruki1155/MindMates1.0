@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 11C — Holidays and Blackouts
-Last completed phase: Phase 11B — Trusted Profile Snapshot Policy
-Last commit: pending Phase 11B commit
+Current phase: Phase 11D — Stale Request Expiry
+Last completed phase: Phase 11C — Holidays and Blackouts
+Last commit: pending Phase 11C commit
 
 ## Completed
 
@@ -19,6 +19,7 @@ Last commit: pending Phase 11B commit
 * Phase 10 — PASS
 * Phase 11A — PASS
 * Phase 11B — PASS
+* Phase 11C — PASS
 
 ## Current blockers
 
@@ -49,3 +50,5 @@ Last commit: pending Phase 11B commit
 * Appointment intake and staff-response field bounds are enforced in Functions.
 * Appointment identity snapshots prefer trusted profile values; intentionally
   editable contact and preference values remain server-validated intake data.
+* Optional `blackoutDates` extend the existing PACC availability document and
+  are enforced by the shared availability validator.
