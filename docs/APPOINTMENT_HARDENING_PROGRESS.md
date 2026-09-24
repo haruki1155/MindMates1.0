@@ -2,7 +2,7 @@
 
 Current phase: Phase 13 — Non-Production End-to-End Validation
 Last completed phase: Phase 12 — Focused Security and Lifecycle Tests
-Last commit: pending Phase 12 commit
+Last commit: `9273220` — archive expired appointment requests consistently
 
 ## Completed
 
@@ -28,7 +28,11 @@ Last commit: pending Phase 12 commit
 
 ## Current blockers
 
-* None
+* Phase 13 requires an authenticated non-production run with two student,
+  two staff/counselor, and one admin account. The repository defines the
+  `mindmate-staging` target but contains no appointment E2E harness, seed
+  identities, or credentials; no staging deployment or account creation was
+  authorized for this work.
 
 ## Known pre-existing failures
 
@@ -65,3 +69,5 @@ Last commit: pending Phase 12 commit
 * Follow-up bookings may link only to the requesting user's terminal appointment.
 * Functions unit coverage and Firestore emulator Rules coverage pass. Callable
   concurrency and end-to-end role scenarios remain non-production validation work.
+* Expired requests are terminal for lifecycle, notification resolution, and
+  automatic/manual appointment history handling.
