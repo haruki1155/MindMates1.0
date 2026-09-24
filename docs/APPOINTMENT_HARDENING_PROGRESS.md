@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 15 — Staging Deployment
-Last completed phase: Phase 14 — Reminder Regression Check
-Last commit: `0d58a5f` — preserve reminders during appointment proposals
+Current phase: Phase 16 — Final Audit Before Production
+Last completed phase: Phase 15 — Staging Deployment
+Last commit: `7dc3eba` — record appointment reminder regression check
 
 ## Completed
 
@@ -27,6 +27,7 @@ Last commit: `0d58a5f` — preserve reminders during appointment proposals
 * Phase 12 — PASS
 * Phase 13 — PASS
 * Phase 14 — PASS
+* Phase 15 — PASS
 
 ## Current blockers
 
@@ -79,3 +80,14 @@ Last commit: `0d58a5f` — preserve reminders during appointment proposals
   and Firestore Rules. Admin/student app deployment remains Phase 15 work.
 * Reminders remain eligible while a reschedule proposal is unresolved because
   the original appointment time is still authoritative until acceptance.
+* Phase 15 deployed only to `mindmate-staging`: hardened Functions and Rules,
+  the reminder scheduler revision, and Firebase Hosting at
+  `https://mindmate-staging.web.app`. The staging admin web build returned
+  HTTP 200 and a staging-flavored Android debug APK was built. The Phase 13
+  authenticated multi-role E2E evidence remains the verification for booking,
+  privacy, lifecycle, concurrency, availability, notification, history, and
+  audit behavior; the original `on_leave` availability was restored.
+* App Check is intentionally bypassed only by the staging client configuration;
+  no production App Check or authorization setting was changed. The reminder
+  scheduler was deployed after its focused regression test passed. The exact
+  committed release-candidate revision for the hardening work is `7dc3eba`.
