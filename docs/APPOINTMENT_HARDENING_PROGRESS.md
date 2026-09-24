@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 16 — Final Audit Before Production
-Last completed phase: Phase 15 — Staging Deployment
-Last commit: `7dc3eba` — record appointment reminder regression check
+Current phase: Complete — Production Readiness Gate
+Last completed phase: Phase 16 — Final Audit Before Production
+Last commit: `808fb85` — record appointment staging deployment
 
 ## Completed
 
@@ -28,6 +28,7 @@ Last commit: `7dc3eba` — record appointment reminder regression check
 * Phase 13 — PASS
 * Phase 14 — PASS
 * Phase 15 — PASS
+* Phase 16 — PASS
 
 ## Current blockers
 
@@ -91,3 +92,16 @@ Last commit: `7dc3eba` — record appointment reminder regression check
   no production App Check or authorization setting was changed. The reminder
   scheduler was deployed after its focused regression test passed. The exact
   committed release-candidate revision for the hardening work is `7dc3eba`.
+* Phase 16 closure audit: office availability, trusted backend slot discovery,
+  lifecycle controls, cancellation/stale/blackout policy support, field bounds,
+  follow-up linkage, server-only availability writes, least-privilege reads,
+  queue projection, abuse policy, terminal archive, and notification cleanup
+  are closed by the committed implementation and focused tests. Proposal
+  conflicts preserve the original reservation, and the shared PACC timestamp
+  capacity limitation is intentionally documented rather than misrepresented
+  as counselor/room parallel capacity.
+* Release gate evidence: 19 focused appointment Functions tests passed; 3
+  appointment Firestore Rules emulator tests passed; the authenticated Phase 13
+  staging E2E passed same-slot concurrency, role isolation, transactions,
+  terminal history, notifications, and audit assertions. The release-candidate
+  SHA recorded for staging is `7dc3eba`. No production deployment was made.
