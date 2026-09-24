@@ -424,9 +424,11 @@ class _BackButton extends StatelessWidget {
 }
 
 String _categoryPurpose(AssessmentSection section) => switch (section) {
-  AssessmentSection.academicCore || AssessmentSection.academicDeeper =>
+  AssessmentSection.academicCore ||
+  AssessmentSection.academicDeeper ||
+  AssessmentSection.academic =>
     'Explores how academic demands may be affecting your daily well-being.',
-  AssessmentSection.financialConcern =>
+  AssessmentSection.financialConcern || AssessmentSection.financial =>
     'Explores how financial concerns may be affecting study and well-being.',
   AssessmentSection.socialAdjustment =>
     'Explores connection, belonging, and access to social support.',

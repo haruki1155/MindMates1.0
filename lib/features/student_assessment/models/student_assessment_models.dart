@@ -25,12 +25,21 @@ enum LikertAnswer {
         return 'Strongly Agree';
     }
   }
+
+  String get v4ResponseCode => switch (this) {
+    LikertAnswer.never => 'stronglyDisagree',
+    LikertAnswer.rarely => 'disagree',
+    LikertAnswer.often => 'agree',
+    LikertAnswer.always => 'stronglyAgree',
+  };
 }
 
 enum AssessmentSection {
   academicCore,
   academicDeeper,
+  academic,
   financialConcern,
+  financial,
   socialAdjustment,
   workplaceStressCore,
   workplaceStressDeeper,
@@ -48,8 +57,12 @@ enum AssessmentSection {
       case AssessmentSection.academicCore:
       case AssessmentSection.academicDeeper:
         return 'Academic Stress';
+      case AssessmentSection.academic:
+        return 'Academic';
       case AssessmentSection.financialConcern:
         return 'Financial Well-Being';
+      case AssessmentSection.financial:
+        return 'Financial';
       case AssessmentSection.socialAdjustment:
         return 'Social Adjustment';
       case AssessmentSection.workplaceStressCore:
@@ -83,6 +96,9 @@ class StudentAssessmentQuestion {
     required this.section,
     required this.direction,
     this.isConditional = false,
+    this.v4DomainId,
+    this.constructId,
+    this.displayOrder,
   });
 
   final String id;
@@ -90,6 +106,9 @@ class StudentAssessmentQuestion {
   final AssessmentSection section;
   final AssessmentDirection direction;
   final bool isConditional;
+  final String? v4DomainId;
+  final String? constructId;
+  final int? displayOrder;
 }
 
 class StudentAssessmentAnswer {
@@ -109,6 +128,18 @@ class StudentAssessmentAnswer {
       'answer': answer.name,
       'value': answer.value,
       'isSkipped': isSkipped,
+    };
+  }
+
+  Map<String, Object> toV4Json() {
+    if (isSkipped) {
+      return {'itemId': questionId, 'skipped': true};
+    }
+    return {
+      'itemId': questionId,
+      'responseCode': answer.v4ResponseCode,
+      'responseValue': answer.value,
+      'skipped': false,
     };
   }
 }

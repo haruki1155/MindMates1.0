@@ -1,0 +1,24 @@
+{
+  "model_version": "V4",
+  "threshold": 0.7,
+  "max_length": 40,
+  "labels": [
+    "appointment_help",
+    "assessment_help",
+    "coping_help",
+    "goodbye",
+    "greeting",
+    "service_information",
+    "venting"
+  ],
+  "label_to_id": {
+    "appointment_help": 0,
+    "assessment_help": 1,
+    "coping_help": 2,
+    "goodbye": 3,
+    "greeting": 4,
+    "service_information": 5,
+    "venting": 6
+  },
+  "random_seed": 42
+}
