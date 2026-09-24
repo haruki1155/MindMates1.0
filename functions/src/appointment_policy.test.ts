@@ -19,3 +19,8 @@ test("stale request expiry remains disabled unless a positive policy is publishe
   assert.equal(appointmentBookingPolicy({}).staleRequestExpiryHours, null);
   assert.equal(appointmentBookingPolicy({staleRequestExpiryHours: 24}).staleRequestExpiryHours, 24);
 });
+
+test("cancellation reason policy is opt-in", () => {
+  assert.equal(appointmentBookingPolicy({}).requireCancellationReason, false);
+  assert.equal(appointmentBookingPolicy({requireCancellationReason: true}).requireCancellationReason, true);
+});

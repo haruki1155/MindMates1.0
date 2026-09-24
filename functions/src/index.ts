@@ -1872,12 +1872,16 @@ export const respondToAppointment = onCall(async (request) => {
       }
       const cutoff = appointmentBookingPolicy(
         policySnapshot.exists ? policySnapshot.data() : null,
-      ).cancellationCutoffMinutes;
+      );
+      const cancellationReason = boundedText(input.reason, "Cancellation reason", 500);
+      if (cutoff.requireCancellationReason && !cancellationReason) {
+        throw new HttpsError("invalid-argument", "Provide a cancellation reason.");
+      }
       const scheduledAt = data.scheduledAt as Timestamp;
-      if (cutoff !== null && scheduledAt.toMillis() - Date.now() < cutoff * 60_000) {
+      if (cutoff.cancellationCutoffMinutes !== null && scheduledAt.toMillis() - Date.now() < cutoff.cancellationCutoffMinutes * 60_000) {
         throw new HttpsError("failed-precondition", "This appointment is inside the cancellation cutoff window.");
       }
-      transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason: boundedText(input.reason, "Cancellation reason", 500), updatedAt: FieldValue.serverTimestamp()});
+      transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason, updatedAt: FieldValue.serverTimestamp()});
       transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
       createAppointmentEvent(transaction, appointment, "appointment_cancelled", userId, before, "cancelled");
       if (data.assignedStaffId) transaction.create(notification, {userId: data.assignedStaffId, appointmentId, type: "appointment", title: "Appointment cancelled", body: "A student cancelled an appointment.", createdAt: FieldValue.serverTimestamp(), readAt: null});

@@ -7,6 +7,7 @@ export type AppointmentBookingPolicy = {
   rateLimitWindowMinutes: number | null;
   rateLimitCount: number | null;
   staleRequestExpiryHours: number | null;
+  requireCancellationReason: boolean;
 };
 
 export const defaultAppointmentBookingPolicy: AppointmentBookingPolicy = {
@@ -18,20 +19,27 @@ export const defaultAppointmentBookingPolicy: AppointmentBookingPolicy = {
   rateLimitWindowMinutes: null,
   rateLimitCount: null,
   staleRequestExpiryHours: null,
+  requireCancellationReason: false,
 };
 
-const fields = Object.keys(defaultAppointmentBookingPolicy) as Array<keyof AppointmentBookingPolicy>;
+const numericFields = [
+  "maxActiveAppointments", "maxPendingAppointments", "minimumLeadTimeMinutes",
+  "maximumBookingDaysAhead", "cancellationCutoffMinutes", "rateLimitWindowMinutes",
+  "rateLimitCount", "staleRequestExpiryHours",
+] as const;
 
 export function appointmentBookingPolicy(value: unknown): AppointmentBookingPolicy {
   if (value == null || typeof value !== "object" || Array.isArray(value)) {
     return {...defaultAppointmentBookingPolicy};
   }
   const source = value as Record<string, unknown>;
-  return fields.reduce((policy, field) => {
+  const policy = numericFields.reduce((policy, field) => {
     const raw = source[field];
     policy[field] = typeof raw === "number" && Number.isInteger(raw) && raw > 0 ? raw : null;
     return policy;
   }, {...defaultAppointmentBookingPolicy});
+  policy.requireCancellationReason = source.requireCancellationReason === true;
+  return policy;
 }
 
 export function bookingPolicyViolation(

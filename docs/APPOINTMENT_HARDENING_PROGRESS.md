@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 11E — Cancellation Policy
-Last completed phase: Phase 11D — Stale Request Expiry
-Last commit: pending Phase 11D commit
+Current phase: Phase 11F — No-Show Notification Cleanup
+Last completed phase: Phase 11E — Cancellation Policy
+Last commit: pending Phase 11E commit
 
 ## Completed
 
@@ -21,6 +21,7 @@ Last commit: pending Phase 11D commit
 * Phase 11B — PASS
 * Phase 11C — PASS
 * Phase 11D — PASS
+* Phase 11E — PASS
 
 ## Current blockers
 
@@ -55,3 +56,5 @@ Last commit: pending Phase 11D commit
   are enforced by the shared availability validator.
 * Stale request expiry is disabled until `staleRequestExpiryHours` is published;
   enabled expiry uses the explicit terminal `expired` status and releases slots.
+* Cancellation cutoff and reason requirements are server policies; requiring a
+  reason is disabled unless explicitly published.
