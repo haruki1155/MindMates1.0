@@ -11,6 +11,7 @@ enum AppointmentStatus {
   completed,
   noShow,
   declined,
+  expired,
   legacyRequested,
   unknown;
 
@@ -23,6 +24,7 @@ enum AppointmentStatus {
         'completed' || 'complete' => completed,
         'no_show' || 'noshow' || 'no-show' => noShow,
         'declined' => declined,
+        'expired' => expired,
         'pending' || 'upcoming' || 'reschedule_required' => legacyRequested,
         _ => unknown,
       };
@@ -35,6 +37,7 @@ enum AppointmentStatus {
     completed => 'completed',
     noShow => 'no_show',
     declined => 'declined',
+    expired => 'expired',
     unknown => 'requested',
   };
 
@@ -46,11 +49,12 @@ enum AppointmentStatus {
     completed => 'COMPLETED',
     noShow => 'NO SHOW',
     declined => 'DECLINED',
+    expired => 'EXPIRED',
     unknown => 'REQUESTED',
   };
 
   bool get isTerminal => switch (this) {
-    cancelled || completed || noShow || declined => true,
+    cancelled || completed || noShow || declined || expired => true,
     _ => false,
   };
 }
@@ -89,6 +93,7 @@ class AppointmentModel {
     this.department,
     this.academicYearId,
     this.archivedAt,
+    this.parentAppointmentId,
   });
 
   final String id;
@@ -123,6 +128,7 @@ class AppointmentModel {
   final String? department;
   final String? academicYearId;
   final DateTime? archivedAt;
+  final String? parentAppointmentId;
 
   bool get isArchived => archivedAt != null;
   AppointmentStatus get lifecycleStatus => AppointmentStatus.parse(status);
@@ -135,6 +141,7 @@ class AppointmentModel {
     'canceled',
     'no_show',
     'noshow',
+    'expired',
   }.contains(status.toLowerCase().trim());
 
   factory AppointmentModel.fromJson(Map<String, dynamic> json, {String? id}) {
@@ -172,6 +179,7 @@ class AppointmentModel {
       department: _optionalString(json['department']),
       academicYearId: _optionalString(json['academicYearId']),
       archivedAt: dateTimeFromFirestore(json['archivedAt']),
+      parentAppointmentId: _optionalString(json['parentAppointmentId']),
     );
   }
 
@@ -207,6 +215,7 @@ class AppointmentModel {
       'academicYearId': academicYearId ?? '',
       'createdAt': createdAt,
       'updatedAt': updatedAt,
+      'parentAppointmentId': parentAppointmentId ?? '',
     };
   }
 
@@ -243,6 +252,7 @@ class AppointmentModel {
     String? department,
     String? academicYearId,
     DateTime? archivedAt,
+    String? parentAppointmentId,
   }) {
     return AppointmentModel(
       id: id ?? this.id,
@@ -279,6 +289,7 @@ class AppointmentModel {
       department: department ?? this.department,
       academicYearId: academicYearId ?? this.academicYearId,
       archivedAt: archivedAt ?? this.archivedAt,
+      parentAppointmentId: parentAppointmentId ?? this.parentAppointmentId,
     );
   }
 

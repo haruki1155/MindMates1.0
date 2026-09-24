@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_assets.dart';
 import '../../../core/widgets/mindmate_terms_and_conditions.dart';
+import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../providers/auth_provider.dart';
@@ -132,6 +133,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
         return Scaffold(
           backgroundColor: _ProfileColors.background,
+          bottomNavigationBar: const MindMateBottomNavigation(active: null),
           body: Stack(
             children: [
               _FloatingProfileBackground(animation: _ambientController),
@@ -142,11 +144,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                   slivers: [
                     SliverToBoxAdapter(
                       child: _ProfileHeader(
-                        onHomeTap: () =>
-                            Navigator.of(context).pushNamedAndRemoveUntil(
-                              RouteNames.home,
-                              (route) => false,
-                            ),
                         onNotificationTap: () =>
                             _openPlaceholder(context, 'Notifications'),
                       ),
@@ -473,12 +470,8 @@ class ProfileActionItem {
 }
 
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader({
-    required this.onHomeTap,
-    required this.onNotificationTap,
-  });
+  const _ProfileHeader({required this.onNotificationTap});
 
-  final VoidCallback onHomeTap;
   final VoidCallback onNotificationTap;
 
   @override
@@ -510,13 +503,6 @@ class _ProfileHeader extends StatelessWidget {
             fit: BoxFit.contain,
           ),
           const Spacer(),
-          Tooltip(
-            message: 'Home',
-            child: IconButton(
-              onPressed: onHomeTap,
-              icon: const Icon(Icons.home_outlined, color: Colors.black),
-            ),
-          ),
           Tooltip(
             message: 'Notifications',
             child: IconButton(

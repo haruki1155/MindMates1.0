@@ -130,6 +130,24 @@ class AppointmentProvider extends ChangeNotifier {
     ),
   );
 
+  Future<List<AppointmentSlot>> getAvailableSlots(DateTime date) async {
+    try {
+      return await _repository.getAvailableSlots(date);
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'Appointment slots failed.',
+      );
+      _errorMessage = FirebaseErrorMessage.describe(
+        error,
+        fallback: 'Unable to load available appointment times.',
+      );
+      notifyListeners();
+      return const [];
+    }
+  }
+
   Future<bool> _performAction(Future<void> Function() action) async {
     if (_isSaving) return false;
     _isSaving = true;

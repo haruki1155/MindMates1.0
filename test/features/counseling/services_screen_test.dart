@@ -245,6 +245,16 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('services keeps the main navigation visible', (tester) async {
+    await tester.pumpWidget(_servicesApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Appointment'), findsOneWidget);
+    expect(find.text('Secret Chat'), findsOneWidget);
+    expect(find.text('Message'), findsOneWidget);
+  });
+
   testWidgets('set appointment opens PACC appointment flow', (tester) async {
     await tester.binding.setSurfaceSize(const Size(390, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -279,9 +289,21 @@ void main() {
 
     await tester.tap(find.text('Book Appointment').first);
     await tester.pumpAndSettle();
-    expect(find.text('Counseling Intake Form'), findsOneWidget);
+    expect(find.text('Appointment Schedule'), findsOneWidget);
+    expect(find.text('April 2026'), findsOneWidget);
 
-    await tester.tap(find.text('Next'));
+    await tester.tap(find.text('30'));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose Time'), findsOneWidget);
+    expect(find.text('Thursday, April 30'), findsOneWidget);
+
+    await tester.tap(find.text('11:00 AM'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue to Details'));
+    await tester.pumpAndSettle();
+    expect(find.text('Counseling Details'), findsWidgets);
+
+    await tester.tap(find.text('Review Appointment'));
     await tester.pump();
     expect(find.text('Please complete all required fields.'), findsOneWidget);
 
@@ -291,45 +313,19 @@ void main() {
     await _chooseVisibleOption(tester, 'Email');
     await _chooseVisibleOption(tester, 'No');
 
-    await tester.ensureVisible(find.text('Next'));
+    await tester.ensureVisible(find.text('Review Appointment'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Next'));
+    await tester.tap(find.text('Review Appointment'));
     await tester.pumpAndSettle();
-    expect(find.text('Appointment Schedule'), findsOneWidget);
-    expect(find.text('April 2026'), findsOneWidget);
+    expect(find.text('Confirm Appointment'), findsWidgets);
+    await tester.tap(find.text('Confirm Appointment').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Appointment Request Sent!'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Back to intake form'));
-    await tester.pumpAndSettle();
-    expect(find.text('Counseling Intake Form'), findsOneWidget);
-    expect(
-      find.text('I feel overwhelmed and would like to talk to someone.'),
-      findsOneWidget,
-    );
-
-    await tester.ensureVisible(find.text('Next'));
-    await tester.tap(find.text('Next'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('30'));
-    await tester.pumpAndSettle();
-    expect(find.text('Choose Time'), findsOneWidget);
-    expect(find.text('Thursday, April 30'), findsOneWidget);
-
-    await tester.tap(find.byTooltip('Back to calendar'));
-    await tester.pumpAndSettle();
-    expect(find.text('Appointment Schedule'), findsOneWidget);
-
-    await tester.tap(find.text('30'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('11:00 AM'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Submit Appointment Request'));
-    await tester.pumpAndSettle();
-    expect(find.text('Appointment Request Submitted'), findsOneWidget);
-
-    await tester.tap(find.text('View My Appointments'));
+    await tester.tap(find.text('Back to Appointments'));
     await tester.pumpAndSettle();
     expect(find.text('Molar, Leonardo M.'), findsNothing);
-    expect(find.text('Thursday, April 30'), findsOneWidget);
+    expect(find.text('APR'), findsOneWidget);
     expect(find.text('11:00 AM'), findsOneWidget);
     expect(
       find.text('I feel overwhelmed and would like to talk to someone.'),
@@ -369,16 +365,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Book Appointment').first);
     await tester.pumpAndSettle();
-    await _fillVisibleForm(tester);
-    await _chooseVisibleOption(tester, 'Male');
-    await _chooseVisibleOption(tester, 'Fourth Year');
-    await _chooseVisibleOption(tester, 'Email');
-    await _chooseVisibleOption(tester, 'No');
-    await tester.ensureVisible(find.text('Next'));
-    await tester.tap(find.text('Next'));
-    await tester.pumpAndSettle();
 
-    await tester.tap(find.text('1'));
+    await tester.tap(find.text('1').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Appointment Schedule'), findsOneWidget);
@@ -422,23 +410,25 @@ Widget _paccApp({_FakeAppointmentRepository? appointmentRepository}) {
 Future<void> _createAppointment(WidgetTester tester) async {
   await tester.tap(find.text('Book Appointment').first);
   await tester.pumpAndSettle();
+  await tester.tap(find.text('30'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('11:00 AM'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Continue to Details'));
+  await tester.pumpAndSettle();
   await _fillVisibleForm(tester);
   await _chooseVisibleOption(tester, 'Male');
   await _chooseVisibleOption(tester, 'Fourth Year');
   await _chooseVisibleOption(tester, 'Email');
   await _chooseVisibleOption(tester, 'No');
 
-  await tester.ensureVisible(find.text('Next'));
+  await tester.ensureVisible(find.text('Review Appointment'));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Next'));
+  await tester.tap(find.text('Review Appointment'));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('30'));
+  await tester.tap(find.text('Confirm Appointment').last);
   await tester.pumpAndSettle();
-  await tester.tap(find.text('11:00 AM'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Submit Appointment Request'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('View My Appointments'));
+  await tester.tap(find.text('Back to Appointments'));
   await tester.pumpAndSettle();
 }
 
@@ -472,6 +462,19 @@ class _FakeAppointmentRepository extends AppointmentRepository {
 
   final List<AppointmentModel> appointments;
   bool shouldFail = false;
+  @override
+  Future<List<AppointmentSlot>> getAvailableSlots(DateTime date) async {
+    if (date.year == 2026 && date.month == 4 && date.day == 30) {
+      return [
+        AppointmentSlot(start: DateTime(2026, 4, 30, 9), label: '9:00 AM'),
+        AppointmentSlot(start: DateTime(2026, 4, 30, 10), label: '10:00 AM'),
+        AppointmentSlot(start: DateTime(2026, 4, 30, 11), label: '11:00 AM'),
+        AppointmentSlot(start: DateTime(2026, 4, 30, 13), label: '1:00 PM'),
+      ];
+    }
+
+    return [];
+  }
 
   @override
   Future<List<AppointmentModel>> fetchAppointments(String userId) async {

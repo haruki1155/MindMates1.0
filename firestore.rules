@@ -132,6 +132,8 @@ service cloud.firestore {
 
     match /assessments/{assessmentId} {
       allow create: if isVerifiedEmail() && isOwner(request.resource.data.userId)
+        && (!request.resource.data.keys().hasAny(['schemaVersion'])
+          || request.resource.data.schemaVersion != 'assessment_record_v4')
         && (request.resource.data.type != 'quick'
           || assessmentId == 'quick_' + request.auth.uid);
       allow get: if (signedIn()
@@ -142,7 +144,9 @@ service cloud.firestore {
       allow update, delete: if isAdmin()
         || (isOwner(resource.data.userId)
           && request.resource.data.userId == resource.data.userId
-          && resource.data.type != 'quick');
+          && resource.data.type != 'quick'
+          && (!resource.data.keys().hasAny(['schemaVersion'])
+            || resource.data.schemaVersion != 'assessment_record_v4'));
     }
 
     match /assessment_feedback/{feedbackId} {
@@ -174,7 +178,9 @@ service cloud.firestore {
       allow create: if isOwner(request.resource.data.userId)
         && moodId.matches('^daily_' + request.auth.uid + '_[0-9]{8}$')
         && request.resource.data.keys().hasOnly([
-          'userId', 'level', 'label', 'note', 'dateKey', 'timezone', 'createdAt'
+          'userId', 'level', 'label', 'note', 'dateKey', 'timezone', 'createdAt',
+          'entryMethod', 'expressionAssistUsed', 'expressionSuggestionAccepted',
+          'expressionModelVersion'
         ])
         && request.resource.data.level is int
         && request.resource.data.level >= 1
@@ -186,7 +192,21 @@ service cloud.firestore {
         && request.resource.data.dateKey is string
         && request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && request.resource.data.timezone == 'Asia/Manila'
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && ((!request.resource.data.keys().hasAny([
+              'entryMethod', 'expressionAssistUsed',
+              'expressionSuggestionAccepted', 'expressionModelVersion'
+            ]))
+          || (request.resource.data.keys().hasAll([
+                'entryMethod', 'expressionAssistUsed',
+                'expressionSuggestionAccepted'
+              ])
+            && request.resource.data.entryMethod == 'expression_assisted'
+            && request.resource.data.expressionAssistUsed == true
+            && request.resource.data.expressionSuggestionAccepted is bool
+            && (!request.resource.data.keys().hasAny(['expressionModelVersion'])
+              || request.resource.data.expressionModelVersion
+                == 'justinshenk_fer_tflite_v1')));
       allow get: if (signedIn()
           && moodId.matches('^daily_' + request.auth.uid + '_[0-9]{8}$'))
         || isOwner(resource.data.userId)
@@ -495,19 +515,24 @@ service cloud.firestore {
       // from confirming/completing their own record or bypassing slot locks.
       allow create: if false;
       allow read: if isOwner(resource.data.userId)
-        || currentAccessRole() == 'portalStaff'
         || currentAccessRole() == 'admin'
         || (currentAccessRole() == 'counselor'
           && resource.data.assignedStaffId == request.auth.uid);
       allow update, delete: if false;
       match /history/{historyId} {
         allow read: if isOwner(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId)
-          || currentAccessRole() == 'portalStaff'
           || currentAccessRole() == 'admin'
           || (currentAccessRole() == 'counselor'
             && get(/databases/$(database)/documents/appointments/$(appointmentId)).data.assignedStaffId == request.auth.uid);
         allow write: if false;
       }
+    }
+
+    // This is a server-generated, non-clinical scheduling projection. It is
+    // the only appointment collection general PAACC portal staff can read.
+    match /appointment_queue/{appointmentId} {
+      allow read: if currentAccessRole() == 'portalStaff';
+      allow write: if false;
     }
 
     match /notifications/{notificationId} {
@@ -553,8 +578,7 @@ service cloud.firestore {
 
     match /pacc_availability/{documentId} {
       allow read: if signedIn();
-      allow create, update: if hasPortalAccess();
-      allow delete: if false;
+      allow write: if false;
     }
 
     match /insight_categories/{categoryId} {

@@ -464,6 +464,11 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
 
   void _setPage(AdminPortalPage page) {
     Navigator.of(context).maybePop();
+    if (_repository.currentAccessRole == AccessRole.portalStaff &&
+        page == AdminPortalPage.appointments) {
+      setState(() => _page = AdminPortalPage.dashboard);
+      return;
+    }
     setState(() => _page = page);
   }
 
@@ -556,6 +561,9 @@ class _Nav extends StatelessWidget {
     AdminPortalPage.assessments => false,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
+    AdminPortalPage.appointments =>
+      accessRole != AccessRole.portalStaff &&
+          (accessRole.canUsePortal || accessRole == AccessRole.admin),
     _ => accessRole.canUsePortal || accessRole == AccessRole.admin,
   };
   @override
@@ -2792,7 +2800,7 @@ class _AppointmentCard extends StatelessWidget {
     final currentStatus = item.status.toLowerCase().trim();
     var action = currentStatus == 'confirmed'
         ? 'completed'
-        : currentStatus == 'reschedule_required'
+        : currentStatus == 'reschedule_proposed'
         ? 'reschedule_proposed'
         : 'confirmed';
     String reason = _appointmentReasons(action).first;
@@ -2922,11 +2930,15 @@ class _AppointmentCard extends StatelessWidget {
                                 child: Text('Mark as no-show'),
                               ),
                               DropdownMenuItem(
+                                value: 'reschedule_proposed',
+                                child: Text('Propose new schedule'),
+                              ),
+                              DropdownMenuItem(
                                 value: 'cancelled',
                                 child: Text('Cancel appointment'),
                               ),
                             ]
-                          : currentStatus == 'reschedule_required'
+                          : currentStatus == 'reschedule_proposed'
                           ? const [
                               DropdownMenuItem(
                                 value: 'reschedule_proposed',
@@ -2939,8 +2951,8 @@ class _AppointmentCard extends StatelessWidget {
                                 child: Text('Confirm appointment'),
                               ),
                               DropdownMenuItem(
-                                value: 'reschedule_required',
-                                child: Text('Schedule adjustment needed'),
+                                value: 'declined',
+                                child: Text('Decline appointment'),
                               ),
                               DropdownMenuItem(
                                 value: 'reschedule_proposed',
@@ -3046,11 +3058,16 @@ class _AppointmentCard extends StatelessWidget {
                       proposedScheduledTime: proposedTime.text.trim(),
                     );
                     if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  } catch (_) {
+                  } catch (error) {
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Unable to update the appointment.'),
+                        SnackBar(
+                          content: Text(
+                            FirebaseErrorMessage.describe(
+                              error,
+                              fallback: 'Unable to update the appointment.',
+                            ),
+                          ),
                         ),
                       );
                     }
@@ -3070,7 +3087,7 @@ class _AppointmentCard extends StatelessWidget {
       'Schedule and counselor are available',
       'Appointment approved by PAACC',
     ],
-    'reschedule_required' => const ['Schedule adjustment needed'],
+    'declined' => const ['Requested schedule cannot be accommodated'],
     'reschedule_proposed' => const [
       'A different office time is available',
       'The requested time needs to be adjusted',
@@ -3362,6 +3379,23 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
                 value: value.acceptsWalkIns,
                 onChanged: (enabled) => _update(value, acceptsWalkIns: enabled),
               ),
+              const SizedBox(height: 12),
+              TextFormField(
+                initialValue: value.blackoutDates.join(', '),
+                decoration: const InputDecoration(
+                  labelText: 'Closed dates',
+                  hintText: 'YYYY-MM-DD, YYYY-MM-DD',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (raw) => _update(
+                  value,
+                  blackoutDates: raw
+                      .split(',')
+                      .map((date) => date.trim())
+                      .where((date) => date.isNotEmpty)
+                      .toList(),
+                ),
+              ),
               const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
@@ -3387,6 +3421,7 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
     String? closesAt,
     CounselorPresence? presence,
     bool? acceptsWalkIns,
+    List<String>? blackoutDates,
   }) {
     setState(
       () => _draft = PaccAvailabilityModel(
@@ -3396,6 +3431,7 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
         presence: presence ?? current.presence,
         acceptsWalkIns: acceptsWalkIns ?? current.acceptsWalkIns,
         notice: current.notice,
+        blackoutDates: blackoutDates ?? current.blackoutDates,
         updatedAt: current.updatedAt,
       ),
     );
@@ -3467,9 +3503,8 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
         final years = {
           for (final item in all) '${item.createdAt.year}',
         }.toList()..sort((a, b) => b.compareTo(a));
-        final statuses = {
-          for (final item in all) item.status ?? 'Pending',
-        }.toList()..sort();
+        final statuses = {for (final item in all) item.displayStatus}.toList()
+          ..sort();
         final roles = {for (final item in all) item.role ?? 'User'}.toList()
           ..sort();
         final types = [
@@ -3486,7 +3521,7 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
                   (yearFilter == 'All Years' ||
                       '${item.createdAt.year}' == yearFilter) &&
                   (statusFilter == 'All Statuses' ||
-                      (item.status ?? 'Pending') == statusFilter) &&
+                      item.displayStatus == statusFilter) &&
                   (roleFilter == 'All Roles' ||
                       (item.role ?? 'User') == roleFilter),
             )
@@ -3507,7 +3542,9 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
                 'With results': active
                     .where((a) => (a.status ?? '').isNotEmpty)
                     .length,
-                'Pending': active.where((a) => (a.status ?? '').isEmpty).length,
+                'Awaiting result': active
+                    .where((a) => (a.status ?? '').isEmpty)
+                    .length,
                 'Archived': all.where((a) => a.isArchived).length,
               },
             ),
@@ -3594,7 +3631,7 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
                           '${assessment.createdAt.year}',
                           _date(assessment.createdAt),
                           _Tag(
-                            label: _formalLabel(assessment.status ?? 'Pending'),
+                            label: _formalLabel(assessment.displayStatus),
                             color: (assessment.status ?? '').isEmpty
                                 ? AdminColors.accentSoft
                                 : AdminColors.surfaceMuted,

@@ -7,6 +7,7 @@ import '../models/admin_inquiry_model.dart';
 import '../models/admin_activity_analytics_model.dart';
 import '../models/admin_mind_aid_analytics_model.dart';
 import '../models/appointment_model.dart';
+import '../models/appointment_queue_item.dart';
 import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
 import '../models/profile_roles.dart';
@@ -25,6 +26,8 @@ class AdminAssessmentRecord {
     this.score,
     this.status,
     this.role,
+    this.instrumentVersion,
+    this.verificationStatus,
     this.archivedAt,
   });
 
@@ -35,6 +38,8 @@ class AdminAssessmentRecord {
   final num? score;
   final String? status;
   final String? role;
+  final String? instrumentVersion;
+  final String? verificationStatus;
   final DateTime? archivedAt;
   bool get isArchived => archivedAt != null;
   bool get isQuickAssessment {
@@ -48,22 +53,37 @@ class AdminAssessmentRecord {
   }
 
   bool get isMainAssessment => !isQuickAssessment;
+  String get displayStatus => status ?? 'Result unavailable';
 
-  factory AdminAssessmentRecord.fromJson(Map<String, dynamic> data) =>
-      AdminAssessmentRecord(
-        id: data['id']?.toString() ?? '',
-        userId: data['userId']?.toString() ?? '',
-        type: data['type']?.toString() ?? 'Assessment',
-        createdAt: _date(data['createdAt']),
-        score: data['score'] is num
-            ? data['score'] as num
-            : num.tryParse('${data['score']}'),
-        status: _text(data['status'] ?? data['overallLevel']),
-        role: _text(data['populationRole'] ?? data['role']),
-        archivedAt: data['archivedAt'] == null
-            ? null
-            : _date(data['archivedAt']),
-      );
+  factory AdminAssessmentRecord.fromJson(Map<String, dynamic> data) {
+    final result = data['result'] is Map
+        ? Map<String, dynamic>.from(data['result'] as Map)
+        : const <String, dynamic>{};
+    final instrument = data['instrument'] is Map
+        ? Map<String, dynamic>.from(data['instrument'] as Map)
+        : const <String, dynamic>{};
+    return AdminAssessmentRecord(
+      id: data['id']?.toString() ?? '',
+      userId: data['userId']?.toString() ?? '',
+      type:
+          data['assessmentKind']?.toString() ??
+          data['type']?.toString() ??
+          'Assessment',
+      createdAt: _date(data['createdAt']),
+      score: data['score'] is num
+          ? data['score'] as num
+          : num.tryParse('${data['score']}'),
+      status: _text(
+        data['status'] ?? data['overallLevel'] ?? result['profileStatus'],
+      ),
+      role: _text(data['populationRole'] ?? data['role']),
+      instrumentVersion: _text(
+        instrument['version'] ?? data['questionSetVersion'],
+      ),
+      verificationStatus: _text(data['verificationStatus']),
+      archivedAt: data['archivedAt'] == null ? null : _date(data['archivedAt']),
+    );
+  }
 
   static DateTime _date(Object? value) {
     if (value is Timestamp) return value.toDate();
@@ -642,6 +662,33 @@ class AdminPortalRepository {
               ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
       );
 
+  Stream<List<AppointmentQueueItem>> watchPortalAppointmentQueue() {
+    if (currentAccessRole != AccessRole.portalStaff) {
+      return Stream.value(const <AppointmentQueueItem>[]);
+    }
+    return Stream.fromFuture(
+      FirebaseFunctions.instance
+          .routedCallable('refreshPortalAppointmentQueue')
+          .call(),
+    ).asyncExpand(
+      (_) => _firestoreService
+          .watchDocuments(FirestoreCollections.appointmentQueue)
+          .map(
+            (items) =>
+                items
+                    .map(
+                      (item) => AppointmentQueueItem.fromJson(
+                        item,
+                        id: item['id']?.toString(),
+                      ),
+                    )
+                    .where((item) => !item.isArchived)
+                    .toList()
+                  ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
+          ),
+    );
+  }
+
   Stream<List<AppNotificationModel>> watchPortalNotifications() =>
       _watchPortalNotifications(archived: false);
 
@@ -1119,13 +1166,14 @@ class AdminPortalRepository {
         (data) => data == null ? null : PaccAvailabilityModel.fromJson(data),
       );
 
-  Future<void> savePaccAvailability(PaccAvailabilityModel availability) =>
-      _firestoreService.setDocument(
-        FirestoreCollections.paccAvailability,
-        'current',
-        {...availability.toJson(), 'updatedAt': FieldValue.serverTimestamp()},
-        merge: true,
-      );
+  Future<void> savePaccAvailability(PaccAvailabilityModel availability) {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    return FirebaseFunctions.instance
+        .routedCallable('savePaccAvailability')
+        .call(availability.toJson());
+  }
 
   Future<void> updateOwnProfile(String userId, Map<String, dynamic> values) =>
       _firestoreService.updateDocument(

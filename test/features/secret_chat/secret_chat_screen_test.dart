@@ -15,18 +15,13 @@ void main() {
     );
   });
 
-  testWidgets('header uses a home icon for the return action', (tester) async {
-    var returnedHome = false;
-    await tester.pumpWidget(
-      _app(posts: const [], onBack: () => returnedHome = true),
-    );
+  testWidgets('header does not duplicate the main Home navigation', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_app(posts: const []));
 
-    expect(find.byIcon(Icons.home_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.bubble_chart_outlined), findsNothing);
-
-    await tester.tap(find.byTooltip('Home'));
-
-    expect(returnedHome, isTrue);
+    expect(find.byIcon(Icons.home_rounded), findsNothing);
+    expect(find.text('Home'), findsOneWidget);
   });
 
   testWidgets('compose shows validation message for blocked content', (
@@ -156,7 +151,6 @@ void main() {
 Widget _app({
   required List<SecretChatModel> posts,
   AddSecretComment? onAddComment,
-  VoidCallback? onBack,
   VoidCallback? onProfile,
   Future<void> Function(String postId)? onDeletePost,
 }) {
@@ -190,7 +184,6 @@ Widget _app({
       onAddComment:
           onAddComment ?? ({required postId, required message}) async {},
       onRetry: () {},
-      onBack: onBack ?? () {},
       onProfile: onProfile,
       onDeletePost: onDeletePost,
     ),

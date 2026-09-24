@@ -123,3 +123,13 @@ test("migration preserves v1 five-point records instead of reinterpreting them",
   assert.equal(result.questionSetVersion, "experimental_role_based_v1");
   assert.equal(result.status, "Moderate Concern");
 });
+
+test("migration leaves immutable V4 records untouched", () => {
+  const record = {
+    schemaVersion: "assessment_record_v4",
+    populationRole: "student",
+    verificationStatus: "verified",
+    result: {profileStatus: "generallySupported"},
+  };
+  assert.deepEqual(migrateAssessmentData(record), record);
+});

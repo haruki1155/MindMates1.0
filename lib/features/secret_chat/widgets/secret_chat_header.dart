@@ -8,7 +8,6 @@ class SecretChatHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.selectedFilter,
     required this.savedCount,
     required this.searchQuery,
-    required this.onBack,
     required this.onSearchChanged,
     required this.onFilterChanged,
     this.onProfile,
@@ -17,7 +16,6 @@ class SecretChatHeaderDelegate extends SliverPersistentHeaderDelegate {
   final SecretChatFilter selectedFilter;
   final int savedCount;
   final String searchQuery;
-  final VoidCallback onBack;
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<SecretChatFilter> onFilterChanged;
   final VoidCallback? onProfile;
@@ -45,12 +43,6 @@ class SecretChatHeaderDelegate extends SliverPersistentHeaderDelegate {
           children: [
             Row(
               children: [
-                _HeaderIconButton(
-                  icon: Icons.home_rounded,
-                  tooltip: 'Home',
-                  onTap: onBack,
-                ),
-                const SizedBox(width: 14),
                 Expanded(
                   child: _SearchField(
                     initialValue: searchQuery,

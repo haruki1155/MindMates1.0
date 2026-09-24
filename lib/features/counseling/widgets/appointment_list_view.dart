@@ -49,6 +49,12 @@ class AppointmentUiState {
       Icons.info_outline,
       Color(0xFFAA5842),
     ),
+    AppointmentStatus.expired => const AppointmentUiState(
+      'Request Expired',
+      'This request was not reviewed in time. Please book a new appointment.',
+      Icons.timer_off_outlined,
+      Color(0xFF6C6C6C),
+    ),
     AppointmentStatus.noShow => const AppointmentUiState(
       'Missed Appointment',
       '',
@@ -68,7 +74,8 @@ class AppointmentUiState {
         AppointmentStatus.completed ||
         AppointmentStatus.noShow => AppointmentSection.past,
         AppointmentStatus.cancelled ||
-        AppointmentStatus.declined => AppointmentSection.cancelled,
+        AppointmentStatus.declined ||
+        AppointmentStatus.expired => AppointmentSection.cancelled,
         _ => AppointmentSection.upcoming,
       };
 }
@@ -116,26 +123,11 @@ class _AppointmentListViewState extends State<AppointmentListView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'My Appointments',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: widget.onBook,
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('Book Appointment'),
-              style: TextButton.styleFrom(
-                minimumSize: const Size(44, 44),
-                foregroundColor: const Color(0xFF6A4C00),
-              ),
-            ),
-          ],
+        const Text(
+          'My Appointments',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         Semantics(
           label: 'Appointment categories',
           child: Row(
@@ -157,6 +149,34 @@ class _AppointmentListViewState extends State<AppointmentListView> {
           ),
         ),
         const SizedBox(height: 20),
+        if (_section == AppointmentSection.upcoming) ...[
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: widget.onBook,
+              icon: const Icon(Icons.add),
+              label: const Text('Book Appointment'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                backgroundColor: const Color(0xFFFFC107),
+                foregroundColor: const Color(0xFF111827),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+        Text(
+          '${switch (_section) {
+            AppointmentSection.upcoming => 'Upcoming',
+            AppointmentSection.past => 'Past',
+            AppointmentSection.cancelled => 'Cancelled',
+          }} Appointments (${items.length})',
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 12),
         if (items.isEmpty)
           _EmptyState(section: _section, onBook: widget.onBook)
         else
@@ -176,8 +196,8 @@ class _AppointmentListViewState extends State<AppointmentListView> {
               ),
             ),
           ),
-        const SizedBox(height: 12),
-        _CrisisCard(),
+        const SizedBox(height: 16),
+        _SectionMessagePanel(section: _section),
       ],
     );
   }
@@ -258,7 +278,7 @@ class AppointmentCard extends StatelessWidget {
       label:
           '${ui.label}: ${formatAppointmentWeekdayDate(appointment.scheduledAt)} at ${appointment.scheduledTime}',
       child: Card(
-        elevation: 1,
+        elevation: 0,
         color: Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
@@ -269,22 +289,37 @@ class AppointmentCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _StatusBadge(ui: ui),
-              const SizedBox(height: 12),
-              Text(
-                formatAppointmentWeekdayDate(appointment.scheduledAt),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 18,
-                ),
-              ),
-              Text(
-                appointment.scheduledTime,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                  color: ui.color,
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _AppointmentDateBlock(date: appointment.scheduledAt),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        FittedBox(
+                          alignment: Alignment.centerLeft,
+                          fit: BoxFit.scaleDown,
+                          child: _StatusBadge(ui: ui),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          appointment.scheduledTime,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'View appointment details',
+                    onPressed: onView,
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
               ),
               const SizedBox(height: 10),
               _Info(icon: Icons.place_outlined, text: appointment.location),
@@ -385,6 +420,7 @@ class AppointmentCard extends StatelessWidget {
       AppointmentStatus.completed,
       AppointmentStatus.cancelled,
       AppointmentStatus.declined,
+      AppointmentStatus.expired,
       AppointmentStatus.noShow,
     }.contains(status)) {
       return Row(
@@ -508,15 +544,6 @@ class AppointmentCard extends StatelessWidget {
                   ? null
                   : () {
                       Navigator.pop(context);
-                      onReschedule();
-                    },
-              child: const Text('Request Another Time'),
-            ),
-            TextButton(
-              onPressed: isSaving
-                  ? null
-                  : () {
-                      Navigator.pop(context);
                       onCancel();
                     },
               style: TextButton.styleFrom(foregroundColor: Colors.red.shade800),
@@ -555,6 +582,55 @@ class _StatusBadge extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _AppointmentDateBlock extends StatelessWidget {
+  const _AppointmentDateBlock({required this.date});
+
+  final DateTime date;
+
+  @override
+  Widget build(BuildContext context) {
+    const months = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
+    ];
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return Container(
+      width: 60,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Text(
+            months[date.month - 1],
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+          ),
+          Text(
+            '${date.day}',
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+          ),
+          Text(
+            weekdays[date.weekday - 1],
+            style: const TextStyle(fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _Info extends StatelessWidget {
@@ -637,6 +713,46 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+class _SectionMessagePanel extends StatelessWidget {
+  const _SectionMessagePanel({required this.section});
+
+  final AppointmentSection section;
+
+  @override
+  Widget build(BuildContext context) {
+    final cancelled = section == AppointmentSection.cancelled;
+    final past = section == AppointmentSection.past;
+    final color = cancelled ? const Color(0xFFFFEEEB) : const Color(0xFFEAF7F1);
+    final iconColor = cancelled
+        ? const Color(0xFFEF5B4D)
+        : const Color(0xFF22A06B);
+    final message = cancelled
+        ? 'This appointment was cancelled. You can book a new schedule anytime.'
+        : past
+        ? 'Thank you for showing up. Taking care of your mental health matters.'
+        : 'You\'re all set. Taking care of your well-being is a positive step.';
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            cancelled ? Icons.info_outline : Icons.check_circle_outline,
+            color: iconColor,
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Text(message, style: const TextStyle(height: 1.35))),
+        ],
+      ),
+    );
+  }
+}
+
+// Retained as an internal support surface for future non-appointment entry points.
+// ignore: unused_element
 class _CrisisCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Card(

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/mood/expression_check_in/expression_check_in_screen.dart';
+import 'package:mind_mates/features/mood/expression_check_in/expression_scan_logic.dart';
 import 'package:mind_mates/features/mood/screens/log_mood_screen.dart';
 import 'package:mind_mates/models/mood_model.dart';
 import 'package:mind_mates/models/report_model.dart';
@@ -50,6 +53,95 @@ void main() {
 
     expect(_cardBorderWidth(tester, angryCard), 2);
     expect(_saveButton(tester).onPressed, isNotNull);
+  });
+
+  testWidgets('expression suggestion requires confirmation before saving', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: LogMoodScreen(
+          expressionScreenBuilder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => Navigator.of(context).pop(
+                const ExpressionCheckInResult(
+                  completed: true,
+                  cue: ExpressionCue.smiling,
+                ),
+              ),
+              child: const Text('Return cue'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Check expression with camera'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Return cue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Smiling expression detected'), findsOneWidget);
+    expect(_saveButton(tester).onPressed, isNull);
+    await tester.tap(find.text('Yes, somewhat'));
+    await tester.pump();
+    expect(_saveButton(tester).onPressed, isNotNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('saves only minimal metadata for a confirmed expression assist', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = _FakeMoodRepository();
+
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(repository),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        expressionScreenBuilder: (context) => Scaffold(
+          body: TextButton(
+            onPressed: () => Navigator.of(context).pop(
+              const ExpressionCheckInResult(
+                completed: true,
+                cue: ExpressionCue.tenseLike,
+                source: ExpressionCueSource.tflite,
+              ),
+            ),
+            child: const Text('Return TFLite cue'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Check expression with camera'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Return TFLite cue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Not really'));
+    await tester.pump();
+    await tester.tap(find.text('Okay'));
+    await tester.pump();
+    expect(_saveButton(tester).onPressed, isNotNull);
+    await tester.ensureVisible(find.text('Save mood check-in'));
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pumpAndSettle();
+
+    expect(repository.createdEntryMethod, 'expression_assisted');
+    expect(repository.createdExpressionAssistUsed, isTrue);
+    expect(repository.createdExpressionSuggestionAccepted, isFalse);
+    expect(
+      repository.createdExpressionModelVersion,
+      'justinshenk_fer_tflite_v1',
+    );
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('typing thoughts updates character count', (tester) async {
@@ -156,6 +248,7 @@ Widget _logMoodApp({
   UserProvider? userProvider,
   ReportProvider? reportProvider,
   DateTime Function()? nowProvider,
+  WidgetBuilder? expressionScreenBuilder,
 }) {
   return MultiProvider(
     providers: [
@@ -165,7 +258,12 @@ Widget _logMoodApp({
       if (reportProvider != null)
         ChangeNotifierProvider<ReportProvider>.value(value: reportProvider),
     ],
-    child: MaterialApp(home: LogMoodScreen(nowProvider: nowProvider)),
+    child: MaterialApp(
+      home: LogMoodScreen(
+        nowProvider: nowProvider,
+        expressionScreenBuilder: expressionScreenBuilder,
+      ),
+    ),
   );
 }
 
@@ -205,6 +303,10 @@ class _FakeMoodRepository extends MoodRepository {
   int? createdLevel;
   String? createdLabel;
   String? createdNote;
+  String? createdEntryMethod;
+  bool? createdExpressionAssistUsed;
+  bool? createdExpressionSuggestionAccepted;
+  String? createdExpressionModelVersion;
   String? fetchedUserId;
 
   @override
@@ -234,6 +336,10 @@ class _FakeMoodRepository extends MoodRepository {
     required int level,
     String? label,
     String? note,
+    String? entryMethod,
+    bool? expressionAssistUsed,
+    bool? expressionSuggestionAccepted,
+    String? expressionModelVersion,
     DateTime? now,
   }) async {
     if (throwsOnCreate) throw StateError('save failed');
@@ -241,6 +347,10 @@ class _FakeMoodRepository extends MoodRepository {
     createdLevel = level;
     createdLabel = label;
     createdNote = note;
+    createdEntryMethod = entryMethod;
+    createdExpressionAssistUsed = expressionAssistUsed;
+    createdExpressionSuggestionAccepted = expressionSuggestionAccepted;
+    createdExpressionModelVersion = expressionModelVersion;
     return DailyMoodSaveResult(
       mood: MoodModel(
         id: 'daily_user_1_20260707',

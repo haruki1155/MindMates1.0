@@ -30,6 +30,11 @@ function answersFrom(data: Record<string, unknown>): {kind: "quick" | "full"; va
 }
 
 export function migrateAssessmentData(data: Record<string, unknown>): Record<string, unknown> {
+  if (data.schemaVersion === "assessment_record_v4") {
+    // V4 records carry the catalog snapshot and server-derived result that
+    // reproduce the original submission. Never recalculate them as legacy.
+    return {...data};
+  }
   const role = roleFromPopulation(data.populationRole ?? data.role);
   if (!role) throw new Error("unsupported role");
   const source = answersFrom(data);

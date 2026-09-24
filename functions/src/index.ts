@@ -29,6 +29,28 @@ export {
 import {defineString} from "firebase-functions/params";
 import {randomBytes} from "node:crypto";
 import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
+import {
+  AppointmentSchedulingValidationError,
+  formatAppointmentTime,
+  validateAppointmentTimestamp,
+} from "./appointment_scheduling";
+import {
+  AppointmentAvailabilityValidationError,
+  canManagePaccAvailability,
+  validatePaccAppointmentAvailability,
+  validatePaccAvailabilityPayload,
+} from "./appointment_availability";
+import {
+  APPOINTMENT_ACTIVE_STATUSES,
+  canTransitionAppointment,
+  canonicalAppointmentStatus,
+} from "./appointment_lifecycle";
+import {
+  isReminderEligibleAppointmentStatus,
+  REMINDER_ELIGIBLE_APPOINTMENT_STATUSES,
+} from "./appointment_reminders";
+import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
+import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_intake";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -61,6 +83,7 @@ const secretChatProfiles = db.collection("secret_chat_profiles");
 const secretChatAliases = db.collection("secret_chat_aliases");
 const publicUserIds = db.collection("user_public_ids");
 const publicUserIdReservations = db.collection("public_user_id_reservations");
+const portalAppointmentQueue = db.collection("appointment_queue");
 
 const SECRET_CHAT_ALIAS_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/;
 const SECRET_CHAT_PHOTO_PATTERN = /^secret_chat_profiles\/([^/]+)\/avatar_[0-9]+\.(jpg|png)$/;
@@ -1434,6 +1457,25 @@ export const notifyPortalOfAppointment = onDocumentCreated(
   async (event) => notifyClinicalStaff("appointment", event.params.appointmentId),
 );
 
+// Keep the non-clinical PAACC queue current without granting portal staff a
+// direct read of sensitive appointment documents.
+export const syncPortalAppointmentQueue = onDocumentWritten(
+  {document: "appointments/{appointmentId}", retry: true},
+  async (event) => {
+    const queueDocument = portalAppointmentQueue.doc(event.params.appointmentId);
+    if (!event.data?.after.exists) {
+      await queueDocument.delete();
+      return;
+    }
+    await queueDocument.set(
+      portalAppointmentQueueProjection(
+        event.params.appointmentId,
+        event.data.after.data() ?? {},
+      ),
+    );
+  },
+);
+
 export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
   {document: "appointments/{appointmentId}", retry: true},
   async (event) => {
@@ -1507,7 +1549,7 @@ export const resolvePortalAppointmentNotifications = onDocumentUpdated(
   async (event) => {
     const before = String(event.data?.before.data()?.status ?? "").toLowerCase();
     const after = String(event.data?.after.data()?.status ?? "").toLowerCase();
-    const terminal = new Set(["completed", "complete", "declined", "cancelled", "canceled"]);
+    const terminal = new Set(["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow", "expired"]);
     if (terminal.has(after) && !terminal.has(before)) {
       await archiveResolvedPortalNotifications("appointment", event.params.appointmentId);
     }
@@ -1596,28 +1638,8 @@ export const archiveReadNotifications = onSchedule(
   },
 );
 
-const APPOINTMENT_ACTIVE_STATUSES = new Set(["requested", "confirmed", "reschedule_proposed"]);
-const APPOINTMENT_TERMINAL_STATUSES = new Set(["cancelled", "completed", "no_show", "declined"]);
-
-function canonicalAppointmentStatus(value: unknown): string {
-  const status = String(value ?? "").trim().toLowerCase();
-  if (status === "pending" || status === "upcoming" || status === "reschedule_required") return "requested";
-  return status;
-}
-
-function appointmentSlotId(timestamp: Timestamp, staffId = "pacc"): string {
+export function appointmentSlotId(timestamp: Pick<Timestamp, "toMillis">, staffId = "pacc"): string {
   return `${staffId}_${timestamp.toMillis()}`;
-}
-
-function callableMillis(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (value instanceof Timestamp) return value.toMillis();
-  if (value && typeof value === "object" && "_seconds" in value) {
-    const seconds = Number((value as {_seconds?: unknown})._seconds);
-    const nanos = Number((value as {_nanoseconds?: unknown})._nanoseconds ?? 0);
-    return Number.isFinite(seconds) ? seconds * 1000 + Math.floor(nanos / 1000000) : Number.NaN;
-  }
-  return Number(value ?? 0);
 }
 
 function createAppointmentEvent(transaction: FirebaseFirestore.Transaction, appointment: FirebaseFirestore.DocumentReference, type: string, actorId: string, previousStatus: string, newStatus: string, metadata: Record<string, unknown> = {}) {
@@ -1627,32 +1649,212 @@ function createAppointmentEvent(transaction: FirebaseFirestore.Transaction, appo
   });
 }
 
+/**
+ * Fields intentionally safe for the general PAACC scheduling queue. Keep this
+ * separate from the clinical appointment record: portal staff must never need
+ * a concern, contact information, demographics, or counseling history to run
+ * the front-desk schedule.
+ */
+export function portalAppointmentQueueProjection(
+  appointmentId: string,
+  appointment: FirebaseFirestore.DocumentData,
+): FirebaseFirestore.DocumentData {
+  return {
+    appointmentId,
+    studentDisplayName: String(appointment.fullName ?? "").trim(),
+    scheduledAt: appointment.scheduledAt ?? Timestamp.now(),
+    scheduledTime: String(appointment.scheduledTime ?? "").trim(),
+    status: String(appointment.status ?? "requested").trim().toLowerCase(),
+    assignedCounselor: String(appointment.counselorName ?? "").trim(),
+    isArchived: appointment.archivedAt != null,
+    sourceUpdatedAt: appointment.updatedAt ?? appointment.createdAt ?? Timestamp.now(),
+    projectedAt: FieldValue.serverTimestamp(),
+  };
+}
+
+export const refreshPortalAppointmentQueue = onCall(async (request) => {
+  const staffId = requireAuthenticatedUser(request);
+  const staff = await requireStaff(staffId);
+  if (staff.accessRole !== "portalStaff") {
+    throw new HttpsError("permission-denied", "PAACC staff access is required.");
+  }
+
+  const appointments = await db.collection("appointments").get();
+  const writer = db.bulkWriter();
+  for (const appointment of appointments.docs) {
+    writer.set(
+      portalAppointmentQueue.doc(appointment.id),
+      portalAppointmentQueueProjection(appointment.id, appointment.data()),
+    );
+  }
+  await writer.close();
+  return {refreshed: appointments.size};
+});
+
+export const savePaccAvailability = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  const actor = await requireStaff(actorId);
+  if (!canManagePaccAvailability(actor.accessRole)) {
+    throw new HttpsError("permission-denied", "Counselor or administrator access is required.");
+  }
+  let availability;
+  try {
+    availability = validatePaccAvailabilityPayload(request.data);
+  } catch (error: unknown) {
+    if (error instanceof AppointmentAvailabilityValidationError) {
+      throw new HttpsError("invalid-argument", error.message);
+    }
+    throw error;
+  }
+  const current = db.collection("pacc_availability").doc("current");
+  await db.runTransaction(async (transaction) => {
+    const before = await transaction.get(current);
+    transaction.set(current, {
+      ...availability,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+    writeAudit(transaction, db, {
+      actorId,
+      actorNameSnapshot: actorName(actor),
+      actorRoleSnapshot: actor.accessRole,
+      action: "SCHEDULE_UPDATED",
+      category: AUDIT_CATEGORIES.schedule,
+      targetType: "pacc_availability",
+      targetId: "current",
+      metadata: {
+        before: before.exists ? before.data() ?? null : null,
+        after: availability,
+      },
+    });
+  });
+  return {ok: true};
+});
+
+function manilaSlotMillis(date: string, minutes: number): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) throw new HttpsError("invalid-argument", "Choose a valid appointment date.");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const local = new Date(Date.UTC(year, month - 1, day, 0, minutes));
+  if (local.getUTCFullYear() !== year || local.getUTCMonth() !== month - 1 || local.getUTCDate() !== day) {
+    throw new HttpsError("invalid-argument", "Choose a valid appointment date.");
+  }
+  // Asia/Manila is UTC+08:00; scheduling already uses this canonical zone.
+  return local.getTime() - 8 * 60 * 60 * 1000;
+}
+
+export const getAvailableAppointmentSlots = onCall(async (request) => {
+  requireAuthenticatedUser(request);
+  const input = (request.data ?? {}) as Record<string, unknown>;
+  const date = String(input.date ?? "").trim();
+  const availabilitySnapshot = await db.collection("pacc_availability").doc("current").get();
+  const policySnapshot = await db.collection("appointment_policy").doc("current").get();
+  const policy = appointmentBookingPolicy(policySnapshot.exists ? policySnapshot.data() : null);
+  const slots: Array<{start: number; label: string}> = [];
+  for (let minutes = 0; minutes < 24 * 60; minutes += 60) {
+    const start = manilaSlotMillis(date, minutes);
+    try {
+      validateAppointmentTimestamp(start);
+      validatePaccAppointmentAvailability(start, availabilitySnapshot.exists ? availabilitySnapshot.data() : null);
+      if (bookingPolicyViolation(policy, start)) continue;
+    } catch (error) {
+      if (error instanceof AppointmentSchedulingValidationError || error instanceof AppointmentAvailabilityValidationError) continue;
+      throw error;
+    }
+    const occupied = await db.collection("appointment_slots").doc(appointmentSlotId(Timestamp.fromMillis(start))).get();
+    if (!occupied.exists) slots.push({start, label: formatAppointmentTime(start)});
+  }
+  return {date, slots};
+});
+
 export const createAppointmentRequest = onCall(async (request) => {
   const userId = requireAuthenticatedUser(request);
   const input = (request.data ?? {}) as Record<string, unknown>;
-  const scheduledMillis = callableMillis(input.scheduledAt);
-  const scheduledTime = String(input.scheduledTime ?? "").trim();
-  const concern = String(input.concern ?? "").trim();
-  if (!Number.isFinite(scheduledMillis) || scheduledMillis <= Date.now() || !scheduledTime || !concern) {
-    throw new HttpsError("invalid-argument", "Choose a future appointment time and provide a concern.");
+  const concern = boundedText(input.concern, "Concern", 2_000, {required: true});
+  let schedule: {millis: number; scheduledTime: string};
+  try {
+    schedule = validateAppointmentTimestamp(input.scheduledAt);
+  } catch (error: unknown) {
+    if (error instanceof AppointmentSchedulingValidationError) {
+      throw new HttpsError("invalid-argument", error.message);
+    }
+    throw error;
   }
-  const scheduledAt = Timestamp.fromMillis(scheduledMillis);
+  const scheduledAt = Timestamp.fromMillis(schedule.millis);
   const appointment = db.collection("appointments").doc();
+  const parentAppointmentId = boundedText(input.parentAppointmentId, "Parent appointment", 128);
   const slot = db.collection("appointment_slots").doc(appointmentSlotId(scheduledAt));
+  const availability = db.collection("pacc_availability").doc("current");
+  const policyDocument = db.collection("appointment_policy").doc("current");
+  const rateLimit = db.collection("_appointment_rate_limits").doc(userId);
   const profile = await db.collection("users").doc(userId).get();
   await db.runTransaction(async (transaction) => {
-    const occupied = await transaction.get(slot);
+    const parent = parentAppointmentId ? db.collection("appointments").doc(parentAppointmentId) : null;
+    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, parentSnapshot] = await Promise.all([
+      transaction.get(slot),
+      transaction.get(availability),
+      transaction.get(policyDocument),
+      transaction.get(db.collection("appointments").where("userId", "==", userId)),
+      transaction.get(rateLimit),
+      parent ? transaction.get(parent) : Promise.resolve(null),
+    ]);
+    if (parentSnapshot) {
+      const parentData = parentSnapshot.data();
+      if (!parentData || String(parentData.userId ?? "") !== userId ||
+          !["completed", "no_show", "cancelled", "declined", "expired"].includes(canonicalAppointmentStatus(parentData.status))) {
+        throw new HttpsError("permission-denied", "This follow-up appointment is unavailable.");
+      }
+    }
+    const policy = appointmentBookingPolicy(policySnapshot.exists ? policySnapshot.data() : null);
+    const policyError = bookingPolicyViolation(policy, schedule.millis);
+    if (policyError) throw new HttpsError("failed-precondition", policyError);
+    const statuses = existingAppointments.docs.map((item) => canonicalAppointmentStatus(item.data().status));
+    if (policy.maxActiveAppointments !== null && statuses.filter((status) => APPOINTMENT_ACTIVE_STATUSES.has(status)).length >= policy.maxActiveAppointments) {
+      throw new HttpsError("resource-exhausted", "You have reached the active appointment limit.");
+    }
+    if (policy.maxPendingAppointments !== null && statuses.filter((status) => status === "requested").length >= policy.maxPendingAppointments) {
+      throw new HttpsError("resource-exhausted", "You have reached the pending appointment limit.");
+    }
+    if (policy.rateLimitWindowMinutes !== null && policy.rateLimitCount !== null) {
+      const now = Timestamp.now();
+      const started = rateLimitSnapshot.data()?.windowStartedAt as Timestamp | undefined;
+      const withinWindow = started && now.toMillis() - started.toMillis() < policy.rateLimitWindowMinutes * 60_000;
+      const count = withinWindow ? Number(rateLimitSnapshot.data()?.count ?? 0) : 0;
+      if (count >= policy.rateLimitCount) throw new HttpsError("resource-exhausted", "Too many appointment requests. Please try again later.");
+      transaction.set(rateLimit, {windowStartedAt: withinWindow ? started : now, count: count + 1, updatedAt: FieldValue.serverTimestamp()});
+    }
     if (occupied.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
+    try {
+      validatePaccAppointmentAvailability(
+        schedule.millis,
+        availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
+      );
+    } catch (error: unknown) {
+      if (error instanceof AppointmentAvailabilityValidationError) {
+        throw new HttpsError("failed-precondition", error.message);
+      }
+      throw error;
+    }
     const source = profile.data() ?? {};
+    const profileName = String(
+      source.name ??
+          [source.firstName, source.middleName, source.lastName]
+            .filter((part) => typeof part === "string" && part.trim())
+            .join(" "),
+    ).trim();
     transaction.create(slot, {appointmentId: appointment.id, scheduledAt, createdAt: FieldValue.serverTimestamp()});
     transaction.create(appointment, {
-      userId, fullName: String(input.fullName ?? source.name ?? "").trim(),
-      contactNumber: String(input.contactNumber ?? source.phone ?? "").trim(), email: String(input.email ?? source.email ?? "").trim(),
-      preferredContactMethod: String(input.preferredContactMethod ?? "").trim(), concern,
-      bestTime: String(input.bestTime ?? "").trim(), location: String(input.location ?? "PACC Office, 2nd Floor, Main Building"),
-      scheduledAt, scheduledTime, status: "requested", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-      department: String(source.department ?? input.department ?? ""), academicYearId: String(input.academicYearId ?? ""),
-      age: input.age ?? null, address: String(input.address ?? ""), facebook: String(input.facebook ?? ""), sex: String(input.sex ?? ""), course: String(input.course ?? ""), yearLevel: String(input.yearLevel ?? ""), therapyBefore: String(input.therapyBefore ?? ""),
+      // Profile-derived identity wins over client payloads. Contact fields stay
+      // editable by design, with a profile value only as the initial fallback.
+      userId, fullName: boundedText(profileName || input.fullName, "Full name", 160),
+      contactNumber: appointmentPhone(input.contactNumber ?? source.phone), email: appointmentEmail(source.email ?? input.email),
+      preferredContactMethod: boundedText(input.preferredContactMethod, "Preferred contact method", 64), concern,
+      bestTime: boundedText(input.bestTime, "Preferred time", 120), location: boundedText(input.location ?? "PACC Office, 2nd Floor, Main Building", "Location", 200),
+      scheduledAt, scheduledTime: schedule.scheduledTime, status: "requested", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      department: boundedText(source.department ?? input.department, "Department", 160), academicYearId: boundedText(input.academicYearId, "Academic year", 80),
+      ...(parentAppointmentId ? {parentAppointmentId} : {}),
+      age: input.age ?? null, address: boundedText(input.address, "Address", 300), facebook: boundedText(input.facebook, "Social contact", 120), sex: boundedText(input.sex, "Sex", 32), course: boundedText(source.course ?? input.course, "Course", 160), yearLevel: boundedText(input.yearLevel, "Year level", 64), therapyBefore: boundedText(input.therapyBefore, "Counseling history", 500),
     });
     createAppointmentEvent(transaction, appointment, "appointment_requested", userId, "", "requested");
   });
@@ -1666,23 +1868,54 @@ export const respondToAppointment = onCall(async (request) => {
   const action = String(input.action ?? "").trim();
   if (!appointmentId || !["cancel", "accept_reschedule", "propose_reschedule"].includes(action)) throw new HttpsError("invalid-argument", "A valid appointment action is required.");
   const appointment = db.collection("appointments").doc(appointmentId);
+  const policyDocument = db.collection("appointment_policy").doc("current");
+  const availabilityDocument = db.collection("pacc_availability").doc("current");
   await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(appointment);
+    const [snapshot, policySnapshot, availabilitySnapshot] = await Promise.all([
+      transaction.get(appointment),
+      transaction.get(policyDocument),
+      transaction.get(availabilityDocument),
+    ]);
     if (!snapshot.exists || String(snapshot.data()?.userId ?? "") !== userId) throw new HttpsError("permission-denied", "This appointment is unavailable.");
     const data = snapshot.data()!;
     const before = canonicalAppointmentStatus(data.status);
     if (!APPOINTMENT_ACTIVE_STATUSES.has(before)) throw new HttpsError("failed-precondition", "This appointment can no longer be changed.");
     const notification = db.collection("notifications").doc();
     if (action === "cancel") {
-      transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason: String(input.reason ?? "").trim(), updatedAt: FieldValue.serverTimestamp()});
+      if (!canTransitionAppointment(before, "student", "cancelled")) {
+        throw new HttpsError("failed-precondition", "This appointment cannot be cancelled in its current state.");
+      }
+      const cutoff = appointmentBookingPolicy(
+        policySnapshot.exists ? policySnapshot.data() : null,
+      );
+      const cancellationReason = boundedText(input.reason, "Cancellation reason", 500);
+      if (cutoff.requireCancellationReason && !cancellationReason) {
+        throw new HttpsError("invalid-argument", "Provide a cancellation reason.");
+      }
+      const scheduledAt = data.scheduledAt as Timestamp;
+      if (cutoff.cancellationCutoffMinutes !== null && scheduledAt.toMillis() - Date.now() < cutoff.cancellationCutoffMinutes * 60_000) {
+        throw new HttpsError("failed-precondition", "This appointment is inside the cancellation cutoff window.");
+      }
+      transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason, updatedAt: FieldValue.serverTimestamp()});
       transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
       createAppointmentEvent(transaction, appointment, "appointment_cancelled", userId, before, "cancelled");
       if (data.assignedStaffId) transaction.create(notification, {userId: data.assignedStaffId, appointmentId, type: "appointment", title: "Appointment cancelled", body: "A student cancelled an appointment.", createdAt: FieldValue.serverTimestamp(), readAt: null});
       return;
     }
     if (action === "accept_reschedule") {
-      if (before !== "reschedule_proposed" || !data.proposedScheduledAt) throw new HttpsError("failed-precondition", "There is no active schedule proposal.");
+      if (!canTransitionAppointment(before, "student", "confirmed") || !data.proposedScheduledAt) throw new HttpsError("failed-precondition", "There is no active schedule proposal.");
       const proposedAt = data.proposedScheduledAt as Timestamp;
+      try {
+        validatePaccAppointmentAvailability(
+          proposedAt.toMillis(),
+          availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
+        );
+      } catch (error: unknown) {
+        if (error instanceof AppointmentAvailabilityValidationError) {
+          throw new HttpsError("failed-precondition", error.message);
+        }
+        throw error;
+      }
       const oldSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp));
       // Existing bookings reserve the shared PACC slot. Keep every lifecycle
       // transition on that same key until counselor-specific availability is
@@ -1695,10 +1928,15 @@ export const respondToAppointment = onCall(async (request) => {
       createAppointmentEvent(transaction, appointment, "reschedule_accepted", userId, before, "confirmed");
       return;
     }
-    if (before !== "confirmed") throw new HttpsError("failed-precondition", "Only confirmed appointments can be rescheduled.");
-    const millis = Number(input.proposedScheduledAt ?? 0); const time = String(input.proposedScheduledTime ?? "").trim();
-    if (!Number.isFinite(millis) || millis <= Date.now() || !time) throw new HttpsError("invalid-argument", "Choose a future proposed schedule.");
-    transaction.update(appointment, {status: "reschedule_proposed", proposedScheduledAt: Timestamp.fromMillis(millis), proposedScheduledTime: time, proposedBy: "student", proposalStatus: "awaiting_counselor", updatedAt: FieldValue.serverTimestamp()});
+    if (!canTransitionAppointment(before, "student", "reschedule_proposed")) throw new HttpsError("failed-precondition", "Only confirmed appointments can be rescheduled.");
+    let proposal: {millis: number; scheduledTime: string};
+    try {
+      proposal = validateAppointmentTimestamp(input.proposedScheduledAt);
+    } catch (error: unknown) {
+      if (error instanceof AppointmentSchedulingValidationError) throw new HttpsError("invalid-argument", error.message);
+      throw error;
+    }
+    transaction.update(appointment, {status: "reschedule_proposed", proposedScheduledAt: Timestamp.fromMillis(proposal.millis), proposedScheduledTime: proposal.scheduledTime, proposedBy: "student", proposalStatus: "awaiting_counselor", updatedAt: FieldValue.serverTimestamp()});
     createAppointmentEvent(transaction, appointment, "reschedule_proposed", userId, before, "reschedule_proposed");
   });
   return {ok: true};
@@ -1711,24 +1949,29 @@ export const reviewAppointment = onCall(async (request) => {
   const input = request.data as Record<string, unknown>;
   const appointmentId = String(input.appointmentId ?? "").trim();
   const action = String(input.action ?? "").trim();
-  const reply = String(input.reply ?? "").trim();
-  const proposedMillis = Number(input.proposedScheduledAt ?? 0);
-  const proposedTime = String(input.proposedScheduledTime ?? "").trim();
-  // Declined remains readable for legacy records, but is intentionally not a
-  // valid action for new appointment decisions.
+  const reply = boundedText(input.reply, "Reply", 1_000, {required: true});
+  let proposal: {millis: number; scheduledTime: string} | null = null;
   if (!appointmentId || !["confirmed", "declined", "reschedule_proposed", "completed", "no_show", "cancelled"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
-  if (!reply) throw new HttpsError("invalid-argument", "A reply to the student is required.");
-  if (action === "reschedule_proposed" && (!Number.isFinite(proposedMillis) || proposedMillis <= 0 || !proposedTime)) {
-    throw new HttpsError("invalid-argument", "A proposed date and time are required.");
+  if (action === "reschedule_proposed") {
+    try {
+      proposal = validateAppointmentTimestamp(input.proposedScheduledAt);
+    } catch (error: unknown) {
+      if (error instanceof AppointmentSchedulingValidationError) throw new HttpsError("invalid-argument", error.message);
+      throw error;
+    }
   }
 
   const appointment = db.collection("appointments").doc(appointmentId);
   const notification = db.collection("notifications").doc();
   const history = appointment.collection("history").doc();
+  const availabilityDocument = db.collection("pacc_availability").doc("current");
   await db.runTransaction(async (transaction) => {
-    const current = await transaction.get(appointment);
+    const [current, availabilitySnapshot] = await Promise.all([
+      transaction.get(appointment),
+      transaction.get(availabilityDocument),
+    ]);
     if (!current.exists) throw new HttpsError("not-found", "Appointment not found.");
     const data = current.data()!;
     // A counselor may claim an unassigned request while reviewing it. Once
@@ -1737,12 +1980,7 @@ export const reviewAppointment = onCall(async (request) => {
       throw new HttpsError("permission-denied", "This appointment is not assigned to your caseload.");
     }
     const before = canonicalAppointmentStatus(data.status);
-    const allowed = before === "confirmed"
-      ? ["completed", "no_show", "cancelled"]
-      : before === "reschedule_proposed"
-        ? ["confirmed", "reschedule_proposed", "cancelled"]
-        : ["confirmed", "declined", "reschedule_proposed", "cancelled"];
-    if (!APPOINTMENT_ACTIVE_STATUSES.has(before) || !allowed.includes(action)) {
+    if (!APPOINTMENT_ACTIVE_STATUSES.has(before) || !canTransitionAppointment(before, "staff", action)) {
       throw new HttpsError("failed-precondition", "This appointment has already been finalized.");
     }
     const userId = String(data.userId ?? "");
@@ -1750,6 +1988,17 @@ export const reviewAppointment = onCall(async (request) => {
     const staffName = String(staff.name ?? staff.email ?? "Counseling staff");
     const acceptingProposal = before === "reschedule_proposed" && action === "confirmed" && data.proposedScheduledAt instanceof Timestamp;
     if (acceptingProposal) {
+      try {
+        validatePaccAppointmentAvailability(
+          (data.proposedScheduledAt as Timestamp).toMillis(),
+          availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
+        );
+      } catch (error: unknown) {
+        if (error instanceof AppointmentAvailabilityValidationError) {
+          throw new HttpsError("failed-precondition", error.message);
+        }
+        throw error;
+      }
       const proposedSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.proposedScheduledAt as Timestamp));
       const occupied = await transaction.get(proposedSlot);
       if (occupied.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
@@ -1763,8 +2012,8 @@ export const reviewAppointment = onCall(async (request) => {
       staffReply: reply,
       reviewedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-      proposedScheduledAt: action === "reschedule_proposed" ? Timestamp.fromMillis(proposedMillis) : null,
-      proposedScheduledTime: action === "reschedule_proposed" ? proposedTime : "",
+      proposedScheduledAt: action === "reschedule_proposed" ? Timestamp.fromMillis(proposal!.millis) : null,
+      proposedScheduledTime: action === "reschedule_proposed" ? proposal!.scheduledTime : "",
       proposedBy: action === "reschedule_proposed" ? "counselor" : FieldValue.delete(),
       proposalStatus: action === "reschedule_proposed" ? "awaiting_student" : FieldValue.delete(),
       ...(acceptingProposal ? {scheduledAt: data.proposedScheduledAt, scheduledTime: data.proposedScheduledTime ?? "", reminders: {}} : {}),
@@ -1809,7 +2058,7 @@ export const reviewAppointment = onCall(async (request) => {
       targetId: appointmentId,
       metadata: {
         before: {status: before},
-        after: {status: action, ...(action === "reschedule_proposed" ? {date: new Date(proposedMillis).toISOString().slice(0, 10), time: proposedTime} : {})},
+        after: {status: action, ...(action === "reschedule_proposed" ? {date: new Date(proposal!.millis).toISOString().slice(0, 10), time: proposal!.scheduledTime} : {})},
       },
     });
   });
@@ -1830,7 +2079,7 @@ export const archiveAppointments = onCall(async (request) => {
       if (!snapshot.exists) throw new HttpsError("not-found", "One or more appointments could not be found.");
       const data = snapshot.data() ?? {};
       const status = String(data.status ?? "").toLowerCase().trim();
-      const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow"].includes(status);
+      const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow", "expired"].includes(status);
       if (!archived && !data.archivedAt) throw new HttpsError("failed-precondition", "Only archived appointments can be restored.");
       if (archived && !terminal) throw new HttpsError("failed-precondition", "Only finished appointments can be moved to history.");
       if (actor.accessRole === "counselor" && String(data.assignedStaffId ?? "") !== actorId) throw new HttpsError("permission-denied", "You can only manage your assigned appointments.");
@@ -1852,7 +2101,7 @@ export const archiveTerminalAppointment = onDocumentUpdated(
     const after = change.after.data();
     if (!after || after.archivedAt) return;
     const status = String(after.status ?? "").toLowerCase().trim();
-    const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow"].includes(status);
+    const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow", "expired"].includes(status);
     if (!terminal || String(before?.status ?? "").toLowerCase().trim() === status) return;
     await change.after.ref.update({archivedAt: FieldValue.serverTimestamp(), archivedBy: "system", updatedAt: FieldValue.serverTimestamp()});
   },
@@ -1938,12 +2187,14 @@ export const sendAppointmentReminders = onSchedule(
     const now = Timestamp.now();
     const lower = Timestamp.fromMillis(now.toMillis() + 45 * 60 * 1000);
     const upper = Timestamp.fromMillis(now.toMillis() + (24 * 60 + 15) * 60 * 1000);
-    const candidates = await db.collection("appointments")
-      .where("status", "==", "confirmed")
-      .where("scheduledAt", ">=", lower)
-      .where("scheduledAt", "<=", upper)
-      .get();
-    await Promise.all(candidates.docs.flatMap((appointment) => REMINDER_WINDOWS.map(async ({key, minutes}) => {
+    const candidateSnapshots = await Promise.all(
+      REMINDER_ELIGIBLE_APPOINTMENT_STATUSES.map((status) => db.collection("appointments")
+        .where("status", "==", status)
+        .where("scheduledAt", ">=", lower)
+        .where("scheduledAt", "<=", upper)
+        .get()),
+    );
+    await Promise.all(candidateSnapshots.flatMap((snapshot) => snapshot.docs).flatMap((appointment) => REMINDER_WINDOWS.map(async ({key, minutes}) => {
       const data = appointment.data();
       const scheduledAt = data.scheduledAt;
       if (!(scheduledAt instanceof Timestamp)) return;
@@ -1955,7 +2206,7 @@ export const sendAppointmentReminders = onSchedule(
         await db.runTransaction(async (transaction) => {
           const fresh = await transaction.get(appointment.ref);
           const current = fresh.data() ?? {};
-          if (canonicalAppointmentStatus(current.status) !== "confirmed" || current.reminders?.[key]) return;
+          if (!isReminderEligibleAppointmentStatus(current.status) || current.reminders?.[key]) return;
           transaction.create(notification, {
             userId: String(current.userId ?? ""), appointmentId: appointment.id,
             type: "appointment_reminder", title: "PACC Appointment Reminder",
@@ -1969,5 +2220,43 @@ export const sendAppointmentReminders = onSchedule(
         if (code !== "6" && code !== "already-exists") throw error;
       }
     })));
+  },
+);
+
+/** Expires only configured, still-unreviewed requests and releases their slot. */
+export const expireStaleAppointmentRequests = onSchedule(
+  {schedule: "every 60 minutes", timeZone: "Asia/Manila", retryCount: 3},
+  async () => {
+    const policySnapshot = await db.collection("appointment_policy").doc("current").get();
+    const hours = appointmentBookingPolicy(policySnapshot.exists ? policySnapshot.data() : null).staleRequestExpiryHours;
+    if (hours === null) return;
+    const cutoff = Timestamp.fromMillis(Date.now() - hours * 60 * 60 * 1000);
+    const candidates = await db.collection("appointments")
+      .where("status", "==", "requested")
+      .where("createdAt", "<=", cutoff)
+      .limit(400)
+      .get();
+    await Promise.all(candidates.docs.map(async (appointment) => {
+      await db.runTransaction(async (transaction) => {
+        const current = await transaction.get(appointment.ref);
+        const data = current.data();
+        if (!data || canonicalAppointmentStatus(data.status) !== "requested" ||
+            !(data.createdAt instanceof Timestamp) || data.createdAt.toMillis() > cutoff.toMillis()) return;
+        const userId = String(data.userId ?? "");
+        transaction.update(appointment.ref, {
+          status: "expired", expiredAt: FieldValue.serverTimestamp(),
+          expiryReason: "Request expired before PAACC review", updatedAt: FieldValue.serverTimestamp(),
+        });
+        if (data.scheduledAt instanceof Timestamp) {
+          transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt)));
+        }
+        createAppointmentEvent(transaction, appointment.ref, "appointment_expired", "system", "requested", "expired");
+        if (userId) transaction.create(db.collection("notifications").doc(), {
+          userId, appointmentId: appointment.id, type: "appointment_expired",
+          title: "Appointment request expired", body: "Your PACC appointment request was not reviewed in time. Please book a new appointment.",
+          createdAt: FieldValue.serverTimestamp(), readAt: null,
+        });
+      });
+    }));
   },
 );

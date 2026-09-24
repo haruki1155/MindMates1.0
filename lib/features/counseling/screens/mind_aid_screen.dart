@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/constants/app_assets.dart';
@@ -66,7 +68,6 @@ class MindAidScreen extends StatefulWidget {
     this.isAssistantTyping = false,
     this.onSendMessage,
     this.onSuggestionSelected,
-    this.onHomeTap,
     this.onNotificationTap,
     this.onActionSelected,
     this.onFeedback,
@@ -83,7 +84,6 @@ class MindAidScreen extends StatefulWidget {
   final bool isAssistantTyping;
   final ValueChanged<String>? onSendMessage;
   final ValueChanged<MindAidSuggestion>? onSuggestionSelected;
-  final VoidCallback? onHomeTap;
   final VoidCallback? onNotificationTap;
   final ValueChanged<MindAidAction>? onActionSelected;
   final MindAidFeedbackCallback? onFeedback;
@@ -135,6 +135,9 @@ class _MindAidScreenState extends State<MindAidScreen> {
     return Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: _MindAidColors.background,
+      bottomNavigationBar: const MindMateBottomNavigation(
+        active: MindMateNavDestination.message,
+      ),
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -142,7 +145,6 @@ class _MindAidScreenState extends State<MindAidScreen> {
             _AnimatedMindAidSection(
               delay: 0,
               child: _MindAidHeader(
-                onHomeTap: widget.onHomeTap,
                 onNotificationTap: widget.onNotificationTap,
                 onClearHistory: widget.onClearHistory,
                 onNewConversation: widget.onNewConversation,
@@ -186,14 +188,12 @@ class _MindAidScreenState extends State<MindAidScreen> {
 
 class _MindAidHeader extends StatelessWidget {
   const _MindAidHeader({
-    this.onHomeTap,
     this.onNotificationTap,
     this.onClearHistory,
     this.onNewConversation,
     this.onPrivacyTap,
   });
 
-  final VoidCallback? onHomeTap;
   final VoidCallback? onNotificationTap;
   final VoidCallback? onClearHistory;
   final VoidCallback? onNewConversation;
@@ -220,21 +220,6 @@ class _MindAidHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Tooltip(
-            message: 'Back to Home',
-            child: IconButton(
-              onPressed: onHomeTap,
-              style: IconButton.styleFrom(
-                minimumSize: const Size.square(40),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              icon: const Icon(
-                Icons.home_rounded,
-                color: _MindAidColors.deepText,
-                size: 24,
-              ),
-            ),
-          ),
           PopupMenuButton<String>(
             tooltip: 'MindAid options',
             onSelected: (value) {

@@ -6,6 +6,7 @@ import '../database/firestore_collections.dart';
 import '../features/quick_assessment/models/quick_assessment_models.dart';
 import '../features/student_assessment/models/student_assessment_models.dart';
 import '../features/student_assessment/data/student_assessment_questions.dart';
+import '../features/student_assessment/data/student_assessment_v4_questions.dart';
 import '../services/firebase/firebase_callable_router.dart';
 import '../services/firebase/firebase_runtime_diagnostics.dart';
 import '../services/firebase/firestore_service.dart';
@@ -160,6 +161,30 @@ class AssessmentRepository {
     );
 
     return payload;
+  }
+
+  /// V4 results are derived only by the callable backend. This is deliberately
+  /// staging-gated until the approved pilot is released to production.
+  Future<Map<String, Object>> saveStudentV4Assessment({
+    required String userId,
+    required List<StudentAssessmentAnswer> answers,
+    required String submissionId,
+  }) async {
+    if (!AppEnvironmentConfig.isStaging) {
+      throw StateError('Student Well-Being V4 is enabled for staging only.');
+    }
+    final response = await _stagingFunctions
+        .routedCallable('submitFullAssessment')
+        .call({
+          'submissionId': submissionId,
+          'instrumentVersion': StudentAssessmentV4Questions.instrumentVersion,
+          'answers': [for (final answer in answers) answer.toV4Json()],
+        });
+    FirebaseRuntimeDiagnostics.log(
+      event: 'student_v4_assessment_submitted',
+      correlationId: _correlationId(response.data),
+    );
+    return _objectMap(response.data);
   }
 
   Future<void> saveAssessmentClarityFeedback({

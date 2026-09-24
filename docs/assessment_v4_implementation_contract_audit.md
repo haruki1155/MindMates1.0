@@ -2,10 +2,11 @@
 
 ## Decision
 
-**Not ready to implement the v4 question bank yet.** The positive-psychology
-proposal defines content and broad presentation rules, but it does not yet define the
-immutable data and algorithm contract needed to safely implement, audit, and preserve
-assessment results.
+**Approved for staging implementation and pilot only.** The client approved the
+four-response agreement vocabulary on 2026-09-21. This contract now defines the
+immutable data and algorithm requirements for Student V4. The professional review,
+pilot, and production release gates in the positive-psychology proposal remain
+required; this approval does not describe V4 as a validated psychological test.
 
 This audit is based on the current Flutter app, Firestore rules, Cloud Functions, and
 the existing `experimental_role_based_v3` contract.

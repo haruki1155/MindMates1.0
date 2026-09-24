@@ -6,10 +6,8 @@ import '../services/firebase/firestore_service.dart';
 import '../services/firebase/firebase_callable_router.dart';
 
 class AppointmentRepository {
-  AppointmentRepository({
-    FirestoreService? firestoreService,
-    this._functions,
-  }) : _firestoreService = firestoreService ?? FirestoreService();
+  AppointmentRepository({FirestoreService? firestoreService, this._functions})
+    : _firestoreService = firestoreService ?? FirestoreService();
 
   final FirestoreService _firestoreService;
   FirebaseFunctions? _functions;
@@ -32,6 +30,22 @@ class AppointmentRepository {
                 )
                 .toList(growable: false),
           );
+
+  Future<List<AppointmentSlot>> getAvailableSlots(DateTime date) async {
+    final day =
+        '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+    final result = await _functionClient
+        .routedCallable('getAvailableAppointmentSlots')
+        .call<Map<String, dynamic>>({'date': day});
+    final slots = result.data['slots'];
+    if (slots is! List) return const [];
+    return slots
+        .whereType<Map>()
+        .map(
+          (slot) => AppointmentSlot.fromJson(Map<String, dynamic>.from(slot)),
+        )
+        .toList(growable: false);
+  }
 
   Future<List<AppointmentModel>> fetchAppointments(String userId) {
     return _firestoreService
@@ -62,6 +76,9 @@ class AppointmentRepository {
       ..['scheduledAt'] = appointment.scheduledAt.millisecondsSinceEpoch
       ..remove('createdAt')
       ..remove('updatedAt');
+    if ((appointment.parentAppointmentId ?? '').trim().isNotEmpty) {
+      payload['parentAppointmentId'] = appointment.parentAppointmentId!.trim();
+    }
     final result = await _functionClient
         .routedCallable('createAppointmentRequest')
         .call<Map<String, dynamic>>(payload);
@@ -104,4 +121,20 @@ class AppointmentRepository {
     'proposedScheduledAt': ?proposedScheduledAt,
     'proposedScheduledTime': ?proposedScheduledTime,
   });
+}
+
+class AppointmentSlot {
+  const AppointmentSlot({required this.start, required this.label});
+  final DateTime start;
+  final String label;
+
+  factory AppointmentSlot.fromJson(Map<String, dynamic> json) {
+    final start = json['start'];
+    return AppointmentSlot(
+      start: DateTime.fromMillisecondsSinceEpoch(
+        start is num ? start.toInt() : int.parse('$start'),
+      ),
+      label: json['label']?.toString() ?? '',
+    );
+  }
 }

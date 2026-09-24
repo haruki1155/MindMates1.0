@@ -93,6 +93,9 @@ class _AssessmentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (assessment['schemaVersion'] == 'assessment_record_v4') {
+      return _V4AssessmentCard(assessment: assessment, previous: previous);
+    }
     final interpretation = _map(assessment['interpretation']);
     if (interpretation == null) {
       return Card(
@@ -325,6 +328,189 @@ class _AssessmentCard extends StatelessWidget {
               icon: Icons.info_outline,
               message:
                   'This university wellness-awareness screening is not a diagnosis and does not replace professional clinical judgment.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _V4AssessmentCard extends StatelessWidget {
+  const _V4AssessmentCard({required this.assessment, this.previous});
+
+  final Map<String, dynamic> assessment;
+  final Map<String, dynamic>? previous;
+
+  @override
+  Widget build(BuildContext context) {
+    final instrument =
+        _map(assessment['instrument']) ?? const <String, dynamic>{};
+    final result = _map(assessment['result']) ?? const <String, dynamic>{};
+    final interpretation =
+        _map(assessment['interpretation']) ?? const <String, dynamic>{};
+    final quality =
+        _map(result['responseQuality']) ?? const <String, dynamic>{};
+    final domains = _maps(result['domainResults']);
+    final compatible =
+        previous?['schemaVersion'] == 'assessment_record_v4' &&
+        _map(previous?['instrument'])?['version'] == instrument['version'];
+    return Card(
+      child: Padding(
+        padding: EdgeInsets.all(
+          MediaQuery.sizeOf(context).width < 600 ? 18 : 28,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _MetadataChip(
+                  icon: Icons.assignment_outlined,
+                  label: 'Student well-being reflection',
+                ),
+                _MetadataChip(
+                  icon: Icons.calendar_today_outlined,
+                  label: _date(
+                    assessment['submittedAt'] ?? assessment['createdAt'],
+                  ),
+                ),
+                _MetadataChip(
+                  icon: Icons.verified_outlined,
+                  label:
+                      assessment['verificationStatus']?.toString() ??
+                      'Verification unavailable',
+                ),
+                _MetadataChip(
+                  icon: Icons.history_outlined,
+                  label:
+                      instrument['version']?.toString() ??
+                      'Version unavailable',
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            Text(
+              _v4ProfileLabel(result['profileStatus']?.toString()),
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                fontSize: 25,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 9),
+            Text(
+              interpretation['studentSummary']?.toString() ??
+                  'Stored V4 result is available.',
+              style: const TextStyle(
+                color: AdminColors.muted,
+                fontSize: 15,
+                height: 1.55,
+              ),
+            ),
+            const SizedBox(height: 18),
+            _GuidanceCallout(
+              message:
+                  interpretation['disclaimer']?.toString() ??
+                  'This reflection profile is not a diagnosis.',
+            ),
+            const Divider(height: 48),
+            const _SectionHeading(
+              title: 'Response quality',
+              description:
+                  'The V4 result is computed by the server from the stored immutable item set.',
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '${quality['answered'] ?? 0} of ${quality['presented'] ?? 50} answered · ${quality['confidence'] ?? 'unavailable'}',
+            ),
+            const SizedBox(height: 28),
+            const _SectionHeading(
+              title: 'Well-being areas',
+              description:
+                  'Versioned reflection statuses; internal concern values are intentionally not shown here.',
+            ),
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, box) {
+                final width = box.maxWidth >= 760
+                    ? (box.maxWidth - 12) / 2
+                    : box.maxWidth;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: domains
+                      .map(
+                        (domain) => SizedBox(
+                          width: width,
+                          child: _AreaPanel(
+                            name: _v4DomainLabel(
+                              domain['domainId']?.toString(),
+                            ),
+                            pattern: _v4DomainStatusLabel(
+                              domain['status']?.toString(),
+                            ),
+                            completion:
+                                '${domain['answeredCount'] ?? 0}/${domain['presentedCount'] ?? 10} answered',
+                            explanation: domain['isScorable'] == true
+                                ? 'This area has enough responses for the stored reflection status.'
+                                : 'More responses are needed before this area can be interpreted.',
+                          ),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
+            const SizedBox(height: 28),
+            LayoutBuilder(
+              builder: (context, box) {
+                final width = box.maxWidth >= 760
+                    ? (box.maxWidth - 12) / 2
+                    : box.maxWidth;
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    SizedBox(
+                      width: width,
+                      child: _InsightPanel(
+                        icon: Icons.check_circle_outline,
+                        title: 'Current strengths',
+                        values: _strings(interpretation['strengthInsights']),
+                      ),
+                    ),
+                    SizedBox(
+                      width: width,
+                      child: _InsightPanel(
+                        icon: Icons.explore_outlined,
+                        title: 'Areas to explore',
+                        values: _strings(interpretation['focusInsights']),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            if (!compatible)
+              const _MutedNotice(
+                message:
+                    'Trend comparison is unavailable because there is no preceding V4 assessment with the same instrument version.',
+              ),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text(
+                'Authorized raw responses',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+              ),
+              subtitle: const Text('Restricted clinical review information'),
+              children: [
+                SelectableText(
+                  (assessment['responses'] ?? const []).toString(),
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                ),
+              ],
             ),
           ],
         ),
@@ -708,6 +894,31 @@ String _assessmentType(Map<String, dynamic> assessment) {
   final type = assessment['type']?.toString().toLowerCase() ?? '';
   return type == 'quick' ? 'Quick Assessment' : 'Psychological Assessment';
 }
+
+String _v4ProfileLabel(String? value) => switch (value) {
+  'generallySupported' => 'Well-being appears generally supported.',
+  'mostlySupported' => 'Mostly supported, with an area to explore.',
+  'someAreasNeedAttention' => 'Some areas may benefit from attention.',
+  'supportMayHelp' => 'Support may be helpful right now.',
+  _ => 'More responses are needed for a complete profile.',
+};
+
+String _v4DomainLabel(String? value) => switch (value) {
+  'academic' => 'Academic',
+  'financial' => 'Financial',
+  'socialAdjustment' => 'Social Adjustment',
+  'sleepRest' => 'Sleep and Rest',
+  'emotionalWellbeing' => 'Emotional Well-Being',
+  _ => 'Well-being area',
+};
+
+String _v4DomainStatusLabel(String? value) => switch (value) {
+  'supported' => 'Supported at present',
+  'mostlySupported' => 'Mostly supported; some areas to explore',
+  'someStrain' => 'Some strain indicated',
+  'supportMayHelp' => 'Support may be helpful',
+  _ => 'More responses needed',
+};
 
 String _abbreviate(String value) {
   if (value.length <= 18) return value;

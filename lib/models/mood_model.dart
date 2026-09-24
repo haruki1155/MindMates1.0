@@ -10,6 +10,10 @@ class MoodModel {
     this.note,
     this.dateKey,
     this.timezone,
+    this.entryMethod,
+    this.expressionAssistUsed,
+    this.expressionSuggestionAccepted,
+    this.expressionModelVersion,
   });
 
   final String id;
@@ -20,6 +24,10 @@ class MoodModel {
   final String? note;
   final String? dateKey;
   final String? timezone;
+  final String? entryMethod;
+  final bool? expressionAssistUsed;
+  final bool? expressionSuggestionAccepted;
+  final String? expressionModelVersion;
 
   factory MoodModel.fromJson(Map<String, dynamic> json, {String? id}) {
     return MoodModel(
@@ -30,6 +38,11 @@ class MoodModel {
       note: json['note']?.toString(),
       dateKey: json['dateKey']?.toString(),
       timezone: json['timezone']?.toString(),
+      entryMethod: json['entryMethod']?.toString(),
+      expressionAssistUsed: json['expressionAssistUsed'] as bool?,
+      expressionSuggestionAccepted:
+          json['expressionSuggestionAccepted'] as bool?,
+      expressionModelVersion: json['expressionModelVersion']?.toString(),
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
     );
   }
@@ -42,6 +55,13 @@ class MoodModel {
       'note': note ?? '',
       'dateKey': dateKey ?? '',
       'timezone': timezone ?? '',
+      if (entryMethod != null) 'entryMethod': entryMethod,
+      if (expressionAssistUsed != null)
+        'expressionAssistUsed': expressionAssistUsed,
+      if (expressionSuggestionAccepted != null)
+        'expressionSuggestionAccepted': expressionSuggestionAccepted,
+      if (expressionModelVersion != null)
+        'expressionModelVersion': expressionModelVersion,
       'createdAt': createdAt,
     };
   }

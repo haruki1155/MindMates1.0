@@ -32,6 +32,7 @@ class PaccAvailabilityModel {
     required this.presence,
     required this.acceptsWalkIns,
     this.notice = '',
+    this.blackoutDates = const [],
     this.updatedAt,
   });
 
@@ -41,6 +42,7 @@ class PaccAvailabilityModel {
   final CounselorPresence presence;
   final bool acceptsWalkIns;
   final String notice;
+  final List<String> blackoutDates;
   final DateTime? updatedAt;
 
   factory PaccAvailabilityModel.fromJson(Map<String, dynamic> json) =>
@@ -54,6 +56,10 @@ class PaccAvailabilityModel {
         presence: CounselorPresence.parse(json['presence']),
         acceptsWalkIns: json['acceptsWalkIns'] == true,
         notice: json['notice']?.toString().trim() ?? '',
+        blackoutDates: (json['blackoutDates'] as List? ?? const [])
+            .map((value) => value.toString().trim())
+            .where((value) => RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value))
+            .toList(),
         updatedAt: dateTimeFromFirestore(json['updatedAt']),
       );
 
@@ -64,6 +70,7 @@ class PaccAvailabilityModel {
     'presence': presence.storedValue,
     'acceptsWalkIns': acceptsWalkIns,
     'notice': notice,
+    'blackoutDates': blackoutDates,
   };
 
   bool isOpenAt(DateTime now) {

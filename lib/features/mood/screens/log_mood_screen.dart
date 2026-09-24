@@ -2,8 +2,12 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 
+import '../expression_check_in/expression_check_in_screen.dart';
+import '../expression_check_in/expression_scan_logic.dart';
+import '../expression_check_in/tflite_expression_classifier.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/mood_provider.dart';
 import '../../../providers/report_provider.dart';
@@ -11,11 +15,17 @@ import '../../../providers/user_provider.dart';
 import '../../../models/mood_model.dart';
 import '../../../repositories/mood_repository.dart';
 
+const bool _expressionCheckInEnabled = true;
+
 class LogMoodScreen extends StatefulWidget {
-  const LogMoodScreen({super.key, DateTime Function()? nowProvider})
-    : _nowProvider = nowProvider ?? DateTime.now;
+  const LogMoodScreen({
+    super.key,
+    DateTime Function()? nowProvider,
+    this.expressionScreenBuilder,
+  }) : _nowProvider = nowProvider ?? DateTime.now;
 
   final DateTime Function() _nowProvider;
+  final WidgetBuilder? expressionScreenBuilder;
 
   @override
   State<LogMoodScreen> createState() => _LogMoodScreenState();
@@ -25,6 +35,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     with WidgetsBindingObserver {
   final TextEditingController _noteController = TextEditingController();
   _MoodChoice? _selectedMood;
+  ExpressionCue? _expressionCue;
+  ExpressionCueSource? _expressionCueSource;
+  bool? _expressionSuggestionAccepted;
   int _noteLength = 0;
   bool _isSaving = false;
   bool _isLoadingToday = false;
@@ -142,6 +155,31 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           isEnabled: !_isSaving,
           onSelected: (mood) => setState(() => _selectedMood = mood),
         ),
+        if (_expressionCheckInEnabled &&
+            !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.android ||
+                defaultTargetPlatform == TargetPlatform.iOS)) ...[
+          const SizedBox(height: 18),
+          _ExpressionCheckInEntry(
+            enabled: !_isSaving,
+            onPressed: _openExpressionCheckIn,
+          ),
+          if (_expressionCue != null) ...[
+            const SizedBox(height: 12),
+            _ExpressionCueCard(
+              cue: _expressionCue!,
+              onAccepted: _acceptExpressionSuggestion,
+              onRejected: () => setState(() {
+                _expressionSuggestionAccepted = false;
+              }),
+              onSkipped: () => setState(() {
+                _expressionCue = null;
+                _expressionCueSource = null;
+                _expressionSuggestionAccepted = null;
+              }),
+            ),
+          ],
+        ],
         const SizedBox(height: 18),
         _ThoughtsBox(
           controller: _noteController,
@@ -150,12 +188,41 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         ),
         const SizedBox(height: 18),
         _SaveMoodButton(
-          isEnabled: _selectedMood != null && !_isSaving,
+          isEnabled:
+              _selectedMood != null &&
+              !_isSaving &&
+              (_expressionCue == null || _expressionSuggestionAccepted != null),
           isSaving: _isSaving,
           onPressed: _saveMood,
         ),
       ],
     );
+  }
+
+  Future<void> _openExpressionCheckIn() async {
+    final result = await Navigator.of(context).push<ExpressionCheckInResult>(
+      MaterialPageRoute(
+        builder:
+            widget.expressionScreenBuilder ??
+            (_) => const ExpressionCheckInScreen(),
+      ),
+    );
+    if (!mounted || result?.completed != true || result?.cue == null) return;
+    setState(() {
+      _expressionCue = result!.cue;
+      _expressionCueSource = result.source;
+      _expressionSuggestionAccepted = null;
+    });
+  }
+
+  void _acceptExpressionSuggestion() {
+    final cue = _expressionCue;
+    if (cue == null) return;
+    final suggestion = _suggestedMoodFor(cue);
+    setState(() {
+      _expressionSuggestionAccepted = true;
+      if (suggestion != null) _selectedMood = suggestion;
+    });
   }
 
   Future<void> _loadTodayMood(String userId) async {
@@ -198,6 +265,14 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       level: mood.level,
       label: mood.label,
       note: _noteController.text,
+      entryMethod: _expressionCue == null ? null : 'expression_assisted',
+      expressionAssistUsed: _expressionCue == null ? null : true,
+      expressionSuggestionAccepted: _expressionCue == null
+          ? null
+          : _expressionSuggestionAccepted,
+      expressionModelVersion: _expressionCueSource == ExpressionCueSource.tflite
+          ? TfliteExpressionClassifier.modelVersion
+          : null,
       now: referenceNow,
     );
 
@@ -223,6 +298,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _isSaving = false;
       _todayMood = moodProvider.todayMood;
       _selectedMood = null;
+      _expressionCue = null;
+      _expressionCueSource = null;
+      _expressionSuggestionAccepted = null;
       _noteController.clear();
       _noteLength = 0;
       _todayError = null;
@@ -245,6 +323,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       setState(() {
         _todayMood = null;
         _selectedMood = null;
+        _expressionCue = null;
+        _expressionCueSource = null;
+        _expressionSuggestionAccepted = null;
         _noteController.clear();
       });
       final userId = _currentUserId();
@@ -278,6 +359,126 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
   }
+}
+
+class _ExpressionCheckInEntry extends StatelessWidget {
+  const _ExpressionCheckInEntry({
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: MoodLogPalette.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: MoodLogPalette.softBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          OutlinedButton.icon(
+            onPressed: enabled ? onPressed : null,
+            icon: const Icon(Icons.camera_alt_outlined),
+            label: const Text('Check expression with camera'),
+          ),
+          const SizedBox(height: 6),
+          const Text('Optional. Your camera image is not saved.'),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExpressionCueCard extends StatelessWidget {
+  const _ExpressionCueCard({
+    required this.cue,
+    required this.onAccepted,
+    required this.onRejected,
+    required this.onSkipped,
+  });
+
+  final ExpressionCue cue;
+  final VoidCallback onAccepted;
+  final VoidCallback onRejected;
+  final VoidCallback onSkipped;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: MoodLogPalette.greenSoft,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _expressionCueMessage(cue),
+            style: const TextStyle(
+              color: MoodLogPalette.ink,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text('Does this match how you feel?'),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton(
+                onPressed: onAccepted,
+                child: const Text('Yes, somewhat'),
+              ),
+              OutlinedButton(
+                onPressed: onRejected,
+                child: const Text('Not really'),
+              ),
+              TextButton(onPressed: onSkipped, child: const Text('Skip')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _expressionCueMessage(ExpressionCue cue) => switch (cue) {
+  ExpressionCue.positiveLike => 'Your visible expression appeared more upbeat.',
+  ExpressionCue.neutralLike =>
+    'Your visible expression appeared fairly neutral.',
+  ExpressionCue.subduedLike =>
+    'Your visible expression appeared a little subdued.',
+  ExpressionCue.tenseLike => 'Your visible expression appeared more tense.',
+  ExpressionCue.surprisedLike =>
+    'Your visible expression appeared more surprised.',
+  ExpressionCue.smiling => 'Smiling expression detected',
+  ExpressionCue.noStrongExpression => 'No strong expression detected',
+  ExpressionCue.unclear => 'Expression unclear',
+};
+
+_MoodChoice? _suggestedMoodFor(ExpressionCue cue) {
+  final label = switch (cue) {
+    ExpressionCue.positiveLike || ExpressionCue.smiling => 'Great',
+    ExpressionCue.neutralLike || ExpressionCue.noStrongExpression => 'Okay',
+    ExpressionCue.subduedLike => 'Sad',
+    ExpressionCue.tenseLike => 'Stressed',
+    _ => null,
+  };
+  if (label == null) return null;
+  for (final choice in _moodChoices) {
+    if (choice.label == label) return choice;
+  }
+  return null;
 }
 
 class _MoodLoadError extends StatelessWidget {

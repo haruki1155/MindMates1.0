@@ -45,7 +45,6 @@ class _SecretChatPageState extends State<SecretChatPage> {
       onFetchComments: provider.fetchComments,
       onAddComment: _addComment,
       onRetry: provider.loadPosts,
-      onBack: () => Navigator.of(context).maybePop(),
       onProfile: () =>
           Navigator.pushNamed(context, RouteNames.secretChatProfile),
       onPostOpened: provider.recordUniqueRead,

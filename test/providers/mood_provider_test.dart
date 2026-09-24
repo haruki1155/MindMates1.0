@@ -8,12 +8,7 @@ void main() {
     final now = DateTime(2026, 7, 7, 12);
     final repository = _FakeMoodRepository(
       recentMoods: [
-        MoodModel(
-          id: 'incomplete',
-          userId: 'user_1',
-          level: 2,
-          createdAt: now,
-        ),
+        MoodModel(id: 'incomplete', userId: 'user_1', level: 2, createdAt: now),
       ],
     );
     final provider = MoodProvider(repository, nowProvider: () => now);
@@ -34,11 +29,7 @@ void main() {
     final repository = _FakeMoodRepository();
     final provider = MoodProvider(repository, nowProvider: () => now);
 
-    await provider.logDailyMood(
-      userId: 'user_1',
-      level: 3,
-      label: 'Okay',
-    );
+    await provider.logDailyMood(userId: 'user_1', level: 3, label: 'Okay');
     expect(provider.todayMood, isNotNull);
 
     now = DateTime(2026, 7, 8, 12);
@@ -131,6 +122,10 @@ class _FakeMoodRepository extends MoodRepository {
     required int level,
     String? label,
     String? note,
+    String? entryMethod,
+    bool? expressionAssistUsed,
+    bool? expressionSuggestionAccepted,
+    String? expressionModelVersion,
     DateTime? now,
   }) async {
     final instant = now ?? DateTime(2026, 7, 7, 12);

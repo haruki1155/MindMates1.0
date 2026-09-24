@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/mindmate_bottom_navigation.dart';
+
 import '../../../models/secret_chat_model.dart';
 import 'secret_chat_thread_screen.dart';
 import '../widgets/secret_chat_background.dart';
@@ -35,7 +37,6 @@ class SecretChatScreen extends StatefulWidget {
     required this.onFetchComments,
     required this.onAddComment,
     required this.onRetry,
-    required this.onBack,
     this.onProfile,
     this.onPostOpened,
     this.onRetryPost,
@@ -58,7 +59,6 @@ class SecretChatScreen extends StatefulWidget {
   final Future<List<SecretChatComment>> Function(String postId) onFetchComments;
   final AddSecretComment onAddComment;
   final VoidCallback onRetry;
-  final VoidCallback onBack;
   final VoidCallback? onProfile;
   final Future<void> Function(String postId)? onPostOpened;
   final Future<void> Function(String postId)? onRetryPost;
@@ -91,6 +91,9 @@ class _SecretChatScreenState extends State<SecretChatScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: SecretChatPalette.background,
+      bottomNavigationBar: const MindMateBottomNavigation(
+        active: MindMateNavDestination.secretChat,
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: widget.canCreate ? _openComposeSheet : _showSignInRequired,
         backgroundColor: SecretChatPalette.sun,
@@ -112,14 +115,13 @@ class _SecretChatScreenState extends State<SecretChatScreen>
                     selectedFilter: widget.selectedFilter,
                     savedCount: widget.savedCount,
                     searchQuery: widget.searchQuery,
-                    onBack: widget.onBack,
                     onSearchChanged: widget.onSearchChanged,
                     onFilterChanged: widget.onFilterChanged,
                     onProfile: widget.onProfile,
                   ),
                 ),
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 96),
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
                   sliver: _buildFeed(),
                 ),
               ],

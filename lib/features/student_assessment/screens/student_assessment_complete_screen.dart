@@ -26,6 +26,7 @@ class _StudentAssessmentCompleteScreenState
   bool _requestedSave = false;
   bool _appointmentPromptRequested = false;
   bool _resultUnlocked = false;
+  Future<Map<String, Object>?>? _v4SaveFuture;
 
   @override
   void initState() {
@@ -46,6 +47,9 @@ class _StudentAssessmentCompleteScreenState
   Widget build(BuildContext context) {
     return Consumer<AssessmentProvider>(
       builder: (context, provider, _) {
+        if (provider.isStudentAssessmentV4) {
+          return _buildV4Completion(provider);
+        }
         final result = provider.studentResult;
         if (result == null) {
           return Scaffold(
@@ -149,6 +153,70 @@ class _StudentAssessmentCompleteScreenState
     );
   }
 
+  Widget _buildV4Completion(AssessmentProvider provider) {
+    final saveFuture = _v4SaveFuture ??= _saveV4Result(provider);
+    return FutureBuilder<Map<String, Object>?>(
+      future: saveFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            backgroundColor: QuickAssessmentPalette.background,
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Preparing your well-being profile…'),
+                ],
+              ),
+            ),
+          );
+        }
+        if (snapshot.hasError || snapshot.data == null) {
+          return Scaffold(
+            backgroundColor: QuickAssessmentPalette.background,
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Your profile could not be saved yet. Your answers were not treated as a result.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 14),
+                    FilledButton(
+                      onPressed: () => setState(() => _v4SaveFuture = null),
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+        return _StudentV4ProfileView(payload: snapshot.data!);
+      },
+    );
+  }
+
+  Future<Map<String, Object>?> _saveV4Result(
+    AssessmentProvider provider,
+  ) async {
+    final userId = _currentUserId();
+    if (userId == null || userId.isEmpty) {
+      throw StateError('A signed-in user is required to save this profile.');
+    }
+    final payload = await provider.saveStudentAssessmentForUser(userId);
+    if (payload == null) return null;
+    if (!mounted) return payload;
+    await context.read<UserProvider>().markFullAssessment(userId);
+    if (mounted) await _reportProviderOrNull()?.refreshWeeklyReport(userId);
+    return payload;
+  }
+
   void _saveResultIfNeeded(AssessmentProvider provider) {
     if (_requestedSave || provider.studentResult == null) return;
     _requestedSave = true;
@@ -236,6 +304,230 @@ class _StudentAssessmentCompleteScreenState
     }
   }
 }
+
+class _StudentV4ProfileView extends StatelessWidget {
+  const _StudentV4ProfileView({required this.payload});
+
+  final Map<String, Object> payload;
+
+  @override
+  Widget build(BuildContext context) {
+    final result = _map(payload['result']);
+    final interpretation = _map(payload['interpretation']);
+    final quality = _map(result['responseQuality']);
+    final domains = _maps(result['domainResults']);
+    final focus = _strings(interpretation['focusInsights']);
+    final strengths = _strings(interpretation['strengthInsights']);
+    final actions = _strings(interpretation['suggestedActions']);
+    final profileStatus = _v4ProfileLabel(result['profileStatus']?.toString());
+    return Scaffold(
+      backgroundColor: QuickAssessmentPalette.background,
+      appBar: AppBar(title: const Text('Your well-being profile')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Text(
+              profileStatus,
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              interpretation['studentSummary']?.toString() ??
+                  'This is a snapshot of the past 7 days based on the areas you answered.',
+              style: const TextStyle(height: 1.5),
+            ),
+            const SizedBox(height: 16),
+            _V4InfoCard(
+              title: 'Response confidence',
+              child: Text(
+                '${quality['answered'] ?? 0} of ${quality['presented'] ?? 50} answered · ${_v4ConfidenceLabel(quality['confidence']?.toString())}. Skipped questions are excluded.',
+              ),
+            ),
+            if (strengths.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _V4InfoCard(
+                title: 'Your strengths',
+                child: _V4Bullets(values: strengths),
+              ),
+            ],
+            if (focus.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _V4InfoCard(
+                title: 'Areas to explore',
+                child: _V4Bullets(values: focus),
+              ),
+            ],
+            const SizedBox(height: 18),
+            Text(
+              'Well-being areas',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            ...domains.map(
+              (domain) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _V4InfoCard(
+                  title:
+                      domain['domainId']?.toString().replaceAllMapped(
+                        RegExp(r'([a-z])([A-Z])'),
+                        (match) => '${match.group(1)} ${match.group(2)}',
+                      ) ??
+                      'Well-being area',
+                  trailing: _v4DomainLabel(domain['status']?.toString()),
+                  child: Text(
+                    '${domain['answeredCount'] ?? 0}/${domain['presentedCount'] ?? 10} answered. ${domain['isScorable'] == true ? 'This area is available for reflection.' : 'More responses are needed for this area.'}',
+                  ),
+                ),
+              ),
+            ),
+            if (actions.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _V4InfoCard(
+                title: 'Practical next steps',
+                child: _V4Bullets(values: actions),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Text(
+              interpretation['disclaimer']?.toString() ??
+                  'This is a 7-day reflection profile, not a diagnosis.',
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.45,
+                color: _ResultPalette.secondaryText,
+              ),
+            ),
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      const PaccCounselingScreen(startBooking: true),
+                ),
+              ),
+              icon: const Icon(Icons.calendar_month_outlined),
+              label: const Text('Book a PACC appointment'),
+            ),
+            const SizedBox(height: 10),
+            FilledButton(
+              onPressed: () => Navigator.of(
+                context,
+              ).pushNamedAndRemoveUntil(RouteNames.home, (route) => false),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _V4InfoCard extends StatelessWidget {
+  const _V4InfoCard({required this.title, required this.child, this.trailing});
+
+  final String title;
+  final Widget child;
+  final String? trailing;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              if (trailing != null) _V4StatusChip(label: trailing!),
+            ],
+          ),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    ),
+  );
+}
+
+class _V4StatusChip extends StatelessWidget {
+  const _V4StatusChip({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: QuickAssessmentPalette.selectedFill,
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: Text(
+      label,
+      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+    ),
+  );
+}
+
+class _V4Bullets extends StatelessWidget {
+  const _V4Bullets({required this.values});
+  final List<String> values;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: values
+        .map(
+          (value) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text('• $value', style: const TextStyle(height: 1.4)),
+          ),
+        )
+        .toList(),
+  );
+}
+
+Map<String, dynamic> _map(Object? value) =>
+    value is Map ? Map<String, dynamic>.from(value) : const <String, dynamic>{};
+List<Map<String, dynamic>> _maps(Object? value) => value is List
+    ? value
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList()
+    : const <Map<String, dynamic>>[];
+List<String> _strings(Object? value) => value is List
+    ? value
+          .map((item) => item.toString())
+          .where((item) => item.isNotEmpty)
+          .toList()
+    : const <String>[];
+String _v4ProfileLabel(String? value) => switch (value) {
+  'generallySupported' => 'Well-being appears generally supported.',
+  'mostlySupported' => 'Mostly supported, with an area to explore.',
+  'someAreasNeedAttention' => 'Some areas may benefit from attention.',
+  'supportMayHelp' => 'Support may be helpful right now.',
+  _ => 'More responses are needed for a complete profile.',
+};
+String _v4DomainLabel(String? value) => switch (value) {
+  'supported' => 'Supported at present',
+  'mostlySupported' => 'Mostly supported',
+  'someStrain' => 'Some strain indicated',
+  'supportMayHelp' => 'Support may be helpful',
+  _ => 'More responses needed',
+};
+String _v4ConfidenceLabel(String? value) => switch (value) {
+  'high' => 'High confidence',
+  'usableWithCaution' => 'Usable with caution',
+  _ => 'Limited responses',
+};
 
 class _Hero extends StatelessWidget {
   const _Hero({required this.result});
