@@ -462,6 +462,19 @@ class _FakeAppointmentRepository extends AppointmentRepository {
 
   final List<AppointmentModel> appointments;
   bool shouldFail = false;
+  @override
+  Future<List<AppointmentSlot>> getAvailableSlots(DateTime date) async {
+    if (date.year == 2026 && date.month == 4 && date.day == 30) {
+      return [
+        AppointmentSlot(start: DateTime(2026, 4, 30, 9), label: '9:00 AM'),
+        AppointmentSlot(start: DateTime(2026, 4, 30, 10), label: '10:00 AM'),
+        AppointmentSlot(start: DateTime(2026, 4, 30, 11), label: '11:00 AM'),
+        AppointmentSlot(start: DateTime(2026, 4, 30, 13), label: '1:00 PM'),
+      ];
+    }
+
+    return [];
+  }
 
   @override
   Future<List<AppointmentModel>> fetchAppointments(String userId) async {
