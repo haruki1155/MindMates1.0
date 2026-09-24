@@ -2075,7 +2075,7 @@ export const archiveAppointments = onCall(async (request) => {
       if (!snapshot.exists) throw new HttpsError("not-found", "One or more appointments could not be found.");
       const data = snapshot.data() ?? {};
       const status = String(data.status ?? "").toLowerCase().trim();
-      const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow"].includes(status);
+      const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow", "expired"].includes(status);
       if (!archived && !data.archivedAt) throw new HttpsError("failed-precondition", "Only archived appointments can be restored.");
       if (archived && !terminal) throw new HttpsError("failed-precondition", "Only finished appointments can be moved to history.");
       if (actor.accessRole === "counselor" && String(data.assignedStaffId ?? "") !== actorId) throw new HttpsError("permission-denied", "You can only manage your assigned appointments.");
@@ -2097,7 +2097,7 @@ export const archiveTerminalAppointment = onDocumentUpdated(
     const after = change.after.data();
     if (!after || after.archivedAt) return;
     const status = String(after.status ?? "").toLowerCase().trim();
-    const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow"].includes(status);
+    const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow", "expired"].includes(status);
     if (!terminal || String(before?.status ?? "").toLowerCase().trim() === status) return;
     await change.after.ref.update({archivedAt: FieldValue.serverTimestamp(), archivedBy: "system", updatedAt: FieldValue.serverTimestamp()});
   },

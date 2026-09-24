@@ -19,7 +19,7 @@ test("lifecycle matrix permits every supported PACC transition", () => {
 });
 
 test("lifecycle matrix rejects terminal and unauthorized transitions", () => {
-  for (const terminal of ["completed", "no_show", "cancelled", "declined"]) {
+  for (const terminal of ["completed", "no_show", "cancelled", "declined", "expired"]) {
     assert.equal(appointmentActionsFor(terminal, "student").length, 0);
     assert.equal(appointmentActionsFor(terminal, "staff").length, 0);
   }
