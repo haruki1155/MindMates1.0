@@ -35,7 +35,9 @@ import {
 } from "./appointment_scheduling";
 import {
   AppointmentAvailabilityValidationError,
+  canManagePaccAvailability,
   validatePaccAppointmentAvailability,
+  validatePaccAvailabilityPayload,
 } from "./appointment_availability";
 export {
   aggregateMindAidFeedback,
@@ -1623,6 +1625,45 @@ function createAppointmentEvent(transaction: FirebaseFirestore.Transaction, appo
     newStatus, metadata, timestamp: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
   });
 }
+
+export const savePaccAvailability = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  const actor = await requireStaff(actorId);
+  if (!canManagePaccAvailability(actor.accessRole)) {
+    throw new HttpsError("permission-denied", "Counselor or administrator access is required.");
+  }
+  let availability;
+  try {
+    availability = validatePaccAvailabilityPayload(request.data);
+  } catch (error: unknown) {
+    if (error instanceof AppointmentAvailabilityValidationError) {
+      throw new HttpsError("invalid-argument", error.message);
+    }
+    throw error;
+  }
+  const current = db.collection("pacc_availability").doc("current");
+  await db.runTransaction(async (transaction) => {
+    const before = await transaction.get(current);
+    transaction.set(current, {
+      ...availability,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+    writeAudit(transaction, db, {
+      actorId,
+      actorNameSnapshot: actorName(actor),
+      actorRoleSnapshot: actor.accessRole,
+      action: "SCHEDULE_UPDATED",
+      category: AUDIT_CATEGORIES.schedule,
+      targetType: "pacc_availability",
+      targetId: "current",
+      metadata: {
+        before: before.exists ? before.data() ?? null : null,
+        after: availability,
+      },
+    });
+  });
+  return {ok: true};
+});
 
 export const createAppointmentRequest = onCall(async (request) => {
   const userId = requireAuthenticatedUser(request);

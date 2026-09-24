@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   AppointmentAvailabilityValidationError,
+  canManagePaccAvailability,
   validatePaccAppointmentAvailability,
+  validatePaccAvailabilityPayload,
 } from "./appointment_availability";
 
 const availability = {
@@ -49,4 +51,31 @@ test("rejects unavailable counselors, missing schedules, and malformed published
     () => validatePaccAppointmentAvailability(openSlot, {...availability, opensAt: "17:00", closesAt: "09:00"}),
     AppointmentAvailabilityValidationError,
   );
+});
+
+test("accepts only clinical staff as availability managers", () => {
+  assert.equal(canManagePaccAvailability("admin"), true);
+  assert.equal(canManagePaccAvailability("counselor"), true);
+  assert.equal(canManagePaccAvailability("portalStaff"), false);
+  assert.equal(canManagePaccAvailability("appUser"), false);
+});
+
+test("validates availability payload shape, time ordering, and bounded notice text", () => {
+  assert.deepEqual(validatePaccAvailabilityPayload({...availability, notice: " Office hours "}), {
+    ...availability,
+    notice: "Office hours",
+  });
+  for (const invalid of [
+    {...availability, opensAt: "9 AM"},
+    {...availability, opensAt: "17:00", closesAt: "17:00"},
+    {...availability, openDays: [1, 1]},
+    {...availability, presence: "unknown"},
+    {...availability, acceptsWalkIns: "yes"},
+    {...availability, unsupported: true},
+  ]) {
+    assert.throws(
+      () => validatePaccAvailabilityPayload(invalid),
+      AppointmentAvailabilityValidationError,
+    );
+  }
 });

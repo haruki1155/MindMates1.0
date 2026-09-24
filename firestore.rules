@@ -573,8 +573,7 @@ service cloud.firestore {
 
     match /pacc_availability/{documentId} {
       allow read: if signedIn();
-      allow create, update: if hasPortalAccess();
-      allow delete: if false;
+      allow write: if false;
     }
 
     match /insight_categories/{categoryId} {

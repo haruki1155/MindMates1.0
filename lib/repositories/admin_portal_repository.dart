@@ -1138,13 +1138,14 @@ class AdminPortalRepository {
         (data) => data == null ? null : PaccAvailabilityModel.fromJson(data),
       );
 
-  Future<void> savePaccAvailability(PaccAvailabilityModel availability) =>
-      _firestoreService.setDocument(
-        FirestoreCollections.paccAvailability,
-        'current',
-        {...availability.toJson(), 'updatedAt': FieldValue.serverTimestamp()},
-        merge: true,
-      );
+  Future<void> savePaccAvailability(PaccAvailabilityModel availability) {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    return FirebaseFunctions.instance
+        .routedCallable('savePaccAvailability')
+        .call(availability.toJson());
+  }
 
   Future<void> updateOwnProfile(String userId, Map<String, dynamic> values) =>
       _firestoreService.updateDocument(
