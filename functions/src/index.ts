@@ -29,6 +29,10 @@ export {
 import {defineString} from "firebase-functions/params";
 import {randomBytes} from "node:crypto";
 import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
+import {
+  AppointmentSchedulingValidationError,
+  validateAppointmentTimestamp,
+} from "./appointment_scheduling";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -1609,17 +1613,6 @@ function appointmentSlotId(timestamp: Timestamp, staffId = "pacc"): string {
   return `${staffId}_${timestamp.toMillis()}`;
 }
 
-function callableMillis(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (value instanceof Timestamp) return value.toMillis();
-  if (value && typeof value === "object" && "_seconds" in value) {
-    const seconds = Number((value as {_seconds?: unknown})._seconds);
-    const nanos = Number((value as {_nanoseconds?: unknown})._nanoseconds ?? 0);
-    return Number.isFinite(seconds) ? seconds * 1000 + Math.floor(nanos / 1000000) : Number.NaN;
-  }
-  return Number(value ?? 0);
-}
-
 function createAppointmentEvent(transaction: FirebaseFirestore.Transaction, appointment: FirebaseFirestore.DocumentReference, type: string, actorId: string, previousStatus: string, newStatus: string, metadata: Record<string, unknown> = {}) {
   transaction.create(appointment.collection("history").doc(), {
     type, performedBy: actorId, performedByRole: "system", previousStatus,
@@ -1630,13 +1623,20 @@ function createAppointmentEvent(transaction: FirebaseFirestore.Transaction, appo
 export const createAppointmentRequest = onCall(async (request) => {
   const userId = requireAuthenticatedUser(request);
   const input = (request.data ?? {}) as Record<string, unknown>;
-  const scheduledMillis = callableMillis(input.scheduledAt);
-  const scheduledTime = String(input.scheduledTime ?? "").trim();
   const concern = String(input.concern ?? "").trim();
-  if (!Number.isFinite(scheduledMillis) || scheduledMillis <= Date.now() || !scheduledTime || !concern) {
-    throw new HttpsError("invalid-argument", "Choose a future appointment time and provide a concern.");
+  let schedule: {millis: number; scheduledTime: string};
+  try {
+    schedule = validateAppointmentTimestamp(input.scheduledAt);
+  } catch (error: unknown) {
+    if (error instanceof AppointmentSchedulingValidationError) {
+      throw new HttpsError("invalid-argument", error.message);
+    }
+    throw error;
   }
-  const scheduledAt = Timestamp.fromMillis(scheduledMillis);
+  if (!concern) {
+    throw new HttpsError("invalid-argument", "Provide a concern for your appointment.");
+  }
+  const scheduledAt = Timestamp.fromMillis(schedule.millis);
   const appointment = db.collection("appointments").doc();
   const slot = db.collection("appointment_slots").doc(appointmentSlotId(scheduledAt));
   const profile = await db.collection("users").doc(userId).get();
@@ -1650,7 +1650,7 @@ export const createAppointmentRequest = onCall(async (request) => {
       contactNumber: String(input.contactNumber ?? source.phone ?? "").trim(), email: String(input.email ?? source.email ?? "").trim(),
       preferredContactMethod: String(input.preferredContactMethod ?? "").trim(), concern,
       bestTime: String(input.bestTime ?? "").trim(), location: String(input.location ?? "PACC Office, 2nd Floor, Main Building"),
-      scheduledAt, scheduledTime, status: "requested", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      scheduledAt, scheduledTime: schedule.scheduledTime, status: "requested", createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       department: String(source.department ?? input.department ?? ""), academicYearId: String(input.academicYearId ?? ""),
       age: input.age ?? null, address: String(input.address ?? ""), facebook: String(input.facebook ?? ""), sex: String(input.sex ?? ""), course: String(input.course ?? ""), yearLevel: String(input.yearLevel ?? ""), therapyBefore: String(input.therapyBefore ?? ""),
     });
@@ -1696,9 +1696,14 @@ export const respondToAppointment = onCall(async (request) => {
       return;
     }
     if (before !== "confirmed") throw new HttpsError("failed-precondition", "Only confirmed appointments can be rescheduled.");
-    const millis = Number(input.proposedScheduledAt ?? 0); const time = String(input.proposedScheduledTime ?? "").trim();
-    if (!Number.isFinite(millis) || millis <= Date.now() || !time) throw new HttpsError("invalid-argument", "Choose a future proposed schedule.");
-    transaction.update(appointment, {status: "reschedule_proposed", proposedScheduledAt: Timestamp.fromMillis(millis), proposedScheduledTime: time, proposedBy: "student", proposalStatus: "awaiting_counselor", updatedAt: FieldValue.serverTimestamp()});
+    let proposal: {millis: number; scheduledTime: string};
+    try {
+      proposal = validateAppointmentTimestamp(input.proposedScheduledAt);
+    } catch (error: unknown) {
+      if (error instanceof AppointmentSchedulingValidationError) throw new HttpsError("invalid-argument", error.message);
+      throw error;
+    }
+    transaction.update(appointment, {status: "reschedule_proposed", proposedScheduledAt: Timestamp.fromMillis(proposal.millis), proposedScheduledTime: proposal.scheduledTime, proposedBy: "student", proposalStatus: "awaiting_counselor", updatedAt: FieldValue.serverTimestamp()});
     createAppointmentEvent(transaction, appointment, "reschedule_proposed", userId, before, "reschedule_proposed");
   });
   return {ok: true};
@@ -1712,16 +1717,20 @@ export const reviewAppointment = onCall(async (request) => {
   const appointmentId = String(input.appointmentId ?? "").trim();
   const action = String(input.action ?? "").trim();
   const reply = String(input.reply ?? "").trim();
-  const proposedMillis = Number(input.proposedScheduledAt ?? 0);
-  const proposedTime = String(input.proposedScheduledTime ?? "").trim();
+  let proposal: {millis: number; scheduledTime: string} | null = null;
   // Declined remains readable for legacy records, but is intentionally not a
   // valid action for new appointment decisions.
   if (!appointmentId || !["confirmed", "declined", "reschedule_proposed", "completed", "no_show", "cancelled"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
   if (!reply) throw new HttpsError("invalid-argument", "A reply to the student is required.");
-  if (action === "reschedule_proposed" && (!Number.isFinite(proposedMillis) || proposedMillis <= 0 || !proposedTime)) {
-    throw new HttpsError("invalid-argument", "A proposed date and time are required.");
+  if (action === "reschedule_proposed") {
+    try {
+      proposal = validateAppointmentTimestamp(input.proposedScheduledAt);
+    } catch (error: unknown) {
+      if (error instanceof AppointmentSchedulingValidationError) throw new HttpsError("invalid-argument", error.message);
+      throw error;
+    }
   }
 
   const appointment = db.collection("appointments").doc(appointmentId);
@@ -1763,8 +1772,8 @@ export const reviewAppointment = onCall(async (request) => {
       staffReply: reply,
       reviewedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-      proposedScheduledAt: action === "reschedule_proposed" ? Timestamp.fromMillis(proposedMillis) : null,
-      proposedScheduledTime: action === "reschedule_proposed" ? proposedTime : "",
+      proposedScheduledAt: action === "reschedule_proposed" ? Timestamp.fromMillis(proposal!.millis) : null,
+      proposedScheduledTime: action === "reschedule_proposed" ? proposal!.scheduledTime : "",
       proposedBy: action === "reschedule_proposed" ? "counselor" : FieldValue.delete(),
       proposalStatus: action === "reschedule_proposed" ? "awaiting_student" : FieldValue.delete(),
       ...(acceptingProposal ? {scheduledAt: data.proposedScheduledAt, scheduledTime: data.proposedScheduledTime ?? "", reminders: {}} : {}),
@@ -1809,7 +1818,7 @@ export const reviewAppointment = onCall(async (request) => {
       targetId: appointmentId,
       metadata: {
         before: {status: before},
-        after: {status: action, ...(action === "reschedule_proposed" ? {date: new Date(proposedMillis).toISOString().slice(0, 10), time: proposedTime} : {})},
+        after: {status: action, ...(action === "reschedule_proposed" ? {date: new Date(proposal!.millis).toISOString().slice(0, 10), time: proposal!.scheduledTime} : {})},
       },
     });
   });
