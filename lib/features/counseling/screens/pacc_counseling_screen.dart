@@ -58,16 +58,8 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   String? _prefilledUserId;
   String? _loadedUserId;
   bool _initialDetailsHandled = false;
-
-  static const _availableTimes = [
-    '09:00 AM',
-    '10:00 AM',
-    '11:00 AM',
-    '01:00 PM',
-    '02:00 PM',
-    '03:00 PM',
-    '04:00 PM',
-  ];
+  List<String> _availableTimes = const [];
+  bool _loadingTimes = false;
 
   DateTime get _today => DateUtils.dateOnly(widget._nowProvider());
 
@@ -220,19 +212,14 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         onNextMonth: () => setState(() {
           _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month + 1);
         }),
-        onDateSelected: (date) {
-          setState(() {
-            _selectedDate = date;
-            _step = _PaccAppointmentStep.time;
-          });
-        },
+        onDateSelected: _selectDate,
       ),
       _PaccAppointmentStep.time => _TimeSelectionView(
         key: const ValueKey('time'),
         selectedDate: _selectedDate,
         selectedTime: _selectedTime,
         availableTimes: _availableTimes,
-        isSaving: appointmentProvider?.isSaving ?? false,
+        isSaving: (appointmentProvider?.isSaving ?? false) || _loadingTimes,
         onBack: () => setState(() => _step = _PaccAppointmentStep.calendar),
         onTimeSelected: (time) => setState(() => _selectedTime = time),
         onNext: () => setState(() => _step = _PaccAppointmentStep.intake),
@@ -286,6 +273,26 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         }),
       ),
     };
+  }
+
+  Future<void> _selectDate(DateTime date) async {
+    setState(() {
+      _selectedDate = date;
+      _selectedTime = null;
+      _availableTimes = const [];
+      _loadingTimes = true;
+      _step = _PaccAppointmentStep.time;
+    });
+    final slots =
+        await _readProviderOrNull<AppointmentProvider>()?.getAvailableSlots(
+          date,
+        ) ??
+        const [];
+    if (!mounted || _selectedDate != date) return;
+    setState(() {
+      _availableTimes = slots.map((slot) => slot.label).toList(growable: false);
+      _loadingTimes = false;
+    });
   }
 
   @override

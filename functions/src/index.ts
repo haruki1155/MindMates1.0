@@ -31,6 +31,7 @@ import {randomBytes} from "node:crypto";
 import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
 import {
   AppointmentSchedulingValidationError,
+  formatAppointmentTime,
   validateAppointmentTimestamp,
 } from "./appointment_scheduling";
 import {
@@ -1722,6 +1723,44 @@ export const savePaccAvailability = onCall(async (request) => {
     });
   });
   return {ok: true};
+});
+
+function manilaSlotMillis(date: string, minutes: number): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) throw new HttpsError("invalid-argument", "Choose a valid appointment date.");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const local = new Date(Date.UTC(year, month - 1, day, 0, minutes));
+  if (local.getUTCFullYear() !== year || local.getUTCMonth() !== month - 1 || local.getUTCDate() !== day) {
+    throw new HttpsError("invalid-argument", "Choose a valid appointment date.");
+  }
+  // Asia/Manila is UTC+08:00; scheduling already uses this canonical zone.
+  return local.getTime() - 8 * 60 * 60 * 1000;
+}
+
+export const getAvailableAppointmentSlots = onCall(async (request) => {
+  requireAuthenticatedUser(request);
+  const input = (request.data ?? {}) as Record<string, unknown>;
+  const date = String(input.date ?? "").trim();
+  const availabilitySnapshot = await db.collection("pacc_availability").doc("current").get();
+  const policySnapshot = await db.collection("appointment_policy").doc("current").get();
+  const policy = appointmentBookingPolicy(policySnapshot.exists ? policySnapshot.data() : null);
+  const slots: Array<{start: number; label: string}> = [];
+  for (let minutes = 0; minutes < 24 * 60; minutes += 60) {
+    const start = manilaSlotMillis(date, minutes);
+    try {
+      validateAppointmentTimestamp(start);
+      validatePaccAppointmentAvailability(start, availabilitySnapshot.exists ? availabilitySnapshot.data() : null);
+      if (bookingPolicyViolation(policy, start)) continue;
+    } catch (error) {
+      if (error instanceof AppointmentSchedulingValidationError || error instanceof AppointmentAvailabilityValidationError) continue;
+      throw error;
+    }
+    const occupied = await db.collection("appointment_slots").doc(appointmentSlotId(Timestamp.fromMillis(start))).get();
+    if (!occupied.exists) slots.push({start, label: formatAppointmentTime(start)});
+  }
+  return {date, slots};
 });
 
 export const createAppointmentRequest = onCall(async (request) => {
