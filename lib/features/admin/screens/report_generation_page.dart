@@ -236,9 +236,30 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
           onDepartmentChanged: _selectDepartment,
         ),
       ],
+      const SizedBox(height: 22),
+      AnimatedSwitcher(
+        duration: const Duration(milliseconds: 180),
+        child: _filterLoading
+            ? const _ReportSkeleton(key: ValueKey('report-skeleton'))
+            : _reportType == AdminReportType.users
+            ? _UserReport(
+                key: const ValueKey('users'),
+                report: report,
+                chartType: _chartType,
+                categoryKey: _userCategory,
+              )
+            : _AppointmentReport(
+                key: const ValueKey('appointments'),
+                report: report,
+                chartType: _chartType,
+                dimension: _dimension,
+              ),
+      ),
       if (_reportType == AdminReportType.appointments &&
           widget.repository.currentAccessRole == AccessRole.admin) ...[
-        const SizedBox(height: 18),
+        const SizedBox(height: 26),
+        Text('Report setup', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 10),
         _PopulationSetup(
           repository: widget.repository,
           config: report.population,
@@ -262,25 +283,6 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
         const SizedBox(height: 18),
         _ImportedFilesPanel(repository: widget.repository),
       ],
-      const SizedBox(height: 18),
-      AnimatedSwitcher(
-        duration: const Duration(milliseconds: 180),
-        child: _filterLoading
-            ? const _ReportSkeleton(key: ValueKey('report-skeleton'))
-            : _reportType == AdminReportType.users
-            ? _UserReport(
-                key: const ValueKey('users'),
-                report: report,
-                chartType: _chartType,
-                categoryKey: _userCategory,
-              )
-            : _AppointmentReport(
-                key: const ValueKey('appointments'),
-                report: report,
-                chartType: _chartType,
-                dimension: _dimension,
-              ),
-      ),
       const SizedBox(height: 14),
       _PrivacyNotice(generatedAt: report.generatedAt),
     ],
@@ -531,7 +533,7 @@ class _Header extends StatelessWidget {
           ),
         ],
       );
-      if (constraints.maxWidth < 720) {
+      if (constraints.maxWidth < 1000) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [title, const SizedBox(height: 16), actions],
@@ -1832,21 +1834,33 @@ class _AppointmentReport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!report.population.configured) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(24),
-        decoration: _panelDecoration,
-        child: const Text(
-          'Complete and save every department population above to generate appointment percentages.',
-          style: TextStyle(color: AdminColors.muted),
-        ),
-      );
-    }
     final items = report.appointmentsFor(dimension);
     final label = _dimensionLabel(dimension);
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(
+          'Appointment results · ${report.population.schoolYear}',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${report.dateRange.label} · ${report.appointmentDepartmentScopeLabel}',
+          style: const TextStyle(color: AdminColors.muted),
+        ),
+        if (!report.population.configured) ...[
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: _panelDecoration,
+            child: const Text(
+              'Complete and save the student population in Report setup below to calculate population-based percentages. Appointment counts remain available.',
+              style: TextStyle(color: AdminColors.muted),
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
         _SummaryCards(
           cards: [
             _SummaryValue(
@@ -1863,21 +1877,32 @@ class _AppointmentReport extends StatelessWidget {
             ),
             _SummaryValue(
               label: 'Counseling reach',
-              value: _formatPercent(report.counselingReach),
+              value: report.population.configured
+                  ? _formatPercent(report.counselingReach)
+                  : 'Not available',
               note: 'Unique students / population',
               icon: Icons.groups_outlined,
-            ),
-            _SummaryValue(
-              label: 'Appointment rate',
-              value: _formatPercent(report.appointmentRate),
-              note: 'Appointments / population',
-              icon: Icons.percent_outlined,
             ),
             _SummaryValue(
               label: 'Completion rate',
               value: _formatPercent(report.completionRate),
               note: 'Completed / scheduled',
               icon: Icons.task_alt_outlined,
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        Text('Service details', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 10),
+        _SummaryCards(
+          cards: [
+            _SummaryValue(
+              label: 'Appointment rate',
+              value: report.population.configured
+                  ? _formatPercent(report.appointmentRate)
+                  : 'Not available',
+              note: 'Appointments / population',
+              icon: Icons.percent_outlined,
             ),
             _SummaryValue(
               label: 'Waiting time',
@@ -1895,16 +1920,10 @@ class _AppointmentReport extends StatelessWidget {
             ),
           ],
         ),
-        if (report.comparison != null) ...[
-          const SizedBox(height: 18),
-          _ComparisonPanel(report: report),
-        ],
-        if (report.trends.length > 1) ...[
-          const SizedBox(height: 18),
-          _TrendPanel(report: report),
-        ],
-        const SizedBox(height: 18),
-        if (report.uniqueStudentsServed < 5)
+        const SizedBox(height: 22),
+        if (!report.population.configured)
+          const SizedBox.shrink()
+        else if (report.uniqueStudentsServed < 5)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(18),
@@ -1923,7 +1942,7 @@ class _AppointmentReport extends StatelessWidget {
             chartType: items.length > 6 ? ReportChartType.bar : chartType,
           ),
         const SizedBox(height: 18),
-        if (report.uniqueStudentsServed >= 5)
+        if (report.population.configured && report.uniqueStudentsServed >= 5)
           _PercentageTable(
             title:
                 '$label distribution - ${report.appointmentDepartmentScopeLabel}',
@@ -1932,6 +1951,14 @@ class _AppointmentReport extends StatelessWidget {
                 .map((item) => [item.label, _formatPercent(item.percentage)])
                 .toList(growable: false),
           ),
+        if (report.comparison != null) ...[
+          const SizedBox(height: 18),
+          _ComparisonPanel(report: report),
+        ],
+        if (report.trends.length > 1) ...[
+          const SizedBox(height: 18),
+          _TrendPanel(report: report),
+        ],
       ],
     );
   }
@@ -2092,6 +2119,7 @@ class _PopulationSetup extends StatefulWidget {
 class _PopulationSetupState extends State<_PopulationSetup> {
   late final TextEditingController _schoolYear;
   late Map<String, TextEditingController> _fields;
+  final Map<String, Map<String, String>> _draftsByYear = {};
   bool _saving = false;
   // Keep the report page compact by default; admins can expand the panel when
   // they need to edit or review department populations.
@@ -2122,6 +2150,45 @@ class _PopulationSetupState extends State<_PopulationSetup> {
   }
 
   @override
+  void didUpdateWidget(covariant _PopulationSetup oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.config.schoolYear == widget.config.schoolYear) return;
+    final hasUnsavedChanges = _fields.entries.any(
+      (entry) =>
+          entry.value.text !=
+          '${oldWidget.config.populations[entry.key] ?? ''}',
+    );
+    if (hasUnsavedChanges) {
+      _draftsByYear[oldWidget.config.schoolYear] = {
+        for (final entry in _fields.entries) entry.key: entry.value.text,
+      };
+    } else {
+      _draftsByYear.remove(oldWidget.config.schoolYear);
+    }
+    _schoolYear.text = widget.config.schoolYear;
+    for (final field in _fields.values) {
+      field.dispose();
+    }
+    final departments = widget.config.departments.isEmpty
+        ? [
+            for (final group in registrationCollegeCourseOptions)
+              group.department,
+          ]
+        : widget.config.departments;
+    final draft = _draftsByYear[widget.config.schoolYear];
+    _fields = {
+      for (final department in departments)
+        department: TextEditingController(
+          text:
+              draft?[department] ??
+              '${widget.config.populations[department] ?? ''}',
+        ),
+    };
+    _editingPopulation = draft != null && widget.config.configured;
+    _error = null;
+  }
+
+  @override
   void dispose() {
     _schoolYear.dispose();
     for (final field in _fields.values) {
@@ -2134,105 +2201,109 @@ class _PopulationSetupState extends State<_PopulationSetup> {
   Widget build(BuildContext context) => Container(
     width: double.infinity,
     decoration: _panelDecoration,
-    child: Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        initiallyExpanded: _expanded,
-        onExpansionChanged: (expanded) => setState(() => _expanded = expanded),
-        tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
-        childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-        title: Text(
-          'Student population setup',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        subtitle: Text(
-          widget.config.status == 'closed'
-              ? 'Locked for ${widget.config.schoolYear}. Historical reports are protected.'
-              : 'Set department populations for ${widget.config.schoolYear}.',
-          style: const TextStyle(color: AdminColors.muted),
-        ),
-        children: [
-          const Divider(height: 18),
-          const Text(
-            'Enter the current student population for every department. Appointment percentages use these values as their denominators. Save a new school year when enrollment changes.',
-            style: TextStyle(color: AdminColors.muted),
+    child: Material(
+      type: MaterialType.transparency,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: _expanded,
+          onExpansionChanged: (expanded) =>
+              setState(() => _expanded = expanded),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
+          childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+          title: Text(
+            'Student population setup',
+            style: Theme.of(context).textTheme.titleLarge,
           ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: 180,
-            child: TextField(
-              controller: _schoolYear,
-              readOnly: true,
-              decoration: const InputDecoration(
-                labelText: 'School year',
-                hintText: '2026-2027',
+          subtitle: Text(
+            widget.config.status == 'closed'
+                ? 'Locked for ${widget.config.schoolYear}. Historical reports are protected.'
+                : 'Set department populations for ${widget.config.schoolYear}.',
+            style: const TextStyle(color: AdminColors.muted),
+          ),
+          children: [
+            const Divider(height: 18),
+            const Text(
+              'Enter the current student population for every department. Appointment percentages use these values as their denominators. Save a new school year when enrollment changes.',
+              style: TextStyle(color: AdminColors.muted),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: 180,
+              child: TextField(
+                controller: _schoolYear,
+                readOnly: true,
+                decoration: const InputDecoration(
+                  labelText: 'School year',
+                  hintText: 'YYYY-YYYY',
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              for (final entry in _fields.entries)
-                SizedBox(
-                  width: 300,
-                  child: TextField(
-                    controller: entry.value,
-                    readOnly:
-                        widget.config.status == 'closed' ||
-                        (widget.config.configured && !_editingPopulation),
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: entry.key,
-                      suffixText: 'students',
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final entry in _fields.entries)
+                  SizedBox(
+                    width: 300,
+                    child: TextField(
+                      controller: entry.value,
+                      readOnly:
+                          widget.config.status == 'closed' ||
+                          (widget.config.configured && !_editingPopulation),
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                        labelText: entry.key,
+                        suffixText: 'students',
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Text(_error!, style: const TextStyle(color: AdminColors.danger)),
-          ],
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _saving || widget.config.status == 'closed'
-                ? null
-                : widget.config.configured && !_editingPopulation
-                ? _confirmEditPopulation
-                : _save,
-            icon: _saving
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save_outlined),
-            label: Text(
-              widget.config.status == 'closed'
-                  ? 'Population locked'
-                  : widget.config.configured && !_editingPopulation
-                  ? 'Edit population'
-                  : _saving
-                  ? 'Saving...'
-                  : 'Save population',
-            ),
-          ),
-          if (widget.config.status != 'closed') ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              children: [
-                TextButton.icon(
-                  onPressed: _saving ? null : _confirmCloseYear,
-                  icon: const Icon(Icons.lock_outline),
-                  label: const Text('Close this year'),
-                ),
               ],
             ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: AdminColors.danger)),
+            ],
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: _saving || widget.config.status == 'closed'
+                  ? null
+                  : widget.config.configured && !_editingPopulation
+                  ? _confirmEditPopulation
+                  : _save,
+              icon: _saving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text(
+                widget.config.status == 'closed'
+                    ? 'Population locked'
+                    : widget.config.configured && !_editingPopulation
+                    ? 'Edit population'
+                    : _saving
+                    ? 'Saving...'
+                    : 'Save population',
+              ),
+            ),
+            if (widget.config.status != 'closed') ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton.icon(
+                    onPressed: _saving ? null : _confirmCloseYear,
+                    icon: const Icon(Icons.lock_outline),
+                    label: const Text('Close this year'),
+                  ),
+                ],
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     ),
   );
@@ -2261,7 +2332,10 @@ class _PopulationSetupState extends State<_PopulationSetup> {
         populations: populations,
       );
       if (mounted) {
-        setState(() => _editingPopulation = false);
+        setState(() {
+          _editingPopulation = false;
+          _draftsByYear.remove(schoolYear);
+        });
         widget.onSaved(saved);
       }
     } catch (error) {
@@ -2565,7 +2639,7 @@ class _SummaryCards extends StatelessWidget {
                         ),
                         Text(
                           card.note,
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: AdminColors.muted,
