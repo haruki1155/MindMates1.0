@@ -1,8 +1,8 @@
 # Appointment Hardening Progress
 
-Current phase: Phase 5 — Authoritative Lifecycle Matrix
-Last completed phase: Phase 4 — Restrict Sensitive Appointment Reads
-Last commit: pending Phase 4 commit
+Current phase: Phase 6 — Align Student and Admin Actions
+Last completed phase: Phase 5 — Authoritative Lifecycle Matrix
+Last commit: pending Phase 5 commit
 
 ## Completed
 
@@ -11,6 +11,7 @@ Last commit: pending Phase 4 commit
 * Phase 2 — PASS
 * Phase 3 — PASS
 * Phase 4 — PASS
+* Phase 5 — PASS
 
 ## Current blockers
 
@@ -26,3 +27,4 @@ Last commit: pending Phase 4 commit
 * Availability publishing is limited to existing clinical roles: counselor and admin.
 * Portal staff read only the server-generated `appointment_queue` projection;
   appointment records and terminal history remain owner/assigned-counselor/admin only.
+* The server lifecycle matrix is the authority for student and staff transitions.

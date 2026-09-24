@@ -39,6 +39,11 @@ import {
   validatePaccAppointmentAvailability,
   validatePaccAvailabilityPayload,
 } from "./appointment_availability";
+import {
+  APPOINTMENT_ACTIVE_STATUSES,
+  canTransitionAppointment,
+  canonicalAppointmentStatus,
+} from "./appointment_lifecycle";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -1626,15 +1631,6 @@ export const archiveReadNotifications = onSchedule(
   },
 );
 
-const APPOINTMENT_ACTIVE_STATUSES = new Set(["requested", "confirmed", "reschedule_proposed"]);
-const APPOINTMENT_TERMINAL_STATUSES = new Set(["cancelled", "completed", "no_show", "declined"]);
-
-function canonicalAppointmentStatus(value: unknown): string {
-  const status = String(value ?? "").trim().toLowerCase();
-  if (status === "pending" || status === "upcoming" || status === "reschedule_required") return "requested";
-  return status;
-}
-
 function appointmentSlotId(timestamp: Timestamp, staffId = "pacc"): string {
   return `${staffId}_${timestamp.toMillis()}`;
 }
@@ -1796,6 +1792,9 @@ export const respondToAppointment = onCall(async (request) => {
     if (!APPOINTMENT_ACTIVE_STATUSES.has(before)) throw new HttpsError("failed-precondition", "This appointment can no longer be changed.");
     const notification = db.collection("notifications").doc();
     if (action === "cancel") {
+      if (!canTransitionAppointment(before, "student", "cancelled")) {
+        throw new HttpsError("failed-precondition", "This appointment cannot be cancelled in its current state.");
+      }
       transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason: String(input.reason ?? "").trim(), updatedAt: FieldValue.serverTimestamp()});
       transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
       createAppointmentEvent(transaction, appointment, "appointment_cancelled", userId, before, "cancelled");
@@ -1803,7 +1802,7 @@ export const respondToAppointment = onCall(async (request) => {
       return;
     }
     if (action === "accept_reschedule") {
-      if (before !== "reschedule_proposed" || !data.proposedScheduledAt) throw new HttpsError("failed-precondition", "There is no active schedule proposal.");
+      if (!canTransitionAppointment(before, "student", "confirmed") || !data.proposedScheduledAt) throw new HttpsError("failed-precondition", "There is no active schedule proposal.");
       const proposedAt = data.proposedScheduledAt as Timestamp;
       const oldSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp));
       // Existing bookings reserve the shared PACC slot. Keep every lifecycle
@@ -1817,7 +1816,7 @@ export const respondToAppointment = onCall(async (request) => {
       createAppointmentEvent(transaction, appointment, "reschedule_accepted", userId, before, "confirmed");
       return;
     }
-    if (before !== "confirmed") throw new HttpsError("failed-precondition", "Only confirmed appointments can be rescheduled.");
+    if (!canTransitionAppointment(before, "student", "reschedule_proposed")) throw new HttpsError("failed-precondition", "Only confirmed appointments can be rescheduled.");
     let proposal: {millis: number; scheduledTime: string};
     try {
       proposal = validateAppointmentTimestamp(input.proposedScheduledAt);
@@ -1840,8 +1839,6 @@ export const reviewAppointment = onCall(async (request) => {
   const action = String(input.action ?? "").trim();
   const reply = String(input.reply ?? "").trim();
   let proposal: {millis: number; scheduledTime: string} | null = null;
-  // Declined remains readable for legacy records, but is intentionally not a
-  // valid action for new appointment decisions.
   if (!appointmentId || !["confirmed", "declined", "reschedule_proposed", "completed", "no_show", "cancelled"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
@@ -1868,12 +1865,7 @@ export const reviewAppointment = onCall(async (request) => {
       throw new HttpsError("permission-denied", "This appointment is not assigned to your caseload.");
     }
     const before = canonicalAppointmentStatus(data.status);
-    const allowed = before === "confirmed"
-      ? ["completed", "no_show", "cancelled"]
-      : before === "reschedule_proposed"
-        ? ["confirmed", "reschedule_proposed", "cancelled"]
-        : ["confirmed", "declined", "reschedule_proposed", "cancelled"];
-    if (!APPOINTMENT_ACTIVE_STATUSES.has(before) || !allowed.includes(action)) {
+    if (!APPOINTMENT_ACTIVE_STATUSES.has(before) || !canTransitionAppointment(before, "staff", action)) {
       throw new HttpsError("failed-precondition", "This appointment has already been finalized.");
     }
     const userId = String(data.userId ?? "");
