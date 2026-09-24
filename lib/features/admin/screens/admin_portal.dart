@@ -498,7 +498,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
     ),
     AdminPortalPage.profiling => ProfileManagementPage(repository: _repository),
-    AdminPortalPage.appointments => _AppointmentsPage(
+    AdminPortalPage.appointments => AdminAppointmentsPage(
       repository: _repository,
       onOpenAssessments: _repository.currentAccessRole.canAccessClinicalData
           ? () => _setPage(AdminPortalPage.assessments)
@@ -1803,18 +1803,19 @@ class _RoleCorrectionQueue extends StatelessWidget {
   }
 }
 
-class _AppointmentsPage extends StatefulWidget {
-  const _AppointmentsPage({
+class AdminAppointmentsPage extends StatefulWidget {
+  const AdminAppointmentsPage({
+    super.key,
     required this.repository,
     required this.onOpenAssessments,
   });
   final AdminPortalRepository repository;
   final VoidCallback? onOpenAssessments;
   @override
-  State<_AppointmentsPage> createState() => _AppointmentsPageState();
+  State<AdminAppointmentsPage> createState() => _AppointmentsPageState();
 }
 
-class _AppointmentsPageState extends State<_AppointmentsPage> {
+class _AppointmentsPageState extends State<AdminAppointmentsPage> {
   String filter = 'Needs action';
   String departmentFilter = 'All departments';
   bool showHistory = false;
@@ -1841,23 +1842,29 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
       builder: (context, snapshot) {
         if (snapshot.hasError) return const _AccessPanel();
         final now = DateTime.now();
-        final all = (snapshot.data ?? const <AppointmentModel>[])
-            .where((appointment) => appointment.isArchived == showHistory)
-            .toList();
-        final counts = appointmentQueueCounts(all, now);
+        final records = snapshot.data ?? const <AppointmentModel>[];
+        final counts = appointmentQueueCounts(records, now);
+        final all = appointmentRecordsForView(
+          records,
+          now,
+          showHistory: showHistory,
+        );
+        final selectedQueue = switch (filter) {
+          'Needs action' => AppointmentQueue.needsAction,
+          'Today' => AppointmentQueue.today,
+          'Upcoming' => AppointmentQueue.upcoming,
+          'Completed' => AppointmentQueue.completed,
+          _ => null,
+        };
+        final categoryRecords = appointmentRecordsForView(
+          records,
+          now,
+          showHistory: showHistory,
+          queue: selectedQueue,
+        );
         final query = _search.text.trim().toLowerCase();
-        final items = all.where((a) {
-          final queue = classifyAppointment(a, now);
-          final tab = switch (filter) {
-            'Needs action' => queue == AppointmentQueue.needsAction,
-            'Today' => queue == AppointmentQueue.today,
-            'Upcoming' => queue == AppointmentQueue.upcoming,
-            'Completed' => queue == AppointmentQueue.completed,
-            'Closed' => queue == AppointmentQueue.closed,
-            _ => true,
-          };
-          return tab &&
-              (query.isEmpty ||
+        final items = categoryRecords.where((a) {
+          return (query.isEmpty ||
                   a.fullName.toLowerCase().contains(query) ||
                   a.userId.toLowerCase().contains(query)) &&
               (departmentFilter == 'All departments' ||
@@ -1870,7 +1877,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
         final upcoming = counts[AppointmentQueue.upcoming] ?? 0;
         final completed = counts[AppointmentQueue.completed] ?? 0;
         final departments =
-            all
+            (showHistory ? all : records)
                 .map((a) => a.department ?? '')
                 .where((a) => a.isNotEmpty)
                 .toSet()
@@ -1880,7 +1887,11 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
           (id) => !items.any((appointment) => appointment.id == id),
         );
         final selectable = items
-            .where((appointment) => appointment.isFinalized)
+            .where(
+              (appointment) =>
+                  appointment.isFinalized &&
+                  (showHistory || !appointment.isArchived),
+            )
             .toList();
         final allSelected =
             selectable.isNotEmpty &&
@@ -1907,55 +1918,57 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               onSelectionChanged: (value) => setState(() {
                 showHistory = value.first;
                 filter = showHistory ? 'All' : 'Needs action';
+                departmentFilter = 'All departments';
                 selectedIds.clear();
               }),
             ),
             const SizedBox(height: 14),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final cards = <Widget>[
-                  _AppointmentSummaryCard(
-                    label: 'Needs action',
-                    value: needsAction,
-                    subtitle: 'Awaiting review',
-                    icon: Icons.priority_high_rounded,
-                    onTap: () => setState(() => filter = 'Needs action'),
-                  ),
-                  _AppointmentSummaryCard(
-                    label: 'Today',
-                    value: counts[AppointmentQueue.today] ?? 0,
-                    subtitle: 'Scheduled for today',
-                    icon: Icons.today_outlined,
-                    onTap: () => setState(() => filter = 'Today'),
-                  ),
-                  _AppointmentSummaryCard(
-                    label: 'Upcoming',
-                    value: upcoming,
-                    subtitle: 'Confirmed future dates',
-                    icon: Icons.event_available_outlined,
-                    onTap: () => setState(() => filter = 'Upcoming'),
-                  ),
-                  _AppointmentSummaryCard(
-                    label: 'Completed',
-                    value: completed,
-                    subtitle: 'Completed sessions',
-                    icon: Icons.task_alt_outlined,
-                    onTap: () => setState(() => filter = 'Completed'),
-                  ),
-                ];
-                if (constraints.maxWidth >= 900) {
-                  return Row(
-                    children: [
-                      for (final card in cards) ...[
-                        Expanded(child: card),
-                        if (card != cards.last) const SizedBox(width: 12),
+            if (!showHistory)
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final cards = <Widget>[
+                    _AppointmentSummaryCard(
+                      label: 'Needs action',
+                      value: needsAction,
+                      subtitle: 'Awaiting review',
+                      icon: Icons.priority_high_rounded,
+                      onTap: () => setState(() => filter = 'Needs action'),
+                    ),
+                    _AppointmentSummaryCard(
+                      label: 'Today',
+                      value: counts[AppointmentQueue.today] ?? 0,
+                      subtitle: 'Scheduled for today',
+                      icon: Icons.today_outlined,
+                      onTap: () => setState(() => filter = 'Today'),
+                    ),
+                    _AppointmentSummaryCard(
+                      label: 'Upcoming',
+                      value: upcoming,
+                      subtitle: 'Confirmed future dates',
+                      icon: Icons.event_available_outlined,
+                      onTap: () => setState(() => filter = 'Upcoming'),
+                    ),
+                    _AppointmentSummaryCard(
+                      label: 'Completed',
+                      value: completed,
+                      subtitle: 'Finished, including archived',
+                      icon: Icons.task_alt_outlined,
+                      onTap: () => setState(() => filter = 'Completed'),
+                    ),
+                  ];
+                  if (constraints.maxWidth >= 900) {
+                    return Row(
+                      children: [
+                        for (final card in cards) ...[
+                          Expanded(child: card),
+                          if (card != cards.last) const SizedBox(width: 12),
+                        ],
                       ],
-                    ],
-                  );
-                }
-                return Wrap(spacing: 12, runSpacing: 12, children: cards);
-              },
-            ),
+                    );
+                  }
+                  return Wrap(spacing: 12, runSpacing: 12, children: cards);
+                },
+              ),
             const SizedBox(height: 18),
             Wrap(
               spacing: 10,
@@ -1976,6 +1989,7 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                   width: 230,
                   child: DropdownButtonFormField<String>(
                     isExpanded: true,
+                    key: ValueKey('$showHistory-$filter-$departmentFilter'),
                     initialValue: departmentFilter,
                     decoration: const InputDecoration(labelText: 'Department'),
                     items: ['All departments', ...departments]
@@ -2002,39 +2016,43 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
               ],
             ),
             const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              children: [
-                for (final tab in const [
-                  'All',
-                  'Needs action',
-                  'Today',
-                  'Upcoming',
-                  'Completed',
-                  'Closed',
-                ])
-                  ChoiceChip(
-                    label: Text(
-                      '$tab ${tab == 'All'
-                          ? all.length
-                          : tab == 'Needs action'
-                          ? needsAction
-                          : tab == 'Today'
-                          ? counts[AppointmentQueue.today] ?? 0
-                          : tab == 'Upcoming'
-                          ? upcoming
-                          : tab == 'Completed'
-                          ? completed
-                          : counts[AppointmentQueue.closed] ?? 0}',
+            if (!showHistory)
+              const Text(
+                'Appointment category',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            if (!showHistory) const SizedBox(height: 8),
+            if (!showHistory)
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final tab in const [
+                    'All',
+                    'Needs action',
+                    'Today',
+                    'Upcoming',
+                    'Completed',
+                  ])
+                    ChoiceChip(
+                      label: Text(
+                        '${tab == 'All' ? 'All active' : tab} ${tab == 'All'
+                            ? all.length
+                            : tab == 'Needs action'
+                            ? needsAction
+                            : tab == 'Today'
+                            ? counts[AppointmentQueue.today] ?? 0
+                            : tab == 'Upcoming'
+                            ? upcoming
+                            : completed}',
+                      ),
+                      selected: filter == tab,
+                      onSelected: (_) => setState(() => filter = tab),
                     ),
-                    selected: filter == tab,
-                    onSelected: (_) => setState(() => filter = tab),
-                  ),
-              ],
-            ),
+                ],
+              ),
             const SizedBox(height: 12),
             Text(
-              'Showing ${items.length} of ${all.length} appointments',
+              'Showing ${items.length} of ${!showHistory && selectedQueue == AppointmentQueue.completed ? completed : all.length} ${showHistory ? 'archived ' : ''}appointments${!showHistory && selectedQueue == AppointmentQueue.completed ? ' · includes archived records' : ''}',
               style: const TextStyle(color: AdminColors.muted, fontSize: 12),
             ),
             const SizedBox(height: 8),
@@ -2119,7 +2137,9 @@ class _AppointmentsPageState extends State<_AppointmentsPage> {
                 repository: widget.repository,
                 now: now,
                 selected: selectedIds.contains(items[index].id),
-                onSelected: items[index].isFinalized
+                onSelected:
+                    items[index].isFinalized &&
+                        (showHistory || !items[index].isArchived)
                     ? (value) => setState(() {
                         if (value) {
                           selectedIds.add(items[index].id);
@@ -2618,25 +2638,27 @@ class _AppointmentSummaryCard extends StatelessWidget {
           children: [
             Icon(icon, color: AdminColors.accentStrong, size: 25),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: const TextStyle(color: AdminColors.muted)),
-                Text(
-                  '$value',
-                  style: const TextStyle(
-                    fontSize: 25,
-                    fontWeight: FontWeight.w900,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: const TextStyle(color: AdminColors.muted)),
+                  Text(
+                    '$value',
+                    style: const TextStyle(
+                      fontSize: 25,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: AdminColors.muted,
-                    fontSize: 11,
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AdminColors.muted,
+                      fontSize: 11,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
