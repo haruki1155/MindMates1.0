@@ -91,20 +91,22 @@ before(async () => {
 after(async () => {
   const appointments = await db.collection("appointments").where("userId", "==", userId).get();
   const slots = await db.collection("appointment_slots").get();
+  const appointmentIds = new Set(appointments.docs.map((snapshot) => snapshot.id));
   const deletes = [
     db.collection("users").doc(userId).delete(),
-    availability.delete(),
     lock.delete(),
     ...appointments.docs.map((snapshot) => snapshot.ref.delete()),
     ...slots.docs
-      .filter((snapshot) => snapshot.data().appointmentId?.startsWith(prefix))
+      .filter((snapshot) => appointmentIds.has(String(snapshot.data().appointmentId ?? "")))
       .map((snapshot) => snapshot.ref.delete()),
   ];
   await Promise.all(deletes);
 });
 
 test("the real booking callable serializes concurrent active appointments", async () => {
-  const [firstSlot, secondSlot, thirdSlot] = await nextWeekdaySlots();
+  // Keep this transaction test away from the nearer scheduling fixtures used
+  // by other emulator files, which execute in parallel.
+  const [firstSlot, secondSlot, thirdSlot] = await nextWeekdaySlots(100);
   const results = await Promise.allSettled([
     create.run({auth: {uid: userId}, data: booking(firstSlot)}),
     create.run({auth: {uid: userId}, data: booking(secondSlot)}),
@@ -129,7 +131,7 @@ test("the real booking callable serializes concurrent active appointments", asyn
 });
 
 test("the real booking callable rejects a forged or unoffered follow-up parent", async () => {
-  const [unofferedSlot, offeredSlot, retrySlot] = await nextWeekdaySlots(8);
+  const [unofferedSlot, offeredSlot, retrySlot] = await nextWeekdaySlots(130);
   const parent = db.collection("appointments").doc(`${prefix}-unoffered-parent`);
   await parent.set({userId, status: "completed", followUpRecommended: false, followUpStatus: "none"});
   await expectCallableFailure(
