@@ -2003,6 +2003,19 @@ export const reviewAppointment = onCall(async (request) => {
     const userActiveAppointmentLock = db.collection("appointment_user_locks").doc(userId);
     const activeLockSnapshot = await transaction.get(userActiveAppointmentLock);
     const staffName = String(staff.name ?? staff.email ?? "Counseling staff");
+    if (proposal) {
+      try {
+        validatePaccAppointmentAvailability(
+          proposal.millis,
+          availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
+        );
+      } catch (error: unknown) {
+        if (error instanceof AppointmentAvailabilityValidationError) {
+          throw new HttpsError("failed-precondition", error.message);
+        }
+        throw error;
+      }
+    }
     const acceptingProposal = before === "reschedule_proposed" && action === "confirmed" && data.proposedScheduledAt instanceof Timestamp;
     if (acceptingProposal) {
       try {

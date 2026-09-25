@@ -189,6 +189,26 @@ test("admin can complete and staff rescheduling requires a client-safe reason", 
   assert.equal(updated.data()?.rescheduleReason, "Counselor schedule conflict");
 });
 
+test("staff cannot propose a reschedule outside the effective V2 schedule", async () => {
+  const appointment = await seedAppointment("v2-closed-proposal");
+  const proposedAt = await futureWeekdaySlot();
+  await availability.set({
+    schemaVersion: 2,
+    timezone: "Asia/Manila",
+    weekdays: Object.fromEntries(Array.from({length: 7}, (_, index) => [String(index + 1), {
+      enabled: false, opensAt: "08:00", closesAt: "17:00", presence: "out_of_office", appointmentsEnabled: false, acceptsWalkIns: false,
+    }])),
+    overrides: [], notice: "",
+  });
+
+  await expectCallableFailure(review.run({
+    auth: {uid: counselorId},
+    data: {appointmentId: appointment.id, action: "reschedule_proposed", reply: "A new schedule is proposed.", proposedScheduledAt: proposedAt, rescheduleReason: "Office schedule conflict"},
+  }), "failed-precondition");
+  assert.equal((await appointment.get()).data()?.status, "confirmed");
+  await availability.set({openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, notice: "", blackoutDates: []});
+});
+
 test("a client can accept only a valid staff schedule proposal", async () => {
   const appointment = await seedAppointment("accept-reschedule");
   const proposedAt = await futureWeekdaySlot();
