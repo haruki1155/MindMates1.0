@@ -47,4 +47,38 @@ void main() {
     expect(decoded.scheduledTime, model.scheduledTime);
     expect(decoded.status, model.status);
   });
+  _followUpContract();
+}
+
+void _followUpContract() {
+  test(
+    'defaults legacy follow-up fields and parses client-safe offer metadata',
+    () {
+      final legacy = AppointmentModel.fromJson({
+        'id': 'legacy',
+        'userId': 'user',
+        'fullName': 'Student',
+        'scheduledAt': Timestamp.now(),
+        'createdAt': Timestamp.now(),
+      });
+      expect(legacy.followUpRecommended, isFalse);
+      expect(legacy.followUpStatus, 'none');
+
+      final offered = AppointmentModel.fromJson({
+        'id': 'offered',
+        'userId': 'user',
+        'fullName': 'Student',
+        'scheduledAt': Timestamp.now(),
+        'createdAt': Timestamp.now(),
+        'followUpRecommended': true,
+        'followUpMessage': 'Please book when ready.',
+        'followUpStatus': 'offered',
+        'rescheduleReason': 'Office schedule adjustment',
+      });
+      expect(offered.followUpRecommended, isTrue);
+      expect(offered.followUpMessage, 'Please book when ready.');
+      expect(offered.followUpStatus, 'offered');
+      expect(offered.rescheduleReason, 'Office schedule adjustment');
+    },
+  );
 }

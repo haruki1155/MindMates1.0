@@ -51,6 +51,7 @@ import {
 } from "./appointment_reminders";
 import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
 import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_intake";
+import {isEligibleFollowUpParentStatus, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -289,6 +290,19 @@ async function requireStaff(uid: string): Promise<FirebaseFirestore.DocumentData
     }
   }
   return {...profile, accessRole};
+}
+
+async function requireClinicalAppointmentStaff(
+  uid: string,
+): Promise<FirebaseFirestore.DocumentData> {
+  const staff = await requireStaff(uid);
+  if (staff.accessRole !== "counselor" && staff.accessRole !== "admin") {
+    throw new HttpsError(
+      "permission-denied",
+      "Counselor or administrator access is required for clinical appointment actions.",
+    );
+  }
+  return staff;
 }
 
 function configuredSuperAdminUid(): string {
@@ -1788,21 +1802,29 @@ export const createAppointmentRequest = onCall(async (request) => {
   const availability = db.collection("pacc_availability").doc("current");
   const policyDocument = db.collection("appointment_policy").doc("current");
   const rateLimit = db.collection("_appointment_rate_limits").doc(userId);
+  const activeAppointmentLock = db.collection("appointment_user_locks").doc(userId);
   const profile = await db.collection("users").doc(userId).get();
   await db.runTransaction(async (transaction) => {
     const parent = parentAppointmentId ? db.collection("appointments").doc(parentAppointmentId) : null;
-    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, parentSnapshot] = await Promise.all([
+    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, activeLockSnapshot, parentSnapshot] = await Promise.all([
       transaction.get(slot),
       transaction.get(availability),
       transaction.get(policyDocument),
       transaction.get(db.collection("appointments").where("userId", "==", userId)),
       transaction.get(rateLimit),
+      transaction.get(activeAppointmentLock),
       parent ? transaction.get(parent) : Promise.resolve(null),
     ]);
+    if (activeLockSnapshot.exists) {
+      throw new HttpsError(
+        "resource-exhausted",
+        "You already have an active appointment. Please complete your current appointment before booking another one.",
+      );
+    }
     if (parentSnapshot) {
       const parentData = parentSnapshot.data();
       if (!parentData || String(parentData.userId ?? "") !== userId ||
-          !["completed", "no_show", "cancelled", "declined", "expired"].includes(canonicalAppointmentStatus(parentData.status))) {
+          !isEligibleFollowUpParentStatus(canonicalAppointmentStatus(parentData.status))) {
         throw new HttpsError("permission-denied", "This follow-up appointment is unavailable.");
       }
     }
@@ -1810,8 +1832,11 @@ export const createAppointmentRequest = onCall(async (request) => {
     const policyError = bookingPolicyViolation(policy, schedule.millis);
     if (policyError) throw new HttpsError("failed-precondition", policyError);
     const statuses = existingAppointments.docs.map((item) => canonicalAppointmentStatus(item.data().status));
-    if (policy.maxActiveAppointments !== null && statuses.filter((status) => APPOINTMENT_ACTIVE_STATUSES.has(status)).length >= policy.maxActiveAppointments) {
-      throw new HttpsError("resource-exhausted", "You have reached the active appointment limit.");
+    if (statuses.some((status) => APPOINTMENT_ACTIVE_STATUSES.has(status))) {
+      throw new HttpsError(
+        "resource-exhausted",
+        "You already have an active appointment. Please complete your current appointment before booking another one.",
+      );
     }
     if (policy.maxPendingAppointments !== null && statuses.filter((status) => status === "requested").length >= policy.maxPendingAppointments) {
       throw new HttpsError("resource-exhausted", "You have reached the pending appointment limit.");
@@ -1844,6 +1869,11 @@ export const createAppointmentRequest = onCall(async (request) => {
             .join(" "),
     ).trim();
     transaction.create(slot, {appointmentId: appointment.id, scheduledAt, createdAt: FieldValue.serverTimestamp()});
+    transaction.create(activeAppointmentLock, {
+      appointmentId: appointment.id,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
     transaction.create(appointment, {
       // Profile-derived identity wins over client payloads. Contact fields stay
       // editable by design, with a profile value only as the initial fallback.
@@ -1856,6 +1886,13 @@ export const createAppointmentRequest = onCall(async (request) => {
       ...(parentAppointmentId ? {parentAppointmentId} : {}),
       age: input.age ?? null, address: boundedText(input.address, "Address", 300), facebook: boundedText(input.facebook, "Social contact", 120), sex: boundedText(input.sex, "Sex", 32), course: boundedText(source.course ?? input.course, "Course", 160), yearLevel: boundedText(input.yearLevel, "Year level", 64), therapyBefore: boundedText(input.therapyBefore, "Counseling history", 500),
     });
+    if (parent) {
+      transaction.update(parent, {
+        followUpStatus: "booked",
+        followUpAppointmentId: appointment.id,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
     createAppointmentEvent(transaction, appointment, "appointment_requested", userId, "", "requested");
   });
   return {ok: true, appointmentId: appointment.id};
@@ -1866,78 +1903,42 @@ export const respondToAppointment = onCall(async (request) => {
   const input = (request.data ?? {}) as Record<string, unknown>;
   const appointmentId = String(input.appointmentId ?? "").trim();
   const action = String(input.action ?? "").trim();
-  if (!appointmentId || !["cancel", "accept_reschedule", "propose_reschedule"].includes(action)) throw new HttpsError("invalid-argument", "A valid appointment action is required.");
+  if (!appointmentId || action !== "accept_reschedule") {
+    throw new HttpsError("invalid-argument", "Only acceptance of a staff-proposed schedule is allowed.");
+  }
   const appointment = db.collection("appointments").doc(appointmentId);
-  const policyDocument = db.collection("appointment_policy").doc("current");
   const availabilityDocument = db.collection("pacc_availability").doc("current");
   await db.runTransaction(async (transaction) => {
-    const [snapshot, policySnapshot, availabilitySnapshot] = await Promise.all([
+    const [snapshot, availabilitySnapshot] = await Promise.all([
       transaction.get(appointment),
-      transaction.get(policyDocument),
       transaction.get(availabilityDocument),
     ]);
     if (!snapshot.exists || String(snapshot.data()?.userId ?? "") !== userId) throw new HttpsError("permission-denied", "This appointment is unavailable.");
     const data = snapshot.data()!;
     const before = canonicalAppointmentStatus(data.status);
     if (!APPOINTMENT_ACTIVE_STATUSES.has(before)) throw new HttpsError("failed-precondition", "This appointment can no longer be changed.");
-    const notification = db.collection("notifications").doc();
-    if (action === "cancel") {
-      if (!canTransitionAppointment(before, "student", "cancelled")) {
-        throw new HttpsError("failed-precondition", "This appointment cannot be cancelled in its current state.");
-      }
-      const cutoff = appointmentBookingPolicy(
-        policySnapshot.exists ? policySnapshot.data() : null,
-      );
-      const cancellationReason = boundedText(input.reason, "Cancellation reason", 500);
-      if (cutoff.requireCancellationReason && !cancellationReason) {
-        throw new HttpsError("invalid-argument", "Provide a cancellation reason.");
-      }
-      const scheduledAt = data.scheduledAt as Timestamp;
-      if (cutoff.cancellationCutoffMinutes !== null && scheduledAt.toMillis() - Date.now() < cutoff.cancellationCutoffMinutes * 60_000) {
-        throw new HttpsError("failed-precondition", "This appointment is inside the cancellation cutoff window.");
-      }
-      transaction.update(appointment, {status: "cancelled", cancelledBy: userId, cancelledAt: FieldValue.serverTimestamp(), cancellationReason, updatedAt: FieldValue.serverTimestamp()});
-      transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
-      createAppointmentEvent(transaction, appointment, "appointment_cancelled", userId, before, "cancelled");
-      if (data.assignedStaffId) transaction.create(notification, {userId: data.assignedStaffId, appointmentId, type: "appointment", title: "Appointment cancelled", body: "A student cancelled an appointment.", createdAt: FieldValue.serverTimestamp(), readAt: null});
-      return;
+    if (!canTransitionAppointment(before, "student", "confirmed") || !data.proposedScheduledAt || data.proposedBy !== "counselor") {
+      throw new HttpsError("failed-precondition", "There is no active staff schedule proposal.");
     }
-    if (action === "accept_reschedule") {
-      if (!canTransitionAppointment(before, "student", "confirmed") || !data.proposedScheduledAt) throw new HttpsError("failed-precondition", "There is no active schedule proposal.");
-      const proposedAt = data.proposedScheduledAt as Timestamp;
-      try {
-        validatePaccAppointmentAvailability(
-          proposedAt.toMillis(),
-          availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
-        );
-      } catch (error: unknown) {
-        if (error instanceof AppointmentAvailabilityValidationError) {
-          throw new HttpsError("failed-precondition", error.message);
-        }
-        throw error;
-      }
-      const oldSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp));
-      // Existing bookings reserve the shared PACC slot. Keep every lifecycle
-      // transition on that same key until counselor-specific availability is
-      // introduced as a compatible, server-side migration.
-      const newSlot = db.collection("appointment_slots").doc(appointmentSlotId(proposedAt));
-      const claimed = await transaction.get(newSlot);
-      if (claimed.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
-      transaction.delete(oldSlot); transaction.create(newSlot, {appointmentId, scheduledAt: proposedAt, createdAt: FieldValue.serverTimestamp()});
-      transaction.update(appointment, {status: "confirmed", scheduledAt: proposedAt, scheduledTime: data.proposedScheduledTime ?? "", proposedScheduledAt: FieldValue.delete(), proposedScheduledTime: FieldValue.delete(), proposedBy: FieldValue.delete(), proposalStatus: FieldValue.delete(), reminders: {}, updatedAt: FieldValue.serverTimestamp()});
-      createAppointmentEvent(transaction, appointment, "reschedule_accepted", userId, before, "confirmed");
-      return;
-    }
-    if (!canTransitionAppointment(before, "student", "reschedule_proposed")) throw new HttpsError("failed-precondition", "Only confirmed appointments can be rescheduled.");
-    let proposal: {millis: number; scheduledTime: string};
+    const proposedAt = data.proposedScheduledAt as Timestamp;
     try {
-      proposal = validateAppointmentTimestamp(input.proposedScheduledAt);
+      validatePaccAppointmentAvailability(
+        proposedAt.toMillis(),
+        availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
+      );
     } catch (error: unknown) {
-      if (error instanceof AppointmentSchedulingValidationError) throw new HttpsError("invalid-argument", error.message);
+      if (error instanceof AppointmentAvailabilityValidationError) {
+        throw new HttpsError("failed-precondition", error.message);
+      }
       throw error;
     }
-    transaction.update(appointment, {status: "reschedule_proposed", proposedScheduledAt: Timestamp.fromMillis(proposal.millis), proposedScheduledTime: proposal.scheduledTime, proposedBy: "student", proposalStatus: "awaiting_counselor", updatedAt: FieldValue.serverTimestamp()});
-    createAppointmentEvent(transaction, appointment, "reschedule_proposed", userId, before, "reschedule_proposed");
+    const oldSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp));
+    const newSlot = db.collection("appointment_slots").doc(appointmentSlotId(proposedAt));
+    const claimed = await transaction.get(newSlot);
+    if (claimed.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
+    transaction.delete(oldSlot); transaction.create(newSlot, {appointmentId, scheduledAt: proposedAt, createdAt: FieldValue.serverTimestamp()});
+    transaction.update(appointment, {status: "confirmed", scheduledAt: proposedAt, scheduledTime: data.proposedScheduledTime ?? "", proposedScheduledAt: FieldValue.delete(), proposedScheduledTime: FieldValue.delete(), proposedBy: FieldValue.delete(), proposalStatus: FieldValue.delete(), reminders: {}, updatedAt: FieldValue.serverTimestamp()});
+    createAppointmentEvent(transaction, appointment, "reschedule_accepted", userId, before, "confirmed");
   });
   return {ok: true};
 });
@@ -1945,16 +1946,19 @@ export const respondToAppointment = onCall(async (request) => {
 export const reviewAppointment = onCall(async (request) => {
   const staffId = request.auth?.uid;
   if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
-  const staff = await requireStaff(staffId);
+  const staff = await requireClinicalAppointmentStaff(staffId);
   const input = request.data as Record<string, unknown>;
   const appointmentId = String(input.appointmentId ?? "").trim();
   const action = String(input.action ?? "").trim();
   const reply = boundedText(input.reply, "Reply", 1_000, {required: true});
   let proposal: {millis: number; scheduledTime: string} | null = null;
-  if (!appointmentId || !["confirmed", "declined", "reschedule_proposed", "completed", "no_show", "cancelled"].includes(action)) {
+  let completion: ReturnType<typeof validateCompletionInput> | null = null;
+  if (!appointmentId || !["confirmed", "reschedule_proposed", "completed", "no_show"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
   if (action === "reschedule_proposed") {
+    const rescheduleReason = validateRescheduleReason(input.rescheduleReason);
+    input.rescheduleReason = rescheduleReason;
     try {
       proposal = validateAppointmentTimestamp(input.proposedScheduledAt);
     } catch (error: unknown) {
@@ -1962,10 +1966,18 @@ export const reviewAppointment = onCall(async (request) => {
       throw error;
     }
   }
+  if (action === "completed") {
+    completion = validateCompletionInput({
+      summary: input.sessionSummary,
+      offerFollowUp: input.offerFollowUp,
+      followUpMessage: input.followUpMessage,
+    });
+  }
 
   const appointment = db.collection("appointments").doc(appointmentId);
   const notification = db.collection("notifications").doc();
   const history = appointment.collection("history").doc();
+  const clinicalNote = appointment.collection("clinical_notes").doc("session");
   const availabilityDocument = db.collection("pacc_availability").doc("current");
   await db.runTransaction(async (transaction) => {
     const [current, availabilitySnapshot] = await Promise.all([
@@ -1985,6 +1997,8 @@ export const reviewAppointment = onCall(async (request) => {
     }
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Appointment has no student.");
+    const userActiveAppointmentLock = db.collection("appointment_user_locks").doc(userId);
+    const activeLockSnapshot = await transaction.get(userActiveAppointmentLock);
     const staffName = String(staff.name ?? staff.email ?? "Counseling staff");
     const acceptingProposal = before === "reschedule_proposed" && action === "confirmed" && data.proposedScheduledAt instanceof Timestamp;
     if (acceptingProposal) {
@@ -2014,40 +2028,62 @@ export const reviewAppointment = onCall(async (request) => {
       updatedAt: FieldValue.serverTimestamp(),
       proposedScheduledAt: action === "reschedule_proposed" ? Timestamp.fromMillis(proposal!.millis) : null,
       proposedScheduledTime: action === "reschedule_proposed" ? proposal!.scheduledTime : "",
+      rescheduleReason: action === "reschedule_proposed" ? String(input.rescheduleReason) : FieldValue.delete(),
       proposedBy: action === "reschedule_proposed" ? "counselor" : FieldValue.delete(),
       proposalStatus: action === "reschedule_proposed" ? "awaiting_student" : FieldValue.delete(),
       ...(acceptingProposal ? {scheduledAt: data.proposedScheduledAt, scheduledTime: data.proposedScheduledTime ?? "", reminders: {}} : {}),
       completedAt: action === "completed" ? FieldValue.serverTimestamp() : null,
       noShowAt: action === "no_show" ? FieldValue.serverTimestamp() : null,
-      cancelledAt: action === "cancelled" ? FieldValue.serverTimestamp() : null,
-      cancellationReason: action === "cancelled" ? reply : null,
+      ...(completion == null ? {} : {
+        followUpRecommended: completion.offerFollowUp,
+        followUpMessage: completion.offerFollowUp ? completion.followUpMessage : "",
+        followUpRecommendedAt: FieldValue.serverTimestamp(),
+        followUpRecommendedBy: staffId,
+        followUpRecommendedByName: staffName,
+        followUpStatus: completion.offerFollowUp ? "offered" : "none",
+      }),
     };
     transaction.update(appointment, patch);
+    if (completion != null) {
+      transaction.set(clinicalNote, {
+        appointmentId,
+        summary: completion.summary,
+        authorId: staffId,
+        authorNameSnapshot: staffName,
+        authorRoleSnapshot: staff.accessRole,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    if (["completed", "no_show"].includes(action) &&
+        String(activeLockSnapshot.data()?.appointmentId ?? "") === appointmentId) {
+      transaction.delete(userActiveAppointmentLock);
+    }
     transaction.create(history, {
       previousStatus: before,
       status: action,
       reply,
+      ...(action === "reschedule_proposed" ? {rescheduleReason: String(input.rescheduleReason)} : {}),
       proposedScheduledAt: patch.proposedScheduledAt ?? null,
       proposedScheduledTime: patch.proposedScheduledTime,
       staffId,
       staffName,
       createdAt: FieldValue.serverTimestamp(),
     });
-    const title = action === "confirmed" ? "PACC Appointment Confirmed" : action === "declined" ? "Appointment request declined" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked no-show" : action === "cancelled" ? "Appointment cancelled" : "Schedule Change Proposed";
+    const title = action === "confirmed" ? "PACC Appointment Confirmed" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked as Did Not Attend" : "Proposed new schedule";
     transaction.create(notification, {
       userId,
       appointmentId,
-      type: action === "confirmed" ? "appointment_confirmed" : action === "declined" ? "appointment_declined" : action === "completed" ? "appointment_completed" : action === "cancelled" ? "appointment_cancelled" : action === "reschedule_proposed" ? "reschedule_proposed" : "appointment_update",
-      title,
-      body: reply,
+      type: completion?.offerFollowUp === true ? "appointment_follow_up_offer" : action === "confirmed" ? "appointment_confirmed" : action === "completed" ? "appointment_completed" : action === "no_show" ? "appointment_did_not_attend" : "reschedule_proposed",
+      title: completion?.offerFollowUp === true ? "Follow-up session offered" : title,
+      body: completion?.offerFollowUp === true ? completion.followUpMessage : action === "no_show" ? "Your appointment was marked as Did Not Attend." : action === "reschedule_proposed" ? `Proposed new schedule: ${String(input.rescheduleReason)}` : reply,
       createdAt: FieldValue.serverTimestamp(),
       readAt: null,
     });
     const auditAction = action === "confirmed" ? "APPOINTMENT_CONFIRMED"
       : action === "completed" ? "APPOINTMENT_COMPLETED"
-        : action === "no_show" ? "APPOINTMENT_MARKED_NO_SHOW"
-          : action === "cancelled" ? "APPOINTMENT_CANCELLED"
-      : action === "reschedule_proposed" ? "APPOINTMENT_RESCHEDULED" : "APPOINTMENT_DECLINED";
+        : action === "no_show" ? "APPOINTMENT_MARKED_DID_NOT_ATTEND"
+          : "APPOINTMENT_RESCHEDULED";
     writeAudit(transaction, db, {
       actorId: staffId,
       actorNameSnapshot: actorName(staff),
@@ -2243,12 +2279,17 @@ export const expireStaleAppointmentRequests = onSchedule(
         if (!data || canonicalAppointmentStatus(data.status) !== "requested" ||
             !(data.createdAt instanceof Timestamp) || data.createdAt.toMillis() > cutoff.toMillis()) return;
         const userId = String(data.userId ?? "");
+        const activeAppointmentLock = db.collection("appointment_user_locks").doc(userId);
+        const activeLock = await transaction.get(activeAppointmentLock);
         transaction.update(appointment.ref, {
           status: "expired", expiredAt: FieldValue.serverTimestamp(),
           expiryReason: "Request expired before PAACC review", updatedAt: FieldValue.serverTimestamp(),
         });
         if (data.scheduledAt instanceof Timestamp) {
           transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt)));
+        }
+        if (String(activeLock.data()?.appointmentId ?? "") === appointment.id) {
+          transaction.delete(activeAppointmentLock);
         }
         createAppointmentEvent(transaction, appointment.ref, "appointment_expired", "system", "requested", "expired");
         if (userId) transaction.create(db.collection("notifications").doc(), {

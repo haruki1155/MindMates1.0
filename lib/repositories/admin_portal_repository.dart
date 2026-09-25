@@ -998,6 +998,10 @@ class AdminPortalRepository {
     required String reply,
     DateTime? proposedScheduledAt,
     String? proposedScheduledTime,
+    String? rescheduleReason,
+    String? sessionSummary,
+    bool offerFollowUp = false,
+    String? followUpMessage,
   }) async {
     final data = <String, dynamic>{
       'appointmentId': appointmentId,
@@ -1009,6 +1013,10 @@ class AdminPortalRepository {
     if (proposedScheduledTime != null) {
       data['proposedScheduledTime'] = proposedScheduledTime;
     }
+    if (rescheduleReason != null) data['rescheduleReason'] = rescheduleReason;
+    if (sessionSummary != null) data['sessionSummary'] = sessionSummary;
+    if (offerFollowUp) data['offerFollowUp'] = true;
+    if (followUpMessage != null) data['followUpMessage'] = followUpMessage;
     await FirebaseFunctions.instance
         .httpsCallable('reviewAppointment')
         .call(data);

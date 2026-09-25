@@ -47,7 +47,7 @@ enum AppointmentStatus {
     rescheduleProposed => 'SCHEDULE CHANGE',
     cancelled => 'CANCELLED',
     completed => 'COMPLETED',
-    noShow => 'NO SHOW',
+    noShow => 'DID NOT ATTEND',
     declined => 'DECLINED',
     expired => 'EXPIRED',
     unknown => 'REQUESTED',
@@ -94,6 +94,11 @@ class AppointmentModel {
     this.academicYearId,
     this.archivedAt,
     this.parentAppointmentId,
+    this.rescheduleReason,
+    this.followUpRecommended = false,
+    this.followUpMessage,
+    this.followUpStatus = 'none',
+    this.followUpAppointmentId,
   });
 
   final String id;
@@ -129,6 +134,11 @@ class AppointmentModel {
   final String? academicYearId;
   final DateTime? archivedAt;
   final String? parentAppointmentId;
+  final String? rescheduleReason;
+  final bool followUpRecommended;
+  final String? followUpMessage;
+  final String followUpStatus;
+  final String? followUpAppointmentId;
 
   bool get isArchived => archivedAt != null;
   AppointmentStatus get lifecycleStatus => AppointmentStatus.parse(status);
@@ -180,6 +190,11 @@ class AppointmentModel {
       academicYearId: _optionalString(json['academicYearId']),
       archivedAt: dateTimeFromFirestore(json['archivedAt']),
       parentAppointmentId: _optionalString(json['parentAppointmentId']),
+      rescheduleReason: _optionalString(json['rescheduleReason']),
+      followUpRecommended: json['followUpRecommended'] == true,
+      followUpMessage: _optionalString(json['followUpMessage']),
+      followUpStatus: _optionalString(json['followUpStatus']) ?? 'none',
+      followUpAppointmentId: _optionalString(json['followUpAppointmentId']),
     );
   }
 
@@ -216,6 +231,11 @@ class AppointmentModel {
       'createdAt': createdAt,
       'updatedAt': updatedAt,
       'parentAppointmentId': parentAppointmentId ?? '',
+      'rescheduleReason': rescheduleReason ?? '',
+      'followUpRecommended': followUpRecommended,
+      'followUpMessage': followUpMessage ?? '',
+      'followUpStatus': followUpStatus,
+      'followUpAppointmentId': followUpAppointmentId ?? '',
     };
   }
 
@@ -253,6 +273,11 @@ class AppointmentModel {
     String? academicYearId,
     DateTime? archivedAt,
     String? parentAppointmentId,
+    String? rescheduleReason,
+    bool? followUpRecommended,
+    String? followUpMessage,
+    String? followUpStatus,
+    String? followUpAppointmentId,
   }) {
     return AppointmentModel(
       id: id ?? this.id,
@@ -290,6 +315,12 @@ class AppointmentModel {
       academicYearId: academicYearId ?? this.academicYearId,
       archivedAt: archivedAt ?? this.archivedAt,
       parentAppointmentId: parentAppointmentId ?? this.parentAppointmentId,
+      rescheduleReason: rescheduleReason ?? this.rescheduleReason,
+      followUpRecommended: followUpRecommended ?? this.followUpRecommended,
+      followUpMessage: followUpMessage ?? this.followUpMessage,
+      followUpStatus: followUpStatus ?? this.followUpStatus,
+      followUpAppointmentId:
+          followUpAppointmentId ?? this.followUpAppointmentId,
     );
   }
 

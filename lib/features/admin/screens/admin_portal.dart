@@ -2783,12 +2783,14 @@ class _AppointmentCard extends StatelessWidget {
     var action = currentStatus == AppointmentStatus.confirmed
         ? 'completed'
         : currentStatus == AppointmentStatus.rescheduleProposed
-        ? item.proposedBy == 'student'
-              ? 'confirmed'
-              : 'reschedule_proposed'
+        ? 'reschedule_proposed'
         : 'confirmed';
     String reason = _appointmentReasons(action).first;
     final proposedTime = TextEditingController();
+    final customReason = TextEditingController();
+    final sessionSummary = TextEditingController();
+    final followUpMessage = TextEditingController();
+    var offerFollowUp = false;
     DateTime? proposedDate;
     await showDialog<void>(
       context: context,
@@ -2914,42 +2916,25 @@ class _AppointmentCard extends StatelessWidget {
                               ),
                               DropdownMenuItem(
                                 value: 'no_show',
-                                child: Text('Mark as no-show'),
+                                child: Text('Mark as Did Not Attend'),
                               ),
                               DropdownMenuItem(
                                 value: 'reschedule_proposed',
                                 child: Text('Propose new schedule'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'cancelled',
-                                child: Text('Cancel appointment'),
                               ),
                             ]
                           : currentStatus ==
                                 AppointmentStatus.rescheduleProposed
                           ? [
-                              if (item.proposedBy == 'student')
-                                const DropdownMenuItem(
-                                  value: 'confirmed',
-                                  child: Text('Accept proposed schedule'),
-                                ),
                               const DropdownMenuItem(
                                 value: 'reschedule_proposed',
                                 child: Text('Propose new schedule'),
-                              ),
-                              const DropdownMenuItem(
-                                value: 'cancelled',
-                                child: Text('Cancel appointment'),
                               ),
                             ]
                           : const [
                               DropdownMenuItem(
                                 value: 'confirmed',
                                 child: Text('Confirm appointment'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'declined',
-                                child: Text('Decline appointment'),
                               ),
                               DropdownMenuItem(
                                 value: 'reschedule_proposed',
@@ -2979,6 +2964,18 @@ class _AppointmentCard extends StatelessWidget {
                       onChanged: (value) =>
                           setDialogState(() => reason = value!),
                     ),
+                    if (action == 'reschedule_proposed') ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: customReason,
+                        maxLength: 500,
+                        decoration: InputDecoration(
+                          labelText: reason == 'Other'
+                              ? 'Custom reschedule reason (required)'
+                              : 'Additional reschedule context (optional)',
+                        ),
+                      ),
+                    ],
                     if (action == 'reschedule_proposed') ...[
                       const SizedBox(height: 12),
                       Wrap(
@@ -3021,6 +3018,38 @@ class _AppointmentCard extends StatelessWidget {
                         ],
                       ),
                     ],
+                    if (action == 'completed') ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: sessionSummary,
+                        minLines: 3,
+                        maxLines: 8,
+                        maxLength: 2000,
+                        decoration: const InputDecoration(
+                          labelText: 'Session summary (internal)',
+                          helperText:
+                              'Visible only to authorized clinical staff.',
+                        ),
+                      ),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        value: offerFollowUp,
+                        onChanged: (value) => setDialogState(
+                          () => offerFollowUp = value ?? false,
+                        ),
+                        title: const Text('Offer a follow-up session'),
+                      ),
+                      if (offerFollowUp)
+                        TextField(
+                          controller: followUpMessage,
+                          minLines: 2,
+                          maxLines: 5,
+                          maxLength: 1000,
+                          decoration: const InputDecoration(
+                            labelText: 'Client message',
+                          ),
+                        ),
+                    ],
                   ],
                 ],
               ),
@@ -3034,6 +3063,45 @@ class _AppointmentCard extends StatelessWidget {
             if (canReview)
               FilledButton(
                 onPressed: () async {
+                  final rescheduleReason = action == 'reschedule_proposed'
+                      ? [
+                          if (reason != 'Other') reason,
+                          customReason.text.trim(),
+                        ].where((part) => part.isNotEmpty).join(': ')
+                      : null;
+                  if (action == 'reschedule_proposed' &&
+                      (rescheduleReason == null ||
+                          rescheduleReason.trim().length < 3)) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Enter a reschedule reason of at least 3 characters.',
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+                  if (action == 'completed' &&
+                      sessionSummary.text.trim().length < 3) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Enter an internal session summary of at least 3 characters.',
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+                  if (action == 'completed' &&
+                      offerFollowUp &&
+                      followUpMessage.text.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Enter a client follow-up message.'),
+                      ),
+                    );
+                    return;
+                  }
                   if (action == 'reschedule_proposed' &&
                       (proposedDate == null ||
                           proposedTime.text.trim().isEmpty)) {
@@ -3050,9 +3118,19 @@ class _AppointmentCard extends StatelessWidget {
                     await repository.reviewAppointment(
                       appointmentId: item.id,
                       action: action,
-                      reply: reason,
+                      reply: action == 'completed'
+                          ? 'Appointment completed.'
+                          : rescheduleReason ?? reason,
                       proposedScheduledAt: proposedDate,
                       proposedScheduledTime: proposedTime.text.trim(),
+                      rescheduleReason: rescheduleReason,
+                      sessionSummary: action == 'completed'
+                          ? sessionSummary.text.trim()
+                          : null,
+                      offerFollowUp: action == 'completed' && offerFollowUp,
+                      followUpMessage: action == 'completed' && offerFollowUp
+                          ? followUpMessage.text.trim()
+                          : null,
                     );
                     if (dialogContext.mounted) Navigator.pop(dialogContext);
                   } catch (error) {
@@ -3077,6 +3155,9 @@ class _AppointmentCard extends StatelessWidget {
       ),
     );
     proposedTime.dispose();
+    customReason.dispose();
+    sessionSummary.dispose();
+    followUpMessage.dispose();
   }
 
   static List<String> _appointmentReasons(String action) => switch (action) {
@@ -3084,19 +3165,15 @@ class _AppointmentCard extends StatelessWidget {
       'Schedule and counselor are available',
       'Appointment approved by PAACC',
     ],
-    'declined' => const ['Requested schedule cannot be accommodated'],
     'reschedule_proposed' => const [
-      'A different office time is available',
-      'The requested time needs to be adjusted',
+      'Counselor schedule conflict',
+      'Counselor unavailable',
+      'Office schedule adjustment',
+      'Emergency office closure',
+      'Requested time is unavailable',
+      'Other',
     ],
     'no_show' => const ['Student did not attend the confirmed appointment'],
-    'cancelled' => const [
-      'Student requested cancellation',
-      'Schedule conflict',
-      'Office closure',
-      'Counselor unavailable',
-      'Other legitimate reason',
-    ],
     _ => const ['Counseling session completed'],
   };
 }
@@ -4967,7 +5044,7 @@ String _formalLabel(String value) {
       return 'Schedule adjustment needed';
     case 'no_show':
     case 'noshow':
-      return 'No-show';
+      return 'Did Not Attend';
     default:
       return value
           .replaceAllMapped(
