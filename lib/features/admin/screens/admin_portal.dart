@@ -1886,13 +1886,14 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
         selectedIds.removeWhere(
           (id) => !items.any((appointment) => appointment.id == id),
         );
-        final selectable = items
-            .where(
-              (appointment) =>
-                  appointment.isFinalized &&
-                  (showHistory || !appointment.isArchived),
-            )
-            .toList();
+        final selectable = showHistory
+            ? <AppointmentModel>[]
+            : items
+                  .where(
+                    (appointment) =>
+                        appointment.isFinalized && !appointment.isArchived,
+                  )
+                  .toList();
         final allSelected =
             selectable.isNotEmpty &&
             selectable.every(
@@ -2056,7 +2057,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
               style: const TextStyle(color: AdminColors.muted, fontSize: 12),
             ),
             const SizedBox(height: 8),
-            if (selectable.isNotEmpty)
+            if (!showHistory && selectable.isNotEmpty)
               Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: Padding(
@@ -2093,15 +2094,9 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                       if (selectedIds.isNotEmpty)
                         FilledButton.icon(
                           onPressed: archiving ? null : _bulkArchive,
-                          icon: Icon(
-                            showHistory
-                                ? Icons.unarchive_outlined
-                                : Icons.archive_outlined,
-                          ),
+                          icon: const Icon(Icons.archive_outlined),
                           label: Text(
-                            showHistory
-                                ? 'Restore selected (${selectedIds.length})'
-                                : 'Move to history (${selectedIds.length})',
+                            'Move to history (${selectedIds.length})',
                           ),
                         ),
                       if (selectedIds.isNotEmpty)
@@ -2138,8 +2133,9 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                 now: now,
                 selected: selectedIds.contains(items[index].id),
                 onSelected:
-                    items[index].isFinalized &&
-                        (showHistory || !items[index].isArchived)
+                    !showHistory &&
+                        items[index].isFinalized &&
+                        !items[index].isArchived
                     ? (value) => setState(() {
                         if (value) {
                           selectedIds.add(items[index].id);
@@ -2148,7 +2144,9 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                         }
                       })
                     : null,
-                onArchive: () => _archiveOne(items[index]),
+                onArchive: !showHistory && !items[index].isArchived
+                    ? () => _archiveOne(items[index])
+                    : null,
               ),
             ],
           ],
@@ -2158,17 +2156,12 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
   );
 
   Future<void> _archiveOne(AppointmentModel appointment) async {
-    final action = showHistory ? 'restore' : 'move to history';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          '${action[0].toUpperCase()}${action.substring(1)} appointment?',
-        ),
-        content: Text(
-          showHistory
-              ? 'This appointment will return to the active queue.'
-              : 'This finished appointment will be kept safely in History.',
+        title: const Text('Move to history appointment?'),
+        content: const Text(
+          'This finished appointment will be kept safely in History.',
         ),
         actions: [
           TextButton(
@@ -2177,7 +2170,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(action[0].toUpperCase() + action.substring(1)),
+            child: const Text('Move to history'),
           ),
         ],
       ),
@@ -2186,17 +2179,11 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
     try {
       await widget.repository.archiveAppointments(
         appointmentIds: [appointment.id],
-        archived: !showHistory,
+        archived: true,
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              showHistory
-                  ? 'Appointment restored.'
-                  : 'Appointment moved to History.',
-            ),
-          ),
+          const SnackBar(content: Text('Appointment moved to History.')),
         );
       }
     } catch (_) {
@@ -2214,15 +2201,12 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
 
   Future<void> _bulkArchive() async {
     final ids = selectedIds.toList();
-    final action = showHistory ? 'restore' : 'move to History';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(
-          '${action[0].toUpperCase()}${action.substring(1)} ${ids.length} appointments?',
-        ),
-        content: Text(
-          'Only finished appointments are included. They will remain available in the ${showHistory ? 'active queue' : 'History'} view.',
+        title: Text('Move to History ${ids.length} appointments?'),
+        content: const Text(
+          'Only finished appointments are included. They will remain available in History.',
         ),
         actions: [
           TextButton(
@@ -2231,7 +2215,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(action[0].toUpperCase() + action.substring(1)),
+            child: const Text('Move to History'),
           ),
         ],
       ),
@@ -2241,16 +2225,12 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
     try {
       final count = await widget.repository.archiveAppointments(
         appointmentIds: ids,
-        archived: !showHistory,
+        archived: true,
       );
       if (mounted) {
         setState(() => selectedIds.clear());
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '$count appointments ${showHistory ? 'restored' : 'moved to History'}.',
-            ),
-          ),
+          SnackBar(content: Text('$count appointments moved to History.')),
         );
       }
     } catch (_) {
@@ -2680,7 +2660,7 @@ class _AppointmentCard extends StatelessWidget {
   final AdminPortalRepository repository;
   final bool selected;
   final ValueChanged<bool>? onSelected;
-  final VoidCallback onArchive;
+  final VoidCallback? onArchive;
   final DateTime now;
   @override
   Widget build(BuildContext context) => Container(
@@ -2733,18 +2713,12 @@ class _AppointmentCard extends StatelessWidget {
           ),
           label: Text(canReview ? 'Review' : 'View'),
         );
-        final historyAction = item.isFinalized
+        final historyAction =
+            item.isFinalized && !item.isArchived && onArchive != null
             ? IconButton(
-                tooltip: item.isArchived
-                    ? 'Restore from history'
-                    : 'Move to history',
+                tooltip: 'Move to history',
                 onPressed: onArchive,
-                icon: Icon(
-                  item.isArchived
-                      ? Icons.unarchive_outlined
-                      : Icons.archive_outlined,
-                  size: 19,
-                ),
+                icon: const Icon(Icons.archive_outlined, size: 19),
               )
             : const SizedBox.shrink();
         if (box.maxWidth < 700) {

@@ -69,6 +69,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Archived 0'), findsWidgets);
     expect(find.text('Finished one'), findsWidgets);
+    expect(find.byTooltip('Move to history'), findsWidgets);
+    expect(find.textContaining('Select finished'), findsOneWidget);
+    await tester.ensureVisible(find.byType(Checkbox).first);
+    await tester.tap(find.byType(Checkbox).first);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Move to history (2)'), findsOneWidget);
 
     await tester.ensureVisible(find.text('History'));
     await tester.tap(find.text('History'));
@@ -76,6 +82,14 @@ void main() {
     expect(find.text('Archived 0'), findsWidgets);
     expect(find.text('Finished one'), findsNothing);
     expect(find.text('Appointment category'), findsNothing);
+    expect(find.byTooltip('Restore from history'), findsNothing);
+    expect(find.textContaining('Restore selected'), findsNothing);
+    expect(find.byIcon(Icons.unarchive_outlined), findsNothing);
+    expect(find.byType(Checkbox), findsNothing);
+    expect(find.textContaining('Select finished'), findsNothing);
+    expect(find.text('View'), findsWidgets);
+    expect(find.text('Review'), findsNothing);
+    expect(find.byTooltip('Move to history'), findsNothing);
   });
 }
 
