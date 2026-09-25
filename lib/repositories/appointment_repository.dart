@@ -91,36 +91,12 @@ class AppointmentRepository {
     );
   }
 
-  Future<void> cancelAppointment(String appointmentId, {String? reason}) =>
-      _action(appointmentId, 'cancel', reason: reason);
-
   Future<void> acceptReschedule(String appointmentId) =>
-      _action(appointmentId, 'accept_reschedule');
+      _functionClient.routedCallable('respondToAppointment').call({
+        'appointmentId': appointmentId,
+        'action': 'accept_reschedule',
+      });
 
-  Future<void> proposeReschedule(
-    String appointmentId,
-    DateTime scheduledAt,
-    String scheduledTime,
-  ) => _action(
-    appointmentId,
-    'propose_reschedule',
-    proposedScheduledAt: scheduledAt.millisecondsSinceEpoch,
-    proposedScheduledTime: scheduledTime,
-  );
-
-  Future<void> _action(
-    String appointmentId,
-    String action, {
-    String? reason,
-    int? proposedScheduledAt,
-    String? proposedScheduledTime,
-  }) => _functionClient.routedCallable('respondToAppointment').call({
-    'appointmentId': appointmentId,
-    'action': action,
-    if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
-    'proposedScheduledAt': ?proposedScheduledAt,
-    'proposedScheduledTime': ?proposedScheduledTime,
-  });
 }
 
 class AppointmentSlot {

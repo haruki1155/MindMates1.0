@@ -110,25 +110,8 @@ class AppointmentProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> cancelAppointment(String appointmentId, {String? reason}) =>
-      _performAction(
-        () => _repository.cancelAppointment(appointmentId, reason: reason),
-      );
-
   Future<bool> acceptReschedule(String appointmentId) =>
       _performAction(() => _repository.acceptReschedule(appointmentId));
-
-  Future<bool> proposeReschedule(
-    String appointmentId,
-    DateTime scheduledAt,
-    String scheduledTime,
-  ) => _performAction(
-    () => _repository.proposeReschedule(
-      appointmentId,
-      scheduledAt,
-      scheduledTime,
-    ),
-  );
 
   Future<List<AppointmentSlot>> getAvailableSlots(DateTime date) async {
     try {

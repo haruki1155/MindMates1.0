@@ -192,9 +192,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         appointments: appointmentProvider?.appointments ?? const [],
         onView: _showAppointmentDetails,
         onCalendar: _openMindMateCalendar,
-        onCancel: _cancelAppointment,
         onAccept: _acceptReschedule,
-        onReschedule: _requestReschedule,
         onBook: _startNewAppointment,
         isSaving: appointmentProvider?.isSaving ?? false,
       );
@@ -315,7 +313,19 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     });
   }
 
-  void _startNewAppointment([String? parentAppointmentId]) {
+  void _startNewAppointment([AppointmentModel? priorAppointment]) {
+    final appointments = _readProviderOrNull<AppointmentProvider>()?.appointments ??
+        const <AppointmentModel>[];
+    if (appointments.any((appointment) => appointment.isActive)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'You already have an active appointment. Please complete your current appointment before booking another one.',
+          ),
+        ),
+      );
+      return;
+    }
     final today = _today;
     setState(() {
       _tab = _PaccAppointmentTab.appointNew;
@@ -323,7 +333,23 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _selectedDate = null;
       _selectedTime = null;
       _visibleMonth = DateTime(today.year, today.month);
-      _parentAppointmentId = parentAppointmentId;
+      _parentAppointmentId = priorAppointment?.hasAvailableFollowUpOffer == true
+          ? priorAppointment?.id
+          : null;
+      if (priorAppointment != null) {
+        _ageController.text = priorAppointment.age?.toString() ?? '';
+        _addressController.text = priorAppointment.address ?? '';
+        _contactNumberController.text = priorAppointment.contactNumber;
+        _emailController.text = priorAppointment.email;
+        _facebookController.text = priorAppointment.facebook ?? '';
+        _concernController.text = priorAppointment.concern;
+        _bestTimeController.text = priorAppointment.bestTime ?? '';
+        _sex = priorAppointment.sex;
+        _course = priorAppointment.course;
+        _yearLevel = priorAppointment.yearLevel;
+        _preferredContactMethod = priorAppointment.preferredContactMethod;
+        _therapyBefore = priorAppointment.therapyBefore;
+      }
     });
   }
 
@@ -413,7 +439,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     showAppointmentDetailsSheet(
       context,
       appointment,
-      onBookAppointment: () => _startNewAppointment(appointment.id),
+      onBookAppointment: () => _startNewAppointment(appointment),
     );
   }
 
@@ -424,44 +450,6 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
             HomeAppointmentCalendarScreen(initialDate: appointment.scheduledAt),
       ),
     );
-  }
-
-  Future<void> _cancelAppointment(AppointmentModel appointment) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Cancel Appointment?'),
-        content: Text(
-          'Are you sure you want to cancel your appointment on ${_formatFullDate(appointment.scheduledAt)} at ${appointment.scheduledTime}?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep Appointment'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Confirm Cancellation'),
-          ),
-        ],
-      ),
-    );
-    if (confirm != true || !mounted) {
-      return;
-    }
-    final provider = _readProviderOrNull<AppointmentProvider>();
-    final saved = await provider?.cancelAppointment(appointment.id) ?? false;
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            saved
-                ? 'Appointment cancelled.'
-                : 'Unable to cancel appointment. Please try again.',
-          ),
-        ),
-      );
-    }
   }
 
   Future<void> _acceptReschedule(AppointmentModel appointment) async {
@@ -478,53 +466,6 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         ),
       );
     }
-  }
-
-  Future<void> _requestReschedule(AppointmentModel appointment) async {
-    final date = await showDatePicker(
-      context: context,
-      firstDate: _today,
-      lastDate: _today.add(const Duration(days: 365)),
-      initialDate: appointment.scheduledAt.isAfter(_today)
-          ? appointment.scheduledAt
-          : _today,
-    );
-    if (date == null || !mounted) return;
-    final time = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const ListTile(title: Text('Choose a proposed time')),
-            for (final option in _availableTimes)
-              ListTile(
-                title: Text(option),
-                onTap: () => Navigator.pop(context, option),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (time == null || !mounted) return;
-    final provider = _readProviderOrNull<AppointmentProvider>();
-    final saved =
-        await provider?.proposeReschedule(
-          appointment.id,
-          _scheduledAt(date, time),
-          time,
-        ) ??
-        false;
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          saved
-              ? 'Your schedule change request was sent to PACC.'
-              : 'Unable to request a new schedule. Please try again.',
-        ),
-      ),
-    );
   }
 
   Future<void> _loadAppointments() async {
@@ -974,26 +915,20 @@ class _AppointmentActions extends StatelessWidget {
     if (status == AppointmentStatus.confirmed) {
       actions.addAll([
         _SmallYellowButton(label: 'Add to Calendar', onTap: onAddToCalendar),
-        _SmallYellowButton(
-          label: 'Request Reschedule',
-          onTap: onRequestReschedule,
-        ),
-        _SmallYellowButton(label: 'Cancel Appointment', onTap: onCancel),
       ]);
     } else if (status == AppointmentStatus.requested ||
         status == AppointmentStatus.legacyRequested) {
-      actions.add(_SmallYellowButton(label: 'Cancel Request', onTap: onCancel));
     } else if (status == AppointmentStatus.rescheduleProposed) {
       actions.addAll([
         _SmallYellowButton(
           label: 'Accept New Schedule',
           onTap: onAcceptReschedule,
         ),
-        _SmallYellowButton(label: 'Cancel Appointment', onTap: onCancel),
       ]);
     } else if (status == AppointmentStatus.cancelled) {
       actions.add(_SmallYellowButton(label: 'Book Again', onTap: onBookAgain));
-    } else if (status == AppointmentStatus.completed) {
+    } else if (status == AppointmentStatus.completed &&
+        appointment.followUpRecommended) {
       actions.add(
         _SmallYellowButton(label: 'Book Follow-up', onTap: onBookAgain),
       );

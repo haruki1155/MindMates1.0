@@ -41,6 +41,9 @@ beforeEach(async () => {
       setDoc(doc(firestore, "appointments/appointment-1/history/terminal"), {
         outcome: "Sensitive history",
       }),
+      setDoc(doc(firestore, "appointments/appointment-1/clinical_notes/session"), {
+        summary: "Sensitive clinical note",
+      }),
       setDoc(doc(firestore, "appointment_queue/appointment-1"), {
         appointmentId: "appointment-1",
         studentDisplayName: "Student Name",
@@ -74,4 +77,20 @@ test("portal staff can read only the minimal appointment queue", async () => {
   await assertFails(getDoc(doc(portalStaff, "appointments/appointment-1")));
   await assertFails(getDoc(doc(portalStaff, "appointments/appointment-1/history/terminal")));
   await assertSucceeds(getDoc(doc(portalStaff, "appointment_queue/appointment-1")));
+});
+
+test("clinical notes are visible only to the assigned counselor or admin", async () => {
+  const student = environment.authenticatedContext("student").firestore();
+  const portalStaff = environment.authenticatedContext("portal-staff").firestore();
+  const counselor = environment.authenticatedContext("counselor").firestore();
+  const otherCounselor = environment.authenticatedContext("other-counselor").firestore();
+  const admin = environment.authenticatedContext("admin").firestore();
+  const note = "appointments/appointment-1/clinical_notes/session";
+
+  await assertFails(getDoc(doc(student, note)));
+  await assertFails(getDoc(doc(portalStaff, note)));
+  await assertSucceeds(getDoc(doc(counselor, note)));
+  await assertFails(getDoc(doc(otherCounselor, note)));
+  await assertSucceeds(getDoc(doc(admin, note)));
+  await assertFails(setDoc(doc(counselor, note), {summary: "Client write"}));
 });

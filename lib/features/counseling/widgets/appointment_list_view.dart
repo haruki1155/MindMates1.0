@@ -56,7 +56,7 @@ class AppointmentUiState {
       Color(0xFF6C6C6C),
     ),
     AppointmentStatus.noShow => const AppointmentUiState(
-      'Missed Appointment',
+      'Did Not Attend',
       '',
       Icons.event_busy_outlined,
       Color(0xFF6C6C6C),
@@ -87,18 +87,14 @@ class AppointmentListView extends StatefulWidget {
     required this.onBook,
     required this.onView,
     required this.onCalendar,
-    required this.onCancel,
     required this.onAccept,
-    required this.onReschedule,
     this.isSaving = false,
   });
   final List<AppointmentModel> appointments;
-  final VoidCallback onBook;
+  final ValueChanged<AppointmentModel?> onBook;
   final ValueChanged<AppointmentModel> onView;
   final ValueChanged<AppointmentModel> onCalendar;
-  final ValueChanged<AppointmentModel> onCancel;
   final ValueChanged<AppointmentModel> onAccept;
-  final ValueChanged<AppointmentModel> onReschedule;
   final bool isSaving;
   @override
   State<AppointmentListView> createState() => _AppointmentListViewState();
@@ -108,6 +104,7 @@ class _AppointmentListViewState extends State<AppointmentListView> {
   AppointmentSection _section = AppointmentSection.upcoming;
   @override
   Widget build(BuildContext context) {
+    final bookingBlocked = widget.appointments.any((appointment) => appointment.isActive);
     final items =
         widget.appointments
             .where(
@@ -153,7 +150,7 @@ class _AppointmentListViewState extends State<AppointmentListView> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: widget.onBook,
+              onPressed: bookingBlocked ? null : () => widget.onBook(null),
               icon: const Icon(Icons.add),
               label: const Text('Book Appointment'),
               style: FilledButton.styleFrom(
@@ -166,6 +163,13 @@ class _AppointmentListViewState extends State<AppointmentListView> {
               ),
             ),
           ),
+          if (bookingBlocked) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'You already have an active appointment. Please complete it before booking another one.',
+              style: TextStyle(color: Color(0xFF6D675F)),
+            ),
+          ],
           const SizedBox(height: 20),
         ],
         Text(
@@ -178,7 +182,7 @@ class _AppointmentListViewState extends State<AppointmentListView> {
         ),
         const SizedBox(height: 12),
         if (items.isEmpty)
-          _EmptyState(section: _section, onBook: widget.onBook)
+          _EmptyState(section: _section, onBook: () => widget.onBook(null))
         else
           ...items.map(
             (a) => Padding(
@@ -188,11 +192,10 @@ class _AppointmentListViewState extends State<AppointmentListView> {
                 compact: _section != AppointmentSection.upcoming,
                 isSaving: widget.isSaving,
                 onView: () => widget.onView(a),
-                onBook: widget.onBook,
+                onBook: () => widget.onBook(a),
+                bookingBlocked: bookingBlocked,
                 onCalendar: () => widget.onCalendar(a),
-                onCancel: () => widget.onCancel(a),
                 onAccept: () => widget.onAccept(a),
-                onReschedule: () => widget.onReschedule(a),
               ),
             ),
           ),
@@ -256,19 +259,14 @@ class AppointmentCard extends StatelessWidget {
     required this.onView,
     required this.onBook,
     required this.onCalendar,
-    required this.onCancel,
     required this.onAccept,
-    required this.onReschedule,
+    required this.bookingBlocked,
   });
   final AppointmentModel appointment;
   final bool compact;
   final bool isSaving;
-  final VoidCallback onView,
-      onBook,
-      onCalendar,
-      onCancel,
-      onAccept,
-      onReschedule;
+  final bool bookingBlocked;
+  final VoidCallback onView, onBook, onCalendar, onAccept;
   @override
   Widget build(BuildContext context) {
     final ui = AppointmentUiState.from(appointment.lifecycleStatus);
@@ -409,7 +407,8 @@ class AppointmentCard extends StatelessWidget {
         ),
       );
     }
-    final book = status == AppointmentStatus.completed
+    final book =
+        appointment.hasAvailableFollowUpOffer
         ? 'Book Follow-up'
         : status == AppointmentStatus.noShow
         ? 'Book Another Appointment'
@@ -429,7 +428,7 @@ class AppointmentCard extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: FilledButton(
-              onPressed: onBook,
+              onPressed: bookingBlocked ? null : onBook,
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
                 backgroundColor: const Color(0xFFFFB800),
@@ -447,16 +446,6 @@ class AppointmentCard extends StatelessWidget {
           child: _OutlineAction(label: 'View Details', onPressed: onView),
         ),
         const SizedBox(width: 8),
-        Expanded(
-          child: TextButton(
-            onPressed: isSaving ? null : onCancel,
-            style: TextButton.styleFrom(
-              minimumSize: const Size(44, 48),
-              foregroundColor: Colors.red.shade800,
-            ),
-            child: Text(isSaving ? 'Cancelling...' : 'Cancel Request'),
-          ),
-        ),
       ],
     );
   }
@@ -474,25 +463,6 @@ class AppointmentCard extends StatelessWidget {
             onTap: () {
               Navigator.pop(context);
               onCalendar();
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.edit_calendar_outlined),
-            title: const Text('Request Reschedule'),
-            onTap: () {
-              Navigator.pop(context);
-              onReschedule();
-            },
-          ),
-          ListTile(
-            leading: Icon(Icons.cancel_outlined, color: Colors.red.shade700),
-            title: Text(
-              'Cancel Appointment',
-              style: TextStyle(color: Colors.red.shade700),
-            ),
-            onTap: () {
-              Navigator.pop(context);
-              onCancel();
             },
           ),
         ],
@@ -521,6 +491,15 @@ class AppointmentCard extends StatelessWidget {
             Text(
               'Proposed appointment\n${appointment.proposedScheduledAt == null ? '' : formatAppointmentWeekdayDate(appointment.proposedScheduledAt!)} · ${appointment.proposedScheduledTime ?? ''}',
             ),
+            if ((appointment.rescheduleReason ?? '').trim().isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Reason for reschedule',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              Text(appointment.rescheduleReason!.trim()),
+            ],
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
@@ -538,16 +517,6 @@ class AppointmentCard extends StatelessWidget {
                 ),
                 child: const Text('Accept New Schedule'),
               ),
-            ),
-            TextButton(
-              onPressed: isSaving
-                  ? null
-                  : () {
-                      Navigator.pop(context);
-                      onCancel();
-                    },
-              style: TextButton.styleFrom(foregroundColor: Colors.red.shade800),
-              child: const Text('Cancel Appointment'),
             ),
           ],
         ),

@@ -170,6 +170,19 @@ Future<void> showAppointmentDetailsSheet(
                   style: const TextStyle(height: 1.45),
                 ),
               ],
+              if (appointment.followUpRecommended &&
+                  (appointment.followUpMessage ?? '').trim().isNotEmpty) ...[
+                const Divider(height: 26),
+                const Text(
+                  'Follow-up offered',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  appointment.followUpMessage!.trim(),
+                  style: const TextStyle(height: 1.45),
+                ),
+              ],
               if (onBookAppointment != null &&
                   (appointment.lifecycleStatus == AppointmentStatus.cancelled ||
                       appointment.lifecycleStatus ==
@@ -187,7 +200,7 @@ Future<void> showAppointmentDetailsSheet(
                     },
                     icon: const Icon(Icons.add_circle_outline),
                     label: Text(
-                      appointment.lifecycleStatus == AppointmentStatus.completed
+                      appointment.hasAvailableFollowUpOffer
                           ? 'Book Follow-up'
                           : 'Book Appointment',
                     ),
@@ -211,7 +224,7 @@ String _friendlyStatus(AppointmentStatus status) => switch (status) {
   AppointmentStatus.cancelled => 'Cancelled',
   AppointmentStatus.declined => 'Request Declined',
   AppointmentStatus.expired => 'Request Expired',
-  AppointmentStatus.noShow => 'Missed Appointment',
+  AppointmentStatus.noShow => 'Did Not Attend',
   AppointmentStatus.unknown => 'Awaiting Confirmation',
 };
 

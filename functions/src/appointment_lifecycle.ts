@@ -8,8 +8,10 @@ export const APPOINTMENT_ACTIVE_STATUSES = new Set([
 
 export const APPOINTMENT_TERMINAL_STATUSES = new Set([
   "cancelled",
+  "canceled",
   "completed",
   "no_show",
+  "noshow",
   "declined",
   "expired",
 ]);
@@ -23,14 +25,12 @@ export function canonicalAppointmentStatus(value: unknown): string {
 
 const transitions: Record<AppointmentActor, Record<string, readonly string[]>> = {
   student: {
-    requested: ["cancelled"],
-    confirmed: ["cancelled", "reschedule_proposed"],
-    reschedule_proposed: ["cancelled", "confirmed"],
+    reschedule_proposed: ["confirmed"],
   },
   staff: {
-    requested: ["confirmed", "reschedule_proposed", "declined", "cancelled"],
-    confirmed: ["completed", "no_show", "reschedule_proposed", "cancelled"],
-    reschedule_proposed: ["confirmed", "reschedule_proposed", "cancelled"],
+    requested: ["confirmed", "reschedule_proposed"],
+    confirmed: ["completed", "no_show", "reschedule_proposed"],
+    reschedule_proposed: ["reschedule_proposed"],
   },
 };
 
