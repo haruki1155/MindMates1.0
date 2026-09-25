@@ -46,3 +46,10 @@ export function isEligibleFollowUpParentStatus(value: unknown): boolean {
     String(value ?? "").trim().toLowerCase(),
   );
 }
+
+/** A completed session can create one linked follow-up appointment only. */
+export function canBookFollowUpFromParent(parent: Record<string, unknown>): boolean {
+  return isEligibleFollowUpParentStatus(parent.status) &&
+    String(parent.followUpStatus ?? "").trim().toLowerCase() !== "booked" &&
+    !String(parent.followUpAppointmentId ?? "").trim();
+}

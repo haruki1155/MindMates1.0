@@ -51,7 +51,7 @@ import {
 } from "./appointment_reminders";
 import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
 import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_intake";
-import {isEligibleFollowUpParentStatus, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
+import {canBookFollowUpFromParent, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -1824,7 +1824,10 @@ export const createAppointmentRequest = onCall(async (request) => {
     if (parentSnapshot) {
       const parentData = parentSnapshot.data();
       if (!parentData || String(parentData.userId ?? "") !== userId ||
-          !isEligibleFollowUpParentStatus(canonicalAppointmentStatus(parentData.status))) {
+          !canBookFollowUpFromParent({
+            ...parentData,
+            status: canonicalAppointmentStatus(parentData.status),
+          })) {
         throw new HttpsError("permission-denied", "This follow-up appointment is unavailable.");
       }
     }

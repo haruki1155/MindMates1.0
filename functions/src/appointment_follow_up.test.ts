@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
 
-import {isEligibleFollowUpParentStatus, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
+import {canBookFollowUpFromParent, isEligibleFollowUpParentStatus, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
 
 test("reschedule reason requires meaningful client-safe text", () => {
   assert.throws(
@@ -25,6 +25,12 @@ test("only valid terminal outcomes can parent a follow-up", () => {
   assert.equal(isEligibleFollowUpParentStatus("cancelled"), false);
   assert.equal(isEligibleFollowUpParentStatus("declined"), false);
   assert.equal(isEligibleFollowUpParentStatus("confirmed"), false);
+});
+
+test("a parent can create only one linked follow-up", () => {
+  assert.equal(canBookFollowUpFromParent({status: "completed"}), true);
+  assert.equal(canBookFollowUpFromParent({status: "completed", followUpStatus: "booked"}), false);
+  assert.equal(canBookFollowUpFromParent({status: "completed", followUpAppointmentId: "child-1"}), false);
 });
 
 test("completion requires an internal summary and a client message only for follow-up", () => {
