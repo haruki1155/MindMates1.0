@@ -154,6 +154,19 @@ class AppointmentModel {
     'expired',
   }.contains(status.toLowerCase().trim());
 
+  bool get isActive => switch (lifecycleStatus) {
+    AppointmentStatus.requested ||
+    AppointmentStatus.legacyRequested ||
+    AppointmentStatus.confirmed ||
+    AppointmentStatus.rescheduleProposed => true,
+    _ => false,
+  };
+
+  bool get hasAvailableFollowUpOffer =>
+      lifecycleStatus == AppointmentStatus.completed &&
+      followUpRecommended &&
+      followUpStatus.trim().toLowerCase() == 'offered';
+
   factory AppointmentModel.fromJson(Map<String, dynamic> json, {String? id}) {
     return AppointmentModel(
       id: (json['id'] ?? id ?? '').toString(),

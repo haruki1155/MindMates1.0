@@ -104,6 +104,7 @@ class _AppointmentListViewState extends State<AppointmentListView> {
   AppointmentSection _section = AppointmentSection.upcoming;
   @override
   Widget build(BuildContext context) {
+    final bookingBlocked = widget.appointments.any((appointment) => appointment.isActive);
     final items =
         widget.appointments
             .where(
@@ -149,7 +150,7 @@ class _AppointmentListViewState extends State<AppointmentListView> {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: () => widget.onBook(null),
+              onPressed: bookingBlocked ? null : () => widget.onBook(null),
               icon: const Icon(Icons.add),
               label: const Text('Book Appointment'),
               style: FilledButton.styleFrom(
@@ -162,6 +163,13 @@ class _AppointmentListViewState extends State<AppointmentListView> {
               ),
             ),
           ),
+          if (bookingBlocked) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'You already have an active appointment. Please complete it before booking another one.',
+              style: TextStyle(color: Color(0xFF6D675F)),
+            ),
+          ],
           const SizedBox(height: 20),
         ],
         Text(
@@ -185,6 +193,7 @@ class _AppointmentListViewState extends State<AppointmentListView> {
                 isSaving: widget.isSaving,
                 onView: () => widget.onView(a),
                 onBook: () => widget.onBook(a),
+                bookingBlocked: bookingBlocked,
                 onCalendar: () => widget.onCalendar(a),
                 onAccept: () => widget.onAccept(a),
               ),
@@ -251,10 +260,12 @@ class AppointmentCard extends StatelessWidget {
     required this.onBook,
     required this.onCalendar,
     required this.onAccept,
+    required this.bookingBlocked,
   });
   final AppointmentModel appointment;
   final bool compact;
   final bool isSaving;
+  final bool bookingBlocked;
   final VoidCallback onView, onBook, onCalendar, onAccept;
   @override
   Widget build(BuildContext context) {
@@ -397,7 +408,7 @@ class AppointmentCard extends StatelessWidget {
       );
     }
     final book =
-        status == AppointmentStatus.completed && appointment.followUpRecommended
+        appointment.hasAvailableFollowUpOffer
         ? 'Book Follow-up'
         : status == AppointmentStatus.noShow
         ? 'Book Another Appointment'
@@ -417,7 +428,7 @@ class AppointmentCard extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: FilledButton(
-              onPressed: onBook,
+              onPressed: bookingBlocked ? null : onBook,
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
                 backgroundColor: const Color(0xFFFFB800),

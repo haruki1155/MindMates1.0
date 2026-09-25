@@ -70,6 +70,7 @@ void _followUpContract() {
         'fullName': 'Student',
         'scheduledAt': Timestamp.now(),
         'createdAt': Timestamp.now(),
+        'status': 'completed',
         'followUpRecommended': true,
         'followUpMessage': 'Please book when ready.',
         'followUpStatus': 'offered',
@@ -79,6 +80,7 @@ void _followUpContract() {
       expect(offered.followUpMessage, 'Please book when ready.');
       expect(offered.followUpStatus, 'offered');
       expect(offered.rescheduleReason, 'Office schedule adjustment');
+      expect(offered.hasAvailableFollowUpOffer, isTrue);
     },
   );
 }

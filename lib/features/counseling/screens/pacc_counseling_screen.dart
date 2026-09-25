@@ -314,6 +314,18 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   }
 
   void _startNewAppointment([AppointmentModel? priorAppointment]) {
+    final appointments = _readProviderOrNull<AppointmentProvider>()?.appointments ??
+        const <AppointmentModel>[];
+    if (appointments.any((appointment) => appointment.isActive)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'You already have an active appointment. Please complete your current appointment before booking another one.',
+          ),
+        ),
+      );
+      return;
+    }
     final today = _today;
     setState(() {
       _tab = _PaccAppointmentTab.appointNew;
@@ -321,10 +333,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _selectedDate = null;
       _selectedTime = null;
       _visibleMonth = DateTime(today.year, today.month);
-      _parentAppointmentId = priorAppointment?.lifecycleStatus ==
-                  AppointmentStatus.completed &&
-              priorAppointment?.followUpRecommended == true &&
-              priorAppointment?.followUpStatus == 'offered'
+      _parentAppointmentId = priorAppointment?.hasAvailableFollowUpOffer == true
           ? priorAppointment?.id
           : null;
       if (priorAppointment != null) {

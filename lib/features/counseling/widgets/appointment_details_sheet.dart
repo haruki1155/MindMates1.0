@@ -200,9 +200,7 @@ Future<void> showAppointmentDetailsSheet(
                     },
                     icon: const Icon(Icons.add_circle_outline),
                     label: Text(
-                      appointment.lifecycleStatus ==
-                                  AppointmentStatus.completed &&
-                              appointment.followUpRecommended
+                      appointment.hasAvailableFollowUpOffer
                           ? 'Book Follow-up'
                           : 'Book Appointment',
                     ),

@@ -28,6 +28,16 @@ void main() {
       expect(find.text('Cancel Request'), findsNothing);
       expect(find.text('Request Reschedule'), findsNothing);
       expect(find.text('Request Another Time'), findsNothing);
+      expect(
+        tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Book Appointment'),
+        ).onPressed,
+        isNull,
+      );
+      expect(
+        find.textContaining('You already have an active appointment'),
+        findsOneWidget,
+      );
     },
   );
 
@@ -38,6 +48,7 @@ void main() {
       status: 'completed',
       followUpRecommended: true,
       followUpMessage: 'You may book a follow-up when ready.',
+      followUpStatus: 'offered',
     );
     AppointmentModel? bookedFrom;
 
@@ -52,6 +63,23 @@ void main() {
     expect(find.text('You may book a follow-up when ready.'), findsNothing);
     await tester.tap(find.text('Book Follow-up'));
     expect(bookedFrom?.id, appointment.id);
+  });
+
+  testWidgets('a booked follow-up is not offered again', (tester) async {
+    final appointment = _appointment(
+      status: 'completed',
+      followUpRecommended: true,
+      followUpMessage: 'Already linked.',
+      followUpStatus: 'booked',
+    );
+
+    await tester.pumpWidget(_app([appointment]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Past'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Book Follow-up'), findsNothing);
+    expect(find.text('Book Again'), findsOneWidget);
   });
 }
 
@@ -77,6 +105,7 @@ AppointmentModel _appointment({
   String? rescheduleReason,
   bool followUpRecommended = false,
   String? followUpMessage,
+  String followUpStatus = 'none',
 }) => AppointmentModel(
   id: 'appointment-1',
   userId: 'student-1',
@@ -95,4 +124,5 @@ AppointmentModel _appointment({
   rescheduleReason: rescheduleReason,
   followUpRecommended: followUpRecommended,
   followUpMessage: followUpMessage,
+  followUpStatus: followUpStatus,
 );
