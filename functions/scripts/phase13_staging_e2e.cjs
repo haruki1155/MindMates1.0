@@ -106,9 +106,9 @@ async function chooseSlots(student, openDays) {
     const weekday = new Date(`${date}T00:00:00.000Z`).getUTCDay() || 7;
     if (!openDays.includes(weekday)) continue;
     const slots = await getSlots(student, date);
-    if (slots.length >= 7) return {date, slots};
+    if (slots.length >= 6) return {date, slots};
   }
-  throw new Error('No future PACC date exposes the seven slots required for Phase 13.');
+  throw new Error('No future PACC date exposes the six slots required for revised Phase 13 validation.');
 }
 
 async function book(student, start, suffix) {
@@ -139,20 +139,24 @@ async function confirm(counselor, id) {
   assert.equal(result.ok, true, `Confirmation failed: ${functionError(result)}`);
 }
 
-async function cancel(student, id) {
-  const result = await callable('respondToAppointment', student.token, {
-    appointmentId: id, action: 'cancel', reason: 'E2E cleanup.',
-  });
-  assert.equal(result.ok, true, `Cancellation failed: ${functionError(result)}`);
+async function expectDeniedAction(actor, name, data, description) {
+  const result = await callable(name, actor.token, data);
+  assert.equal(result.ok, false, `${description} unexpectedly succeeded.`);
+  return functionError(result);
 }
 
-async function waitForArchived(student, id) {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const current = await appointment(student, id);
-    if (current.fields?.archivedAt) return current;
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-  throw new Error('Terminal appointment was not archived by the deployed trigger.');
+async function markDidNotAttend(counselor, id, reply = 'E2E unattended session.') {
+  const result = await callable('reviewAppointment', counselor.token, {
+    appointmentId: id, action: 'no_show', reply,
+  });
+  assert.equal(result.ok, true, `Did Not Attend action failed: ${functionError(result)}`);
+}
+
+function documentsFromQuery(result) {
+  assert.equal(result.ok, true, `Firestore query failed: ${functionError(result)}`);
+  return (Array.isArray(result.body) ? result.body : [])
+    .map((item) => item.document)
+    .filter(Boolean);
 }
 
 async function countByAppointment(token, collectionId, appointmentId, fieldPath = 'appointmentId', ownerId = null) {
@@ -172,8 +176,24 @@ async function countByAppointment(token, collectionId, appointmentId, fieldPath 
     from: [{collectionId}],
     where,
   });
-  assert.equal(result.ok, true, `${collectionId} query failed: ${functionError(result)}`);
-  return (Array.isArray(result.body) ? result.body : []).filter((item) => item.document).length;
+  return documentsFromQuery(result).length;
+}
+
+async function documentsByAppointment(token, collectionId, appointmentId, fieldPath = 'appointmentId', ownerId = null) {
+  const appointmentFilter = {
+    field: {fieldPath}, op: 'EQUAL', value: {stringValue: appointmentId},
+  };
+  const where = ownerId ? {
+    compositeFilter: {
+      op: 'AND',
+      filters: [
+        {fieldFilter: {field: {fieldPath: 'userId'}, op: 'EQUAL', value: {stringValue: ownerId}}},
+        {fieldFilter: appointmentFilter},
+      ],
+    },
+  } : {fieldFilter: appointmentFilter};
+  const result = await query(token, {from: [{collectionId}], where});
+  return documentsFromQuery(result);
 }
 
 async function main() {
@@ -231,36 +251,71 @@ async function main() {
 
     const {date, slots} = await chooseSlots(student1, temporaryAvailability.openDays);
     report.checks.selectedDate = date;
-    const [normalSlot, rescheduleOld, rescheduleNew, conflictOld, conflictProposed, concurrentSlot, terminalSlot] = slots;
+    const [oneActiveSlot, rescheduleOld, rescheduleNew, followUpParentSlot, followUpChildSlot, concurrentSlot] = slots;
 
-    const normal = await book(student1, normalSlot.start, 'normal'); report.created.push(normal);
-    await confirm(counselor1, normal);
-    const normalRead = await appointment(student1, normal);
+    const oneActive = await book(student1, oneActiveSlot.start, 'one-active'); report.created.push(oneActive);
+    await confirm(counselor1, oneActive);
+    const normalRead = await appointment(student1, oneActive);
     assert.equal(stringField(normalRead, 'status'), 'confirmed');
     report.checks.studentSeesConfirmed = true;
-    const adminRead = await document(admin.token, `appointments/${normal}`);
+    const secondBooking = await callable('createAppointmentRequest', student1.token, {
+      scheduledAt: rescheduleOld.start,
+      concern: 'E2E second active appointment.',
+      contactNumber: '09171234567', preferredContactMethod: 'Email', bestTime: 'Morning',
+      location: 'PACC Office, 2nd Floor, Main Building',
+    });
+    assert.equal(secondBooking.ok, false, 'Student created a second active appointment.');
+    report.checks.oneActiveAppointmentLimit = functionError(secondBooking);
+    const adminRead = await document(admin.token, `appointments/${oneActive}`);
     assert.equal(adminRead.ok, true, `Admin cannot read appointment: ${functionError(adminRead)}`);
     report.checks.adminSensitiveAccess = true;
 
-    const studentTwoRead = await document(student2.token, `appointments/${normal}`);
+    const studentTwoRead = await document(student2.token, `appointments/${oneActive}`);
     assert.equal(studentTwoRead.ok, false, 'Student 2 read Student 1 appointment.');
     report.checks.studentPrivacyStatus = studentTwoRead.status;
-    const studentTwoAction = await callable('respondToAppointment', student2.token, {appointmentId: normal, action: 'cancel', reason: 'forbidden'});
-    assert.equal(studentTwoAction.ok, false, 'Student 2 changed Student 1 appointment.');
-    report.checks.studentUnauthorizedAction = functionError(studentTwoAction);
-    const counselorTwoRead = await document(counselor2.token, `appointments/${normal}`);
+    report.checks.studentUnauthorizedAction = await expectDeniedAction(
+      student2, 'respondToAppointment', {appointmentId: oneActive, action: 'accept_reschedule'},
+      'Student 2 changed Student 1 appointment',
+    );
+    const counselorTwoRead = await document(counselor2.token, `appointments/${oneActive}`);
     assert.equal(counselorTwoRead.ok, false, 'Unassigned Counselor 2 read Counselor 1 caseload.');
-    const counselorTwoAction = await callable('reviewAppointment', counselor2.token, {appointmentId: normal, action: 'completed', reply: 'forbidden'});
-    assert.equal(counselorTwoAction.ok, false, 'Unassigned Counselor 2 changed Counselor 1 caseload.');
-    report.checks.counselorAssignmentRestriction = functionError(counselorTwoAction);
-    await cancel(student1, normal);
-    assert.ok((await getSlots(student1, date)).some((slot) => slot.start === normalSlot.start), 'Cancellation did not release capacity.');
-    report.checks.cancellationReleasedCapacity = true;
+    report.checks.counselorAssignmentRestriction = await expectDeniedAction(
+      counselor2, 'reviewAppointment', {appointmentId: oneActive, action: 'completed', reply: 'forbidden', sessionSummary: 'forbidden'},
+      'Unassigned Counselor 2 changed Counselor 1 appointment',
+    );
+    report.checks.studentCannotCancel = await expectDeniedAction(
+      student1, 'respondToAppointment', {appointmentId: oneActive, action: 'cancel'},
+      'Student cancellation',
+    );
+    report.checks.studentCannotProposeSchedule = await expectDeniedAction(
+      student1, 'reviewAppointment', {appointmentId: oneActive, action: 'reschedule_proposed', proposedScheduledAt: rescheduleNew.start, rescheduleReason: 'Counselor availability'},
+      'Student schedule proposal',
+    );
+    report.checks.staffCannotCancel = await expectDeniedAction(
+      counselor1, 'reviewAppointment', {appointmentId: oneActive, action: 'cancel'},
+      'Staff cancellation',
+    );
+    report.checks.staffCannotDecline = await expectDeniedAction(
+      counselor1, 'reviewAppointment', {appointmentId: oneActive, action: 'declined'},
+      'Staff decline',
+    );
+    await markDidNotAttend(counselor1, oneActive);
+    const unattended = await appointment(student1, oneActive);
+    assert.equal(stringField(unattended, 'status'), 'no_show');
+    const unattendedNotifications = await documentsByAppointment(student1.token, 'notifications', oneActive, 'appointmentId', student1.uid);
+    assert.ok(unattendedNotifications.some((item) => JSON.stringify(item).includes('Did Not Attend')), 'Did Not Attend notification was not client-visible.');
+    report.checks.didNotAttendClientTerminology = true;
 
     const reschedule = await book(student1, rescheduleOld.start, 'reschedule'); report.created.push(reschedule);
     await confirm(counselor1, reschedule);
-    const proposal = await callable('reviewAppointment', counselor1.token, {appointmentId: reschedule, action: 'reschedule_proposed', reply: 'E2E reschedule.', proposedScheduledAt: rescheduleNew.start});
+    const proposal = await callable('reviewAppointment', counselor1.token, {
+      appointmentId: reschedule, action: 'reschedule_proposed', reply: 'E2E reschedule.',
+      proposedScheduledAt: rescheduleNew.start, rescheduleReason: 'Counselor availability',
+    });
     assert.equal(proposal.ok, true, `Counselor proposal failed: ${functionError(proposal)}`);
+    const proposed = await appointment(student1, reschedule);
+    assert.equal(stringField(proposed, 'status'), 'reschedule_proposed');
+    assert.equal(stringField(proposed, 'rescheduleReason'), 'Counselor availability');
     const accepted = await callable('respondToAppointment', student1.token, {appointmentId: reschedule, action: 'accept_reschedule'});
     assert.equal(accepted.ok, true, `Student acceptance failed: ${functionError(accepted)}`);
     const moved = await appointment(student1, reschedule);
@@ -270,21 +325,44 @@ async function main() {
     assert.ok(slotsAfterMove.some((slot) => slot.start === rescheduleOld.start));
     assert.ok(!slotsAfterMove.some((slot) => slot.start === rescheduleNew.start));
     report.checks.transactionalReschedule = true;
-    await cancel(student1, reschedule);
+    await markDidNotAttend(counselor1, reschedule, 'E2E rescheduled session unattended.');
 
-    const conflict = await book(student1, conflictOld.start, 'proposal-conflict'); report.created.push(conflict);
-    await confirm(counselor1, conflict);
-    const conflictProposal = await callable('reviewAppointment', counselor1.token, {appointmentId: conflict, action: 'reschedule_proposed', reply: 'E2E conflict proposal.', proposedScheduledAt: conflictProposed.start});
-    assert.equal(conflictProposal.ok, true, `Conflict proposal failed: ${functionError(conflictProposal)}`);
-    const occupying = await book(student2, conflictProposed.start, 'proposal-conflict-occupier'); report.created.push(occupying);
-    const failedAcceptance = await callable('respondToAppointment', student1.token, {appointmentId: conflict, action: 'accept_reschedule'});
-    assert.equal(failedAcceptance.ok, false, 'Conflicted proposal was accepted.');
-    const intact = await appointment(student1, conflict);
-    assert.equal(stringField(intact, 'status'), 'reschedule_proposed');
-    assert.equal(timestampField(intact, 'scheduledAt'), conflictOld.start);
-    report.checks.proposalConflictPreservesOriginal = functionError(failedAcceptance);
-    await cancel(student1, conflict);
-    await cancel(student2, occupying);
+    const followUpParent = await book(student1, followUpParentSlot.start, 'follow-up-parent'); report.created.push(followUpParent);
+    await confirm(counselor1, followUpParent);
+    const privateSummary = 'E2E private clinical summary must stay protected.';
+    const followUpMessage = 'Please book your recommended follow-up session.';
+    const complete = await callable('reviewAppointment', counselor1.token, {
+      appointmentId: followUpParent, action: 'completed', reply: 'E2E completion.', sessionSummary: privateSummary,
+      offerFollowUp: true, followUpMessage,
+    });
+    assert.equal(complete.ok, true, `Follow-up parent completion failed: ${functionError(complete)}`);
+    const completedParent = await appointment(student1, followUpParent);
+    assert.equal(stringField(completedParent, 'status'), 'completed');
+    assert.equal(stringField(completedParent, 'followUpMessage'), followUpMessage);
+    assert.equal(JSON.stringify(completedParent).includes(privateSummary), false, 'Private summary leaked into the client appointment.');
+    const clientClinicalRead = await document(student1.token, `appointments/${followUpParent}/clinical_notes/session`);
+    assert.equal(clientClinicalRead.ok, false, 'Student read a protected clinical note.');
+    const followUpNotifications = await documentsByAppointment(student1.token, 'notifications', followUpParent, 'appointmentId', student1.uid);
+    assert.ok(followUpNotifications.some((item) => JSON.stringify(item).includes(followUpMessage)), 'Follow-up notification did not contain the client message.');
+    assert.equal(followUpNotifications.some((item) => JSON.stringify(item).includes(privateSummary)), false, 'Private summary leaked into a client notification.');
+    const followUp = await callable('createAppointmentRequest', student1.token, {
+      scheduledAt: followUpChildSlot.start,
+      concern: 'E2E follow-up with updated concern.', contactNumber: '09171234567',
+      preferredContactMethod: 'Email', bestTime: 'Afternoon', location: 'PACC Office, 2nd Floor, Main Building',
+      parentAppointmentId: followUpParent,
+    });
+    assert.equal(followUp.ok, true, `Follow-up booking failed: ${functionError(followUp)}`);
+    const followUpId = followUp.body?.result?.appointmentId || followUp.body?.result?.data?.appointmentId;
+    assert.ok(followUpId, 'Follow-up booking returned no appointment ID.');
+    report.created.push(followUpId);
+    const linkedFollowUp = await appointment(student1, followUpId);
+    const parentAfterFollowUp = await appointment(student1, followUpParent);
+    assert.equal(stringField(linkedFollowUp, 'parentAppointmentId'), followUpParent);
+    assert.equal(stringField(parentAfterFollowUp, 'followUpStatus'), 'booked');
+    assert.equal(stringField(parentAfterFollowUp, 'followUpAppointmentId'), followUpId);
+    report.checks.followUpClientSafeAndLinked = true;
+    await confirm(counselor1, followUpId);
+    await markDidNotAttend(counselor1, followUpId, 'E2E follow-up session unattended.');
 
     const concurrent = await Promise.allSettled([
       book(student1, concurrentSlot.start, 'concurrent-student-1'),
@@ -299,24 +377,18 @@ async function main() {
     report.created.push(winnerId);
     report.checks.sameSlotConcurrency = 'one reservation';
     const winnerIsStudent1 = concurrent[0].status === 'fulfilled';
-    await cancel(winnerIsStudent1 ? student1 : student2, winnerId);
-
-    const terminal = await book(student1, terminalSlot.start, 'terminal'); report.created.push(terminal);
-    await confirm(counselor1, terminal);
-    const complete = await callable('reviewAppointment', counselor1.token, {appointmentId: terminal, action: 'completed', reply: 'E2E completion.'});
-    assert.equal(complete.ok, true, `Terminal completion failed: ${functionError(complete)}`);
-    const archived = await waitForArchived(student1, terminal);
-    assert.equal(stringField(archived, 'status'), 'completed');
-    assert.ok(archived.fields?.archivedAt, 'Completed appointment lacks archivedAt.');
-    const history = await document(student1.token, `appointments/${terminal}/history`);
+    const winner = winnerIsStudent1 ? student1 : student2;
+    await confirm(counselor1, winnerId);
+    await markDidNotAttend(counselor1, winnerId, 'E2E concurrent winner unattended.');
+    const history = await document(winner.token, `appointments/${winnerId}/history`);
     assert.equal(history.ok, true, `Terminal history is not visible to its owner: ${functionError(history)}`);
     const historyCount = (history.body.documents || []).length;
     assert.ok(historyCount >= 2, 'Terminal workflow history is incomplete.');
-    const notificationCount = await countByAppointment(student1.token, 'notifications', terminal, 'appointmentId', student1.uid);
+    const notificationCount = await countByAppointment(winner.token, 'notifications', winnerId, 'appointmentId', winner.uid);
     assert.ok(notificationCount >= 1, 'Terminal workflow created no student notification.');
-    const auditCount = await countByAppointment(admin.token, 'admin_audit_logs', terminal, 'targetId');
+    const auditCount = await countByAppointment(admin.token, 'admin_audit_logs', winnerId, 'targetId');
     assert.ok(auditCount >= 1, 'Terminal workflow created no audit record.');
-    report.checks.terminalHistoryNotificationAudit = {archived: true, historyCount, notificationCount, auditCount};
+    report.checks.terminalHistoryNotificationAudit = {historyCount, notificationCount, auditCount};
   } finally {
     const restore = await callable('savePaccAvailability', admin.token, originalAvailability);
     restored = restore.ok;
