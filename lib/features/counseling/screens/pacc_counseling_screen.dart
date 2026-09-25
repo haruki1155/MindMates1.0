@@ -321,7 +321,10 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _selectedDate = null;
       _selectedTime = null;
       _visibleMonth = DateTime(today.year, today.month);
-      _parentAppointmentId = priorAppointment?.followUpRecommended == true
+      _parentAppointmentId = priorAppointment?.lifecycleStatus ==
+                  AppointmentStatus.completed &&
+              priorAppointment?.followUpRecommended == true &&
+              priorAppointment?.followUpStatus == 'offered'
           ? priorAppointment?.id
           : null;
       if (priorAppointment != null) {

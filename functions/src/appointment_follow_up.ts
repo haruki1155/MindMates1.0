@@ -42,14 +42,15 @@ export function validateCompletionInput(input: {
 }
 
 export function isEligibleFollowUpParentStatus(value: unknown): boolean {
-  return ["completed", "no_show", "noshow", "expired"].includes(
-    String(value ?? "").trim().toLowerCase(),
-  );
+  // A follow-up is a post-session offer. A missed or expired appointment did
+  // not have a completed counseling session, so it cannot be a follow-up parent.
+  return String(value ?? "").trim().toLowerCase() === "completed";
 }
 
-/** A completed session can create one linked follow-up appointment only. */
+/** Only an offered, completed session can create one linked follow-up appointment. */
 export function canBookFollowUpFromParent(parent: Record<string, unknown>): boolean {
   return isEligibleFollowUpParentStatus(parent.status) &&
-    String(parent.followUpStatus ?? "").trim().toLowerCase() !== "booked" &&
+    parent.followUpRecommended === true &&
+    String(parent.followUpStatus ?? "").trim().toLowerCase() === "offered" &&
     !String(parent.followUpAppointmentId ?? "").trim();
 }

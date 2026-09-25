@@ -18,19 +18,26 @@ test("reschedule reason requires meaningful client-safe text", () => {
   );
 });
 
-test("only valid terminal outcomes can parent a follow-up", () => {
-  for (const finalStatus of ["completed", "no_show", "noshow", "expired"]) {
-    assert.equal(isEligibleFollowUpParentStatus(finalStatus), true);
-  }
+test("only a completed counseling session can parent a follow-up", () => {
+  assert.equal(isEligibleFollowUpParentStatus("completed"), true);
+  assert.equal(isEligibleFollowUpParentStatus("no_show"), false);
+  assert.equal(isEligibleFollowUpParentStatus("noshow"), false);
+  assert.equal(isEligibleFollowUpParentStatus("expired"), false);
   assert.equal(isEligibleFollowUpParentStatus("cancelled"), false);
   assert.equal(isEligibleFollowUpParentStatus("declined"), false);
   assert.equal(isEligibleFollowUpParentStatus("confirmed"), false);
 });
 
 test("a parent can create only one linked follow-up", () => {
-  assert.equal(canBookFollowUpFromParent({status: "completed"}), true);
-  assert.equal(canBookFollowUpFromParent({status: "completed", followUpStatus: "booked"}), false);
-  assert.equal(canBookFollowUpFromParent({status: "completed", followUpAppointmentId: "child-1"}), false);
+  const offeredParent = {
+    status: "completed",
+    followUpRecommended: true,
+    followUpStatus: "offered",
+  };
+  assert.equal(canBookFollowUpFromParent(offeredParent), true);
+  assert.equal(canBookFollowUpFromParent({status: "completed"}), false);
+  assert.equal(canBookFollowUpFromParent({...offeredParent, followUpStatus: "booked"}), false);
+  assert.equal(canBookFollowUpFromParent({...offeredParent, followUpAppointmentId: "child-1"}), false);
 });
 
 test("completion requires an internal summary and a client message only for follow-up", () => {
