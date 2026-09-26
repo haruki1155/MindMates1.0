@@ -40,6 +40,55 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+class PaccHomeScheduleStatus extends StatelessWidget {
+  const PaccHomeScheduleStatus({
+    super.key,
+    required this.availability,
+    required this.now,
+    required this.onViewMore,
+    required this.onViewDetail,
+  });
+
+  final PaccAvailabilityModel? availability;
+  final DateTime now;
+  final VoidCallback onViewMore;
+  final VoidCallback onViewDetail;
+
+  @override
+  Widget build(BuildContext context) {
+    if (availability == null) {
+      return HomeAnnouncementCard(
+        badge: 'PAACC',
+        message: 'PAACC office availability has not been published yet.',
+        onViewMore: onViewMore,
+        onViewDetail: onViewDetail,
+      );
+    }
+    final resolved = availability!.resolveScheduleAt(now);
+    final unavailableCounselor =
+        resolved.schedule.presence != CounselorPresence.inOffice;
+    final badge = !resolved.isOfficeOpen
+        ? 'CLOSED'
+        : unavailableCounselor
+        ? 'OPEN — COUNSELOR UNAVAILABLE'
+        : resolved.canBookAppointments
+        ? 'OPEN — APPOINTMENTS AVAILABLE'
+        : 'OPEN — APPOINTMENTS UNAVAILABLE';
+    final message = !resolved.isOfficeOpen
+        ? 'Office is closed. ${resolved.closureReason ?? ''}'.trim()
+        : unavailableCounselor
+        ? 'Office is open. Counselor is unavailable; appointments cannot be booked. ${resolved.acceptsWalkIns ? 'Walk-ins are accepted.' : 'Walk-ins are unavailable.'}'
+        : 'Office is open. ${resolved.canBookAppointments ? 'Appointments are available.' : 'Appointments are unavailable.'} ${resolved.acceptsWalkIns ? 'Walk-ins are accepted.' : 'Walk-ins are unavailable.'}';
+    return HomeAnnouncementCard(
+      badge: badge,
+      message: message,
+      isOpen: resolved.isOfficeOpen,
+      onViewMore: onViewMore,
+      onViewDetail: onViewDetail,
+    );
+  }
+}
+
 class _HomeScreenState extends State<HomeScreen> {
   final ScrollController _scrollController = ScrollController();
   final AppNotificationService _notifications = AppNotificationService();
@@ -226,23 +275,15 @@ class _HomeScreenState extends State<HomeScreen> {
                                           .watchCurrent(),
                                 builder: (context, snapshot) {
                                   final availability = snapshot.data;
-                                  final open = availability?.isOpenAt(
-                                    widget._nowProvider(),
-                                  );
-                                  final message = availability == null
-                                      ? 'PAACC office availability has not been published yet.'
-                                      : '${availability.presence.label}. ${availability.opensAt}–${availability.closesAt}. ${availability.acceptsWalkIns ? 'Walk-ins accepted.' : 'Appointment required.'}';
-                                  return HomeAnnouncementCard(
-                                    badge: availability == null
-                                        ? 'PAACC'
-                                        : availability.statusLabel(
-                                            widget._nowProvider(),
-                                          ),
-                                    message: message,
-                                    isOpen: open,
+                                  return PaccHomeScheduleStatus(
+                                    availability: availability,
+                                    now: widget._nowProvider(),
                                     onViewMore: _openNotifications,
                                     onViewDetail: () =>
-                                        _showAvailabilityDetails(availability),
+                                        _showAvailabilityDetails(
+                                          availability,
+                                          widget._nowProvider(),
+                                        ),
                                   );
                                 },
                               ),
@@ -583,19 +624,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _showAvailabilityDetails(PaccAvailabilityModel? availability) {
-    const days = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday',
-    ];
-    final openDays =
-        availability?.openDays.map((day) => days[day - 1]).join(', ') ??
-        'Not published';
+  Future<void> _showAvailabilityDetails(
+    PaccAvailabilityModel? availability,
+    DateTime now,
+  ) {
+    final resolved = availability?.resolveScheduleAt(now);
     return showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -603,7 +636,7 @@ class _HomeScreenState extends State<HomeScreen> {
         content: Text(
           availability == null
               ? 'The PAACC schedule has not been published yet.'
-              : '${availability.presence.label}\n\nWorking days: $openDays\nHours: ${availability.opensAt}–${availability.closesAt}\n\n${availability.acceptsWalkIns ? 'Walk-in visits are currently accepted during office hours.' : 'Please book an appointment before visiting.'}',
+              : 'Office status: ${resolved!.isOfficeOpen ? 'Open' : 'Closed'}\n\nAppointments: ${resolved.canBookAppointments ? 'Available' : 'Unavailable'}\nWalk-ins: ${resolved.acceptsWalkIns ? 'Accepted' : 'Unavailable'}\n\n${resolved.closureReason ?? ''}',
         ),
         actions: [
           TextButton(

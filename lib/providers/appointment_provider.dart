@@ -15,6 +15,7 @@ class AppointmentProvider extends ChangeNotifier {
   bool _isLoading = false;
   bool _isSaving = false;
   String? _errorMessage;
+  String? _slotAvailabilityMessage;
   String? _loadedUserId;
   int _loadGeneration = 0;
   StreamSubscription<List<AppointmentModel>>? _subscription;
@@ -23,6 +24,7 @@ class AppointmentProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isSaving => _isSaving;
   String? get errorMessage => _errorMessage;
+  String? get slotAvailabilityMessage => _slotAvailabilityMessage;
   String? get loadedUserId => _loadedUserId;
 
   Future<void> loadAppointments(String userId) async {
@@ -115,7 +117,9 @@ class AppointmentProvider extends ChangeNotifier {
 
   Future<List<AppointmentSlot>> getAvailableSlots(DateTime date) async {
     try {
-      return await _repository.getAvailableSlots(date);
+      final slots = await _repository.getAvailableSlots(date);
+      _slotAvailabilityMessage = _repository.lastSlotAvailabilityMessage;
+      return slots;
     } catch (error, stackTrace) {
       FirebaseErrorMessage.log(
         error,
@@ -126,6 +130,7 @@ class AppointmentProvider extends ChangeNotifier {
         error,
         fallback: 'Unable to load available appointment times.',
       );
+      _slotAvailabilityMessage = 'Unable to load appointment times. Please try again.';
       notifyListeners();
       return const [];
     }

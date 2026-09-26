@@ -372,6 +372,21 @@ void main() {
     expect(find.text('Appointment Schedule'), findsOneWidget);
     expect(find.text('Choose Time'), findsNothing);
   });
+
+  testWidgets('shows a safe no-slot message supplied by the backend', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(430, 3200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = _FakeAppointmentRepository()
+      ..slotAvailabilityMessage = 'The counselor is unavailable on this date. Please choose another available date.';
+    await tester.pumpWidget(_paccApp(appointmentRepository: repository));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Book Appointment').first);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('29'));
+    await tester.tap(find.text('29'));
+    await tester.pumpAndSettle();
+    expect(find.text('The counselor is unavailable on this date. Please choose another available date.'), findsOneWidget);
+  });
 }
 
 Widget _servicesApp() {
@@ -462,6 +477,9 @@ class _FakeAppointmentRepository extends AppointmentRepository {
 
   final List<AppointmentModel> appointments;
   bool shouldFail = false;
+  String? slotAvailabilityMessage;
+  @override
+  String? get lastSlotAvailabilityMessage => slotAvailabilityMessage;
   @override
   Future<List<AppointmentSlot>> getAvailableSlots(DateTime date) async {
     if (date.year == 2026 && date.month == 4 && date.day == 30) {
