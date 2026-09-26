@@ -69,7 +69,16 @@ function normalizeLegacy(value: Record<string, unknown>): PaccAvailabilityConfig
 /** Reads V2 documents losslessly and converts V1 only at the storage boundary. */
 export function normalizePaccAvailabilityForRead(value: unknown): PaccAvailabilityConfig {
   if (!isRecord(value)) throw new AppointmentAvailabilityValidationError("PACC availability has not been published.");
-  return value.schemaVersion === 2 ? validatePaccAvailabilityPayload(value) : normalizeLegacy(value);
+  if (value.schemaVersion === 2) {
+    return validatePaccAvailabilityPayload({
+      schemaVersion: value.schemaVersion,
+      timezone: value.timezone,
+      weekdays: value.weekdays,
+      overrides: value.overrides,
+      notice: value.notice,
+    });
+  }
+  return normalizeLegacy(value);
 }
 export function resolvePaccSchedule(scheduledMillis: number, availability: unknown): ResolvedPaccSchedule {
   if (!Number.isFinite(scheduledMillis)) throw new AppointmentAvailabilityValidationError("PACC schedule time is invalid.");
@@ -77,6 +86,34 @@ export function resolvePaccSchedule(scheduledMillis: number, availability: unkno
   const withinHours = local.minutes >= minutes(schedule.opensAt) && local.minutes < minutes(schedule.closesAt); const isOfficeOpen = schedule.enabled && withinHours; const canBookAppointments = isOfficeOpen && schedule.presence === "in_office" && schedule.appointmentsEnabled; const acceptsWalkInsNow = isOfficeOpen && schedule.acceptsWalkIns;
   const closureReason = !schedule.enabled ? (override?.reason || "Office is closed.") : !withinHours ? "Office is closed at the selected time." : schedule.presence !== "in_office" ? "Counselor is unavailable." : !schedule.appointmentsEnabled ? "Appointments are unavailable." : undefined;
   return {...schedule, date: local.date, weekday: local.weekday, source: override ? "override" : "weekly", isOfficeOpen, canBookAppointments, acceptsWalkInsNow, ...(closureReason ? {closureReason} : {})};
+}
+export type PaccScheduleConflict = {appointmentId: string; status: string; timestamp: number; reason: string};
+function appointmentMillis(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value instanceof Date) return value.getTime();
+  if (isRecord(value) && typeof value.toMillis === "function") {
+    const millis = (value.toMillis as () => unknown)();
+    return typeof millis === "number" && Number.isFinite(millis) ? millis : null;
+  }
+  if (isRecord(value) && typeof value._seconds === "number") return value._seconds * 1_000 + (typeof value._nanoseconds === "number" ? Math.floor(value._nanoseconds / 1_000_000) : 0);
+  return null;
+}
+/** Finds future active appointment timestamps that a candidate schedule would invalidate. */
+export function previewPaccScheduleConflicts(candidate: PaccAvailabilityConfig, appointments: Iterable<Record<string, unknown>>, nowMillis = Date.now()): PaccScheduleConflict[] {
+  const conflicts: PaccScheduleConflict[] = [];
+  const activeStatuses = new Set(["requested", "confirmed", "reschedule_proposed", "pending", "upcoming", "reschedule_required"]);
+  for (const appointment of appointments) {
+    const status = String(appointment.status ?? "");
+    if (!activeStatuses.has(status)) continue;
+    const timestamps = [appointmentMillis(appointment.scheduledAt)];
+    if (status === "reschedule_proposed") timestamps.push(appointmentMillis(appointment.proposedScheduledAt));
+    for (const timestamp of timestamps) {
+      if (timestamp === null || timestamp <= nowMillis) continue;
+      const resolved = resolvePaccSchedule(timestamp, candidate);
+      if (!resolved.canBookAppointments) conflicts.push({appointmentId: String(appointment.id ?? ""), status, timestamp, reason: resolved.closureReason ?? "PACC is unavailable."});
+    }
+  }
+  return conflicts.sort((left, right) => left.appointmentId.localeCompare(right.appointmentId) || left.timestamp - right.timestamp);
 }
 export function canManagePaccAvailability(accessRole: unknown): boolean { return accessRole === "counselor" || accessRole === "admin"; }
 export function validatePaccAppointmentAvailability(scheduledMillis: number, availability: unknown): void { const resolved = resolvePaccSchedule(scheduledMillis, availability); if (!resolved.canBookAppointments) throw new AppointmentAvailabilityValidationError(resolved.closureReason ?? "PACC is not available for appointments at this time."); }

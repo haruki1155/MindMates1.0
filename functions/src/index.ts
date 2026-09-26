@@ -37,6 +37,9 @@ import {
 import {
   AppointmentAvailabilityValidationError,
   canManagePaccAvailability,
+  normalizePaccAvailabilityForRead,
+  PaccAvailabilityConfig,
+  previewPaccScheduleConflicts,
   validatePaccAppointmentAvailability,
   validatePaccAvailabilityPayload,
 } from "./appointment_availability";
@@ -1711,9 +1714,18 @@ export const savePaccAvailability = onCall(async (request) => {
   if (!canManagePaccAvailability(actor.accessRole)) {
     throw new HttpsError("permission-denied", "Counselor or administrator access is required.");
   }
-  let availability;
+  const input = (request.data ?? {}) as Record<string, unknown>;
+  const expectedRevision = input.expectedRevision;
+  const confirmConflicts = input.confirmConflicts;
+  const incoming = input.availability;
+  if (!Number.isInteger(expectedRevision) || (expectedRevision as number) < 0 || typeof confirmConflicts !== "boolean" || !incoming || typeof incoming !== "object" || Array.isArray(incoming)) {
+    throw new HttpsError("invalid-argument", "Provide availability, expectedRevision, and confirmConflicts.");
+  }
+  const incomingData = incoming as Record<string, unknown>;
+  const incomingIsV2 = incomingData.schemaVersion === 2;
+  let candidate: PaccAvailabilityConfig;
   try {
-    availability = validatePaccAvailabilityPayload(request.data);
+    candidate = incomingIsV2 ? validatePaccAvailabilityPayload(incoming) : normalizePaccAvailabilityForRead(incoming);
   } catch (error: unknown) {
     if (error instanceof AppointmentAvailabilityValidationError) {
       throw new HttpsError("invalid-argument", error.message);
@@ -1721,12 +1733,27 @@ export const savePaccAvailability = onCall(async (request) => {
     throw error;
   }
   const current = db.collection("pacc_availability").doc("current");
-  await db.runTransaction(async (transaction) => {
+  const activeScheduleStatuses = ["requested", "confirmed", "reschedule_proposed", "pending", "upcoming", "reschedule_required"];
+  const result = await db.runTransaction(async (transaction) => {
     const before = await transaction.get(current);
-    transaction.set(current, {
-      ...availability,
-      updatedAt: FieldValue.serverTimestamp(),
-    }, {merge: true});
+    const stored = before.exists ? before.data() ?? {} : {};
+    const storedIsV2 = stored.schemaVersion === 2;
+    const currentRevision = Number.isInteger(stored.revision) && Number(stored.revision) >= 0 ? Number(stored.revision) : 0;
+    if (expectedRevision !== currentRevision) throw new HttpsError("failed-precondition", "The PAACC schedule was updated by another user. Reload the latest schedule before saving.");
+    if (storedIsV2 && !incomingIsV2) throw new HttpsError("failed-precondition", "This PAACC schedule is already V2 and cannot be replaced by a legacy client.");
+    const appointments = await transaction.get(db.collection("appointments").where("status", "in", activeScheduleStatuses));
+    const conflicts = previewPaccScheduleConflicts(candidate, appointments.docs.map((snapshot) => ({id: snapshot.id, ...snapshot.data()})));
+    if (conflicts.length > 0 && !confirmConflicts) throw new HttpsError("failed-precondition", `${conflicts.length} upcoming appointments conflict with the proposed schedule.`);
+    const beforeNormalized = before.exists ? normalizePaccAvailabilityForRead(stored) : null;
+    const changedWeekdays = beforeNormalized == null ? [1, 2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5, 6, 7].filter((day) => JSON.stringify(beforeNormalized.weekdays[day]) !== JSON.stringify(candidate.weekdays[day]));
+    const previousOverrides = new Map((beforeNormalized?.overrides ?? []).map((item) => [item.date, item]));
+    const nextOverrides = new Map(candidate.overrides.map((item) => [item.date, item]));
+    const overridesAdded = [...nextOverrides.keys()].filter((date) => !previousOverrides.has(date)).length;
+    const overridesRemoved = [...previousOverrides.keys()].filter((date) => !nextOverrides.has(date)).length;
+    const overridesUpdated = [...nextOverrides.entries()].filter(([date, value]) => previousOverrides.has(date) && JSON.stringify(previousOverrides.get(date)) !== JSON.stringify(value)).length;
+    const newRevision = currentRevision + 1;
+    const nextDocument = incomingIsV2 ? {...candidate, revision: newRevision, updatedAt: FieldValue.serverTimestamp()} : {...incomingData, revision: newRevision, updatedAt: FieldValue.serverTimestamp()};
+    transaction.set(current, nextDocument);
     writeAudit(transaction, db, {
       actorId,
       actorNameSnapshot: actorName(actor),
@@ -1736,12 +1763,20 @@ export const savePaccAvailability = onCall(async (request) => {
       targetType: "pacc_availability",
       targetId: "current",
       metadata: {
-        before: before.exists ? before.data() ?? null : null,
-        after: availability,
+        schemaVersion: incomingIsV2 ? 2 : 1,
+        previousRevision: currentRevision,
+        newRevision,
+        changedWeekdays,
+        overridesAdded,
+        overridesUpdated,
+        overridesRemoved,
+        conflictCount: conflicts.length,
+        conflictsConfirmed: confirmConflicts,
       },
     });
+    return {ok: true, revision: newRevision, conflicts};
   });
-  return {ok: true};
+  return result;
 });
 
 function manilaSlotMillis(date: string, minutes: number): number {
