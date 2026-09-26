@@ -12,6 +12,7 @@ import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
 import '../models/profile_roles.dart';
 import '../models/pacc_availability_model.dart';
+import 'pacc_availability_repository.dart';
 import '../features/admin/domain/admin_management_models.dart';
 import '../features/admin/domain/report_generation_models.dart';
 import '../services/firebase/firebase_callable_router.dart';
@@ -170,10 +171,16 @@ class PortalAccessEvaluation {
 }
 
 class AdminPortalRepository {
-  AdminPortalRepository({FirestoreService? firestoreService})
-    : _firestoreService = firestoreService ?? FirestoreService();
+  AdminPortalRepository({
+    FirestoreService? firestoreService,
+    PaccAvailabilityRepository? paccAvailabilityRepository,
+  })  : _firestoreService = firestoreService ?? FirestoreService(),
+        _paccAvailabilityRepository =
+            paccAvailabilityRepository ??
+            PaccAvailabilityRepository(firestoreService: firestoreService);
 
   final FirestoreService _firestoreService;
+  final PaccAvailabilityRepository _paccAvailabilityRepository;
   AccessRole _currentAccessRole = AccessRole.appUser;
   AccessRole get currentAccessRole => _currentAccessRole;
   bool _isSuperAdmin = false;
@@ -1168,19 +1175,20 @@ class AdminPortalRepository {
       .httpsCallable('acknowledgeInquiry')
       .call({'inquiryId': id});
 
-  Stream<PaccAvailabilityModel?> watchPaccAvailability() => _firestoreService
-      .watchDocument(FirestoreCollections.paccAvailability, 'current')
-      .map(
-        (data) => data == null ? null : PaccAvailabilityModel.fromJson(data),
-      );
+  Stream<PaccAvailabilityModel?> watchPaccAvailability() =>
+      _paccAvailabilityRepository.watchCurrent();
 
-  Future<void> savePaccAvailability(PaccAvailabilityModel availability) {
+  Future<PaccAvailabilitySaveResult> savePaccAvailability(
+    PaccAvailabilityModel availability, {
+    bool confirmConflicts = false,
+  }) {
     if (!currentAccessRole.canAccessClinicalData) {
       throw StateError('Counselor or administrator access is required.');
     }
-    return FirebaseFunctions.instance
-        .routedCallable('savePaccAvailability')
-        .call(availability.toJson());
+    return _paccAvailabilityRepository.savePaccAvailability(
+      availability,
+      confirmConflicts: confirmConflicts,
+    );
   }
 
   Future<void> updateOwnProfile(String userId, Map<String, dynamic> values) =>
