@@ -125,16 +125,20 @@ class _DashboardContent extends StatelessWidget {
                   child: StreamBuilder<PaccAvailabilityModel?>(
                     stream: availability,
                     builder: (context, state) {
-                      final available = state.data?.isOpenAt(now) == true;
-                      return _Metric(
-                        width: width,
-                        label: 'Schedule',
-                        value: state.hasData
-                            ? (available ? 'Available' : 'Closed')
-                            : '—',
-                        note: "Today's PAACC schedule",
-                        icon: Icons.schedule_outlined,
-                      );
+                      final schedule = state.data;
+                      return schedule == null
+                          ? _Metric(
+                              width: width,
+                              label: 'Schedule',
+                              value: '—',
+                              note: "Today's PAACC schedule",
+                              icon: Icons.schedule_outlined,
+                            )
+                          : PaccStaffScheduleMetric(
+                              width: width,
+                              availability: schedule,
+                              now: now,
+                            );
                     },
                   ),
                 ),
@@ -185,6 +189,42 @@ class _DashboardContent extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class PaccStaffScheduleMetric extends StatelessWidget {
+  const PaccStaffScheduleMetric({
+    super.key,
+    required this.width,
+    required this.availability,
+    required this.now,
+  });
+
+  final double width;
+  final PaccAvailabilityModel availability;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolved = availability.resolveScheduleAt(now);
+    final unavailableCounselor =
+        resolved.schedule.presence != CounselorPresence.inOffice;
+    final value = !resolved.isOfficeOpen
+        ? 'Closed'
+        : unavailableCounselor
+        ? 'Open — counselor unavailable'
+        : resolved.canBookAppointments
+        ? 'Open — appointments available'
+        : 'Open — appointments unavailable';
+    return _Metric(
+      width: width,
+      label: 'Schedule',
+      value: value,
+      note: resolved.source == PaccScheduleSource.override
+          ? 'Schedule override for ${resolved.date}'
+          : "Today's PAACC schedule",
+      icon: Icons.schedule_outlined,
     );
   }
 }
