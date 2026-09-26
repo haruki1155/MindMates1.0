@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/models/pacc_availability_model.dart';
 import 'package:mind_mates/repositories/pacc_availability_repository.dart';
@@ -103,5 +105,39 @@ void main() {
       repository.savePaccAvailability(_schedule()),
       throwsA(isA<StateError>()),
     );
+  });
+
+  test('Admin, Counselor, and Staff readers receive the same newer revision', () async {
+    final source = StreamController<Map<String, dynamic>?>.broadcast();
+    addTearDown(source.close);
+    PaccAvailabilityRepository reader() => PaccAvailabilityRepository(
+      watchCurrentSource: () => source.stream,
+    );
+    final adminNext = reader().watchCurrent().where((value) => value != null).first;
+    final counselorNext = reader().watchCurrent().where((value) => value != null).first;
+    final staffNext = reader().watchCurrent().where((value) => value != null).first;
+    source.add(_schedule(revision: 8).toJson()..['revision'] = 8);
+
+    expect((await adminNext)!.revision, 8);
+    expect((await counselorNext)!.revision, 8);
+    expect((await staffNext)!.revision, 8);
+  });
+
+  test('a fresh reader after logout observes the current revision, not a stale cache', () async {
+    final firstSession = StreamController<Map<String, dynamic>?>.broadcast();
+    final first = PaccAvailabilityRepository(
+      watchCurrentSource: () => firstSession.stream,
+    ).watchCurrent().where((value) => value != null).first;
+    firstSession.add(_schedule(revision: 3).toJson()..['revision'] = 3);
+    expect((await first)!.revision, 3);
+    await firstSession.close();
+
+    final secondSession = StreamController<Map<String, dynamic>?>.broadcast();
+    addTearDown(secondSession.close);
+    final current = PaccAvailabilityRepository(
+      watchCurrentSource: () => secondSession.stream,
+    ).watchCurrent().where((value) => value != null).first;
+    secondSession.add(_schedule(revision: 4).toJson()..['revision'] = 4);
+    expect((await current)!.revision, 4);
   });
 }

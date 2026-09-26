@@ -85,4 +85,31 @@ void main() {
     expect(status.canBookAppointments, isFalse);
     expect(status.acceptsWalkIns, isTrue);
   });
+
+  test('custom special-date schedule controls student appointment availability', () {
+    final availability = PaccAvailabilityModel.v2(
+      weekdays: {for (var day = 1; day <= 7; day++) day: PaccDaySchedule.closed},
+      overrides: const [
+        PaccDateOverride(
+          date: '2026-10-01',
+          closedAllDay: false,
+          reason: 'University event schedule',
+          schedule: PaccDaySchedule(
+            enabled: true,
+            opensAt: '08:00',
+            closesAt: '12:00',
+            presence: CounselorPresence.inOffice,
+            appointmentsEnabled: true,
+            acceptsWalkIns: true,
+          ),
+        ),
+      ],
+    );
+
+    final resolved = availability.resolveScheduleAt(DateTime.utc(2026, 10, 1));
+    expect(resolved.source, PaccScheduleSource.override);
+    expect(resolved.canBookAppointments, isTrue);
+    expect(resolved.acceptsWalkIns, isTrue);
+    expect(resolved.schedule.opensAt, '08:00');
+  });
 }

@@ -3360,11 +3360,31 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
   late int _revision = widget.availability.revision;
   String? _saveMessage;
   String? _saveError;
+  bool _conflictDetected = false;
   static const _names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
   @override
   void initState() {
     super.initState();
+  }
+
+  @override
+  void didUpdateWidget(covariant PaccScheduleEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Firestore is authoritative.  A clean editor must immediately reflect a
+    // revision saved by another authorized portal session; a dirty draft is
+    // deliberately retained so a remote update cannot silently discard it.
+    if (!_dirty && widget.availability.revision != oldWidget.availability.revision) {
+      _days
+        ..clear()
+        ..addAll(widget.availability.effectiveWeekdays);
+      _overrides
+        ..clear()
+        ..addAll(widget.availability.overrides);
+      _revision = widget.availability.revision;
+      _saveMessage = 'Schedule up to date';
+      _saveError = null;
+    }
   }
 
   @override
@@ -3375,16 +3395,48 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
     super.dispose();
   }
 
-  Future<void> _addClosedOverride() async {
-    final selected = await showDatePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime(2100), initialDate: DateTime.now(), helpText: 'Special date');
-    if (selected == null) return;
+  Future<void> _addSpecialOverride([PaccDateOverride? existing]) async {
+    final selected = existing == null ? await showDatePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime(2100), initialDate: DateTime.now(), helpText: 'Special date') : DateTime.parse(existing.date);
+    if (selected == null || !mounted) return;
     final date = '${selected.year.toString().padLeft(4, '0')}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}';
-    setState(() {
-      _overrides.removeWhere((item) => item.date == date);
-      _overrides.add(PaccDateOverride(date: date, closedAllDay: true));
-      _overrides.sort((left, right) => left.date.compareTo(right.date));
-      _dirty = true;
-    });
+    var closed = existing?.closedAllDay ?? true;
+    var schedule = existing?.schedule ?? (_days[selected.weekday] ?? PaccDaySchedule.closed);
+    final opens = TextEditingController(text: schedule.opensAt);
+    final closes = TextEditingController(text: schedule.closesAt);
+    final reason = TextEditingController(text: existing?.reason ?? '');
+    _dialogControllers.addAll([opens, closes, reason]);
+    String? validation;
+    final override = await showDialog<PaccDateOverride>(context: context, builder: (context) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
+      title: Text(existing == null ? 'Add special date' : 'Edit special date'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        SwitchListTile(title: const Text('Closed all day'), value: closed, onChanged: (value) => setDialogState(() => closed = value)),
+        if (!closed) ...[
+          TextField(key: const Key('override-opens'), controller: opens, decoration: const InputDecoration(labelText: 'Opening time')),
+          TextField(key: const Key('override-closes'), controller: closes, decoration: const InputDecoration(labelText: 'Closing time')),
+          SwitchListTile(title: const Text('Counselor in office'), value: schedule.presence == CounselorPresence.inOffice, onChanged: (value) => setDialogState(() => schedule = schedule.copyWith(presence: value ? CounselorPresence.inOffice : CounselorPresence.outOfOffice, appointmentsEnabled: value ? schedule.appointmentsEnabled : false))),
+          SwitchListTile(title: const Text('Appointments enabled'), value: schedule.appointmentsEnabled, onChanged: schedule.presence != CounselorPresence.inOffice ? null : (value) => setDialogState(() => schedule = schedule.copyWith(appointmentsEnabled: value))),
+          SwitchListTile(title: const Text('Walk-ins enabled'), value: schedule.acceptsWalkIns, onChanged: (value) => setDialogState(() => schedule = schedule.copyWith(acceptsWalkIns: value))),
+        ],
+        TextField(key: const Key('override-reason'), controller: reason, maxLength: 250, decoration: const InputDecoration(labelText: 'Reason')),
+        if (validation != null) Text(validation!, style: const TextStyle(color: Colors.red)),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), FilledButton(onPressed: () {
+        if (reason.text.trim().length > 250 || (!closed && (!RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(opens.text) || !RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(closes.text) || opens.text.compareTo(closes.text) >= 0))) {
+          setDialogState(() => validation = 'Enter an ordered HH:mm range and a reason up to 250 characters.');
+          return;
+        }
+        final custom = schedule.copyWith(enabled: true, opensAt: opens.text, closesAt: closes.text, appointmentsEnabled: schedule.presence == CounselorPresence.inOffice ? schedule.appointmentsEnabled : false);
+        Navigator.pop(context, PaccDateOverride(date: date, closedAllDay: closed, schedule: closed ? null : custom, reason: reason.text.trim()));
+      }, child: const Text('Apply'))],
+    )));
+    if (override != null && mounted) {
+      setState(() {
+        _overrides.removeWhere((item) => item.date == date);
+        _overrides.add(override);
+        _overrides.sort((left, right) => left.date.compareTo(right.date));
+        _dirty = true;
+      });
+    }
   }
 
   Future<void> _editDay(int day) async {
@@ -3439,11 +3491,62 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
     }
   }
 
+  Future<void> _setMultipleDays() async {
+    final selected = <int>{};
+    var draft = _days[1] ?? PaccDaySchedule.closed;
+    final opens = TextEditingController(text: draft.opensAt);
+    final closes = TextEditingController(text: draft.closesAt);
+    _dialogControllers.addAll([opens, closes]);
+    String? validation;
+    final applied = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Set multiple days'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              ...List.generate(5, (index) => CheckboxListTile(
+                key: Key('bulk-day-${index + 1}'),
+                title: Text(_names[index]),
+                value: selected.contains(index + 1),
+                onChanged: (value) => setDialogState(() => value == true ? selected.add(index + 1) : selected.remove(index + 1)),
+              )),
+              SwitchListTile(title: const Text('Office open'), value: draft.enabled, onChanged: (value) => setDialogState(() => draft = draft.copyWith(enabled: value, appointmentsEnabled: value ? draft.appointmentsEnabled : false, acceptsWalkIns: value ? draft.acceptsWalkIns : false))),
+              TextField(key: const Key('bulk-opens'), controller: opens, decoration: const InputDecoration(labelText: 'Opening time')),
+              TextField(key: const Key('bulk-closes'), controller: closes, decoration: const InputDecoration(labelText: 'Closing time')),
+              SwitchListTile(title: const Text('Appointments enabled'), value: draft.appointmentsEnabled, onChanged: !draft.enabled || draft.presence != CounselorPresence.inOffice ? null : (value) => setDialogState(() => draft = draft.copyWith(appointmentsEnabled: value))),
+              SwitchListTile(title: const Text('Walk-ins enabled'), value: draft.acceptsWalkIns, onChanged: !draft.enabled ? null : (value) => setDialogState(() => draft = draft.copyWith(acceptsWalkIns: value))),
+              if (validation != null) Text(validation!, style: const TextStyle(color: Colors.red)),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () {
+              final valid = selected.isNotEmpty && RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(opens.text) && RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(closes.text) && opens.text.compareTo(closes.text) < 0;
+              if (!valid) { setDialogState(() => validation = 'Select days and enter an ordered HH:mm range.'); return; }
+              draft = draft.copyWith(opensAt: opens.text, closesAt: closes.text, appointmentsEnabled: draft.enabled && draft.presence == CounselorPresence.inOffice ? draft.appointmentsEnabled : false, acceptsWalkIns: draft.enabled ? draft.acceptsWalkIns : false);
+              Navigator.pop(context, true);
+            }, child: const Text('Apply to selected days')),
+          ],
+        ),
+      ),
+    );
+    if (applied == true && mounted) {
+      setState(() {
+        for (final day in selected) { _days[day] = draft; }
+        _dirty = true;
+        _saveMessage = null;
+        _saveError = null;
+      });
+    }
+  }
+
   Future<void> _save({bool confirmConflicts = false}) async {
-    setState(() => _saving = true);
+    setState(() { _saving = true; _saveMessage = 'Saving...'; _saveError = null; if (!confirmConflicts) _conflictDetected = false; });
     try {
       final result = await widget.onSave(_draft, confirmConflicts: confirmConflicts);
       if (result.conflicts.isNotEmpty && mounted && !confirmConflicts) {
+        setState(() => _conflictDetected = true);
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -3457,11 +3560,12 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
         );
         if (confirmed == true && mounted) await _save(confirmConflicts: true);
       } else if (mounted) {
-        setState(() { _revision = result.revision; _dirty = false; _saveMessage = 'Schedule saved'; _saveError = null; });
+        setState(() { _revision = result.revision; _dirty = false; _saveMessage = 'Schedule saved successfully'; _saveError = null; _conflictDetected = false; });
       }
     } catch (error) {
       final isConflict = !confirmConflicts && error.toString().contains('upcoming appointments conflict');
       if (isConflict && mounted) {
+        setState(() => _conflictDetected = true);
         final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
           title: const Text('Schedule conflicts'),
           content: const Text('Upcoming appointments conflict with this schedule. Existing appointments will not be cancelled automatically.'),
@@ -3469,7 +3573,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
         ));
         if (confirmed == true && mounted) await _save(confirmConflicts: true);
       } else if (mounted) {
-        setState(() { _saveError = 'Schedule could not be saved. Your changes are still available.'; _saveMessage = null; });
+        setState(() { _saveError = 'Save failed. Your changes are still available.'; _saveMessage = null; });
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -3490,7 +3594,11 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
     label: 'PAACC weekly schedule editor',
     child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (widget.readOnly) const Text('Read-only schedule'),
-      Text(_dirty ? 'Unsaved changes' : (_saveMessage ?? 'Schedule up to date')),
+      Row(children: [
+        Expanded(child: Text(_saving ? 'Saving...' : (_conflictDetected ? 'Conflict detected' : (_dirty ? 'Unsaved changes' : (_saveMessage ?? 'Schedule up to date'))))),
+        Text('Revision $_revision'),
+      ]),
+      if (widget.availability.updatedAt != null) Text('Last updated ${widget.availability.updatedAt!.toLocal()}', style: const TextStyle(fontSize: 12)),
       if (_saveError != null) Text(_saveError!, style: const TextStyle(color: Colors.red)),
       ...List.generate(5, (index) {
         final day = index + 1;
@@ -3504,6 +3612,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
       const SizedBox(height: 12),
       const Text('Special dates'),
       ..._overrides.map((override) => ListTile(
+        onTap: widget.readOnly ? null : () => _addSpecialOverride(override),
         title: Text(override.date),
         subtitle: Text(override.closedAllDay ? 'Closed' : 'Custom schedule'),
         trailing: widget.readOnly ? null : IconButton(
@@ -3513,13 +3622,13 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
         ),
       )),
       if (!widget.readOnly) TextButton.icon(
-        onPressed: _addClosedOverride,
+        onPressed: _addSpecialOverride,
         icon: const Icon(Icons.add_circle_outline),
         label: const Text('Add special date'),
       ),
       if (!widget.readOnly) Wrap(children: [
         ...List.generate(0, (index) => Semantics(label: 'Select ${_names[index]}', child: Checkbox(value: _selectedDays.contains(index + 1), onChanged: (value) => setState(() => value == true ? _selectedDays.add(index + 1) : _selectedDays.remove(index + 1))))),
-        TextButton(onPressed: _selectedDays.isEmpty ? null : () => setState(() { for (final day in _selectedDays) { _days[day] = PaccDaySchedule.closed; } }), child: const Text('Close selected days')),
+        TextButton(onPressed: _setMultipleDays, child: const Text('Set multiple days')),
       ]),
       ...List.generate(0, (index) {
         final day = index + 1;
