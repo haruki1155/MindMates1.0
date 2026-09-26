@@ -27,6 +27,20 @@ void main() {
     expect(json['notice'], 'Office hours');
   });
 
+  test('serialization forces Saturday and Sunday closed', () {
+    final model = PaccAvailabilityModel.v2(
+      weekdays: {for (var day = 1; day <= 7; day++) day: monday},
+      overrides: const [],
+    );
+
+    final weekdays = (model.toJson()['weekdays'] as Map).cast<String, dynamic>();
+
+    expect(weekdays['6']['enabled'], isFalse);
+    expect(weekdays['6']['appointmentsEnabled'], isFalse);
+    expect(weekdays['7']['enabled'], isFalse);
+    expect(weekdays['7']['acceptsWalkIns'], isFalse);
+  });
+
   test('V1 model normalizes blackout dates and ignores server metadata', () {
     final model = PaccAvailabilityModel.fromJson({
       'openDays': [1, 2, 3, 4, 5],

@@ -3351,28 +3351,27 @@ class PaccScheduleEditor extends StatefulWidget {
 }
 
 class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
-  late final Map<int, PaccDaySchedule> _days = Map.of(widget.availability.weekdays);
+  late final Map<int, PaccDaySchedule> _days = Map.of(widget.availability.effectiveWeekdays);
   late final List<PaccDateOverride> _overrides = List.of(widget.availability.overrides);
-  late final TextEditingController _mondayOpens;
-  late final TextEditingController _mondayCloses;
   final Set<int> _selectedDays = {};
+  final List<TextEditingController> _dialogControllers = [];
   bool _saving = false;
   bool _dirty = false;
-  static const _names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  late int _revision = widget.availability.revision;
+  String? _saveMessage;
+  String? _saveError;
+  static const _names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
   @override
   void initState() {
     super.initState();
-    _mondayOpens = TextEditingController(text: _days[1]!.opensAt)..addListener(_syncMondayTimes);
-    _mondayCloses = TextEditingController(text: _days[1]!.closesAt)..addListener(_syncMondayTimes);
   }
-
-  void _syncMondayTimes() => setState(() { _days[1] = _days[1]!.copyWith(opensAt: _mondayOpens.text, closesAt: _mondayCloses.text); _dirty = true; });
 
   @override
   void dispose() {
-    _mondayOpens.dispose();
-    _mondayCloses.dispose();
+    for (final controller in _dialogControllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -3388,6 +3387,39 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
     });
   }
 
+  Future<void> _editDay(int day) async {
+    var draft = _days[day]!;
+    final opens = TextEditingController(text: draft.opensAt);
+    final closes = TextEditingController(text: draft.closesAt);
+    _dialogControllers.addAll([opens, closes]);
+    String? validation;
+    try {
+      final applied = await showDialog<PaccDaySchedule>(context: context, builder: (context) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
+        title: Text(_names[day - 1]),
+        content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          SwitchListTile(title: const Text('Office open'), value: draft.enabled, onChanged: (value) => setDialogState(() => draft = draft.copyWith(enabled: value, appointmentsEnabled: value ? draft.appointmentsEnabled : false, acceptsWalkIns: value ? draft.acceptsWalkIns : false))),
+          TextField(key: Key('day-$day-opens'), controller: opens, decoration: const InputDecoration(labelText: 'Opening time')),
+          TextField(key: Key('day-$day-closes'), controller: closes, decoration: const InputDecoration(labelText: 'Closing time')),
+          // ignore: deprecated_member_use
+          RadioListTile(value: CounselorPresence.inOffice, groupValue: draft.presence, title: const Text('In office'), onChanged: (value) => setDialogState(() => draft = draft.copyWith(presence: value!, appointmentsEnabled: draft.appointmentsEnabled))),
+          // ignore: deprecated_member_use
+          RadioListTile(value: CounselorPresence.outOfOffice, groupValue: draft.presence, title: const Text('Out of office'), onChanged: (value) => setDialogState(() => draft = draft.copyWith(presence: value!, appointmentsEnabled: false))),
+          // ignore: deprecated_member_use
+          RadioListTile(value: CounselorPresence.onLeave, groupValue: draft.presence, title: const Text('On leave'), onChanged: (value) => setDialogState(() => draft = draft.copyWith(presence: value!, appointmentsEnabled: false))),
+          SwitchListTile(title: const Text('Appointment booking'), value: draft.appointmentsEnabled, onChanged: !draft.enabled || draft.presence != CounselorPresence.inOffice ? null : (value) => setDialogState(() => draft = draft.copyWith(appointmentsEnabled: value))),
+          SwitchListTile(title: const Text('Walk-in visits'), value: draft.acceptsWalkIns, onChanged: !draft.enabled ? null : (value) => setDialogState(() => draft = draft.copyWith(acceptsWalkIns: value))),
+          if (validation != null) Text(validation!, style: const TextStyle(color: Colors.red)),
+        ])),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), FilledButton(onPressed: () {
+          final valid = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(opens.text) && RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(closes.text) && opens.text.compareTo(closes.text) < 0;
+          if (!valid) { setDialogState(() => validation = 'Opening time must be before closing time.'); return; }
+          Navigator.pop(context, draft.copyWith(opensAt: opens.text, closesAt: closes.text, appointmentsEnabled: draft.enabled && draft.presence == CounselorPresence.inOffice ? draft.appointmentsEnabled : false, acceptsWalkIns: draft.enabled ? draft.acceptsWalkIns : false));
+        }, child: const Text('Apply'))],
+      )));
+      if (applied != null && mounted) setState(() { _days[day] = applied; _dirty = true; _saveMessage = null; _saveError = null; });
+    } finally {}
+  }
+
   Future<void> _discard() async {
     if (!_dirty) return;
     final discard = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
@@ -3398,12 +3430,10 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
       setState(() {
         _days
           ..clear()
-          ..addAll(widget.availability.weekdays);
+          ..addAll(widget.availability.effectiveWeekdays);
         _overrides
           ..clear()
           ..addAll(widget.availability.overrides);
-        _mondayOpens.text = _days[1]!.opensAt;
-        _mondayCloses.text = _days[1]!.closesAt;
         _dirty = false;
       });
     }
@@ -3426,6 +3456,20 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
           ),
         );
         if (confirmed == true && mounted) await _save(confirmConflicts: true);
+      } else if (mounted) {
+        setState(() { _revision = result.revision; _dirty = false; _saveMessage = 'Schedule saved'; _saveError = null; });
+      }
+    } catch (error) {
+      final isConflict = !confirmConflicts && error.toString().contains('upcoming appointments conflict');
+      if (isConflict && mounted) {
+        final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+          title: const Text('Schedule conflicts'),
+          content: const Text('Upcoming appointments conflict with this schedule. Existing appointments will not be cancelled automatically.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Go Back')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save anyway'))],
+        ));
+        if (confirmed == true && mounted) await _save(confirmConflicts: true);
+      } else if (mounted) {
+        setState(() { _saveError = 'Schedule could not be saved. Your changes are still available.'; _saveMessage = null; });
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -3433,29 +3477,30 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
   }
 
   PaccAvailabilityModel get _draft => PaccAvailabilityModel.v2(
-    weekdays: _days,
+    weekdays: {..._days, 6: PaccDaySchedule.closed, 7: PaccDaySchedule.closed},
     overrides: _overrides,
     notice: widget.availability.notice,
-    revision: widget.availability.revision,
+    revision: _revision,
   );
-  bool get _mondayTimesInvalid {
-    final day = _days[1]!;
-    final open = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(day.opensAt) ? int.parse(day.opensAt.substring(0, 2)) * 60 + int.parse(day.opensAt.substring(3)) : -1;
-    final close = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(day.closesAt) ? int.parse(day.closesAt.substring(0, 2)) * 60 + int.parse(day.closesAt.substring(3)) : -1;
-    return open < 0 || close < 0 || open >= close;
-  }
 
   @override
   Widget build(BuildContext context) => Semantics(
+    container: true,
+    explicitChildNodes: true,
     label: 'PAACC weekly schedule editor',
     child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (widget.readOnly) const Text('Read-only schedule'),
-      if (!widget.readOnly) Row(children: [
-        Expanded(child: TextFormField(key: const Key('day-1-opens'), controller: _mondayOpens, decoration: const InputDecoration(labelText: 'Monday opens'))),
-        const SizedBox(width: 12),
-        Expanded(child: TextFormField(key: const Key('day-1-closes'), controller: _mondayCloses, decoration: const InputDecoration(labelText: 'Monday closes'))),
-      ]),
-      if (_mondayTimesInvalid) const Text('Opening time must be before closing time.'),
+      Text(_dirty ? 'Unsaved changes' : (_saveMessage ?? 'Schedule up to date')),
+      if (_saveError != null) Text(_saveError!, style: const TextStyle(color: Colors.red)),
+      ...List.generate(5, (index) {
+        final day = index + 1;
+        final schedule = _days[day] ?? PaccDaySchedule.closed;
+        return Semantics(container: true, label: 'Schedule ${_names[index]}', child: ListTile(
+          title: Text(_names[index]),
+          subtitle: Text(schedule.enabled ? '${schedule.opensAt}-${schedule.closesAt} ${schedule.presence.label}' : 'Closed'),
+          trailing: widget.readOnly ? null : OutlinedButton(key: Key('edit-day-$day'), onPressed: () => _editDay(day), child: const Text('Edit')),
+        ));
+      }),
       const SizedBox(height: 12),
       const Text('Special dates'),
       ..._overrides.map((override) => ListTile(
@@ -3473,10 +3518,10 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
         label: const Text('Add special date'),
       ),
       if (!widget.readOnly) Wrap(children: [
-        ...List.generate(7, (index) => Semantics(label: 'Select ${_names[index]}', child: Checkbox(value: _selectedDays.contains(index + 1), onChanged: (value) => setState(() => value == true ? _selectedDays.add(index + 1) : _selectedDays.remove(index + 1))))),
+        ...List.generate(0, (index) => Semantics(label: 'Select ${_names[index]}', child: Checkbox(value: _selectedDays.contains(index + 1), onChanged: (value) => setState(() => value == true ? _selectedDays.add(index + 1) : _selectedDays.remove(index + 1))))),
         TextButton(onPressed: _selectedDays.isEmpty ? null : () => setState(() { for (final day in _selectedDays) { _days[day] = PaccDaySchedule.closed; } }), child: const Text('Close selected days')),
       ]),
-      ...List.generate(7, (index) {
+      ...List.generate(0, (index) {
         final day = index + 1;
         final schedule = _days[day] ?? PaccDaySchedule.closed;
         return Semantics(
@@ -3496,7 +3541,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
         child: FilledButton.icon(
           onPressed: _saving ? null : _save,
           icon: const Icon(Icons.save_outlined),
-          label: const Text('Save schedule'),
+          label: Text(_saving ? 'Saving schedule...' : 'Save schedule'),
         ),
       ),
     ])),

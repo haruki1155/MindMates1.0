@@ -51,9 +51,18 @@ test("V2 payload round-trips seven weekdays and rejects unsupported or contradic
     {...v2Availability, unexpected: true},
     {...v2Availability, weekdays: {...v2Availability.weekdays, 2: {...v2Availability.weekdays[2], appointmentsEnabled: true}}},
     {...v2Availability, overrides: [{date: "2026-09-24", closedAllDay: true, schedule: v2Availability.weekdays[1], reason: "Contradiction"}]},
+    {...v2Availability, weekdays: {...v2Availability.weekdays, 6: {...v2Availability.weekdays[6], enabled: true, presence: "in_office", appointmentsEnabled: true}}},
   ]) {
     assert.throws(() => validatePaccAvailabilityPayload(invalid), AppointmentAvailabilityValidationError);
   }
+});
+
+test("weekends are closed when reading V1 schedules and never resolve as bookable", () => {
+  const normalized = normalizePaccAvailabilityForRead({...availability, openDays: [1, 6, 7]});
+  assert.equal(normalized.weekdays[6].enabled, false);
+  assert.equal(normalized.weekdays[7].enabled, false);
+  const saturdayNine = Date.UTC(2026, 8, 26, 1, 0, 0);
+  assert.equal(resolvePaccSchedule(saturdayNine, normalized).canBookAppointments, false);
 });
 
 test("V1 documents normalize with server metadata and blackout dates as closed overrides", () => {

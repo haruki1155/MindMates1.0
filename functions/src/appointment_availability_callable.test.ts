@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import {after, before, beforeEach, test} from "node:test";
 import {getFirestore} from "firebase-admin/firestore";
 
-import {savePaccAvailability} from "./index";
+import {getAvailableAppointmentSlots, savePaccAvailability} from "./index";
 
 type Callable = {run: (request: {auth?: {uid: string}; data?: Record<string, unknown>}) => Promise<unknown>};
 const db = getFirestore();
@@ -13,6 +13,7 @@ const staffId = `${prefix}-staff`;
 const studentId = `${prefix}-student`;
 const current = db.collection("pacc_availability").doc("current");
 const save = savePaccAvailability as unknown as Callable;
+const slots = getAvailableAppointmentSlots as unknown as Callable;
 const v1 = {openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, notice: "", blackoutDates: []};
 const v2 = {
   schemaVersion: 2, timezone: "Asia/Manila", notice: "",
@@ -33,6 +34,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await current.set(v1);
+  await db.collection("appointment_slots").doc(`pacc_${Date.UTC(2027, 0, 8, 0)}`).delete();
   const appointments = await db.collection("appointments").where("testOwner", "==", prefix).get();
   await Promise.all(appointments.docs.map((doc) => doc.ref.delete()));
   const audits = await db.collection("admin_audit_logs").where("actorId", "==", adminId).get();
@@ -105,4 +107,28 @@ test("conflicts require confirmation, preserve appointments, recalculate at save
   assert.equal(JSON.stringify(audit?.metadata).includes("private concern"), false);
   assert.equal(JSON.stringify(audit?.metadata).includes("private summary"), false);
   await appointment.delete();
+});
+
+test("slot callable returns safe unavailable metadata and preserves whole-hour starts", async () => {
+  const friday = "2027-01-08";
+  const day = (overrides: Record<string, unknown> = {}) => ({enabled: true, opensAt: "08:00", closesAt: "17:00", presence: "in_office", appointmentsEnabled: true, acceptsWalkIns: true, ...overrides});
+  const schedule = (fridayDay: Record<string, unknown>) => ({...v2, weekdays: {...v2.weekdays, 5: fridayDay}});
+  const read = async () => slots.run({auth: {uid: studentId}, data: {date: friday}}) as Promise<{slots: Array<{label: string}>; availability: {status: string}}>;
+
+  await current.set(schedule(day({enabled: false, appointmentsEnabled: false, acceptsWalkIns: false, presence: "out_of_office"})));
+  assert.equal((await read()).availability.status, "office_closed");
+  await current.set(schedule(day({presence: "on_leave", appointmentsEnabled: false})));
+  assert.equal((await read()).availability.status, "counselor_unavailable");
+  await current.set(schedule(day({appointmentsEnabled: false})));
+  assert.equal((await read()).availability.status, "appointments_disabled");
+  await current.set(schedule(day()));
+  assert.deepEqual((await read()).slots.map((slot) => slot.label), ["08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM"]);
+  await current.set(schedule(day({opensAt: "07:30", closesAt: "12:00"})));
+  assert.equal((await read()).slots[0].label, "08:00 AM");
+  await current.set(schedule(day({opensAt: "08:00", closesAt: "09:00"})));
+  await db.collection("appointment_slots").doc(`pacc_${Date.UTC(2027, 0, 8, 0)}`).set({appointmentId: `${prefix}-occupied`});
+  assert.equal((await read()).availability.status, "fully_booked");
+  const saturday = await slots.run({auth: {uid: studentId}, data: {date: "2027-01-09"}}) as {slots: unknown[]; availability: {status: string}};
+  assert.equal(saturday.slots.length, 0);
+  assert.equal(saturday.availability.status, "office_closed");
 });

@@ -40,6 +40,7 @@ import {
   normalizePaccAvailabilityForRead,
   PaccAvailabilityConfig,
   previewPaccScheduleConflicts,
+  resolvePaccSchedule,
   validatePaccAppointmentAvailability,
   validatePaccAvailabilityPayload,
 } from "./appointment_availability";
@@ -1814,7 +1815,11 @@ export const getAvailableAppointmentSlots = onCall(async (request) => {
     const occupied = await db.collection("appointment_slots").doc(appointmentSlotId(Timestamp.fromMillis(start))).get();
     if (!occupied.exists) slots.push({start, label: formatAppointmentTime(start)});
   }
-  return {date, slots};
+  if (slots.length > 0) return {date, slots, availability: {status: "available"}};
+  const resolved = resolvePaccSchedule(manilaSlotMillis(date, 12 * 60), availabilitySnapshot.exists ? availabilitySnapshot.data() : null);
+  const status = !resolved.enabled ? "office_closed" : resolved.presence !== "in_office" ? "counselor_unavailable" : !resolved.appointmentsEnabled ? "appointments_disabled" : "fully_booked";
+  const message = status === "office_closed" ? "PAACC is closed on this date. Please choose another date." : status === "counselor_unavailable" ? "The counselor is unavailable on this date. Please choose another available date." : status === "appointments_disabled" ? "Appointments are not available on this date." : "No appointment times are available for this date. Please choose another date.";
+  return {date, slots, availability: {status, message}};
 });
 
 export const createAppointmentRequest = onCall(async (request) => {

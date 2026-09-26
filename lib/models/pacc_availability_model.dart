@@ -54,19 +54,20 @@ class PaccAvailabilityModel {
       final rawDays = Map<String, dynamic>.from(json['weekdays'] as Map);
       final days = <int, PaccDaySchedule>{for (var day = 1; day <= 7; day++) day: PaccDaySchedule.fromJson(Map<String, dynamic>.from(rawDays['$day'] as Map? ?? const {}))};
       final rawOverrides = json['overrides'] as List? ?? const [];
-      return PaccAvailabilityModel.v2(weekdays: days, overrides: rawOverrides.whereType<Map>().map((value) => PaccDateOverride.fromJson(Map<String, dynamic>.from(value))).toList(), notice: json['notice']?.toString().trim() ?? '', revision: (json['revision'] as num?)?.toInt() ?? 0, updatedAt: dateTimeFromFirestore(json['updatedAt']));
+      return PaccAvailabilityModel.v2(weekdays: _withClosedWeekends(days), overrides: rawOverrides.whereType<Map>().map((value) => PaccDateOverride.fromJson(Map<String, dynamic>.from(value))).toList(), notice: json['notice']?.toString().trim() ?? '', revision: (json['revision'] as num?)?.toInt() ?? 0, updatedAt: dateTimeFromFirestore(json['updatedAt']));
     }
     final openDays = (json['openDays'] as List? ?? const [1, 2, 3, 4, 5]).whereType<num>().map((value) => value.toInt()).where((day) => day >= 1 && day <= 7).toList();
     final opensAt = json['opensAt']?.toString() ?? '08:00'; final closesAt = json['closesAt']?.toString() ?? '17:00'; final presence = CounselorPresence.parse(json['presence']); final walks = json['acceptsWalkIns'] == true;
-    final days = <int, PaccDaySchedule>{for (var day = 1; day <= 7; day++) day: openDays.contains(day) ? PaccDaySchedule(enabled: true, opensAt: opensAt, closesAt: closesAt, presence: presence, appointmentsEnabled: true, acceptsWalkIns: walks) : PaccDaySchedule.closed};
+    final days = <int, PaccDaySchedule>{for (var day = 1; day <= 7; day++) day: day <= 5 && openDays.contains(day) ? PaccDaySchedule(enabled: true, opensAt: opensAt, closesAt: closesAt, presence: presence, appointmentsEnabled: true, acceptsWalkIns: walks) : PaccDaySchedule.closed};
     final dates = (json['blackoutDates'] as List? ?? const []).map((value) => value.toString().trim()).where((value) => RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)).toList();
     return PaccAvailabilityModel.v2(weekdays: days, overrides: dates.map((date) => PaccDateOverride(date: date, closedAllDay: true)).toList(), notice: json['notice']?.toString().trim() ?? '', revision: (json['revision'] as num?)?.toInt() ?? 0, updatedAt: dateTimeFromFirestore(json['updatedAt']));
   }
 
   Map<int, PaccDaySchedule> get _effectiveWeekdays {
-    if (weekdays.length == 7) return weekdays;
-    return {for (var day = 1; day <= 7; day++) day: openDays.contains(day) ? PaccDaySchedule(enabled: true, opensAt: opensAt, closesAt: closesAt, presence: presence, appointmentsEnabled: true, acceptsWalkIns: acceptsWalkIns) : PaccDaySchedule.closed};
+    if (weekdays.length == 7) return _withClosedWeekends(weekdays);
+    return {for (var day = 1; day <= 7; day++) day: day <= 5 && openDays.contains(day) ? PaccDaySchedule(enabled: true, opensAt: opensAt, closesAt: closesAt, presence: presence, appointmentsEnabled: true, acceptsWalkIns: acceptsWalkIns) : PaccDaySchedule.closed};
   }
+  Map<int, PaccDaySchedule> get effectiveWeekdays => Map.unmodifiable(_effectiveWeekdays);
   List<PaccDateOverride> get _effectiveOverrides => overrides.isNotEmpty ? overrides : blackoutDates.map((date) => PaccDateOverride(date: date, closedAllDay: true)).toList();
 
   Map<String, dynamic> toJson() => {'schemaVersion': 2, 'timezone': 'Asia/Manila', 'weekdays': {for (var day = 1; day <= 7; day++) '$day': _effectiveWeekdays[day]!.toJson()}, 'overrides': _effectiveOverrides.map((override) => override.toJson()).toList(), 'notice': notice.trim()};
@@ -86,4 +87,10 @@ class PaccAvailabilityModel {
   }
   bool isOpenAt(DateTime now) => resolveScheduleAt(now).isOfficeOpen;
   String statusLabel(DateTime now) => isOpenAt(now) ? 'OPEN NOW' : 'CLOSED';
+
+  static Map<int, PaccDaySchedule> _withClosedWeekends(Map<int, PaccDaySchedule> source) => {
+    for (var day = 1; day <= 5; day++) day: source[day] ?? PaccDaySchedule.closed,
+    6: PaccDaySchedule.closed,
+    7: PaccDaySchedule.closed,
+  };
 }

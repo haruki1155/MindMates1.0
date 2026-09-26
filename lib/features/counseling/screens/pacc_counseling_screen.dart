@@ -50,6 +50,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   late DateTime _visibleMonth;
   DateTime? _selectedDate;
   String? _selectedTime;
+  String? _noSlotMessage;
   String? _sex;
   String? _course;
   String? _yearLevel;
@@ -218,6 +219,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         selectedDate: _selectedDate,
         selectedTime: _selectedTime,
         availableTimes: _availableTimes,
+        noSlotMessage: _noSlotMessage,
         isSaving: (appointmentProvider?.isSaving ?? false) || _loadingTimes,
         onBack: () => setState(() => _step = _PaccAppointmentStep.calendar),
         onTimeSelected: (time) => setState(() => _selectedTime = time),
@@ -279,17 +281,20 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _selectedDate = date;
       _selectedTime = null;
       _availableTimes = const [];
+      _noSlotMessage = null;
       _loadingTimes = true;
       _step = _PaccAppointmentStep.time;
     });
+    final provider = _readProviderOrNull<AppointmentProvider>();
     final slots =
-        await _readProviderOrNull<AppointmentProvider>()?.getAvailableSlots(
+        await provider?.getAvailableSlots(
           date,
         ) ??
         const [];
     if (!mounted || _selectedDate != date) return;
     setState(() {
       _availableTimes = slots.map((slot) => slot.label).toList(growable: false);
+      _noSlotMessage = slots.isEmpty ? provider?.slotAvailabilityMessage ?? 'No appointment times are available for this date. Please choose another date.' : null;
       _loadingTimes = false;
     });
   }
@@ -1083,6 +1088,7 @@ class _TimeSelectionView extends StatelessWidget {
     required this.selectedDate,
     required this.selectedTime,
     required this.availableTimes,
+    required this.noSlotMessage,
     required this.isSaving,
     required this.onBack,
     required this.onTimeSelected,
@@ -1092,6 +1098,7 @@ class _TimeSelectionView extends StatelessWidget {
   final DateTime? selectedDate;
   final String? selectedTime;
   final List<String> availableTimes;
+  final String? noSlotMessage;
   final bool isSaving;
   final VoidCallback onBack;
   final ValueChanged<String> onTimeSelected;
@@ -1146,6 +1153,10 @@ class _TimeSelectionView extends StatelessWidget {
               ],
             );
           },
+        ),
+        if (!isSaving && availableTimes.isEmpty) Padding(
+          padding: const EdgeInsets.only(top: 20),
+          child: Text(noSlotMessage ?? 'No appointment times are available for this date. Please choose another date.', style: _PaccText.body),
         ),
         const SizedBox(height: 34),
         const _ReminderCard(),

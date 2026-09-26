@@ -11,6 +11,8 @@ class AppointmentRepository {
 
   final FirestoreService _firestoreService;
   FirebaseFunctions? _functions;
+  String? _lastSlotAvailabilityMessage;
+  String? get lastSlotAvailabilityMessage => _lastSlotAvailabilityMessage;
   FirebaseFunctions get _functionClient =>
       _functions ??= FirebaseFunctions.instance;
 
@@ -37,6 +39,10 @@ class AppointmentRepository {
     final result = await _functionClient
         .routedCallable('getAvailableAppointmentSlots')
         .call<Map<String, dynamic>>({'date': day});
+    final availability = result.data['availability'];
+    _lastSlotAvailabilityMessage = availability is Map
+        ? availability['message']?.toString()
+        : null;
     final slots = result.data['slots'];
     if (slots is! List) return const [];
     return slots

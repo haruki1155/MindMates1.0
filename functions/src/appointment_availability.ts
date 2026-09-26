@@ -53,6 +53,7 @@ export function validatePaccAvailabilityPayload(value: unknown): PaccAvailabilit
   const weekdays = {} as Record<number, PaccDaySchedule>;
   for (let day = 1; day <= 7; day += 1) { if (!(String(day) in value.weekdays)) throw new AppointmentAvailabilityValidationError("PACC availability requires all weekdays."); weekdays[day] = validateDay(value.weekdays[String(day)]); }
   if (Object.keys(value.weekdays).some((key) => !/^[1-7]$/.test(key))) throw new AppointmentAvailabilityValidationError("PACC availability requires valid weekdays.");
+  if (weekdays[6].enabled || weekdays[7].enabled) throw new AppointmentAvailabilityValidationError("PACC is closed on weekends.");
   const overrides = value.overrides.map(validateOverride).sort((left, right) => left.date.localeCompare(right.date));
   if (new Set(overrides.map((item) => item.date)).size !== overrides.length) throw new AppointmentAvailabilityValidationError("PACC date overrides must be unique.");
   return {schemaVersion: 2, timezone: APPOINTMENT_TIME_ZONE, weekdays, overrides, notice: value.notice.trim()};
@@ -62,7 +63,7 @@ function normalizeLegacy(value: Record<string, unknown>): PaccAvailabilityConfig
   const {openDays, opensAt, closesAt, presence, acceptsWalkIns} = value; const notice = value.notice ?? ""; const blackoutDates = value.blackoutDates ?? [];
   if (!Array.isArray(openDays) || openDays.length === 0 || !openDays.every((day) => Number.isInteger(day) && day >= 1 && day <= 7) || new Set(openDays).size !== openDays.length || typeof opensAt !== "string" || !OFFICE_TIME.test(opensAt) || typeof closesAt !== "string" || !OFFICE_TIME.test(closesAt) || minutes(opensAt) >= minutes(closesAt) || typeof presence !== "string" || !PRESENCES.has(presence as CounselorPresence) || typeof acceptsWalkIns !== "boolean" || typeof notice !== "string" || notice.trim().length > 500 || !Array.isArray(blackoutDates) || blackoutDates.length > 366 || !blackoutDates.every((date) => typeof date === "string" && isCalendarDate(date)) || new Set(blackoutDates).size !== blackoutDates.length) throw new AppointmentAvailabilityValidationError("PACC availability has not been published.");
   const weekdays = {} as Record<number, PaccDaySchedule>;
-  for (let day = 1; day <= 7; day += 1) weekdays[day] = openDays.includes(day) ? {enabled: true, opensAt, closesAt, presence: presence as CounselorPresence, appointmentsEnabled: true, acceptsWalkIns} : closedDay();
+  for (let day = 1; day <= 7; day += 1) weekdays[day] = day <= 5 && openDays.includes(day) ? {enabled: true, opensAt, closesAt, presence: presence as CounselorPresence, appointmentsEnabled: true, acceptsWalkIns} : closedDay();
   return {schemaVersion: 2, timezone: APPOINTMENT_TIME_ZONE, weekdays, overrides: [...blackoutDates].sort().map((date) => ({date, closedAllDay: true, reason: ""})), notice: notice.trim()};
 }
 
