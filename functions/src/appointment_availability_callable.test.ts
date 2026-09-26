@@ -8,6 +8,9 @@ type Callable = {run: (request: {auth?: {uid: string}; data?: Record<string, unk
 const db = getFirestore();
 const prefix = `availability-save-${Date.now()}`;
 const adminId = `${prefix}-admin`;
+const counselorId = `${prefix}-counselor`;
+const staffId = `${prefix}-staff`;
+const studentId = `${prefix}-student`;
 const current = db.collection("pacc_availability").doc("current");
 const save = savePaccAvailability as unknown as Callable;
 const v1 = {openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, notice: "", blackoutDates: []};
@@ -16,12 +19,17 @@ const v2 = {
   weekdays: Object.fromEntries(Array.from({length: 7}, (_, index) => [String(index + 1), {enabled: index < 5, opensAt: "09:00", closesAt: "17:00", presence: index < 5 ? "in_office" : "out_of_office", appointmentsEnabled: index < 5, acceptsWalkIns: false}])),
   overrides: [],
 };
-const request = (availability: Record<string, unknown>, expectedRevision: number, confirmConflicts = true) => save.run({auth: {uid: adminId}, data: {availability, expectedRevision, confirmConflicts}});
+const request = (availability: Record<string, unknown>, expectedRevision: number, confirmConflicts = true, uid = adminId) => save.run({auth: {uid}, data: {availability, expectedRevision, confirmConflicts}});
 async function rejects(promise: Promise<unknown>, code: string) { await assert.rejects(promise, (error: {code?: string}) => error.code === code); }
 
 before(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("FIRESTORE_EMULATOR_HOST is required for availability callable tests.");
-  await db.collection("users").doc(adminId).set({accessRole: "admin", name: "Availability Test Admin"});
+  await Promise.all([
+    db.collection("users").doc(adminId).set({accessRole: "admin", name: "Availability Test Admin"}),
+    db.collection("users").doc(counselorId).set({accessRole: "counselor", name: "Availability Test Counselor"}),
+    db.collection("users").doc(staffId).set({accessRole: "staff", name: "Availability Test Staff"}),
+    db.collection("users").doc(studentId).set({accessRole: "student", name: "Availability Test Student"}),
+  ]);
 });
 beforeEach(async () => {
   await current.set(v1);
@@ -31,8 +39,16 @@ beforeEach(async () => {
   await Promise.all(audits.docs.map((doc) => doc.ref.delete()));
 });
 after(async () => {
-  await db.collection("users").doc(adminId).delete();
+  await Promise.all([adminId, counselorId, staffId, studentId].map((userId) => db.collection("users").doc(userId).delete()));
   await current.set(v1);
+});
+
+test("availability save allows administrators and counselors, but denies staff, students, and unauthenticated callers", async () => {
+  await assert.doesNotReject(request(v2, 0, true, counselorId));
+  await current.set(v1);
+  await rejects(request(v2, 0, true, staffId), "permission-denied");
+  await rejects(request(v2, 0, true, studentId), "permission-denied");
+  await assert.rejects(save.run({data: {availability: v2, expectedRevision: 0, confirmConflicts: true}}), (error: {code?: string}) => error.code === "unauthenticated");
 });
 
 test("missing revision behaves as zero and V1 to V2 saves replace legacy fields", async () => {

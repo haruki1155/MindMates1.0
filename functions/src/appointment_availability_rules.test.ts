@@ -41,9 +41,14 @@ beforeEach(async () => {
 
 after(async () => environment.cleanup());
 
-test("authenticated users can read published availability but cannot write it directly", async () => {
-  const student = environment.authenticatedContext("student").firestore();
-  const current = doc(student, "pacc_availability/current");
-  await assertSucceeds(getDoc(current));
-  await assertFails(setDoc(current, {...availability, opensAt: "10:00"}));
+test("all authenticated roles can read published availability while every direct client write remains denied", async () => {
+  for (const userId of ["admin", "counselor", "staff", "student"]) {
+    const firestore = environment.authenticatedContext(userId).firestore();
+    const current = doc(firestore, "pacc_availability/current");
+    await assertSucceeds(getDoc(current));
+    await assertFails(setDoc(current, {...availability, opensAt: "10:00"}));
+  }
+  const unauthenticated = environment.unauthenticatedContext().firestore();
+  await assertFails(getDoc(doc(unauthenticated, "pacc_availability/current")));
+  await assertFails(setDoc(doc(unauthenticated, "pacc_availability/current"), {...availability, opensAt: "10:00"}));
 });
