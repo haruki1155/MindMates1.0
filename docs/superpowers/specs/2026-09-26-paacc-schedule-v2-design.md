@@ -31,3 +31,7 @@ Malformed stored data, unsupported fields, invalid timezone, invalid times, dupl
 ## Verification requirements
 
 Tests cover V2 parsing/serialization, V1 normalization, resolver precedence and timezone boundaries, payload validation, permissions, slot filtering, appointment create/confirm/reschedule rejection, occupied-slot safety, conflict preview, revision conflicts, rules, Flutter model mapping, responsive UI behavior, and accessibility labels. Full appointment lifecycle regression runs after implementation.
+
+## Verified rollout limits
+
+Automated verification establishes the source, callable, rules, and Flutter test contracts only. Deployment, authenticated staging validation, and any intentional V1-to-V2 document migration remain separate follow-up operations. V1 documents must continue to be read through normalization until a separately approved migration is planned and executed; this rollout does not migrate stored schedules or alter existing appointments.
