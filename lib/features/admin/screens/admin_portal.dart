@@ -11,6 +11,7 @@ import '../domain/admin_management_models.dart';
 import '../domain/appointment_workflow.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/admin_status_repository.dart';
+import '../../../repositories/pacc_availability_repository.dart';
 import 'admin_assessment_detail_screen.dart';
 import 'staff_registration_screen.dart';
 import 'user_management_page.dart';
@@ -3339,6 +3340,169 @@ class _AppointmentNotice extends StatelessWidget {
   );
 }
 
+class PaccScheduleEditor extends StatefulWidget {
+  const PaccScheduleEditor({super.key, required this.availability, required this.onSave, this.readOnly = false});
+  final PaccAvailabilityModel availability;
+  final bool readOnly;
+  final Future<PaccAvailabilitySaveResult> Function(PaccAvailabilityModel availability, {bool confirmConflicts}) onSave;
+
+  @override
+  State<PaccScheduleEditor> createState() => _PaccScheduleEditorState();
+}
+
+class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
+  late final Map<int, PaccDaySchedule> _days = Map.of(widget.availability.weekdays);
+  late final List<PaccDateOverride> _overrides = List.of(widget.availability.overrides);
+  late final TextEditingController _mondayOpens;
+  late final TextEditingController _mondayCloses;
+  final Set<int> _selectedDays = {};
+  bool _saving = false;
+  bool _dirty = false;
+  static const _names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  @override
+  void initState() {
+    super.initState();
+    _mondayOpens = TextEditingController(text: _days[1]!.opensAt)..addListener(_syncMondayTimes);
+    _mondayCloses = TextEditingController(text: _days[1]!.closesAt)..addListener(_syncMondayTimes);
+  }
+
+  void _syncMondayTimes() => setState(() { _days[1] = _days[1]!.copyWith(opensAt: _mondayOpens.text, closesAt: _mondayCloses.text); _dirty = true; });
+
+  @override
+  void dispose() {
+    _mondayOpens.dispose();
+    _mondayCloses.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addClosedOverride() async {
+    final selected = await showDatePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime(2100), initialDate: DateTime.now(), helpText: 'Special date');
+    if (selected == null) return;
+    final date = '${selected.year.toString().padLeft(4, '0')}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}';
+    setState(() {
+      _overrides.removeWhere((item) => item.date == date);
+      _overrides.add(PaccDateOverride(date: date, closedAllDay: true));
+      _overrides.sort((left, right) => left.date.compareTo(right.date));
+      _dirty = true;
+    });
+  }
+
+  Future<void> _discard() async {
+    if (!_dirty) return;
+    final discard = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      title: const Text('Discard schedule changes?'),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep editing')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Discard'))],
+    ));
+    if (discard == true && mounted) {
+      setState(() {
+        _days
+          ..clear()
+          ..addAll(widget.availability.weekdays);
+        _overrides
+          ..clear()
+          ..addAll(widget.availability.overrides);
+        _mondayOpens.text = _days[1]!.opensAt;
+        _mondayCloses.text = _days[1]!.closesAt;
+        _dirty = false;
+      });
+    }
+  }
+
+  Future<void> _save({bool confirmConflicts = false}) async {
+    setState(() => _saving = true);
+    try {
+      final result = await widget.onSave(_draft, confirmConflicts: confirmConflicts);
+      if (result.conflicts.isNotEmpty && mounted && !confirmConflicts) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Schedule conflicts'),
+            content: Text('${result.conflicts.length} appointment${result.conflicts.length == 1 ? '' : 's'} conflict with this schedule.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save anyway')),
+            ],
+          ),
+        );
+        if (confirmed == true && mounted) await _save(confirmConflicts: true);
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  PaccAvailabilityModel get _draft => PaccAvailabilityModel.v2(
+    weekdays: _days,
+    overrides: _overrides,
+    notice: widget.availability.notice,
+    revision: widget.availability.revision,
+  );
+  bool get _mondayTimesInvalid {
+    final day = _days[1]!;
+    final open = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(day.opensAt) ? int.parse(day.opensAt.substring(0, 2)) * 60 + int.parse(day.opensAt.substring(3)) : -1;
+    final close = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$').hasMatch(day.closesAt) ? int.parse(day.closesAt.substring(0, 2)) * 60 + int.parse(day.closesAt.substring(3)) : -1;
+    return open < 0 || close < 0 || open >= close;
+  }
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'PAACC weekly schedule editor',
+    child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (widget.readOnly) const Text('Read-only schedule'),
+      if (!widget.readOnly) Row(children: [
+        Expanded(child: TextFormField(key: const Key('day-1-opens'), controller: _mondayOpens, decoration: const InputDecoration(labelText: 'Monday opens'))),
+        const SizedBox(width: 12),
+        Expanded(child: TextFormField(key: const Key('day-1-closes'), controller: _mondayCloses, decoration: const InputDecoration(labelText: 'Monday closes'))),
+      ]),
+      if (_mondayTimesInvalid) const Text('Opening time must be before closing time.'),
+      const SizedBox(height: 12),
+      const Text('Special dates'),
+      ..._overrides.map((override) => ListTile(
+        title: Text(override.date),
+        subtitle: Text(override.closedAllDay ? 'Closed' : 'Custom schedule'),
+        trailing: widget.readOnly ? null : IconButton(
+          tooltip: 'Remove ${override.date}',
+          icon: const Icon(Icons.delete_outline),
+          onPressed: () => setState(() => _overrides.remove(override)),
+        ),
+      )),
+      if (!widget.readOnly) TextButton.icon(
+        onPressed: _addClosedOverride,
+        icon: const Icon(Icons.add_circle_outline),
+        label: const Text('Add special date'),
+      ),
+      if (!widget.readOnly) Wrap(children: [
+        ...List.generate(7, (index) => Semantics(label: 'Select ${_names[index]}', child: Checkbox(value: _selectedDays.contains(index + 1), onChanged: (value) => setState(() => value == true ? _selectedDays.add(index + 1) : _selectedDays.remove(index + 1))))),
+        TextButton(onPressed: _selectedDays.isEmpty ? null : () => setState(() { for (final day in _selectedDays) { _days[day] = PaccDaySchedule.closed; } }), child: const Text('Close selected days')),
+      ]),
+      ...List.generate(7, (index) {
+        final day = index + 1;
+        final schedule = _days[day] ?? PaccDaySchedule.closed;
+        return Semantics(
+          label: 'Schedule ${_names[index]}',
+          child: SwitchListTile(
+            title: Text(_names[index]),
+            subtitle: Text(schedule.enabled ? '${schedule.opensAt}–${schedule.closesAt}' : 'Closed'),
+            value: schedule.enabled,
+            onChanged: widget.readOnly ? null : (enabled) => setState(() => _days[day] = schedule.copyWith(enabled: enabled, appointmentsEnabled: enabled ? schedule.appointmentsEnabled : false, acceptsWalkIns: enabled ? schedule.acceptsWalkIns : false)),
+          ),
+        );
+      }),
+      const SizedBox(height: 12),
+      if (!widget.readOnly && _dirty) TextButton(onPressed: _discard, child: const Text('Discard changes')),
+      if (!widget.readOnly) SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: _saving ? null : _save,
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('Save schedule'),
+        ),
+      ),
+    ])),
+  );
+}
+
 class _AvailabilityPage extends StatefulWidget {
   const _AvailabilityPage({required this.repository});
   final AdminPortalRepository repository;
@@ -3348,9 +3512,6 @@ class _AvailabilityPage extends StatefulWidget {
 }
 
 class _AvailabilityPageState extends State<_AvailabilityPage> {
-  PaccAvailabilityModel? _draft;
-  bool _saving = false;
-
   @override
   Widget build(BuildContext context) => _Page(
     title: 'PAACC Schedule & Availability',
@@ -3359,9 +3520,7 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
     child: StreamBuilder<PaccAvailabilityModel?>(
       stream: widget.repository.watchPaccAvailability(),
       builder: (context, snapshot) {
-        final value =
-            _draft ??
-            snapshot.data ??
+        final value = snapshot.data ??
             const PaccAvailabilityModel(
               openDays: [1, 2, 3, 4, 5],
               opensAt: '08:00',
@@ -3372,182 +3531,16 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
         return Container(
           padding: const EdgeInsets.all(28),
           decoration: _box,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Working days',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                children: List.generate(7, (index) {
-                  final day = index + 1;
-                  const labels = [
-                    'Mon',
-                    'Tue',
-                    'Wed',
-                    'Thu',
-                    'Fri',
-                    'Sat',
-                    'Sun',
-                  ];
-                  return FilterChip(
-                    label: Text(labels[index]),
-                    selected: value.openDays.contains(day),
-                    onSelected: (selected) => _update(
-                      value,
-                      openDays: selected
-                          ? ([...value.openDays, day]..sort())
-                          : value.openDays
-                                .where((item) => item != day)
-                                .toList(),
-                    ),
-                  );
-                }),
-              ),
-              const SizedBox(height: 22),
-              Wrap(
-                spacing: 14,
-                runSpacing: 12,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: () => _pickTime(value, opening: true),
-                    icon: const Icon(Icons.login_outlined),
-                    label: Text('Opens ${value.opensAt}'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: () => _pickTime(value, opening: false),
-                    icon: const Icon(Icons.logout_outlined),
-                    label: Text('Closes ${value.closesAt}'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 22),
-              DropdownButtonFormField<CounselorPresence>(
-                initialValue: value.presence,
-                decoration: const InputDecoration(
-                  labelText: 'Counselor status',
-                  border: OutlineInputBorder(),
-                ),
-                items: CounselorPresence.values
-                    .map(
-                      (presence) => DropdownMenuItem(
-                        value: presence,
-                        child: Text(presence.label),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (presence) {
-                  if (presence != null) _update(value, presence: presence);
-                },
-              ),
-              const SizedBox(height: 10),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Accept walk-in visits'),
-                subtitle: const Text(
-                  'Users will see whether they may visit without an appointment.',
-                ),
-                value: value.acceptsWalkIns,
-                onChanged: (enabled) => _update(value, acceptsWalkIns: enabled),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                initialValue: value.blackoutDates.join(', '),
-                decoration: const InputDecoration(
-                  labelText: 'Closed dates',
-                  hintText: 'YYYY-MM-DD, YYYY-MM-DD',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (raw) => _update(
-                  value,
-                  blackoutDates: raw
-                      .split(',')
-                      .map((date) => date.trim())
-                      .where((date) => date.isNotEmpty)
-                      .toList(),
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _saving ? null : () => _save(value),
-                  icon: const Icon(Icons.publish_outlined),
-                  label: Text(
-                    _saving ? 'Publishing...' : 'Publish availability',
-                  ),
-                ),
-              ),
-            ],
+          child: PaccScheduleEditor(
+            availability: value,
+            readOnly: !widget.repository.currentAccessRole.canAccessClinicalData,
+            onSave: widget.repository.savePaccAvailability,
           ),
         );
       },
     ),
   );
 
-  void _update(
-    PaccAvailabilityModel current, {
-    List<int>? openDays,
-    String? opensAt,
-    String? closesAt,
-    CounselorPresence? presence,
-    bool? acceptsWalkIns,
-    List<String>? blackoutDates,
-  }) {
-    setState(
-      () => _draft = PaccAvailabilityModel(
-        openDays: openDays ?? current.openDays,
-        opensAt: opensAt ?? current.opensAt,
-        closesAt: closesAt ?? current.closesAt,
-        presence: presence ?? current.presence,
-        acceptsWalkIns: acceptsWalkIns ?? current.acceptsWalkIns,
-        notice: current.notice,
-        blackoutDates: blackoutDates ?? current.blackoutDates,
-        updatedAt: current.updatedAt,
-      ),
-    );
-  }
-
-  Future<void> _pickTime(
-    PaccAvailabilityModel value, {
-    required bool opening,
-  }) async {
-    final raw = opening ? value.opensAt : value.closesAt;
-    final parts = raw.split(':');
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(
-        hour: int.parse(parts[0]),
-        minute: int.parse(parts[1]),
-      ),
-    );
-    if (picked == null) return;
-    final formatted =
-        '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
-    _update(
-      value,
-      opensAt: opening ? formatted : null,
-      closesAt: opening ? null : formatted,
-    );
-  }
-
-  Future<void> _save(PaccAvailabilityModel value) async {
-    setState(() => _saving = true);
-    try {
-      await widget.repository.savePaccAvailability(value);
-      _draft = null;
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PAACC availability published.')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
 }
 
 class _AssessmentsPage extends StatefulWidget {
