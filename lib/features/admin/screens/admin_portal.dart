@@ -385,6 +385,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   AdminPortalPage _page = AdminPortalPage.dashboard;
   bool _navCollapsed = false;
   late final Stream<List<AppNotificationModel>> _notifications;
+  final PaccScheduleEditorController _scheduleController = PaccScheduleEditorController();
 
   @override
   void initState() {
@@ -464,14 +465,16 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
     },
   );
 
-  void _setPage(AdminPortalPage page) {
+  Future<void> _setPage(AdminPortalPage page) async {
+    if (_page == AdminPortalPage.availability && page != AdminPortalPage.availability && !await _scheduleController.confirmLeave(context)) return;
+    if (!mounted) return;
     Navigator.of(context).maybePop();
     if (_repository.currentAccessRole == AccessRole.portalStaff &&
         page == AdminPortalPage.appointments) {
       setState(() => _page = AdminPortalPage.dashboard);
       return;
     }
-    setState(() => _page = page);
+    if (mounted) setState(() => _page = page);
   }
 
   Widget _buildPage() => switch (_page) {
@@ -521,7 +524,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
       onOpenInquiries: () => _setPage(AdminPortalPage.inquiries),
     ),
-    AdminPortalPage.availability => _AvailabilityPage(repository: _repository),
+    AdminPortalPage.availability => _AvailabilityPage(repository: _repository, controller: _scheduleController),
     AdminPortalPage.inquiries => _InquiriesPage(repository: _repository),
     AdminPortalPage.assessments => _AssessmentsPage(
       repository: _repository,
@@ -3340,10 +3343,16 @@ class _AppointmentNotice extends StatelessWidget {
   );
 }
 
+class PaccScheduleEditorController {
+  Future<bool> Function(BuildContext)? _confirmLeave;
+  Future<bool> confirmLeave(BuildContext context) => _confirmLeave?.call(context) ?? Future.value(true);
+}
+
 class PaccScheduleEditor extends StatefulWidget {
-  const PaccScheduleEditor({super.key, required this.availability, required this.onSave, this.readOnly = false});
+  const PaccScheduleEditor({super.key, required this.availability, required this.onSave, this.readOnly = false, this.controller});
   final PaccAvailabilityModel availability;
   final bool readOnly;
+  final PaccScheduleEditorController? controller;
   final Future<PaccAvailabilitySaveResult> Function(PaccAvailabilityModel availability, {bool confirmConflicts}) onSave;
 
   @override
@@ -3360,17 +3369,23 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
   late int _revision = widget.availability.revision;
   String? _saveMessage;
   String? _saveError;
+  String? _actionMessage;
   bool _conflictDetected = false;
   static const _names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
   @override
   void initState() {
     super.initState();
+    widget.controller?._confirmLeave = _confirmLeave;
   }
 
   @override
   void didUpdateWidget(covariant PaccScheduleEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?._confirmLeave = null;
+      widget.controller?._confirmLeave = _confirmLeave;
+    }
     // Firestore is authoritative.  A clean editor must immediately reflect a
     // revision saved by another authorized portal session; a dirty draft is
     // deliberately retained so a remote update cannot silently discard it.
@@ -3389,6 +3404,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
 
   @override
   void dispose() {
+    widget.controller?._confirmLeave = null;
     for (final controller in _dialogControllers) {
       controller.dispose();
     }
@@ -3396,9 +3412,18 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
   }
 
   Future<void> _addSpecialOverride([PaccDateOverride? existing]) async {
-    final selected = existing == null ? await showDatePicker(context: context, firstDate: DateTime(2020), lastDate: DateTime(2100), initialDate: DateTime.now(), helpText: 'Special date') : DateTime.parse(existing.date);
+    final manilaNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+    final selected = existing == null ? await showDatePicker(context: context, firstDate: DateTime(manilaNow.year, manilaNow.month, manilaNow.day), lastDate: DateTime(2100), initialDate: DateTime(manilaNow.year, manilaNow.month, manilaNow.day), helpText: 'Special date') : DateTime.parse(existing.date);
     if (selected == null || !mounted) return;
     final date = '${selected.year.toString().padLeft(4, '0')}-${selected.month.toString().padLeft(2, '0')}-${selected.day.toString().padLeft(2, '0')}';
+    if (!isPaccOverrideDateAllowed(date, DateTime.now())) {
+      setState(() => _actionMessage = 'Past special dates cannot be added.');
+      return;
+    }
+    if (existing == null && _overrides.any((item) => item.date == date)) {
+      setState(() => _actionMessage = 'A special date already exists for $date.');
+      return;
+    }
     var closed = existing?.closedAllDay ?? true;
     var schedule = existing?.schedule ?? (_days[selected.weekday] ?? PaccDaySchedule.closed);
     final opens = TextEditingController(text: schedule.opensAt);
@@ -3435,6 +3460,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
         _overrides.add(override);
         _overrides.sort((left, right) => left.date.compareTo(right.date));
         _dirty = true;
+        _actionMessage = existing == null ? 'Special date added. Changes are not published until Save schedule is pressed.' : 'Special date updated. Changes are not published until Save schedule is pressed.';
       });
     }
   }
@@ -3491,6 +3517,30 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
     }
   }
 
+  Future<bool> _confirmLeave(BuildContext context) async {
+    if (!_dirty) return true;
+    final decision = await showDialog<String>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Unsaved schedule changes'),
+      content: const Text("You have changes that haven't been saved."),
+      actions: [
+        IconButton(tooltip: 'Close', onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close)),
+        TextButton(onPressed: () => Navigator.pop(dialogContext, 'discard'), child: const Text('Discard changes')),
+        FilledButton(onPressed: () => Navigator.pop(dialogContext, 'save'), child: const Text('Save changes')),
+      ],
+    ));
+    if (!mounted || decision == null) return false;
+    if (decision == 'discard') {
+      setState(() {
+        _days..clear()..addAll(widget.availability.effectiveWeekdays);
+        _overrides..clear()..addAll(widget.availability.overrides);
+        _dirty = false;
+      });
+      return true;
+    }
+    await _save();
+    return !_dirty;
+  }
+
   Future<void> _setMultipleDays() async {
     final selected = <int>{};
     var draft = _days[1] ?? PaccDaySchedule.closed;
@@ -3526,7 +3576,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
               if (!valid) { setDialogState(() => validation = 'Select days and enter an ordered HH:mm range.'); return; }
               draft = draft.copyWith(opensAt: opens.text, closesAt: closes.text, appointmentsEnabled: draft.enabled && draft.presence == CounselorPresence.inOffice ? draft.appointmentsEnabled : false, acceptsWalkIns: draft.enabled ? draft.acceptsWalkIns : false);
               Navigator.pop(context, true);
-            }, child: const Text('Apply to selected days')),
+            }, child: Text('Apply to ${selected.length} ${selected.length == 1 ? 'day' : 'days'}')),
           ],
         ),
       ),
@@ -3537,6 +3587,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
         _dirty = true;
         _saveMessage = null;
         _saveError = null;
+        _actionMessage = 'Multiple days updated. Changes are not published until Save schedule is pressed.';
       });
     }
   }
@@ -3560,7 +3611,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
         );
         if (confirmed == true && mounted) await _save(confirmConflicts: true);
       } else if (mounted) {
-        setState(() { _revision = result.revision; _dirty = false; _saveMessage = 'Schedule saved successfully'; _saveError = null; _conflictDetected = false; });
+        setState(() { _revision = result.revision; _dirty = false; _saveMessage = 'Schedule saved successfully'; _saveError = null; _conflictDetected = false; _actionMessage = 'Schedule saved successfully'; });
       }
     } catch (error) {
       final isConflict = !confirmConflicts && error.toString().contains('upcoming appointments conflict');
@@ -3588,24 +3639,55 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
   );
 
   @override
-  Widget build(BuildContext context) => Semantics(
+  Widget build(BuildContext context) => _PolishedPaccScheduleLayout(
+    days: _days,
+    overrides: _overrides,
+    readOnly: widget.readOnly,
+    saving: _saving,
+    dirty: _dirty,
+    status: _saving ? 'Saving...' : (_conflictDetected ? 'Conflict detected' : (_actionMessage ?? (_dirty ? 'Unsaved changes' : (_saveMessage ?? 'Schedule up to date')))),
+    revision: _revision,
+    updatedAt: widget.availability.updatedAt,
+    saveError: _saveError,
+    onEditDay: _editDay,
+    onSetMultipleDays: _setMultipleDays,
+    onAddSpecialDate: _addSpecialOverride,
+    onEditSpecialDate: _addSpecialOverride,
+    onRemoveSpecialDate: (override) => setState(() { _overrides.remove(override); _dirty = true; _actionMessage = 'Special date removed. Changes are not published until Save schedule is pressed.'; }),
+    onDiscard: _discard,
+    onSave: _save,
+  );
+
+  // Kept temporarily as the unchanged interaction reference while the live
+  // widget above provides the responsive presentation.
+  // ignore: unused_element
+  Widget _legacyBuild(BuildContext context) => Semantics(
     container: true,
     explicitChildNodes: true,
     label: 'PAACC weekly schedule editor',
     child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (widget.readOnly) const Text('Read-only schedule'),
       Row(children: [
-        Expanded(child: Text(_saving ? 'Saving...' : (_conflictDetected ? 'Conflict detected' : (_dirty ? 'Unsaved changes' : (_saveMessage ?? 'Schedule up to date'))))),
+        Expanded(child: Text(_saving ? 'Saving...' : (_conflictDetected ? 'Conflict detected' : (_actionMessage ?? (_dirty ? 'Unsaved changes' : (_saveMessage ?? 'Schedule up to date')))))),
         Text('Revision $_revision'),
       ]),
       if (widget.availability.updatedAt != null) Text('Last updated ${widget.availability.updatedAt!.toLocal()}', style: const TextStyle(fontSize: 12)),
       if (_saveError != null) Text(_saveError!, style: const TextStyle(color: Colors.red)),
+      if (!widget.readOnly) SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          onPressed: _saving ? null : _save,
+          icon: const Icon(Icons.save_outlined),
+          label: Text(_saving ? 'Saving schedule...' : 'Save schedule'),
+        ),
+      ),
+      const SizedBox(height: 8),
       ...List.generate(5, (index) {
         final day = index + 1;
         final schedule = _days[day] ?? PaccDaySchedule.closed;
         return Semantics(container: true, label: 'Schedule ${_names[index]}', child: ListTile(
           title: Text(_names[index]),
-          subtitle: Text(schedule.enabled ? '${schedule.opensAt}-${schedule.closesAt} ${schedule.presence.label}' : 'Closed'),
+          subtitle: Text(schedule.enabled ? '${schedule.opensAt}-${schedule.closesAt} • ${schedule.presence.label} • Appointments ${schedule.appointmentsEnabled ? 'on' : 'off'} • Walk-ins ${schedule.acceptsWalkIns ? 'on' : 'off'}' : 'Closed • Appointments off • Walk-ins off'),
           trailing: widget.readOnly ? null : OutlinedButton(key: Key('edit-day-$day'), onPressed: () => _editDay(day), child: const Text('Edit')),
         ));
       }),
@@ -3614,11 +3696,11 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
       ..._overrides.map((override) => ListTile(
         onTap: widget.readOnly ? null : () => _addSpecialOverride(override),
         title: Text(override.date),
-        subtitle: Text(override.closedAllDay ? 'Closed' : 'Custom schedule'),
+        subtitle: Text(override.closedAllDay ? 'Closed all day${override.reason.isEmpty ? '' : ' • ${override.reason}'}' : '${override.schedule!.opensAt}-${override.schedule!.closesAt} • ${override.schedule!.presence.label} • Appointments ${override.schedule!.appointmentsEnabled ? 'on' : 'off'} • Walk-ins ${override.schedule!.acceptsWalkIns ? 'on' : 'off'}${override.reason.isEmpty ? '' : ' • ${override.reason}'}'),
         trailing: widget.readOnly ? null : IconButton(
           tooltip: 'Remove ${override.date}',
           icon: const Icon(Icons.delete_outline),
-          onPressed: () => setState(() => _overrides.remove(override)),
+          onPressed: () => setState(() { _overrides.remove(override); _dirty = true; _actionMessage = 'Special date removed. Changes are not published until Save schedule is pressed.'; }),
         ),
       )),
       if (!widget.readOnly) TextButton.icon(
@@ -3645,21 +3727,190 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
       }),
       const SizedBox(height: 12),
       if (!widget.readOnly && _dirty) TextButton(onPressed: _discard, child: const Text('Discard changes')),
-      if (!widget.readOnly) SizedBox(
-        width: double.infinity,
-        child: FilledButton.icon(
-          onPressed: _saving ? null : _save,
-          icon: const Icon(Icons.save_outlined),
-          label: Text(_saving ? 'Saving schedule...' : 'Save schedule'),
-        ),
-      ),
     ])),
   );
 }
 
+class _PolishedPaccScheduleLayout extends StatelessWidget {
+  const _PolishedPaccScheduleLayout({
+    required this.days,
+    required this.overrides,
+    required this.readOnly,
+    required this.saving,
+    required this.dirty,
+    required this.status,
+    required this.revision,
+    required this.updatedAt,
+    required this.saveError,
+    required this.onEditDay,
+    required this.onSetMultipleDays,
+    required this.onAddSpecialDate,
+    required this.onEditSpecialDate,
+    required this.onRemoveSpecialDate,
+    required this.onDiscard,
+    required this.onSave,
+  });
+
+  final Map<int, PaccDaySchedule> days;
+  final List<PaccDateOverride> overrides;
+  final bool readOnly;
+  final bool saving;
+  final bool dirty;
+  final String status;
+  final int revision;
+  final DateTime? updatedAt;
+  final String? saveError;
+  final Future<void> Function(int) onEditDay;
+  final Future<void> Function() onSetMultipleDays;
+  final Future<void> Function([PaccDateOverride?]) onAddSpecialDate;
+  final Future<void> Function([PaccDateOverride?]) onEditSpecialDate;
+  final ValueChanged<PaccDateOverride> onRemoveSpecialDate;
+  final Future<void> Function() onDiscard;
+  final Future<void> Function() onSave;
+
+  static const _names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = readOnly ? const SizedBox.shrink() : Wrap(spacing: 8, runSpacing: 8, children: [
+      OutlinedButton(onPressed: dirty && !saving ? onDiscard : null, child: const Text('Discard changes')),
+      FilledButton.icon(onPressed: saving ? null : onSave, icon: const Icon(Icons.save_outlined, size: 18), label: Text(saving ? 'Saving schedule...' : 'Save schedule')),
+    ]);
+    final weekly = _PaccScheduleSection(
+      title: 'Weekly Schedule',
+      subtitle: 'Define office hours and availability for each weekday.',
+      action: readOnly ? null : OutlinedButton.icon(onPressed: onSetMultipleDays, icon: const Icon(Icons.edit_calendar_outlined, size: 18), label: const Text('Set multiple days')),
+      child: Column(children: List.generate(5, (index) {
+        final day = index + 1;
+        return _PaccWeekdaySummary(day: day, name: _names[index], schedule: days[day] ?? PaccDaySchedule.closed, readOnly: readOnly, onEdit: () => onEditDay(day));
+      })),
+    );
+    final special = _PaccScheduleSection(
+      title: 'Special Dates',
+      subtitle: 'Override the weekly schedule for specific dates.',
+      action: readOnly ? null : OutlinedButton.icon(onPressed: onAddSpecialDate, icon: const Icon(Icons.add, size: 18), label: const Text('Add special date')),
+      child: overrides.isEmpty
+          ? const _PaccSpecialDatesEmpty()
+          : Column(children: overrides.map((item) => _PaccSpecialDateSummary(dateOverride: item, readOnly: readOnly, onEdit: () => onEditSpecialDate(item), onDelete: () => onRemoveSpecialDate(item))).toList()),
+    );
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: 'PAACC weekly schedule editor',
+      child: SingleChildScrollView(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (readOnly) ...[const _PaccStatusChip(label: 'Read-only schedule'), const SizedBox(height: 12)],
+        Align(alignment: Alignment.centerRight, child: actions),
+        const SizedBox(height: 20),
+        LayoutBuilder(builder: (context, constraints) => constraints.maxWidth >= 1100
+            ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(flex: 7, child: weekly), const SizedBox(width: 20), Expanded(flex: 3, child: special)])
+            : Column(children: [weekly, const SizedBox(height: 20), special])),
+        const SizedBox(height: 20),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(color: AdminColors.surfaceMuted, borderRadius: BorderRadius.circular(10), border: Border.all(color: AdminColors.border)),
+          child: Wrap(spacing: 10, runSpacing: 6, children: [
+            _PaccStatusChip(label: status),
+            Text('Revision $revision', style: const TextStyle(fontSize: 12, color: AdminColors.muted)),
+            if (updatedAt != null) Text('Last updated ${_paccDateTime(updatedAt!)}', style: const TextStyle(fontSize: 12, color: AdminColors.muted)),
+            if (saveError != null) Text(saveError!, style: const TextStyle(fontSize: 12, color: Colors.red)),
+          ]),
+        ),
+      ])),
+    );
+  }
+}
+
+class _PaccScheduleSection extends StatelessWidget {
+  const _PaccScheduleSection({required this.title, required this.subtitle, required this.child, this.action});
+  final String title; final String subtitle; final Widget child; final Widget? action;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AdminColors.border)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      LayoutBuilder(builder: (context, constraints) {
+        final heading = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)), const SizedBox(height: 3), Text(subtitle, style: const TextStyle(fontSize: 13, color: AdminColors.muted))]);
+        if (action case final Widget sectionAction) {
+          if (constraints.maxWidth >= 560) {
+            return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: heading), const SizedBox(width: 16), sectionAction]);
+          }
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [heading, const SizedBox(height: 12), sectionAction]);
+        }
+        return heading;
+      }),
+      const SizedBox(height: 16), child,
+    ]),
+  );
+}
+
+class _PaccStatusChip extends StatelessWidget {
+  const _PaccStatusChip({required this.label}); final String label;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+    decoration: BoxDecoration(color: AdminColors.surfaceMuted, borderRadius: BorderRadius.circular(20), border: Border.all(color: AdminColors.border)),
+    child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+  );
+}
+
+class _PaccWeekdaySummary extends StatelessWidget {
+  const _PaccWeekdaySummary({required this.day, required this.name, required this.schedule, required this.readOnly, required this.onEdit});
+  final int day; final String name; final PaccDaySchedule schedule; final bool readOnly; final VoidCallback onEdit;
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minHeight: 82), padding: const EdgeInsets.symmetric(vertical: 12), decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AdminColors.border))),
+    child: LayoutBuilder(builder: (context, constraints) {
+      final states = schedule.enabled
+          ? Wrap(spacing: 6, runSpacing: 6, children: [const _PaccStatusChip(label: 'Open'), _PaccStatusChip(label: _paccRange(schedule.opensAt, schedule.closesAt)), _PaccStatusChip(label: _paccPresence(schedule.presence)), _PaccStatusChip(label: 'Appointments ${schedule.appointmentsEnabled ? 'on' : 'off'}'), _PaccStatusChip(label: 'Walk-ins ${schedule.acceptsWalkIns ? 'on' : 'off'}')])
+          : const Wrap(spacing: 6, children: [_PaccStatusChip(label: 'Closed'), _PaccStatusChip(label: 'No office hours')]);
+      final edit = readOnly ? const SizedBox.shrink() : OutlinedButton.icon(key: Key('edit-day-$day'), onPressed: onEdit, icon: const Icon(Icons.edit_outlined, size: 17), label: const Text('Edit'));
+      final badge = Container(width: 42, padding: const EdgeInsets.symmetric(vertical: 6), alignment: Alignment.center, decoration: BoxDecoration(color: AdminColors.surfaceMuted, borderRadius: BorderRadius.circular(7)), child: Text(name.substring(0, 3).toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800)));
+      return constraints.maxWidth >= 620 ? Row(children: [badge, const SizedBox(width: 12), SizedBox(width: 94, child: Text(name, style: const TextStyle(fontWeight: FontWeight.w700))), const SizedBox(width: 12), Expanded(child: states), const SizedBox(width: 12), edit]) : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [badge, const SizedBox(width: 10), Text(name, style: const TextStyle(fontWeight: FontWeight.w700)), const Spacer(), edit]), const SizedBox(height: 10), states]);
+    }),
+  );
+}
+
+class _PaccSpecialDatesEmpty extends StatelessWidget {
+  const _PaccSpecialDatesEmpty();
+  @override
+  Widget build(BuildContext context) => const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('No special dates yet', style: TextStyle(fontWeight: FontWeight.w700)), SizedBox(height: 4), Text('Add an override for holidays, events, or temporary schedule changes.', style: TextStyle(color: AdminColors.muted))]));
+}
+
+class _PaccSpecialDateSummary extends StatelessWidget {
+  const _PaccSpecialDateSummary({required this.dateOverride, required this.readOnly, required this.onEdit, required this.onDelete});
+  final PaccDateOverride dateOverride; final bool readOnly; final VoidCallback onEdit; final VoidCallback onDelete;
+  @override
+  Widget build(BuildContext context) {
+    final date = DateTime.tryParse(dateOverride.date); final schedule = dateOverride.schedule;
+    return InkWell(onTap: readOnly ? null : onEdit, borderRadius: BorderRadius.circular(10), child: Container(width: double.infinity, margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: AdminColors.surfaceMuted, borderRadius: BorderRadius.circular(10), border: Border.all(color: AdminColors.border)), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(width: 50, padding: const EdgeInsets.symmetric(vertical: 7), alignment: Alignment.center, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: AdminColors.border)), child: date == null ? Text(dateOverride.date, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10)) : Column(children: [Text(_paccMonth(date.month), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800)), Text('${date.day}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)), Text('${date.year}', style: const TextStyle(fontSize: 10))])),
+      const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(dateOverride.date, style: const TextStyle(fontSize: 12, color: AdminColors.muted)),
+        const SizedBox(height: 3),
+        Text(dateOverride.closedAllDay ? 'Closed all day' : 'Custom schedule', style: const TextStyle(fontWeight: FontWeight.w700)),
+        if (!dateOverride.closedAllDay && schedule != null) ...[const SizedBox(height: 6), Wrap(spacing: 6, runSpacing: 6, children: [_PaccStatusChip(label: _paccRange(schedule.opensAt, schedule.closesAt)), _PaccStatusChip(label: _paccPresence(schedule.presence)), _PaccStatusChip(label: 'Appointments ${schedule.appointmentsEnabled ? 'on' : 'off'}'), _PaccStatusChip(label: 'Walk-ins ${schedule.acceptsWalkIns ? 'on' : 'off'}')])],
+        if (dateOverride.reason.isNotEmpty) ...[const SizedBox(height: 8), Text(dateOverride.reason, style: const TextStyle(fontSize: 13))],
+        if (!readOnly) ...[const SizedBox(height: 6), Wrap(spacing: 2, children: [Tooltip(message: 'Edit ${dateOverride.date}', child: TextButton.icon(onPressed: onEdit, icon: const Icon(Icons.edit_outlined, size: 16), label: const Text('Edit'))), IconButton(tooltip: 'Remove ${dateOverride.date}', icon: const Icon(Icons.delete_outline, size: 18), onPressed: onDelete)])],
+      ])),
+    ])));
+  }
+}
+
+String _paccRange(String opens, String closes) => '${_paccTime(opens)} – ${_paccTime(closes)}';
+String _paccTime(String value) { final parts = value.split(':'); final hour = int.tryParse(parts.first) ?? 0; final minute = parts.length > 1 ? parts[1] : '00'; final displayHour = (hour % 12 == 0 ? 12 : hour % 12).toString().padLeft(2, '0'); return '$displayHour:$minute ${hour >= 12 ? 'PM' : 'AM'}'; }
+String _paccMonth(int month) => const ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][month - 1];
+String _paccPresence(CounselorPresence presence) => switch (presence) {
+  CounselorPresence.inOffice => 'In office',
+  CounselorPresence.outOfOffice => 'Out of office',
+  CounselorPresence.onLeave => 'On leave',
+};
+String _paccDateTime(DateTime value) => '${_paccMonth(value.month)} ${value.day}, ${value.year} • ${_paccTime('${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}')}';
+
 class _AvailabilityPage extends StatefulWidget {
-  const _AvailabilityPage({required this.repository});
+  const _AvailabilityPage({required this.repository, required this.controller});
   final AdminPortalRepository repository;
+  final PaccScheduleEditorController controller;
 
   @override
   State<_AvailabilityPage> createState() => _AvailabilityPageState();
@@ -3668,9 +3919,8 @@ class _AvailabilityPage extends StatefulWidget {
 class _AvailabilityPageState extends State<_AvailabilityPage> {
   @override
   Widget build(BuildContext context) => _Page(
-    title: 'PAACC Schedule & Availability',
-    subtitle:
-        'Publish office hours, walk-in availability, and counselor presence',
+    title: 'Schedule',
+    subtitle: 'Set office hours, counselor availability, appointments, and walk-ins.',
     child: StreamBuilder<PaccAvailabilityModel?>(
       stream: widget.repository.watchPaccAvailability(),
       builder: (context, snapshot) {
@@ -3687,6 +3937,7 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
           decoration: _box,
           child: PaccScheduleEditor(
             availability: value,
+            controller: widget.controller,
             readOnly: !widget.repository.currentAccessRole.canAccessClinicalData,
             onSave: widget.repository.savePaccAvailability,
           ),

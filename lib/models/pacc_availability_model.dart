@@ -26,6 +26,14 @@ class PaccDateOverride {
 
 enum PaccScheduleSource { weekly, override }
 
+String paccManilaDate(DateTime now) {
+  final manila = now.toUtc().add(const Duration(hours: 8));
+  return '${manila.year.toString().padLeft(4, '0')}-${manila.month.toString().padLeft(2, '0')}-${manila.day.toString().padLeft(2, '0')}';
+}
+
+bool isPaccOverrideDateAllowed(String date, DateTime now) =>
+    RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date) && date.compareTo(paccManilaDate(now)) >= 0;
+
 class ResolvedPaccSchedule {
   const ResolvedPaccSchedule({required this.schedule, required this.source, required this.date, required this.weekday, required this.isOfficeOpen, required this.canBookAppointments, required this.acceptsWalkIns, this.closureReason});
   final PaccDaySchedule schedule; final PaccScheduleSource source; final String date; final int weekday; final bool isOfficeOpen; final bool canBookAppointments; final bool acceptsWalkIns; final String? closureReason;

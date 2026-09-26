@@ -112,4 +112,22 @@ void main() {
     expect(resolved.acceptsWalkIns, isTrue);
     expect(resolved.schedule.opensAt, '08:00');
   });
+
+  test('new overrides accept Manila today and future dates but reject past dates', () {
+    final reference = DateTime.utc(2026, 9, 30, 18); // Oct 1 in Manila.
+    expect(paccManilaDate(reference), '2026-10-01');
+    expect(isPaccOverrideDateAllowed('2026-09-30', reference), isFalse);
+    expect(isPaccOverrideDateAllowed('2026-10-01', reference), isTrue);
+    expect(isPaccOverrideDateAllowed('2026-10-02', reference), isTrue);
+  });
+
+  test('historical overrides remain readable while duplicate dates remain distinguishable', () {
+    final model = PaccAvailabilityModel.v2(
+      weekdays: {for (var day = 1; day <= 7; day++) day: PaccDaySchedule.closed},
+      overrides: const [PaccDateOverride(date: '2020-01-01', closedAllDay: true, reason: 'Historical closure')],
+    );
+    expect(model.overrides.single.reason, 'Historical closure');
+    expect(isPaccOverrideDateAllowed('2020-01-01', DateTime.utc(2026, 1, 1)), isFalse);
+    expect(model.overrides.map((item) => item.date).toSet().length, 1);
+  });
 }
