@@ -5,7 +5,7 @@ import 'package:mind_mates/models/appointment_model.dart';
 
 void main() {
   testWidgets(
-    'client appointment cards expose only staff-proposal acceptance',
+    'legacy schedule updates are view-only for clients',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(430, 1200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -18,12 +18,10 @@ void main() {
 
       await tester.pumpWidget(_app([appointment]));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Review New Schedule'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Accept New Schedule'), findsOneWidget);
-      expect(find.text('Reason for reschedule'), findsOneWidget);
-      expect(find.text('Counselor schedule conflict'), findsOneWidget);
+      expect(find.text('Schedule Update Pending'), findsOneWidget);
+      expect(find.text('Accept New Schedule'), findsNothing);
+      expect(find.text('PAACC is finalizing your appointment schedule.'),
+          findsOneWidget);
       expect(find.text('Cancel Appointment'), findsNothing);
       expect(find.text('Cancel Request'), findsNothing);
       expect(find.text('Request Reschedule'), findsNothing);
@@ -93,7 +91,6 @@ Widget _app(
       onBook: onBook ?? (_) {},
       onView: (_) {},
       onCalendar: (_) {},
-      onAccept: (_) {},
     ),
   ),
 );

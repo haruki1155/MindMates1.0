@@ -6,12 +6,10 @@ import {appointmentActionsFor, canTransitionAppointment} from "./appointment_lif
 test("lifecycle matrix permits every supported PACC transition", () => {
   const allowed: Array<[string, "student" | "staff", string]> = [
     ["requested", "staff", "confirmed"],
-    ["requested", "staff", "reschedule_proposed"],
     ["confirmed", "staff", "completed"],
     ["confirmed", "staff", "no_show"],
-    ["confirmed", "staff", "reschedule_proposed"],
-    ["reschedule_proposed", "student", "confirmed"],
-    ["reschedule_proposed", "staff", "reschedule_proposed"],
+    // Legacy records can be finalized only by a clinical staff member.
+    ["reschedule_proposed", "staff", "confirmed"],
   ];
   for (const [status, actor, next] of allowed) {
     assert.equal(canTransitionAppointment(status, actor, next), true, `${status} -> ${next}`);
@@ -31,6 +29,7 @@ test("lifecycle matrix rejects terminal and unauthorized transitions", () => {
   assert.equal(canTransitionAppointment("confirmed", "student", "cancelled"), false);
   assert.equal(canTransitionAppointment("confirmed", "staff", "cancelled"), false);
   assert.equal(canTransitionAppointment("reschedule_proposed", "staff", "cancelled"), false);
+  assert.equal(canTransitionAppointment("reschedule_proposed", "student", "confirmed"), false);
   assert.equal(canTransitionAppointment("confirmed", "student", "no_show"), false);
   assert.equal(canTransitionAppointment("pending", "staff", "confirmed"), true);
 });

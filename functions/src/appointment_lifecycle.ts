@@ -24,13 +24,11 @@ export function canonicalAppointmentStatus(value: unknown): string {
 }
 
 const transitions: Record<AppointmentActor, Record<string, readonly string[]>> = {
-  student: {
-    reschedule_proposed: ["confirmed"],
-  },
+  student: {},
   staff: {
-    requested: ["confirmed", "reschedule_proposed"],
-    confirmed: ["completed", "no_show", "reschedule_proposed"],
-    reschedule_proposed: ["reschedule_proposed"],
+    requested: ["confirmed"],
+    confirmed: ["completed", "no_show"],
+    reschedule_proposed: ["confirmed"],
   },
 };
 

@@ -1794,6 +1794,19 @@ function manilaSlotMillis(date: string, minutes: number): number {
   return local.getTime() - 8 * 60 * 60 * 1000;
 }
 
+function staffProposalTimestamp(input: Record<string, unknown>): {millis: number; scheduledTime: string} {
+  const date = typeof input.proposedScheduledDate === "string" ? input.proposedScheduledDate.trim() : "";
+  if (!date) return validateAppointmentTimestamp(input.proposedScheduledAt);
+
+  const match = /^(\d{1,2}):([0-5]\d)\s*([AaPp][Mm])$/.exec(String(input.proposedScheduledTime ?? "").trim());
+  if (!match) throw new AppointmentSchedulingValidationError("Choose a valid proposed appointment time.");
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 1 || hour > 12) throw new AppointmentSchedulingValidationError("Choose a valid proposed appointment time.");
+  const minutes = (hour % 12 + (match[3].toLowerCase() === "pm" ? 12 : 0)) * 60 + minute;
+  return validateAppointmentTimestamp(manilaSlotMillis(date, minutes));
+}
+
 export const getAvailableAppointmentSlots = onCall(async (request) => {
   requireAuthenticatedUser(request);
   const input = (request.data ?? {}) as Record<string, unknown>;
@@ -1942,48 +1955,8 @@ export const createAppointmentRequest = onCall(async (request) => {
 });
 
 export const respondToAppointment = onCall(async (request) => {
-  const userId = requireAuthenticatedUser(request);
-  const input = (request.data ?? {}) as Record<string, unknown>;
-  const appointmentId = String(input.appointmentId ?? "").trim();
-  const action = String(input.action ?? "").trim();
-  if (!appointmentId || action !== "accept_reschedule") {
-    throw new HttpsError("invalid-argument", "Only acceptance of a staff-proposed schedule is allowed.");
-  }
-  const appointment = db.collection("appointments").doc(appointmentId);
-  const availabilityDocument = db.collection("pacc_availability").doc("current");
-  await db.runTransaction(async (transaction) => {
-    const [snapshot, availabilitySnapshot] = await Promise.all([
-      transaction.get(appointment),
-      transaction.get(availabilityDocument),
-    ]);
-    if (!snapshot.exists || String(snapshot.data()?.userId ?? "") !== userId) throw new HttpsError("permission-denied", "This appointment is unavailable.");
-    const data = snapshot.data()!;
-    const before = canonicalAppointmentStatus(data.status);
-    if (!APPOINTMENT_ACTIVE_STATUSES.has(before)) throw new HttpsError("failed-precondition", "This appointment can no longer be changed.");
-    if (!canTransitionAppointment(before, "student", "confirmed") || !data.proposedScheduledAt || data.proposedBy !== "counselor") {
-      throw new HttpsError("failed-precondition", "There is no active staff schedule proposal.");
-    }
-    const proposedAt = data.proposedScheduledAt as Timestamp;
-    try {
-      validatePaccAppointmentAvailability(
-        proposedAt.toMillis(),
-        availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
-      );
-    } catch (error: unknown) {
-      if (error instanceof AppointmentAvailabilityValidationError) {
-        throw new HttpsError("failed-precondition", error.message);
-      }
-      throw error;
-    }
-    const oldSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp));
-    const newSlot = db.collection("appointment_slots").doc(appointmentSlotId(proposedAt));
-    const claimed = await transaction.get(newSlot);
-    if (claimed.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
-    transaction.delete(oldSlot); transaction.create(newSlot, {appointmentId, scheduledAt: proposedAt, createdAt: FieldValue.serverTimestamp()});
-    transaction.update(appointment, {status: "confirmed", scheduledAt: proposedAt, scheduledTime: data.proposedScheduledTime ?? "", proposedScheduledAt: FieldValue.delete(), proposedScheduledTime: FieldValue.delete(), proposedBy: FieldValue.delete(), proposalStatus: FieldValue.delete(), reminders: {}, updatedAt: FieldValue.serverTimestamp()});
-    createAppointmentEvent(transaction, appointment, "reschedule_accepted", userId, before, "confirmed");
-  });
-  return {ok: true};
+  requireAuthenticatedUser(request);
+  throw new HttpsError("permission-denied", "Appointment schedule changes are finalized by PAACC staff.");
 });
 
 export const reviewAppointment = onCall(async (request) => {
@@ -1996,14 +1969,14 @@ export const reviewAppointment = onCall(async (request) => {
   const reply = boundedText(input.reply, "Reply", 1_000, {required: true});
   let proposal: {millis: number; scheduledTime: string} | null = null;
   let completion: ReturnType<typeof validateCompletionInput> | null = null;
-  if (!appointmentId || !["confirmed", "reschedule_proposed", "completed", "no_show"].includes(action)) {
+  if (!appointmentId || !["confirmed", "rescheduled", "completed", "no_show"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
-  if (action === "reschedule_proposed") {
+  if (action === "rescheduled") {
     const rescheduleReason = validateRescheduleReason(input.rescheduleReason);
     input.rescheduleReason = rescheduleReason;
     try {
-      proposal = validateAppointmentTimestamp(input.proposedScheduledAt);
+      proposal = staffProposalTimestamp(input);
     } catch (error: unknown) {
       if (error instanceof AppointmentSchedulingValidationError) throw new HttpsError("invalid-argument", error.message);
       throw error;
@@ -2035,7 +2008,14 @@ export const reviewAppointment = onCall(async (request) => {
       throw new HttpsError("permission-denied", "This appointment is not assigned to your caseload.");
     }
     const before = canonicalAppointmentStatus(data.status);
-    if (!APPOINTMENT_ACTIVE_STATUSES.has(before) || !canTransitionAppointment(before, "staff", action)) {
+    const nextStatus = action === "rescheduled" ? "confirmed" : action;
+    if (before === "reschedule_proposed" && action !== "rescheduled") {
+      throw new HttpsError("failed-precondition", "Use Re-schedule appointment to finalize this legacy schedule update.");
+    }
+    const isStaffReschedule = action === "rescheduled" &&
+      (before === "confirmed" || before === "reschedule_proposed");
+    if (!APPOINTMENT_ACTIVE_STATUSES.has(before) ||
+        (!isStaffReschedule && !canTransitionAppointment(before, "staff", nextStatus))) {
       throw new HttpsError("failed-precondition", "This appointment has already been finalized.");
     }
     const userId = String(data.userId ?? "");
@@ -2056,38 +2036,31 @@ export const reviewAppointment = onCall(async (request) => {
         throw error;
       }
     }
-    const acceptingProposal = before === "reschedule_proposed" && action === "confirmed" && data.proposedScheduledAt instanceof Timestamp;
-    if (acceptingProposal) {
-      try {
-        validatePaccAppointmentAvailability(
-          (data.proposedScheduledAt as Timestamp).toMillis(),
-          availabilitySnapshot.exists ? availabilitySnapshot.data() : null,
-        );
-      } catch (error: unknown) {
-        if (error instanceof AppointmentAvailabilityValidationError) {
-          throw new HttpsError("failed-precondition", error.message);
-        }
-        throw error;
-      }
-      const proposedSlot = db.collection("appointment_slots").doc(appointmentSlotId(data.proposedScheduledAt as Timestamp));
-      const occupied = await transaction.get(proposedSlot);
+    if (action === "rescheduled") {
+      const newSlot = db.collection("appointment_slots").doc(appointmentSlotId(Timestamp.fromMillis(proposal!.millis)));
+      const occupied = await transaction.get(newSlot);
       if (occupied.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
       transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt as Timestamp)));
-      transaction.create(proposedSlot, {appointmentId, scheduledAt: data.proposedScheduledAt, createdAt: FieldValue.serverTimestamp()});
+      transaction.create(newSlot, {appointmentId, scheduledAt: Timestamp.fromMillis(proposal!.millis), createdAt: FieldValue.serverTimestamp()});
     }
     const patch: Record<string, unknown> = {
-      status: action,
+      status: action === "rescheduled" ? "confirmed" : action,
       assignedStaffId: staffId,
       counselorName: staffName,
       staffReply: reply,
       reviewedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-      proposedScheduledAt: action === "reschedule_proposed" ? Timestamp.fromMillis(proposal!.millis) : null,
-      proposedScheduledTime: action === "reschedule_proposed" ? proposal!.scheduledTime : "",
-      rescheduleReason: action === "reschedule_proposed" ? String(input.rescheduleReason) : FieldValue.delete(),
-      proposedBy: action === "reschedule_proposed" ? "counselor" : FieldValue.delete(),
-      proposalStatus: action === "reschedule_proposed" ? "awaiting_student" : FieldValue.delete(),
-      ...(acceptingProposal ? {scheduledAt: data.proposedScheduledAt, scheduledTime: data.proposedScheduledTime ?? "", reminders: {}} : {}),
+      scheduledAt: action === "rescheduled" ? Timestamp.fromMillis(proposal!.millis) : data.scheduledAt,
+      scheduledTime: action === "rescheduled" ? proposal!.scheduledTime : data.scheduledTime,
+      // The reason belongs to immutable history/audit, not the canonical record.
+      rescheduleReason: FieldValue.delete(),
+      rescheduledAt: action === "rescheduled" ? FieldValue.serverTimestamp() : FieldValue.delete(),
+      rescheduledBy: action === "rescheduled" ? staffId : FieldValue.delete(),
+      proposedScheduledAt: FieldValue.delete(),
+      proposedScheduledTime: FieldValue.delete(),
+      proposedBy: FieldValue.delete(),
+      proposalStatus: FieldValue.delete(),
+      ...(action === "rescheduled" ? {reminders: {}} : {}),
       completedAt: action === "completed" ? FieldValue.serverTimestamp() : null,
       noShowAt: action === "no_show" ? FieldValue.serverTimestamp() : null,
       ...(completion == null ? {} : {
@@ -2100,6 +2073,15 @@ export const reviewAppointment = onCall(async (request) => {
       }),
     };
     transaction.update(appointment, patch);
+    if (action === "rescheduled") {
+      createAppointmentEvent(transaction, appointment, "appointment_rescheduled", staffId, before, "confirmed", {
+        previousScheduledAt: data.scheduledAt,
+        previousScheduledTime: data.scheduledTime ?? "",
+        scheduledAt: Timestamp.fromMillis(proposal!.millis),
+        scheduledTime: proposal!.scheduledTime,
+        rescheduleReason: String(input.rescheduleReason),
+      });
+    }
     if (completion != null) {
       transaction.set(clinicalNote, {
         appointmentId,
@@ -2119,20 +2101,22 @@ export const reviewAppointment = onCall(async (request) => {
       previousStatus: before,
       status: action,
       reply,
-      ...(action === "reschedule_proposed" ? {rescheduleReason: String(input.rescheduleReason)} : {}),
-      proposedScheduledAt: patch.proposedScheduledAt ?? null,
-      proposedScheduledTime: patch.proposedScheduledTime,
+      ...(action === "rescheduled" ? {rescheduleReason: String(input.rescheduleReason), previousScheduledAt: data.scheduledAt, previousScheduledTime: data.scheduledTime} : {}),
+      ...(action === "rescheduled" ? {
+        scheduledAt: Timestamp.fromMillis(proposal!.millis),
+        scheduledTime: proposal!.scheduledTime,
+      } : {}),
       staffId,
       staffName,
       createdAt: FieldValue.serverTimestamp(),
     });
-    const title = action === "confirmed" ? "PACC Appointment Confirmed" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked as Did Not Attend" : "Proposed new schedule";
+    const title = action === "rescheduled" ? "Appointment rescheduled" : action === "confirmed" ? "PACC Appointment Confirmed" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked as Did Not Attend" : "Appointment update";
     transaction.create(notification, {
       userId,
       appointmentId,
-      type: completion?.offerFollowUp === true ? "appointment_follow_up_offer" : action === "confirmed" ? "appointment_confirmed" : action === "completed" ? "appointment_completed" : action === "no_show" ? "appointment_did_not_attend" : "reschedule_proposed",
+      type: completion?.offerFollowUp === true ? "appointment_follow_up_offer" : action === "rescheduled" ? "appointment_rescheduled" : action === "confirmed" ? "appointment_confirmed" : action === "completed" ? "appointment_completed" : action === "no_show" ? "appointment_did_not_attend" : "appointment_update",
       title: completion?.offerFollowUp === true ? "Follow-up session offered" : title,
-      body: completion?.offerFollowUp === true ? completion.followUpMessage : action === "no_show" ? "Your appointment was marked as Did Not Attend." : action === "reschedule_proposed" ? `Proposed new schedule: ${String(input.rescheduleReason)}` : reply,
+      body: completion?.offerFollowUp === true ? completion.followUpMessage : action === "no_show" ? "Your appointment was marked as Did Not Attend." : action === "rescheduled" ? `PAACC rescheduled your appointment: ${proposal!.scheduledTime}. ${String(input.rescheduleReason)}` : reply,
       createdAt: FieldValue.serverTimestamp(),
       readAt: null,
     });
@@ -2150,7 +2134,13 @@ export const reviewAppointment = onCall(async (request) => {
       targetId: appointmentId,
       metadata: {
         before: {status: before},
-        after: {status: action, ...(action === "reschedule_proposed" ? {date: new Date(proposal!.millis).toISOString().slice(0, 10), time: proposal!.scheduledTime} : {})},
+        after: {
+          status: nextStatus,
+          ...(action === "rescheduled" ? {
+            date: new Date(proposal!.millis).toISOString().slice(0, 10),
+            time: proposal!.scheduledTime,
+          } : {}),
+        },
       },
     });
   });

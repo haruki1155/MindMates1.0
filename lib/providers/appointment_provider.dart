@@ -112,9 +112,6 @@ class AppointmentProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> acceptReschedule(String appointmentId) =>
-      _performAction(() => _repository.acceptReschedule(appointmentId));
-
   Future<List<AppointmentSlot>> getAvailableSlots(DateTime date) async {
     try {
       final slots = await _repository.getAvailableSlots(date);
@@ -136,6 +133,7 @@ class AppointmentProvider extends ChangeNotifier {
     }
   }
 
+  // ignore: unused_element
   Future<bool> _performAction(Future<void> Function() action) async {
     if (_isSaving) return false;
     _isSaving = true;

@@ -97,12 +97,6 @@ class AppointmentRepository {
     );
   }
 
-  Future<void> acceptReschedule(String appointmentId) =>
-      _functionClient.routedCallable('respondToAppointment').call({
-        'appointmentId': appointmentId,
-        'action': 'accept_reschedule',
-      });
-
 }
 
 class AppointmentSlot {

@@ -343,7 +343,7 @@ class _Skeleton extends StatelessWidget {
 
 String _label(String value) => switch (value.toLowerCase().trim()) {
   'reschedule_required' => 'Follow-up required',
-  'reschedule_proposed' => 'New schedule proposed',
+  'reschedule_proposed' => 'Schedule update pending',
   'confirmed' => 'Confirmed',
   'completed' || 'complete' => 'Completed',
   _ => 'Scheduled',

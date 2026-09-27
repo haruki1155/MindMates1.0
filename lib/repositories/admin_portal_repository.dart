@@ -12,6 +12,7 @@ import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
 import '../models/profile_roles.dart';
 import '../models/pacc_availability_model.dart';
+import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
 import '../features/admin/domain/admin_management_models.dart';
 import '../features/admin/domain/report_generation_models.dart';
@@ -174,13 +175,16 @@ class AdminPortalRepository {
   AdminPortalRepository({
     FirestoreService? firestoreService,
     PaccAvailabilityRepository? paccAvailabilityRepository,
-  })  : _firestoreService = firestoreService ?? FirestoreService(),
-        _paccAvailabilityRepository =
-            paccAvailabilityRepository ??
-            PaccAvailabilityRepository(firestoreService: firestoreService);
+  }) : _firestoreService = firestoreService ?? FirestoreService(),
+       _paccAvailabilityRepository =
+           paccAvailabilityRepository ??
+           PaccAvailabilityRepository(firestoreService: firestoreService);
 
   final FirestoreService _firestoreService;
   final PaccAvailabilityRepository _paccAvailabilityRepository;
+
+  Future<List<AppointmentSlot>> getAvailableAppointmentSlots(DateTime date) =>
+      AppointmentRepository().getAvailableSlots(date);
   AccessRole _currentAccessRole = AccessRole.appUser;
   AccessRole get currentAccessRole => _currentAccessRole;
   bool _isSuperAdmin = false;
@@ -1016,6 +1020,9 @@ class AdminPortalRepository {
       'reply': reply,
       if (proposedScheduledAt != null)
         'proposedScheduledAt': proposedScheduledAt.millisecondsSinceEpoch,
+      if (proposedScheduledAt != null)
+        'proposedScheduledDate':
+            '${proposedScheduledAt.year.toString().padLeft(4, '0')}-${proposedScheduledAt.month.toString().padLeft(2, '0')}-${proposedScheduledAt.day.toString().padLeft(2, '0')}',
     };
     if (proposedScheduledTime != null) {
       data['proposedScheduledTime'] = proposedScheduledTime;

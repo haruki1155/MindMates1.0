@@ -86,11 +86,10 @@ Future<void> showAppointmentDetailsSheet(
         text: _friendlyStatus(appointment.lifecycleStatus),
       ),
     (icon: Icons.badge_outlined, text: _counselorText(appointment)),
-    if (appointment.proposedScheduledAt != null)
+    if (appointment.lifecycleStatus == AppointmentStatus.rescheduleProposed)
       (
         icon: Icons.event_repeat_outlined,
-        text:
-            'Proposed schedule: ${formatAppointmentDate(appointment.proposedScheduledAt!)} ${appointment.proposedScheduledTime ?? ''}${appointment.proposedBy == null ? '' : ' (${appointment.proposedBy})'}',
+        text: 'PAACC is finalizing the updated appointment schedule.',
       ),
     if (contactSummary.isNotEmpty)
       (icon: Icons.contact_phone_outlined, text: contactSummary),
@@ -219,7 +218,7 @@ String _friendlyStatus(AppointmentStatus status) => switch (status) {
   AppointmentStatus.requested ||
   AppointmentStatus.legacyRequested => 'Awaiting Confirmation',
   AppointmentStatus.confirmed => 'Confirmed',
-  AppointmentStatus.rescheduleProposed => 'Action Required',
+  AppointmentStatus.rescheduleProposed => 'Schedule Update Pending',
   AppointmentStatus.completed => 'Completed',
   AppointmentStatus.cancelled => 'Cancelled',
   AppointmentStatus.declined => 'Request Declined',

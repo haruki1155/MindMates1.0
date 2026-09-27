@@ -193,7 +193,6 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         appointments: appointmentProvider?.appointments ?? const [],
         onView: _showAppointmentDetails,
         onCalendar: _openMindMateCalendar,
-        onAccept: _acceptReschedule,
         onBook: _startNewAppointment,
         isSaving: appointmentProvider?.isSaving ?? false,
       );
@@ -286,15 +285,14 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _step = _PaccAppointmentStep.time;
     });
     final provider = _readProviderOrNull<AppointmentProvider>();
-    final slots =
-        await provider?.getAvailableSlots(
-          date,
-        ) ??
-        const [];
+    final slots = await provider?.getAvailableSlots(date) ?? const [];
     if (!mounted || _selectedDate != date) return;
     setState(() {
       _availableTimes = slots.map((slot) => slot.label).toList(growable: false);
-      _noSlotMessage = slots.isEmpty ? provider?.slotAvailabilityMessage ?? 'No appointment times are available for this date. Please choose another date.' : null;
+      _noSlotMessage = slots.isEmpty
+          ? provider?.slotAvailabilityMessage ??
+                'No appointment times are available for this date. Please choose another date.'
+          : null;
       _loadingTimes = false;
     });
   }
@@ -319,7 +317,8 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   }
 
   void _startNewAppointment([AppointmentModel? priorAppointment]) {
-    final appointments = _readProviderOrNull<AppointmentProvider>()?.appointments ??
+    final appointments =
+        _readProviderOrNull<AppointmentProvider>()?.appointments ??
         const <AppointmentModel>[];
     if (appointments.any((appointment) => appointment.isActive)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -455,22 +454,6 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
             HomeAppointmentCalendarScreen(initialDate: appointment.scheduledAt),
       ),
     );
-  }
-
-  Future<void> _acceptReschedule(AppointmentModel appointment) async {
-    final provider = _readProviderOrNull<AppointmentProvider>();
-    final saved = await provider?.acceptReschedule(appointment.id) ?? false;
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            saved
-                ? 'New schedule confirmed.'
-                : 'This proposed time is no longer available.',
-          ),
-        ),
-      );
-    }
   }
 
   Future<void> _loadAppointments() async {
@@ -625,8 +608,8 @@ class _AppointmentLoadError extends StatelessWidget {
   }
 }
 
-// Legacy private composition retained temporarily while shared cards are used
-// by [AppointmentListView].
+// Legacy private composition retained while shared cards are used by
+// [AppointmentListView]. It offers no schedule acceptance action.
 // ignore: unused_element
 class _MyAppointmentsView extends StatelessWidget {
   // ignore: unused_element_parameter
@@ -636,7 +619,6 @@ class _MyAppointmentsView extends StatelessWidget {
     required this.onViewDetails,
     required this.onAddToCalendar,
     required this.onCancel,
-    required this.onAcceptReschedule,
     required this.onRequestReschedule,
     required this.onBookAgain,
   });
@@ -646,7 +628,6 @@ class _MyAppointmentsView extends StatelessWidget {
   final ValueChanged<AppointmentModel> onViewDetails;
   final ValueChanged<AppointmentModel> onAddToCalendar;
   final ValueChanged<AppointmentModel> onCancel;
-  final ValueChanged<AppointmentModel> onAcceptReschedule;
   final ValueChanged<AppointmentModel> onRequestReschedule;
   final VoidCallback onBookAgain;
 
@@ -682,7 +663,6 @@ class _MyAppointmentsView extends StatelessWidget {
               onViewDetails: () => onViewDetails(appointment),
               onAddToCalendar: () => onAddToCalendar(appointment),
               onCancel: () => onCancel(appointment),
-              onAcceptReschedule: () => onAcceptReschedule(appointment),
               onRequestReschedule: () => onRequestReschedule(appointment),
               onBookAgain: onBookAgain,
             ),
@@ -820,7 +800,6 @@ class _AppointmentCard extends StatelessWidget {
     required this.onViewDetails,
     required this.onAddToCalendar,
     required this.onCancel,
-    required this.onAcceptReschedule,
     required this.onRequestReschedule,
     required this.onBookAgain,
   });
@@ -829,7 +808,6 @@ class _AppointmentCard extends StatelessWidget {
   final VoidCallback onViewDetails;
   final VoidCallback onAddToCalendar;
   final VoidCallback onCancel;
-  final VoidCallback onAcceptReschedule;
   final VoidCallback onRequestReschedule;
   final VoidCallback onBookAgain;
 
@@ -883,7 +861,6 @@ class _AppointmentCard extends StatelessWidget {
             onViewDetails: onViewDetails,
             onAddToCalendar: onAddToCalendar,
             onCancel: onCancel,
-            onAcceptReschedule: onAcceptReschedule,
             onRequestReschedule: onRequestReschedule,
             onBookAgain: onBookAgain,
           ),
@@ -899,7 +876,6 @@ class _AppointmentActions extends StatelessWidget {
     required this.onViewDetails,
     required this.onAddToCalendar,
     required this.onCancel,
-    required this.onAcceptReschedule,
     required this.onRequestReschedule,
     required this.onBookAgain,
   });
@@ -907,7 +883,6 @@ class _AppointmentActions extends StatelessWidget {
   final VoidCallback onViewDetails;
   final VoidCallback onAddToCalendar;
   final VoidCallback onCancel;
-  final VoidCallback onAcceptReschedule;
   final VoidCallback onRequestReschedule;
   final VoidCallback onBookAgain;
 
@@ -925,10 +900,7 @@ class _AppointmentActions extends StatelessWidget {
         status == AppointmentStatus.legacyRequested) {
     } else if (status == AppointmentStatus.rescheduleProposed) {
       actions.addAll([
-        _SmallYellowButton(
-          label: 'Accept New Schedule',
-          onTap: onAcceptReschedule,
-        ),
+        _SmallYellowButton(label: 'View Details', onTap: onViewDetails),
       ]);
     } else if (status == AppointmentStatus.cancelled) {
       actions.add(_SmallYellowButton(label: 'Book Again', onTap: onBookAgain));
@@ -1154,10 +1126,15 @@ class _TimeSelectionView extends StatelessWidget {
             );
           },
         ),
-        if (!isSaving && availableTimes.isEmpty) Padding(
-          padding: const EdgeInsets.only(top: 20),
-          child: Text(noSlotMessage ?? 'No appointment times are available for this date. Please choose another date.', style: _PaccText.body),
-        ),
+        if (!isSaving && availableTimes.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 20),
+            child: Text(
+              noSlotMessage ??
+                  'No appointment times are available for this date. Please choose another date.',
+              style: _PaccText.body,
+            ),
+          ),
         const SizedBox(height: 34),
         const _ReminderCard(),
         const SizedBox(height: 34),

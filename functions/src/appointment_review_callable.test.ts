@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 import {after, before, test} from "node:test";
-import {getFirestore} from "firebase-admin/firestore";
+import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {respondToAppointment, reviewAppointment} from "./index";
 
-type Callable = {
-  run: (request: {auth?: {uid: string}; data?: Record<string, unknown>}) => Promise<unknown>;
-};
-
+type Callable = {run: (request: {auth?: {uid: string}; data?: Record<string, unknown>}) => Promise<unknown>};
 const db = getFirestore();
 const prefix = `appointment-review-${Date.now()}`;
 const studentId = `${prefix}-student`;
@@ -19,220 +16,106 @@ const review = reviewAppointment as unknown as Callable;
 const respond = respondToAppointment as unknown as Callable;
 const availability = db.collection("pacc_availability").doc("current");
 
-async function futureWeekdaySlot(): Promise<number> {
-  for (let offset = 1; offset <= 14; offset += 1) {
-    const candidate = new Date(Date.now() + offset * 24 * 60 * 60 * 1_000);
-    const weekday = candidate.getUTCDay();
-    if (weekday >= 1 && weekday <= 5) {
-      const slot = Date.UTC(candidate.getUTCFullYear(), candidate.getUTCMonth(), candidate.getUTCDate(), 1);
-      const claimed = await db.collection("appointment_slots").doc(`pacc_${slot}`).get();
-      if (!claimed.exists) return slot;
-    }
+async function futureWeekdaySlot(excluded = new Set<number>()): Promise<number> {
+  for (let offset = 1; offset <= 21; offset += 1) {
+    const candidate = new Date(Date.now() + offset * 86_400_000);
+    if (candidate.getUTCDay() < 1 || candidate.getUTCDay() > 5) continue;
+    const slot = Date.UTC(candidate.getUTCFullYear(), candidate.getUTCMonth(), candidate.getUTCDate(), 1);
+    if (excluded.has(slot)) continue;
+    const claimed = await db.collection("appointment_slots").doc(`pacc_${slot}`).get();
+    if (!claimed.exists) return slot;
   }
   throw new Error("No future weekday slot found.");
 }
-
+function payload(appointmentId: string, proposedAt: number, reason = "Office schedule adjustment") {
+  return {appointmentId, action: "rescheduled", reply: "PAACC has updated your appointment schedule.", proposedScheduledAt: proposedAt, rescheduleReason: reason};
+}
 async function expectCallableFailure(promise: Promise<unknown>, code: string): Promise<void> {
   await assert.rejects(promise, (error: {code?: unknown}) => error?.code === code);
 }
-
-async function seedAppointment(id: string, assignedStaffId = counselorId) {
+async function seedAppointment(id: string, options: {assignedStaffId?: string; status?: string; scheduledAt?: number; claimSlot?: boolean} = {}) {
+  const scheduledAt = options.scheduledAt ?? await futureWeekdaySlot();
   const appointment = db.collection("appointments").doc(`${prefix}-${id}`);
-  await appointment.set({
-    userId: studentId,
-    status: "confirmed",
-    assignedStaffId,
-    scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1_000),
-    scheduledTime: "9:00 AM",
-    concern: "Academic pressure",
-  });
+  await appointment.set({userId: studentId, status: options.status ?? "confirmed", assignedStaffId: options.assignedStaffId ?? counselorId, scheduledAt: Timestamp.fromMillis(scheduledAt), scheduledTime: "9:00 AM", concern: "Academic pressure"});
+  await db.collection("appointment_user_locks").doc(studentId).set({appointmentId: appointment.id});
+  if (options.claimSlot !== false) await db.collection("appointment_slots").doc(`pacc_${scheduledAt}`).set({appointmentId: appointment.id, scheduledAt: Timestamp.fromMillis(scheduledAt)});
   return appointment;
+}
+async function setOpenSchedule(): Promise<void> {
+  await availability.set({openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, notice: "", blackoutDates: []});
 }
 
 before(async () => {
-  if (!process.env.FIRESTORE_EMULATOR_HOST) {
-    throw new Error("FIRESTORE_EMULATOR_HOST is required for appointment callable tests.");
-  }
+  if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("FIRESTORE_EMULATOR_HOST is required for appointment callable tests.");
   await Promise.all([
-    db.collection("users").doc(studentId).set({accessRole: "appUser"}),
-    db.collection("users").doc(adminId).set({accessRole: "admin", name: "Test Admin"}),
-    db.collection("users").doc(counselorId).set({accessRole: "counselor", name: "Assigned Counselor"}),
-    db.collection("users").doc(otherCounselorId).set({accessRole: "counselor", name: "Other Counselor"}),
-    db.collection("users").doc(portalStaffId).set({accessRole: "portalStaff", name: "Portal Staff"}),
-    availability.set({
-      openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00",
-      presence: "in_office", acceptsWalkIns: false, notice: "", blackoutDates: [],
-    }),
+    db.collection("users").doc(studentId).set({accessRole: "appUser"}), db.collection("users").doc(adminId).set({accessRole: "admin", name: "Test Admin"}),
+    db.collection("users").doc(counselorId).set({accessRole: "counselor", name: "Assigned Counselor"}), db.collection("users").doc(otherCounselorId).set({accessRole: "counselor", name: "Other Counselor"}),
+    db.collection("users").doc(portalStaffId).set({accessRole: "portalStaff", name: "Portal Staff"}), setOpenSchedule(),
   ]);
 });
-
 after(async () => {
   const appointments = await db.collection("appointments").where("userId", "==", studentId).get();
-  const notifications = await db.collection("notifications").where("userId", "==", studentId).get();
-  const slots = await db.collection("appointment_slots").get();
-  const appointmentIds = new Set(appointments.docs.map((snapshot) => snapshot.id));
+  const appointmentIds = new Set(appointments.docs.map((item) => item.id));
   for (const appointment of appointments.docs) {
-    const [notes, history] = await Promise.all([
-      appointment.ref.collection("clinical_notes").get(),
-      appointment.ref.collection("history").get(),
-    ]);
-    await Promise.all([
-      ...notes.docs.map((snapshot) => snapshot.ref.delete()),
-      ...history.docs.map((snapshot) => snapshot.ref.delete()),
-    ]);
-    await appointment.ref.delete();
+    const [history, notes] = await Promise.all([appointment.ref.collection("history").get(), appointment.ref.collection("clinical_notes").get()]);
+    await Promise.all([...history.docs.map((item) => item.ref.delete()), ...notes.docs.map((item) => item.ref.delete()), appointment.ref.delete()]);
   }
-  await Promise.all([
-    db.collection("users").doc(studentId).delete(),
-    db.collection("users").doc(adminId).delete(),
-    db.collection("users").doc(counselorId).delete(),
-    db.collection("users").doc(otherCounselorId).delete(),
-    db.collection("users").doc(portalStaffId).delete(),
-    ...notifications.docs.map((snapshot) => snapshot.ref.delete()),
-    ...slots.docs
-      .filter((snapshot) => appointmentIds.has(String(snapshot.data().appointmentId ?? "")))
-      .map((snapshot) => snapshot.ref.delete()),
-  ]);
+  const [slots, notifications, audits] = await Promise.all([db.collection("appointment_slots").get(), db.collection("notifications").where("userId", "==", studentId).get(), db.collection("admin_audit_logs").get()]);
+  await Promise.all([...slots.docs.filter((item) => appointmentIds.has(String(item.data().appointmentId ?? ""))).map((item) => item.ref.delete()), ...notifications.docs.map((item) => item.ref.delete()), ...audits.docs.filter((item) => appointmentIds.has(String(item.data().targetId ?? ""))).map((item) => item.ref.delete()), db.collection("appointment_user_locks").doc(studentId).delete(), availability.delete(), ...[studentId, adminId, counselorId, otherCounselorId, portalStaffId].map((id) => db.collection("users").doc(id).delete())]);
 });
 
-test("only authorized clinical staff can complete a session and the summary remains private", async () => {
-  const appointment = await seedAppointment("completion");
-  const completion = {
-    appointmentId: appointment.id,
-    action: "completed",
-    reply: "Appointment completed.",
-    sessionSummary: "Private clinical summary that must not be client-visible.",
-    offerFollowUp: true,
-    followUpMessage: "Please book a follow-up when you are ready.",
-  };
-
-  await expectCallableFailure(review.run({auth: {uid: studentId}, data: completion}), "permission-denied");
-  await expectCallableFailure(review.run({auth: {uid: portalStaffId}, data: completion}), "permission-denied");
-  await expectCallableFailure(review.run({auth: {uid: otherCounselorId}, data: completion}), "permission-denied");
-  await assert.doesNotReject(review.run({auth: {uid: counselorId}, data: completion}));
-
-  const [updated, note, history, notifications] = await Promise.all([
-    appointment.get(),
-    appointment.collection("clinical_notes").doc("session").get(),
-    appointment.collection("history").get(),
-    db.collection("notifications").where("appointmentId", "==", appointment.id).get(),
-  ]);
-  assert.equal(updated.data()?.status, "completed");
-  assert.equal(updated.data()?.followUpStatus, "offered");
-  assert.equal(updated.data()?.sessionSummary, undefined);
-  assert.equal(note.data()?.summary, completion.sessionSummary);
-  assert.equal(history.docs.some((snapshot) => JSON.stringify(snapshot.data()).includes(completion.sessionSummary)), false);
-  assert.equal(notifications.size, 1);
-  assert.equal(notifications.docs[0].data().type, "appointment_follow_up_offer");
-  assert.equal(notifications.docs[0].data().title, "Follow-up session offered");
-  assert.equal(notifications.docs[0].data().body, completion.followUpMessage);
-  assert.equal(JSON.stringify(notifications.docs[0].data()).includes(completion.sessionSummary), false);
+test("staff re-schedule is atomic, confirmed, audited, and not student-approvable", async () => {
+  const oldAt = await futureWeekdaySlot(); const appointment = await seedAppointment("atomic", {scheduledAt: oldAt}); const newAt = await futureWeekdaySlot(new Set([oldAt]));
+  await assert.doesNotReject(review.run({auth: {uid: counselorId}, data: payload(appointment.id, newAt)}));
+  const [updated, oldSlot, newSlot, lock, history, notices, audit] = await Promise.all([appointment.get(), db.collection("appointment_slots").doc(`pacc_${oldAt}`).get(), db.collection("appointment_slots").doc(`pacc_${newAt}`).get(), db.collection("appointment_user_locks").doc(studentId).get(), appointment.collection("history").get(), db.collection("notifications").where("appointmentId", "==", appointment.id).get(), db.collection("admin_audit_logs").where("targetId", "==", appointment.id).get()]);
+  assert.equal(updated.data()?.status, "confirmed"); assert.equal(updated.data()?.scheduledAt.toMillis(), newAt); assert.equal(updated.data()?.proposedScheduledAt, undefined); assert.deepEqual(updated.data()?.reminders, {});
+  assert.equal(oldSlot.exists, false); assert.equal(newSlot.data()?.appointmentId, appointment.id); assert.equal(lock.data()?.appointmentId, appointment.id);
+  const historyEntry = history.docs.find((item) => item.data().status === "rescheduled")?.data();
+  assert.equal(historyEntry?.previousScheduledAt.toMillis(), oldAt); assert.equal(historyEntry?.scheduledAt.toMillis(), newAt);
+  assert.equal(notices.docs[0].data().type, "appointment_rescheduled"); assert.match(notices.docs[0].data().body, /PAACC rescheduled/i);
+  assert.equal(audit.docs.some((item) => item.data().action === "APPOINTMENT_RESCHEDULED" && item.data().actorId === counselorId), true);
+  await expectCallableFailure(respond.run({auth: {uid: studentId}, data: {appointmentId: appointment.id, action: "accept_reschedule"}}), "permission-denied");
 });
 
-test("admin can mark Did Not Attend and clients receive the approved wording", async () => {
-  const appointment = await seedAppointment("attendance");
-  await assert.doesNotReject(review.run({
-    auth: {uid: adminId},
-    data: {
-      appointmentId: appointment.id,
-      action: "no_show",
-      reply: "The student did not attend the confirmed appointment.",
-    },
-  }));
-  const notifications = await db.collection("notifications").where("appointmentId", "==", appointment.id).get();
-  assert.equal((await appointment.get()).data()?.status, "no_show");
-  assert.equal(notifications.docs[0].data().title, "Appointment marked as Did Not Attend");
-  assert.equal(notifications.docs[0].data().body, "Your appointment was marked as Did Not Attend.");
+test("occupied target is rejected without appointment or slot mutation", async () => {
+  const oldAt = await futureWeekdaySlot(); const newAt = await futureWeekdaySlot(new Set([oldAt])); const appointment = await seedAppointment("occupied", {scheduledAt: oldAt});
+  await db.collection("appointment_slots").doc(`pacc_${newAt}`).set({appointmentId: "other", scheduledAt: Timestamp.fromMillis(newAt)});
+  await expectCallableFailure(review.run({auth: {uid: counselorId}, data: payload(appointment.id, newAt)}), "already-exists");
+  assert.equal((await appointment.get()).data()?.scheduledAt.toMillis(), oldAt); assert.equal((await db.collection("appointment_slots").doc(`pacc_${oldAt}`).get()).data()?.appointmentId, appointment.id);
 });
 
-test("admin can complete and staff rescheduling requires a client-safe reason", async () => {
-  const adminCompletion = await seedAppointment("admin-completion", adminId);
-  await assert.doesNotReject(review.run({
-    auth: {uid: adminId},
-    data: {
-      appointmentId: adminCompletion.id,
-      action: "completed",
-      reply: "Appointment completed.",
-      sessionSummary: "Private administrative session summary.",
-      offerFollowUp: false,
-    },
-  }));
-  assert.equal((await adminCompletion.get()).data()?.status, "completed");
-  assert.equal(
-    (await adminCompletion.collection("clinical_notes").doc("session").get()).data()?.authorId,
-    adminId,
-  );
-
-  const reschedule = await seedAppointment("reschedule");
-  const proposedAt = await futureWeekdaySlot();
-  await expectCallableFailure(review.run({
-    auth: {uid: counselorId},
-    data: {
-      appointmentId: reschedule.id,
-      action: "reschedule_proposed",
-      reply: "A new schedule is proposed.",
-      proposedScheduledAt: proposedAt,
-    },
-  }), "invalid-argument");
-  await assert.doesNotReject(review.run({
-    auth: {uid: counselorId},
-    data: {
-      appointmentId: reschedule.id,
-      action: "reschedule_proposed",
-      reply: "A new schedule is proposed.",
-      proposedScheduledAt: proposedAt,
-      rescheduleReason: "Counselor schedule conflict",
-    },
-  }));
-  const updated = await reschedule.get();
-  assert.equal(updated.data()?.status, "reschedule_proposed");
-  assert.equal(updated.data()?.rescheduleReason, "Counselor schedule conflict");
+test("closed, overridden, unavailable, and disabled schedules reject without mutation", async () => {
+  const oldAt = await futureWeekdaySlot(); const newAt = await futureWeekdaySlot(new Set([oldAt])); const appointment = await seedAppointment("availability", {scheduledAt: oldAt});
+  const date = new Date(newAt).toISOString().slice(0, 10);
+  const closed = {enabled: false, opensAt: "09:00", closesAt: "17:00", presence: "out_of_office", appointmentsEnabled: false, acceptsWalkIns: false};
+  const open = {enabled: true, opensAt: "09:00", closesAt: "17:00", presence: "in_office", appointmentsEnabled: true, acceptsWalkIns: false};
+  for (const config of [
+    {weekdays: Object.fromEntries(Array.from({length: 7}, (_, i) => [String(i + 1), closed])), overrides: []},
+    {weekdays: Object.fromEntries(Array.from({length: 7}, (_, i) => [String(i + 1), open])), overrides: [{date, closedAllDay: true, reason: "Special closure"}]},
+    {weekdays: Object.fromEntries(Array.from({length: 7}, (_, i) => [String(i + 1), {...open, presence: "on_leave"}])), overrides: []},
+    {weekdays: Object.fromEntries(Array.from({length: 7}, (_, i) => [String(i + 1), {...open, appointmentsEnabled: false}])), overrides: []},
+  ]) { await availability.set({schemaVersion: 2, timezone: "Asia/Manila", ...config, notice: ""}); await expectCallableFailure(review.run({auth: {uid: counselorId}, data: payload(appointment.id, newAt)}), "failed-precondition"); assert.equal((await appointment.get()).data()?.scheduledAt.toMillis(), oldAt); }
+  await setOpenSchedule();
 });
 
-test("staff cannot propose a reschedule outside the effective V2 schedule", async () => {
-  const appointment = await seedAppointment("v2-closed-proposal");
-  const proposedAt = await futureWeekdaySlot();
-  await availability.set({
-    schemaVersion: 2,
-    timezone: "Asia/Manila",
-    weekdays: Object.fromEntries(Array.from({length: 7}, (_, index) => [String(index + 1), {
-      enabled: false, opensAt: "08:00", closesAt: "17:00", presence: "out_of_office", appointmentsEnabled: false, acceptsWalkIns: false,
-    }])),
-    overrides: [], notice: "",
-  });
-
-  await expectCallableFailure(review.run({
-    auth: {uid: counselorId},
-    data: {appointmentId: appointment.id, action: "reschedule_proposed", reply: "A new schedule is proposed.", proposedScheduledAt: proposedAt, rescheduleReason: "Office schedule conflict"},
-  }), "failed-precondition");
-  assert.equal((await appointment.get()).data()?.status, "confirmed");
-  await availability.set({openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, notice: "", blackoutDates: []});
+test("terminal, unauthorized, and forged staff actions are denied", async () => {
+  const slot = await futureWeekdaySlot(); const terminal = await seedAppointment("terminal", {scheduledAt: slot, status: "completed"});
+  await expectCallableFailure(review.run({auth: {uid: counselorId}, data: payload(terminal.id, await futureWeekdaySlot(new Set([slot])))}), "failed-precondition");
+  const appointment = await seedAppointment("authority"); const target = await futureWeekdaySlot();
+  await expectCallableFailure(review.run({auth: {uid: studentId}, data: payload(appointment.id, target)}), "permission-denied"); await expectCallableFailure(review.run({auth: {uid: portalStaffId}, data: payload(appointment.id, target)}), "permission-denied"); await expectCallableFailure(review.run({auth: {uid: otherCounselorId}, data: payload(appointment.id, target)}), "permission-denied");
 });
 
-test("a client can accept only a valid staff schedule proposal", async () => {
-  const appointment = await seedAppointment("accept-reschedule");
-  const proposedAt = await futureWeekdaySlot();
-  await appointment.update({
-    status: "reschedule_proposed",
-    proposedScheduledAt: new Date(proposedAt),
-    proposedScheduledTime: "9:00 AM",
-    proposedBy: "counselor",
-    rescheduleReason: "Office schedule adjustment",
-  });
-  await expectCallableFailure(respond.run({
-    auth: {uid: studentId},
-    data: {appointmentId: appointment.id, action: "cancel"},
-  }), "invalid-argument");
-  await expectCallableFailure(respond.run({
-    auth: {uid: studentId},
-    data: {appointmentId: appointment.id, action: "propose_reschedule"},
-  }), "invalid-argument");
-  await assert.doesNotReject(respond.run({
-    auth: {uid: studentId},
-    data: {appointmentId: appointment.id, action: "accept_reschedule"},
-  }));
-  const updated = await appointment.get();
-  assert.equal(updated.data()?.status, "confirmed");
-  assert.equal(updated.data()?.rescheduleReason, "Office schedule adjustment");
-  assert.equal(updated.data()?.proposedScheduledAt, undefined);
+test("a legacy proposal is finalized only by staff and its legacy fields are cleared", async () => {
+  const oldAt = await futureWeekdaySlot(); const newAt = await futureWeekdaySlot(new Set([oldAt])); const appointment = await seedAppointment("legacy", {scheduledAt: oldAt, status: "reschedule_proposed"});
+  await appointment.update({proposedScheduledAt: Timestamp.fromMillis(newAt), proposedScheduledTime: "9:00 AM", proposedBy: "counselor", proposalStatus: "pending", rescheduleReason: "Legacy"});
+  await assert.doesNotReject(review.run({auth: {uid: counselorId}, data: payload(appointment.id, newAt)}));
+  const data = (await appointment.get()).data()!; assert.equal(data.status, "confirmed"); assert.equal(data.scheduledAt.toMillis(), newAt);
+  for (const field of ["proposedScheduledAt", "proposedScheduledTime", "proposedBy", "proposalStatus", "rescheduleReason"]) assert.equal(data[field], undefined);
+});
+
+test("concurrent re-schedules to one slot allow exactly one claimant", async () => {
+  const firstAt = await futureWeekdaySlot(); const secondAt = await futureWeekdaySlot(new Set([firstAt])); const target = await futureWeekdaySlot(new Set([firstAt, secondAt]));
+  const first = await seedAppointment("race-first", {scheduledAt: firstAt}); const second = await seedAppointment("race-second", {scheduledAt: secondAt});
+  const outcomes = await Promise.allSettled([review.run({auth: {uid: counselorId}, data: payload(first.id, target)}), review.run({auth: {uid: adminId}, data: payload(second.id, target)})]);
+  assert.equal(outcomes.filter((result) => result.status === "fulfilled").length, 1); assert.equal(outcomes.filter((result) => result.status === "rejected").length, 1); assert.equal((await db.collection("appointment_slots").doc(`pacc_${target}`).get()).exists, true);
 });

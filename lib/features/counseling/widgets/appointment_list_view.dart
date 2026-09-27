@@ -26,8 +26,8 @@ class AppointmentUiState {
       Color(0xFF287953),
     ),
     AppointmentStatus.rescheduleProposed => const AppointmentUiState(
-      'Action Required',
-      'A new schedule has been proposed.',
+      'Schedule Update Pending',
+      'PAACC is finalizing your appointment schedule.',
       Icons.event_repeat_outlined,
       Color(0xFFAD6700),
     ),
@@ -87,14 +87,12 @@ class AppointmentListView extends StatefulWidget {
     required this.onBook,
     required this.onView,
     required this.onCalendar,
-    required this.onAccept,
     this.isSaving = false,
   });
   final List<AppointmentModel> appointments;
   final ValueChanged<AppointmentModel?> onBook;
   final ValueChanged<AppointmentModel> onView;
   final ValueChanged<AppointmentModel> onCalendar;
-  final ValueChanged<AppointmentModel> onAccept;
   final bool isSaving;
   @override
   State<AppointmentListView> createState() => _AppointmentListViewState();
@@ -195,7 +193,6 @@ class _AppointmentListViewState extends State<AppointmentListView> {
                 onBook: () => widget.onBook(a),
                 bookingBlocked: bookingBlocked,
                 onCalendar: () => widget.onCalendar(a),
-                onAccept: () => widget.onAccept(a),
               ),
             ),
           ),
@@ -259,18 +256,16 @@ class AppointmentCard extends StatelessWidget {
     required this.onView,
     required this.onBook,
     required this.onCalendar,
-    required this.onAccept,
     required this.bookingBlocked,
   });
   final AppointmentModel appointment;
   final bool compact;
   final bool isSaving;
   final bool bookingBlocked;
-  final VoidCallback onView, onBook, onCalendar, onAccept;
+  final VoidCallback onView, onBook, onCalendar;
   @override
   Widget build(BuildContext context) {
     final ui = AppointmentUiState.from(appointment.lifecycleStatus);
-    final proposed = appointment.proposedScheduledAt;
     return Semantics(
       container: true,
       label:
@@ -339,21 +334,7 @@ class AppointmentCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
-              if (appointment.lifecycleStatus ==
-                      AppointmentStatus.rescheduleProposed &&
-                  proposed != null) ...[
-                const Divider(height: 24),
-                const Text(
-                  'Schedule change proposed',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                Text(
-                  'Current: ${formatAppointmentShortDate(appointment.scheduledAt)} · ${appointment.scheduledTime}',
-                ),
-                Text(
-                  'Proposed: ${formatAppointmentShortDate(proposed)} · ${appointment.proposedScheduledTime ?? ''}',
-                ),
-              ] else if (ui.description.isNotEmpty) ...[
+              if (ui.description.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
                   ui.description,
@@ -397,13 +378,13 @@ class AppointmentCard extends StatelessWidget {
       return SizedBox(
         width: double.infinity,
         child: FilledButton(
-          onPressed: isSaving ? null : () => _showProposal(context),
+          onPressed: onView,
           style: FilledButton.styleFrom(
             minimumSize: const Size.fromHeight(48),
             backgroundColor: const Color(0xFFFFB800),
             foregroundColor: Colors.black,
           ),
-          child: Text(isSaving ? 'Updating...' : 'Review New Schedule'),
+          child: const Text('View appointment details'),
         ),
       );
     }
@@ -469,6 +450,8 @@ class AppointmentCard extends StatelessWidget {
       ),
     ),
   );
+  // Legacy records are view-only while PAACC finalizes their schedule.
+  // ignore: unused_element
   void _showProposal(BuildContext context) => showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
@@ -480,7 +463,7 @@ class AppointmentCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Schedule Change',
+              'Schedule Update',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 12),
@@ -489,17 +472,8 @@ class AppointmentCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Proposed appointment\n${appointment.proposedScheduledAt == null ? '' : formatAppointmentWeekdayDate(appointment.proposedScheduledAt!)} · ${appointment.proposedScheduledTime ?? ''}',
+              'PAACC is finalizing the updated appointment schedule.',
             ),
-            if ((appointment.rescheduleReason ?? '').trim().isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const Text(
-                'Reason for reschedule',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 4),
-              Text(appointment.rescheduleReason!.trim()),
-            ],
             const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
@@ -508,14 +482,14 @@ class AppointmentCard extends StatelessWidget {
                     ? null
                     : () {
                         Navigator.pop(context);
-                        onAccept();
+                        // Legacy records are read-only for students.
                       },
                 style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(48),
                   backgroundColor: const Color(0xFFFFB800),
                   foregroundColor: Colors.black,
                 ),
-                child: const Text('Accept New Schedule'),
+                child: const Text('Close'),
               ),
             ),
           ],

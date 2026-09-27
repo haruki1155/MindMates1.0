@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/screens/admin_portal.dart';
 import 'package:mind_mates/models/appointment_model.dart';
 import 'package:mind_mates/repositories/admin_portal_repository.dart';
+import 'package:mind_mates/repositories/appointment_repository.dart';
 
 class _Repository extends AdminPortalRepository {
   _Repository(this.records);
@@ -11,6 +12,16 @@ class _Repository extends AdminPortalRepository {
 
   @override
   Stream<List<AppointmentModel>> watchAppointments() => Stream.value(records);
+
+  @override
+  Future<List<AppointmentSlot>> getAvailableAppointmentSlots(
+    DateTime date,
+  ) async => [
+    AppointmentSlot(
+      start: DateTime(date.year, date.month, date.day, 13),
+      label: '1:00 PM',
+    ),
+  ];
 }
 
 void main() {
@@ -91,6 +102,40 @@ void main() {
     expect(find.text('Review'), findsNothing);
     expect(find.byTooltip('Move to history'), findsNothing);
   });
+
+  testWidgets(
+    'reschedule proposals offer available slots instead of manual time entry',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final record = _appointment(
+        'requested',
+        DateTime.now(),
+        'Needs reschedule',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: _Repository([record]),
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm appointment'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Re-schedule appointment').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Available times'), findsOneWidget);
+      expect(find.text('e.g. 2:00 PM'), findsNothing);
+    },
+  );
 }
 
 AppointmentModel _appointment(
