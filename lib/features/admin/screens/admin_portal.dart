@@ -470,9 +470,12 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   Future<void> _setPage(AdminPortalPage page) async {
     if (_page == AdminPortalPage.availability &&
         page != AdminPortalPage.availability &&
-        !await _scheduleController.confirmLeave(context))
+        !await _scheduleController.confirmLeave(context)) {
       return;
-    if (!mounted) return;
+    }
+    if (!mounted) {
+      return;
+    }
     Navigator.of(context).maybePop();
     if (_repository.currentAccessRole == AccessRole.portalStaff &&
         page == AdminPortalPage.appointments) {
@@ -3716,40 +3719,37 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
                       labelText: 'Closing time',
                     ),
                   ),
-                  // ignore: deprecated_member_use
-                  RadioListTile(
-                    value: CounselorPresence.inOffice,
+                  RadioGroup<CounselorPresence>(
                     groupValue: draft.presence,
-                    title: const Text('In office'),
-                    onChanged: (value) => setDialogState(
-                      () => draft = draft.copyWith(
-                        presence: value!,
-                        appointmentsEnabled: draft.appointmentsEnabled,
-                      ),
-                    ),
-                  ),
-                  // ignore: deprecated_member_use
-                  RadioListTile(
-                    value: CounselorPresence.outOfOffice,
-                    groupValue: draft.presence,
-                    title: const Text('Out of office'),
-                    onChanged: (value) => setDialogState(
-                      () => draft = draft.copyWith(
-                        presence: value!,
-                        appointmentsEnabled: false,
-                      ),
-                    ),
-                  ),
-                  // ignore: deprecated_member_use
-                  RadioListTile(
-                    value: CounselorPresence.onLeave,
-                    groupValue: draft.presence,
-                    title: const Text('On leave'),
-                    onChanged: (value) => setDialogState(
-                      () => draft = draft.copyWith(
-                        presence: value!,
-                        appointmentsEnabled: false,
-                      ),
+                    onChanged: (value) {
+                      if (value == null) {
+                        return;
+                      }
+                      setDialogState(
+                        () => draft = draft.copyWith(
+                          presence: value,
+                          appointmentsEnabled:
+                              value == CounselorPresence.inOffice
+                              ? draft.appointmentsEnabled
+                              : false,
+                        ),
+                      );
+                    },
+                    child: const Column(
+                      children: [
+                        RadioListTile(
+                          value: CounselorPresence.inOffice,
+                          title: Text('In office'),
+                        ),
+                        RadioListTile(
+                          value: CounselorPresence.outOfOffice,
+                          title: Text('Out of office'),
+                        ),
+                        RadioListTile(
+                          value: CounselorPresence.onLeave,
+                          title: Text('On leave'),
+                        ),
+                      ],
                     ),
                   ),
                   SwitchListTile(
@@ -3826,13 +3826,14 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
           ),
         ),
       );
-      if (applied != null && mounted)
+      if (applied != null && mounted) {
         setState(() {
           _days[day] = applied;
           _dirty = true;
           _saveMessage = null;
           _saveError = null;
         });
+      }
     } finally {}
   }
 
