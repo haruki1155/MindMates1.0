@@ -15,6 +15,7 @@ class MindAidMessageModel {
   final double confidence;
   final String fallbackReason;
   final List<MindAidAction> actions;
+  final bool hasPaaccDisplay;
 
   MindAidMessageModel({
     required this.id,
@@ -30,6 +31,7 @@ class MindAidMessageModel {
     this.confidence = 0,
     this.fallbackReason = '',
     this.actions = const [],
+    this.hasPaaccDisplay = false,
   });
 
   factory MindAidMessageModel.fromMap(Map<String, dynamic> map) {
@@ -47,6 +49,7 @@ class MindAidMessageModel {
       confidence: (map['confidence'] as num?)?.toDouble() ?? 0,
       fallbackReason: (map['fallbackReason'] ?? '').toString(),
       actions: _actionsFrom(map['actions']),
+      hasPaaccDisplay: map['hasPaaccDisplay'] == true,
     );
   }
 

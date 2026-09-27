@@ -7,6 +7,8 @@ import '../../../core/constants/app_assets.dart';
 import '../../mind_aid/domain/mind_aid_integration_models.dart';
 
 typedef MindAidFeedbackCallback = void Function(String messageId, bool helpful);
+typedef MindAidActionCallback =
+    void Function(String messageId, MindAidAction action);
 
 enum MindAidSender { assistant, user }
 
@@ -85,7 +87,7 @@ class MindAidScreen extends StatefulWidget {
   final ValueChanged<String>? onSendMessage;
   final ValueChanged<MindAidSuggestion>? onSuggestionSelected;
   final VoidCallback? onNotificationTap;
-  final ValueChanged<MindAidAction>? onActionSelected;
+  final MindAidActionCallback? onActionSelected;
   final MindAidFeedbackCallback? onFeedback;
   final VoidCallback? onRetry;
   final VoidCallback? onClearHistory;
@@ -98,6 +100,9 @@ class MindAidScreen extends StatefulWidget {
 
 class _MindAidScreenState extends State<MindAidScreen> {
   final TextEditingController _messageController = TextEditingController();
+  final ScrollController _conversationController = ScrollController();
+  bool _isNearLatest = true;
+  bool _isAutoScrolling = false;
 
   bool get _canSend =>
       !widget.isAssistantTyping &&
@@ -108,12 +113,31 @@ class _MindAidScreenState extends State<MindAidScreen> {
   void initState() {
     super.initState();
     _messageController.addListener(_handleMessageChanged);
+    _conversationController.addListener(_handleConversationScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToLatest());
+  }
+
+  @override
+  void didUpdateWidget(covariant MindAidScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.messages.length != widget.messages.length ||
+        oldWidget.isAssistantTyping != widget.isAssistantTyping) {
+      final followLatest = _isNearLatest;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && followLatest) {
+          _scrollToLatest(animated: oldWidget.messages.isNotEmpty);
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
     _messageController
       ..removeListener(_handleMessageChanged)
+      ..dispose();
+    _conversationController
+      ..removeListener(_handleConversationScroll)
       ..dispose();
     super.dispose();
   }
@@ -122,10 +146,49 @@ class _MindAidScreenState extends State<MindAidScreen> {
     setState(() {});
   }
 
+  void _handleConversationScroll() {
+    if (_isAutoScrolling || !_conversationController.hasClients) return;
+    final position = _conversationController.position;
+    final nearLatest = position.maxScrollExtent - position.pixels <= 80;
+    if (nearLatest != _isNearLatest && mounted) {
+      setState(() => _isNearLatest = nearLatest);
+    }
+  }
+
+  Future<void> _scrollToLatest({bool animated = false}) async {
+    if (!_conversationController.hasClients) return;
+    _isAutoScrolling = true;
+    _isNearLatest = true;
+    final target = _conversationController.position.maxScrollExtent;
+    try {
+      if (animated) {
+        await _conversationController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _conversationController.jumpTo(target);
+      }
+      // Lazy slivers refine their extent as newer messages are laid out.
+      // Recheck after layout rather than stopping at the old estimate.
+      for (var attempt = 0; attempt < 8; attempt++) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted || !_conversationController.hasClients) return;
+        final position = _conversationController.position;
+        if (position.maxScrollExtent - position.pixels <= 1) break;
+        _conversationController.jumpTo(position.maxScrollExtent);
+      }
+    } finally {
+      _isAutoScrolling = false;
+    }
+  }
+
   void _sendMessage() {
     final message = _messageController.text.trim();
     if (!_canSend || message.isEmpty) return;
 
+    _isNearLatest = true;
     widget.onSendMessage?.call(message);
     _messageController.clear();
   }
@@ -142,42 +205,52 @@ class _MindAidScreenState extends State<MindAidScreen> {
         bottom: false,
         child: Column(
           children: [
-            _AnimatedMindAidSection(
-              delay: 0,
-              child: _MindAidHeader(
-                onNotificationTap: widget.onNotificationTap,
-                onClearHistory: widget.onClearHistory,
-                onNewConversation: widget.onNewConversation,
-                onPrivacyTap: widget.onPrivacyTap,
-              ),
-            ),
-            const _AnimatedMindAidSection(
-              delay: 70,
-              child: _AssistantProfileCard(),
+            _MindAidHeader(
+              onNotificationTap: widget.onNotificationTap,
+              onClearHistory: widget.onClearHistory,
+              onNewConversation: widget.onNewConversation,
+              onPrivacyTap: widget.onPrivacyTap,
             ),
             Expanded(
-              child: _AnimatedMindAidSection(
-                delay: 130,
-                child: _MindAidConversation(
-                  messages: widget.messages,
-                  suggestions: widget.suggestions,
-                  isAssistantTyping: widget.isAssistantTyping,
-                  disclaimerText: widget.disclaimerText,
-                  errorText: widget.errorText,
-                  onSuggestionSelected: widget.onSuggestionSelected,
-                  onActionSelected: widget.onActionSelected,
-                  onFeedback: widget.onFeedback,
-                  onRetry: widget.onRetry,
-                ),
+              child: Stack(
+                children: [
+                  _MindAidConversation(
+                    controller: _conversationController,
+                    messages: widget.messages,
+                    isAssistantTyping: widget.isAssistantTyping,
+                    errorText: widget.errorText,
+                    onActionSelected: widget.onActionSelected,
+                    onFeedback: widget.onFeedback,
+                    onRetry: widget.onRetry,
+                  ),
+                  if (!_isNearLatest && widget.messages.isNotEmpty)
+                    Positioned(
+                      right: 16,
+                      bottom: 14,
+                      child: FloatingActionButton.small(
+                        heroTag: 'mindaid_latest',
+                        tooltip: 'Latest messages',
+                        onPressed: () => _scrollToLatest(animated: true),
+                        backgroundColor: _MindAidColors.sun,
+                        child: const Icon(Icons.south_rounded),
+                      ),
+                    ),
+                ],
               ),
             ),
-            _AnimatedMindAidSection(
-              delay: 180,
-              child: _MindAidComposer(
-                controller: _messageController,
-                canSend: _canSend,
-                onSend: _sendMessage,
+            if (widget.suggestions.isNotEmpty)
+              _SuggestionPanel(
+                suggestions: widget.suggestions,
+                onSuggestionSelected: widget.onSuggestionSelected,
               ),
+            if (widget.messages.isEmpty &&
+                widget.disclaimerText != null &&
+                widget.disclaimerText!.trim().isNotEmpty)
+              _DisclaimerPanel(text: widget.disclaimerText!.trim()),
+            _MindAidComposer(
+              controller: _messageController,
+              canSend: _canSend,
+              onSend: _sendMessage,
             ),
           ],
         ),
@@ -202,21 +275,11 @@ class _MindAidHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 82,
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+      height: 68,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [_MindAidColors.sun, _MindAidColors.sunLight],
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Color(0x26000000),
-            blurRadius: 15,
-            offset: Offset(0, 7),
-          ),
-        ],
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFEAE4D7))),
       ),
       child: Row(
         children: [
@@ -245,22 +308,34 @@ class _MindAidHeader extends StatelessWidget {
             ],
             icon: const Icon(Icons.more_vert_rounded),
           ),
-          const SizedBox(width: 4),
-          const _MindAidAssetImage(
-            assetName: 'creativity_15557951 1.png',
+          Container(
             width: 38,
             height: 38,
-            fallbackIcon: Icons.psychology_alt_outlined,
+            decoration: const BoxDecoration(
+              color: _MindAidColors.disclaimer,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.support_agent_rounded,
+              color: _MindAidColors.deepText,
+              size: 22,
+            ),
           ),
-          const SizedBox(width: 9),
-          const _MindAidAssetImage(
-            assetName: 'MindMate.png',
-            width: 114,
-            height: 27,
-            fit: BoxFit.contain,
-            fallbackText: 'MindMate',
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('MindAid', style: _MindAidText.headerTitle),
+                SizedBox(height: 1),
+                Text(
+                  'AI wellness assistant',
+                  style: _MindAidText.headerSubtitle,
+                ),
+              ],
+            ),
           ),
-          const Spacer(),
           Tooltip(
             message: 'Notifications',
             child: IconButton(
@@ -283,85 +358,29 @@ class _MindAidHeader extends StatelessWidget {
   }
 }
 
-class _AssistantProfileCard extends StatelessWidget {
-  const _AssistantProfileCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(26, 24, 24, 24),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Color(0x13000000),
-            blurRadius: 15,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: const BoxDecoration(
-              color: _MindAidColors.disclaimer,
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.support_agent_rounded,
-              color: _MindAidColors.deepText,
-              size: 30,
-            ),
-          ),
-          const SizedBox(width: 14),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('MindAid', style: _MindAidText.profileTitle),
-                SizedBox(height: 3),
-                Text(
-                  'Always here to support you',
-                  style: _MindAidText.profileSubtitle,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _MindAidConversation extends StatelessWidget {
   const _MindAidConversation({
+    required this.controller,
     required this.messages,
-    required this.suggestions,
     required this.isAssistantTyping,
-    required this.disclaimerText,
     required this.errorText,
-    required this.onSuggestionSelected,
     required this.onActionSelected,
     required this.onFeedback,
     required this.onRetry,
   });
 
+  final ScrollController controller;
   final List<MindAidMessage> messages;
-  final List<MindAidSuggestion> suggestions;
   final bool isAssistantTyping;
-  final String? disclaimerText;
   final String? errorText;
-  final ValueChanged<MindAidSuggestion>? onSuggestionSelected;
-  final ValueChanged<MindAidAction>? onActionSelected;
+  final MindAidActionCallback? onActionSelected;
   final MindAidFeedbackCallback? onFeedback;
   final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     return CustomScrollView(
+      controller: controller,
       physics: const BouncingScrollPhysics(),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       slivers: [
@@ -370,12 +389,12 @@ class _MindAidConversation extends StatelessWidget {
             child: _MindAidErrorBanner(text: errorText!.trim()),
           ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(12, 18, 12, 26),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
           sliver: messages.isEmpty && !isAssistantTyping
               ? const SliverToBoxAdapter(child: _WelcomeConversation())
               : SliverList.separated(
                   itemCount: messages.length + (isAssistantTyping ? 1 : 0),
-                  separatorBuilder: (_, _) => const SizedBox(height: 18),
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
                   itemBuilder: (context, index) {
                     if (index == messages.length) {
                       return const _TypingBubble();
@@ -389,17 +408,6 @@ class _MindAidConversation extends StatelessWidget {
                   },
                 ),
         ),
-        if (suggestions.isNotEmpty)
-          SliverToBoxAdapter(
-            child: _SuggestionPanel(
-              suggestions: suggestions,
-              onSuggestionSelected: onSuggestionSelected,
-            ),
-          ),
-        if (disclaimerText != null && disclaimerText!.trim().isNotEmpty)
-          SliverToBoxAdapter(
-            child: _DisclaimerPanel(text: disclaimerText!.trim()),
-          ),
       ],
     );
   }
@@ -488,7 +496,7 @@ class _MessageBubble extends StatelessWidget {
   });
 
   final MindAidMessage message;
-  final ValueChanged<MindAidAction>? onActionSelected;
+  final MindAidActionCallback? onActionSelected;
   final MindAidFeedbackCallback? onFeedback;
   final VoidCallback? onRetry;
 
@@ -515,7 +523,7 @@ class _AssistantMessageBubble extends StatelessWidget {
   });
 
   final MindAidMessage message;
-  final ValueChanged<MindAidAction>? onActionSelected;
+  final MindAidActionCallback? onActionSelected;
   final MindAidFeedbackCallback? onFeedback;
 
   @override
@@ -525,16 +533,13 @@ class _AssistantMessageBubble extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: width < 420 ? width - 34 : 380,
-          minWidth: width < 360 ? 0 : 260,
-        ),
+        constraints: BoxConstraints(maxWidth: width < 600 ? width * .84 : 520),
         child: Stack(
           clipBehavior: Clip.none,
           children: [
             Container(
-              margin: const EdgeInsets.only(bottom: 24),
-              padding: const EdgeInsets.fromLTRB(15, 13, 15, 13),
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.fromLTRB(14, 11, 14, 10),
               decoration: BoxDecoration(
                 color: _MindAidColors.aiBubble,
                 borderRadius: BorderRadius.circular(15),
@@ -544,7 +549,7 @@ class _AssistantMessageBubble extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const _AssistantBubbleHeader(),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 8),
                   Text(message.text, style: _MindAidText.message),
                   if (message.supportCards.isNotEmpty) ...[
                     const SizedBox(height: 12),
@@ -566,21 +571,37 @@ class _AssistantMessageBubble extends StatelessWidget {
                               size: 16,
                             ),
                             label: Text(action.label),
-                            onPressed: () => onActionSelected?.call(action),
+                            onPressed: () =>
+                                onActionSelected?.call(message.id, action),
+                          ),
+                        if (message.status != 'urgent')
+                          TextButton(
+                            onPressed: () => onActionSelected?.call(
+                              message.id,
+                              const MindAidAction(
+                                type: MindAidActionType.dismissPending,
+                                label: 'Not now',
+                              ),
+                            ),
+                            child: const Text('Not now'),
                           ),
                       ],
                     ),
                   ],
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   _AssistantBubbleMeta(message: message),
                   if (message.id != 'welcome') ...[
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
                           tooltip: 'Copy response',
                           visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 34,
+                            height: 34,
+                          ),
                           onPressed: () => Clipboard.setData(
                             ClipboardData(text: message.text),
                           ),
@@ -589,6 +610,10 @@ class _AssistantMessageBubble extends StatelessWidget {
                         IconButton(
                           tooltip: 'Helpful',
                           visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 34,
+                            height: 34,
+                          ),
                           onPressed: () => onFeedback?.call(message.id, true),
                           icon: const Icon(
                             Icons.thumb_up_alt_outlined,
@@ -598,6 +623,10 @@ class _AssistantMessageBubble extends StatelessWidget {
                         IconButton(
                           tooltip: 'Not helpful',
                           visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 34,
+                            height: 34,
+                          ),
                           onPressed: () => onFeedback?.call(message.id, false),
                           icon: const Icon(
                             Icons.thumb_down_alt_outlined,
@@ -609,11 +638,6 @@ class _AssistantMessageBubble extends StatelessWidget {
                   ],
                 ],
               ),
-            ),
-            const Positioned(
-              bottom: -2,
-              right: 70,
-              child: _AssistantBubbleTail(),
             ),
           ],
         ),
@@ -629,17 +653,21 @@ class _AssistantBubbleMeta extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final category = message.categoryLabel?.trim();
-    final hasCategory = category != null && category.isNotEmpty;
+    final category = message.categoryLabel?.trim() ?? '';
+    final hasCategory = category.isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (hasCategory) ...[
-          Text('Category: $category', style: _MindAidText.category),
-          const SizedBox(height: 4),
-        ],
-        Text(_messageTime(message), style: _MindAidText.status),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasCategory)
+              Flexible(child: Text(category, style: _MindAidText.category)),
+            if (hasCategory) const SizedBox(width: 6),
+            Text(_messageTime(message), style: _MindAidText.status),
+          ],
+        ),
         if (message.source == 'dialogflow')
           const Text('Dialogflow assisted', style: _MindAidText.status),
       ],
@@ -667,53 +695,6 @@ class _AssistantBubbleHeader extends StatelessWidget {
   }
 }
 
-class _AssistantBubbleTail extends StatelessWidget {
-  const _AssistantBubbleTail();
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      size: const Size(46, 36),
-      painter: _AssistantBubbleTailPainter(),
-    );
-  }
-}
-
-class _AssistantBubbleTailPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final shadowPaint = Paint()
-      ..color = const Color(0x22000000)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-    final paint = Paint()..color = _MindAidColors.aiBubble;
-    final path = Path()
-      ..moveTo(0, 0)
-      ..cubicTo(
-        size.width * .18,
-        2,
-        size.width * .28,
-        size.height,
-        size.width * .5,
-        size.height,
-      )
-      ..cubicTo(
-        size.width * .72,
-        size.height,
-        size.width * .82,
-        2,
-        size.width,
-        0,
-      )
-      ..close();
-
-    canvas.drawPath(path.shift(const Offset(0, 2)), shadowPaint);
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
 class _UserMessageBubble extends StatelessWidget {
   const _UserMessageBubble({required this.message, this.onRetry});
 
@@ -725,7 +706,11 @@ class _UserMessageBubble extends StatelessWidget {
     return Align(
       alignment: Alignment.centerRight,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 270),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width < 600
+              ? MediaQuery.sizeOf(context).width * .84
+              : 520,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
@@ -757,8 +742,8 @@ class _UserMessageBubble extends StatelessWidget {
                 Flexible(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
+                      horizontal: 14,
+                      vertical: 9,
                     ),
                     decoration: BoxDecoration(
                       color: _MindAidColors.userBubble,
@@ -836,38 +821,21 @@ class _SuggestionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
-      child: Column(
-        children: [
-          const Text(
-            'Quick suggestions:',
-            style: _MindAidText.suggestionsTitle,
-          ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final itemWidth = constraints.maxWidth >= 320
-                  ? (constraints.maxWidth - 14) / 2
-                  : constraints.maxWidth;
-
-              return Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 14,
-                runSpacing: 10,
-                children: [
-                  for (final suggestion in suggestions.take(6))
-                    SizedBox(
-                      width: itemWidth.clamp(140, 176).toDouble(),
-                      child: _SuggestionChip(
-                        suggestion: suggestion,
-                        onTap: () => onSuggestionSelected?.call(suggestion),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-        ],
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+      child: SizedBox(
+        height: 38,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: suggestions.take(6).length,
+          separatorBuilder: (_, _) => const SizedBox(width: 8),
+          itemBuilder: (context, index) {
+            final suggestion = suggestions[index];
+            return _SuggestionChip(
+              suggestion: suggestion,
+              onTap: () => onSuggestionSelected?.call(suggestion),
+            );
+          },
+        ),
       ),
     );
   }
@@ -883,22 +851,18 @@ class _SuggestionChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: _MindAidColors.chip,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(19),
       elevation: 0,
       shadowColor: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(19),
         onTap: onTap,
         child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: _MindAidShadows.chip,
-          ),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(19)),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
             child: Row(
-              mainAxisSize: MainAxisSize.max,
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 if (_hasIconAsset) ...[
                   _MindAidAssetImage(
@@ -912,7 +876,7 @@ class _SuggestionChip extends StatelessWidget {
                 Flexible(
                   child: Text(
                     suggestion.label,
-                    maxLines: 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     textAlign: TextAlign.center,
                     style: _MindAidText.suggestion,
@@ -941,13 +905,42 @@ class _DisclaimerPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(0, 6, 0, 0),
-      padding: const EdgeInsets.fromLTRB(22, 13, 22, 13),
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: const BoxDecoration(
         color: _MindAidColors.disclaimer,
-        border: Border(top: BorderSide(color: Color(0x0D000000))),
+        borderRadius: BorderRadius.all(Radius.circular(10)),
       ),
-      child: Text(text, style: _MindAidText.disclaimer),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline_rounded, size: 16),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              'MindAid provides non-clinical wellness support.',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _MindAidText.disclaimer,
+            ),
+          ),
+          TextButton(
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (_) => AlertDialog(
+                title: const Text('About MindAid'),
+                content: Text(text),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close'),
+                  ),
+                ],
+              ),
+            ),
+            child: const Text('Learn more'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -968,15 +961,15 @@ class _MindAidComposer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(8, 10, 14, 12),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
         decoration: const BoxDecoration(
           color: Colors.white,
           border: Border(top: BorderSide(color: Color(0xFFE3E3E3))),
           boxShadow: [
             BoxShadow(
-              color: Color(0x16000000),
-              blurRadius: 10,
-              offset: Offset(0, -4),
+              color: Color(0x10000000),
+              blurRadius: 6,
+              offset: Offset(0, -2),
             ),
           ],
         ),
@@ -1004,20 +997,20 @@ class _MindAidComposer extends StatelessWidget {
                   hintText: 'Type your message...',
                   hintStyle: _MindAidText.inputHint,
                   contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
+                    horizontal: 14,
+                    vertical: 10,
                   ),
                   filled: true,
                   fillColor: Colors.white,
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
+                    borderRadius: BorderRadius.circular(18),
                     borderSide: const BorderSide(
                       color: _MindAidColors.inputBorder,
                       width: 2,
                     ),
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(15),
+                    borderRadius: BorderRadius.circular(18),
                     borderSide: const BorderSide(
                       color: _MindAidColors.sun,
                       width: 2,
@@ -1026,19 +1019,7 @@ class _MindAidComposer extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 10),
-            Tooltip(
-              message: 'Voice input',
-              child: IconButton(
-                onPressed: null,
-                icon: const Icon(
-                  Icons.mic_rounded,
-                  size: 26,
-                  color: _MindAidColors.mic,
-                ),
-              ),
-            ),
-            const SizedBox(width: 2),
+            const SizedBox(width: 6),
             _SendButton(canSend: canSend, onSend: onSend),
           ],
         ),
@@ -1107,17 +1088,13 @@ class _MindAidAssetImage extends StatelessWidget {
     required this.assetName,
     this.width,
     this.height,
-    this.fit = BoxFit.contain,
     this.fallbackIcon,
-    this.fallbackText,
   });
 
   final String assetName;
   final double? width;
   final double? height;
-  final BoxFit fit;
   final IconData? fallbackIcon;
-  final String? fallbackText;
 
   @override
   Widget build(BuildContext context) {
@@ -1125,12 +1102,8 @@ class _MindAidAssetImage extends StatelessWidget {
       '${AppAssets.messageImages}/$assetName',
       width: width,
       height: height,
-      fit: fit,
+      fit: BoxFit.contain,
       errorBuilder: (_, _, _) {
-        if (fallbackText != null) {
-          return Text(fallbackText!, style: _MindAidText.brandFallback);
-        }
-
         return SizedBox(
           width: width,
           height: height,
@@ -1144,38 +1117,11 @@ class _MindAidAssetImage extends StatelessWidget {
   }
 }
 
-class _AnimatedMindAidSection extends StatelessWidget {
-  const _AnimatedMindAidSection({required this.child, required this.delay});
-
-  final Widget child;
-  final int delay;
-
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(begin: 0, end: 1),
-      duration: Duration(milliseconds: 320 + delay),
-      curve: Curves.easeOutCubic,
-      builder: (context, value, animatedChild) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, (1 - value) * 14),
-            child: animatedChild,
-          ),
-        );
-      },
-      child: child,
-    );
-  }
-}
-
 class _MindAidColors {
   const _MindAidColors._();
 
   static const background = Color(0xFFFAFAFA);
   static const sun = Color(0xFFFFCD3A);
-  static const sunLight = Color(0xFFFFD84E);
   static const softSun = Color(0xFFFFE59A);
   static const aiBubble = Color(0xFFFFF4D8);
   static const userBubble = Color(0xFFE0E0E0);
@@ -1185,7 +1131,6 @@ class _MindAidColors {
   static const text = Color(0xFF6F5613);
   static const deepText = Color(0xFF2D2308);
   static const muted = Color(0xFF8B8B8B);
-  static const mic = Color(0xFF9D9D9D);
   static const cardBorder = Color(0x19A67C00);
 }
 
@@ -1204,22 +1149,16 @@ class _MindAidShadows {
 class _MindAidText {
   const _MindAidText._();
 
-  static const brandFallback = TextStyle(
-    color: Colors.black,
-    fontSize: 24,
-    fontWeight: FontWeight.w900,
+  static const headerTitle = TextStyle(
+    color: _MindAidColors.deepText,
+    fontSize: 17,
+    fontWeight: FontWeight.w800,
   );
 
-  static const profileTitle = TextStyle(
-    color: Color(0xFFFFB700),
-    fontSize: 19,
-    fontWeight: FontWeight.w900,
-  );
-
-  static const profileSubtitle = TextStyle(
-    color: Color(0xFFFFB700),
-    fontSize: 12,
-    fontWeight: FontWeight.w700,
+  static const headerSubtitle = TextStyle(
+    color: _MindAidColors.muted,
+    fontSize: 11,
+    fontWeight: FontWeight.w600,
   );
 
   static const message = TextStyle(
@@ -1267,12 +1206,6 @@ class _MindAidText {
     fontSize: 9.5,
     height: 1.15,
     fontWeight: FontWeight.w600,
-  );
-
-  static const suggestionsTitle = TextStyle(
-    color: Colors.black,
-    fontSize: 13,
-    fontWeight: FontWeight.w700,
   );
 
   static const suggestion = TextStyle(

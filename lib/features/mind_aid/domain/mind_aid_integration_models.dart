@@ -5,7 +5,8 @@ enum MindAidActionType {
   openInsights,
   openCounselingServices,
   bookAppointment,
-  viewAppointments;
+  viewAppointments,
+  dismissPending;
 
   static MindAidActionType? fromWire(String value) {
     for (final item in values) {

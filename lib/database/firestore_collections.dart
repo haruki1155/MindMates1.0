@@ -40,6 +40,7 @@ class FirestoreCollections {
   static const secretChatEvents = '_secret_chat_events';
   static const mindAidMessages = 'mind_aid_messages';
   static const mindAidPreferences = 'mind_aid_preferences';
+  static const mindAidDialogueState = 'mind_aid_dialogue_state';
   static const mindAidFeedback = 'mind_aid_feedback';
   static const mindAidAnalyticsDaily = 'mind_aid_analytics_daily';
 }

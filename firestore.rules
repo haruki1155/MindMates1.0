@@ -271,7 +271,65 @@ service cloud.firestore {
         && (request.resource.data.sender == 'user'
           || request.resource.data.source == 'local');
       allow read, delete: if isOwner(resource.data.userId);
-      allow update: if false;
+      allow update: if isOwner(resource.data.userId)
+        && resource.data.sender == 'assistant'
+        && resource.data.requiresEscalation == false
+        && resource.data.safetyLevel == 'safeSupport'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paaccDisplay'])
+        && request.resource.data.paaccDisplay is map
+        && request.resource.data.paaccDisplay.keys().hasOnly(['text', 'actions'])
+        && request.resource.data.paaccDisplay.text is string
+        && request.resource.data.paaccDisplay.text.size() >= 1
+        && request.resource.data.paaccDisplay.text.size() <= 600
+        && request.resource.data.paaccDisplay.actions is list
+        && request.resource.data.paaccDisplay.actions.size() <= 1
+        && (request.resource.data.paaccDisplay.actions.size() == 0 ||
+          (request.resource.data.paaccDisplay.actions[0] is map
+            && request.resource.data.paaccDisplay.actions[0].keys().hasOnly(['type', 'label', 'payload'])
+            && request.resource.data.paaccDisplay.actions[0].type in [
+              'bookAppointment', 'viewAppointments', 'openAssessment', 'openCounselingServices', 'startBreathing'
+            ]
+            && request.resource.data.paaccDisplay.actions[0].label is string
+            && request.resource.data.paaccDisplay.actions[0].label.size() <= 80
+            && request.resource.data.paaccDisplay.actions[0].payload == {}));
+    }
+
+    match /mind_aid_dialogue_state/{userId}/conversations/{conversationId} {
+      function validDialogueState() {
+        return request.resource.data.keys().hasOnly(['userId', 'conversationId', 'pending', 'updatedAt'])
+          && request.resource.data.userId == userId
+          && request.resource.data.conversationId == conversationId
+          && conversationId.size() >= 1
+          && conversationId.size() <= 64
+          && request.resource.data.updatedAt == request.time
+          && (request.resource.data.pending == null ||
+            (request.resource.data.pending is map
+              && request.resource.data.pending.keys().hasOnly(['sourceMessageId', 'action', 'expiresAt'])
+              && request.resource.data.pending.sourceMessageId is string
+              && request.resource.data.pending.sourceMessageId.size() <= 128
+              && request.resource.data.pending.expiresAt is timestamp
+              && request.resource.data.pending.expiresAt <= request.time + duration.value(11, 'm')
+              && get(/databases/$(database)/documents/mind_aid_messages/$(request.resource.data.pending.sourceMessageId)).data.userId == userId
+              && get(/databases/$(database)/documents/mind_aid_messages/$(request.resource.data.pending.sourceMessageId)).data.conversationId == conversationId
+              && get(/databases/$(database)/documents/mind_aid_messages/$(request.resource.data.pending.sourceMessageId)).data.sender == 'assistant'
+              && get(/databases/$(database)/documents/mind_aid_messages/$(request.resource.data.pending.sourceMessageId)).data.requiresEscalation == false
+              && get(/databases/$(database)/documents/mind_aid_messages/$(request.resource.data.pending.sourceMessageId)).data.safetyLevel in ['safeSupport', 'needsClarification']
+              && request.resource.data.pending.action is map
+              && request.resource.data.pending.action.keys().hasOnly(['type', 'label', 'payload'])
+              && request.resource.data.pending.action.type in [
+                'bookAppointment', 'viewAppointments', 'openAssessment', 'openCounselingServices', 'startBreathing'
+              ]
+              && request.resource.data.pending.action.label is string
+              && request.resource.data.pending.action.label.size() <= 80
+              && request.resource.data.pending.action.payload == {}));
+      }
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && validDialogueState();
+      allow update: if isOwner(userId)
+        && validDialogueState()
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.conversationId == resource.data.conversationId;
+      allow delete: if isOwner(userId);
     }
 
     function validSleepTags(data) {

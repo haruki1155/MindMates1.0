@@ -46,6 +46,7 @@ void main() {
 
     final launcher = find.byKey(const ValueKey('globalMindAidLauncher'));
     final initialCenter = tester.getCenter(launcher);
+    expect(tester.getRect(launcher).bottom, lessThanOrEqualTo(700));
 
     await tester.drag(launcher, const Offset(-180, -260));
     await tester.pump();
@@ -60,6 +61,9 @@ void main() {
     final boundedRect = tester.getRect(launcher);
     expect(boundedRect.left, greaterThanOrEqualTo(12));
     expect(boundedRect.top, greaterThanOrEqualTo(12));
+    await tester.drag(launcher, const Offset(1000, 1000));
+    await tester.pump();
+    expect(tester.getRect(launcher).bottom, lessThanOrEqualTo(700));
     expect(tester.takeException(), isNull);
   });
 }

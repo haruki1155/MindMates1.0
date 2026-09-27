@@ -1,11 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '/features/counseling/screens/mind_aid_screen.dart';
 import '/features/mind_aid/domain/mind_aid_context.dart';
+import '/features/mind_aid/domain/mind_aid_dialogue_state.dart';
 import '/features/mind_aid/domain/mind_aid_integration_models.dart';
 import '/features/mind_aid/domain/mind_aid_safety.dart';
 import '/features/mind_aid/models/paacc_route_decision.dart';
 import '/features/mind_aid/services/paacc_intent_router.dart';
+import '/features/mind_aid/services/paacc_intent_resolver.dart';
+import '/features/mind_aid/services/paacc_mind_aid_response_composer.dart';
 import '/models/mind_aid_message_model.dart';
 import '/models/mind_aid_suggestion_model.dart';
 import '/repositories/mind_aid_repository_screen.dart';
@@ -27,6 +32,7 @@ class MindAidAnalyticsSnapshot {
 class MindAidProvider extends ChangeNotifier {
   final MindAidRepository repository;
   final PaaccIntentRouter _paaccIntentRouter;
+  final PaaccIntentResolver _paaccResolver = const PaaccIntentResolver();
 
   MindAidProvider(this.repository, {PaaccIntentRouter? paaccIntentRouter})
     : _paaccIntentRouter = paaccIntentRouter ?? PaaccIntentRouter();
@@ -43,7 +49,13 @@ class MindAidProvider extends ChangeNotifier {
   String? _lastFailedText;
   String? _sessionUserId;
   bool _lastUserMessagePersisted = false;
+  int _conversationRevision = 0;
   PaaccRouteDecision? _lastPaaccRouteDecision;
+  final List<PaaccRouteDecision> _routingDiagnostics = [];
+  MindAidDialogueState? _dialogueState;
+  Timer? _dialogueExpiryTimer;
+  bool _dialogueStateSynced = false;
+  String? dialogueSyncError;
   String? _paaccRoutingError;
   int _selectedSuggestionCount = 0;
   int _highRiskTriggerCount = 0;
@@ -63,6 +75,12 @@ class MindAidProvider extends ChangeNotifier {
   String? get lastFailedText => _lastFailedText;
   PaaccRouteDecision? get lastPaaccRouteDecision => _lastPaaccRouteDecision;
   String? get paaccRoutingError => _paaccRoutingError;
+  List<PaaccRouteDecision> get routingDiagnostics =>
+      List.unmodifiable(_routingDiagnostics);
+  String? get activeActionMessageId =>
+      _dialogueState?.isPendingAt(DateTime.now()) == true
+      ? _dialogueState!.sourceMessageId
+      : null;
 
   Future<void> loadChat(
     String userId, {
@@ -74,8 +92,16 @@ class MindAidProvider extends ChangeNotifier {
     if (_sessionUserId != userId) {
       repository.resetSession();
       _sessionUserId = userId;
+      _dialogueState = null;
+      _dialogueStateSynced = false;
+      _dialogueExpiryTimer?.cancel();
+      _routingDiagnostics.clear();
     }
     final effectiveContext = _contextWithSessionMemory(context);
+    final previousConversationId = _preferences?.conversationId;
+    final previousDialogueState = _dialogueState;
+    final previousDialogueStateSynced = _dialogueStateSynced;
+    final loadRevision = _conversationRevision;
     isLoading = true;
     notifyListeners();
 
@@ -90,24 +116,42 @@ class MindAidProvider extends ChangeNotifier {
       ]);
       final msgResult = results[0] as List<MindAidMessageModel>;
       final sugResult = results[1] as List<MindAidSuggestionModel>;
+      if (loadRevision != _conversationRevision || _sessionUserId != userId) {
+        return;
+      }
 
-      messages = msgResult
-          .map(
-            (e) => MindAidMessage(
-              id: e.id,
-              sender: e.sender == "user"
-                  ? MindAidSender.user
-                  : MindAidSender.assistant,
-              text: e.text,
-              createdAt: e.createdAt,
-              status: e.status,
-              categoryLabel: null,
-              supportCards: const [],
-              actions: e.actions,
-              source: e.source,
-            ),
-          )
-          .toList();
+      final conversationId = _preferences?.conversationId ?? userId;
+      final sameConversation = previousConversationId == conversationId;
+      MindAidDialogueState loadedState;
+      try {
+        loadedState = await repository.loadDialogueState(
+          userId,
+          conversationId,
+        );
+        _dialogueStateSynced = true;
+      } catch (_) {
+        loadedState = _dialogueState?.conversationId == conversationId
+            ? _dialogueState!
+            : MindAidDialogueState(conversationId: conversationId);
+        _dialogueStateSynced = false;
+      }
+      final displayedMessages = await _displayMessagesForHistory(msgResult);
+      if (loadRevision != _conversationRevision || _sessionUserId != userId) {
+        return;
+      }
+      final keepLocalPending = sameConversation &&
+          !previousDialogueStateSynced &&
+          previousDialogueState?.isPendingAt(DateTime.now()) == true &&
+          !loadedState.isPendingAt(DateTime.now());
+      _dialogueState = keepLocalPending ? previousDialogueState : loadedState;
+      if (keepLocalPending) _dialogueStateSynced = false;
+      if (!sameConversation ||
+          messages.isEmpty ||
+          displayedMessages.any((message) => message.id == messages.last.id)) {
+        messages = displayedMessages;
+      }
+      _scheduleDialogueExpiry();
+      _stripInactiveActions();
 
       suggestions = _suggestionsWithAssessmentReview(
         sugResult
@@ -131,9 +175,15 @@ class MindAidProvider extends ChangeNotifier {
         ].take(5).toList(growable: false);
       }
     } catch (e) {
+      if (loadRevision != _conversationRevision || _sessionUserId != userId) {
+        return;
+      }
       errorMessage = 'MindAid could not load this conversation.';
     }
 
+    if (loadRevision != _conversationRevision || _sessionUserId != userId) {
+      return;
+    }
     isLoading = false;
     notifyListeners();
   }
@@ -148,6 +198,8 @@ class MindAidProvider extends ChangeNotifier {
       return false;
     }
     final effectiveContext = _contextWithSessionMemory(context);
+    _conversationRevision += 1;
+    isLoading = false;
     isSending = true;
     _lastUserMessagePersisted = false;
     notifyListeners();
@@ -155,13 +207,16 @@ class MindAidProvider extends ChangeNotifier {
     try {
       _lastFailedText = null;
       _paaccRoutingError = null;
-      try {
-        _lastPaaccRouteDecision = await _paaccIntentRouter.route(trimmedText);
-      } catch (_) {
-        // Intent routing is an optional enhancement; retain the existing,
-        // independently safety-screened MindAid path on ML infrastructure failure.
-        _lastPaaccRouteDecision = null;
-        _paaccRoutingError = 'Intent routing is temporarily unavailable.';
+      _lastPaaccRouteDecision = null;
+      if (userId != 'guest' && _dialogueStateSynced) {
+        try {
+          _dialogueState = await repository.loadDialogueState(
+            userId,
+            _preferences?.conversationId ?? userId,
+          );
+        } catch (_) {
+          // Continue from this device's pending choice when sync is unavailable.
+        }
       }
       final userMessage = MindAidMessage(
         id: DateTime.now().toString(),
@@ -190,19 +245,97 @@ class MindAidProvider extends ChangeNotifier {
         launchContext: _launchContext?.source ?? '',
       );
       final bot = result.message;
+      PaaccMindAidResponse? paaccResponse;
+      final isSafety =
+          result.chatResponse.requiresEscalation ||
+          result.chatResponse.safetyLevel.blocksCloud;
+      if (isSafety) {
+        await _setDialogueState(userId, null);
+      } else {
+        final pending = _dialogueState;
+        final normalized = trimmedText
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^a-z]+'), ' ')
+            .trim();
+        if (pending?.isPendingAt(DateTime.now()) == true &&
+            normalized == 'no') {
+          paaccResponse = const PaaccMindAidResponse(
+            text:
+                'Okay. We can talk about something else whenever you are ready.',
+          );
+          await _setDialogueState(userId, null);
+        } else if (pending?.isPendingAt(DateTime.now()) == true &&
+            normalized == 'yes') {
+          paaccResponse = PaaccMindAidResponse(
+            text: 'You can use the button below whenever you are ready.',
+            actions: [pending!.action!],
+          );
+          await _setDialogueState(
+            userId,
+            MindAidDialogueState(
+              conversationId: pending.conversationId,
+              sourceMessageId: bot.id,
+              action: pending.action,
+              expiresAt: pending.expiresAt,
+            ),
+          );
+        } else {
+          await _setDialogueState(userId, null);
+          PaaccRouteDecision? prediction;
+          try {
+            prediction = await _paaccIntentRouter.route(trimmedText);
+          } catch (_) {
+            _paaccRoutingError = 'Intent routing is temporarily unavailable.';
+          }
+          _lastPaaccRouteDecision = _paaccResolver.resolve(
+            trimmedText,
+            prediction,
+          );
+          _routingDiagnostics.add(_lastPaaccRouteDecision!);
+          if (_routingDiagnostics.length > 50) _routingDiagnostics.removeAt(0);
+          paaccResponse = const PaaccMindAidResponseComposer().compose(
+            _lastPaaccRouteDecision!,
+          );
+          if (paaccResponse.actions.isNotEmpty) {
+            await _setDialogueState(
+              userId,
+              MindAidDialogueState(
+                conversationId: _preferences?.conversationId ?? userId,
+                sourceMessageId: bot.id,
+                action: paaccResponse.actions.first,
+                expiresAt: DateTime.now().add(const Duration(minutes: 10)),
+              ),
+            );
+          }
+        }
+      }
+      if (paaccResponse != null) {
+        await repository.savePaaccDisplayOverride(
+          messageId: bot.id,
+          text: paaccResponse.text,
+          actions: paaccResponse.actions,
+        );
+      }
 
       final botMessage = MindAidMessage(
         id: bot.id,
         sender: MindAidSender.assistant,
-        text: bot.text,
+        text: paaccResponse?.text ?? bot.text,
         createdAt: bot.createdAt,
         status: bot.status,
-        categoryLabel: _categoryLabelFor(result),
-        supportCards: _supportCardsFor(result, context),
-        actions: _actionsFor(result),
+        categoryLabel: paaccResponse == null ? _categoryLabelFor(result) : null,
+        supportCards:
+            paaccResponse == null ||
+                _lastPaaccRouteDecision?.route == PaaccRouteType.venting ||
+                _lastPaaccRouteDecision?.route == PaaccRouteType.copingHelp ||
+                _lastPaaccRouteDecision?.route == PaaccRouteType.assessmentHelp
+            ? _supportCardsFor(result, context)
+            : const [],
+        actions: paaccResponse?.actions ?? _actionsFor(result),
         source: result.chatResponse.source,
       );
 
+      _stripInactiveActions();
       messages.add(botMessage);
       suggestions = _suggestionsWithAssessmentReview(
         result.suggestions
@@ -274,6 +407,7 @@ class MindAidProvider extends ChangeNotifier {
   }
 
   Future<void> clearHistory(String userId) async {
+    await _setDialogueState(userId, null);
     await repository.clearHistory(userId);
     repository.resetSession();
     messages = [];
@@ -284,6 +418,7 @@ class MindAidProvider extends ChangeNotifier {
   }
 
   Future<void> startNewConversation(String userId) async {
+    await _setDialogueState(userId, null);
     final nextId = await repository.startNewConversation(userId);
     repository.resetSession();
     final current = _preferences;
@@ -295,6 +430,7 @@ class MindAidProvider extends ChangeNotifier {
       consentVersion: current?.consentVersion,
     );
     messages = [];
+    _dialogueState = MindAidDialogueState(conversationId: nextId);
     _conversationSummary = null;
     _lastFailedText = null;
     notifyListeners();
@@ -518,8 +654,205 @@ class MindAidProvider extends ChangeNotifier {
     return const [];
   }
 
+  Future<void> _setDialogueState(
+    String userId,
+    MindAidDialogueState? next,
+  ) async {
+    final state =
+        next ??
+        MindAidDialogueState(
+          conversationId: _preferences?.conversationId ?? userId,
+        );
+    _dialogueState = state;
+    _dialogueStateSynced = false;
+    _scheduleDialogueExpiry();
+    try {
+      await repository.saveDialogueState(userId, state);
+      _dialogueStateSynced = true;
+      dialogueSyncError = null;
+    } catch (_) {
+      dialogueSyncError =
+          'Dialogue choices could not sync. Please try again when connected.';
+    }
+  }
+
+  void _scheduleDialogueExpiry() {
+    _dialogueExpiryTimer?.cancel();
+    final expiry = _dialogueState?.expiresAt;
+    if (expiry == null) return;
+    final remaining = expiry.difference(DateTime.now());
+    if (remaining.isNegative) return;
+    _dialogueExpiryTimer = Timer(remaining, () {
+      _stripInactiveActions();
+      notifyListeners();
+    });
+  }
+
+  Future<void> addReturnPrompt(MindAidAction action) async {
+    if (messages.lastOrNull?.status == 'urgent') return;
+    final text = switch (action.type) {
+      MindAidActionType.bookAppointment || MindAidActionType.viewAppointments =>
+        'Would you like help preparing what to discuss with PACC?',
+      MindAidActionType.openAssessment =>
+        'Would you like to talk about how the self-assessment felt?',
+      MindAidActionType.startBreathing =>
+        'How are you feeling after taking that pause?',
+      MindAidActionType.openCounselingServices =>
+        'Is there a support service you would like to know more about?',
+      _ => null,
+    };
+    if (text == null) return;
+    final message = MindAidMessage(
+      id: 'return_${DateTime.now().microsecondsSinceEpoch}',
+      sender: MindAidSender.assistant,
+      text: text,
+      createdAt: DateTime.now(),
+    );
+    messages.add(message);
+    notifyListeners();
+    final userId = _sessionUserId;
+    if (userId == null || userId == 'guest') return;
+    await repository.saveDialogueFollowUp(
+      userId,
+      MindAidMessageModel(
+        id: message.id,
+        conversationId: _preferences?.conversationId ?? userId,
+        sender: 'assistant',
+        text: message.text,
+        createdAt: message.createdAt,
+        status: 'sent',
+        safetyLevel: MindAidSafetyLevel.safeSupport.name,
+      ),
+    );
+  }
+
+  Future<bool> consumeAction(
+    String userId,
+    String messageId,
+    MindAidAction action,
+  ) async {
+    if (isSending || isLoading) return false;
+    final message = messages.where((item) => item.id == messageId).firstOrNull;
+    if (message?.status == 'urgent') {
+      return message!.actions.any(
+        (allowed) =>
+            allowed.type == action.type && allowed.label == action.label,
+      );
+    }
+    final state = _dialogueState;
+    final dismiss = action.type == MindAidActionType.dismissPending;
+    if (state == null ||
+        (dismiss
+            ? !(state.isPendingAt(DateTime.now()) &&
+                  state.sourceMessageId == messageId)
+            : !state.matches(messageId, action, DateTime.now()))) {
+      return false;
+    }
+    if (_dialogueStateSynced) {
+      try {
+        if (!await repository.consumeDialogueAction(
+          userId,
+          state.conversationId,
+          messageId,
+          action,
+          dismiss: dismiss,
+        )) {
+          errorMessage =
+              'That choice is no longer available. Please ask MindAid again.';
+          notifyListeners();
+          return false;
+        }
+      } catch (_) {
+        errorMessage =
+            'MindAid could not verify that choice. Please check your connection and try again.';
+        notifyListeners();
+        return false;
+      }
+    }
+    _dialogueState = MindAidDialogueState(conversationId: state.conversationId);
+    _scheduleDialogueExpiry();
+    _stripInactiveActions();
+    notifyListeners();
+    return true;
+  }
+
+  void _stripInactiveActions() {
+    final activeId = activeActionMessageId;
+    messages = messages.map((message) {
+      if (message.actions.isEmpty ||
+          message.status == 'urgent' ||
+          message.id == activeId) {
+        return message;
+      }
+      return MindAidMessage(
+        id: message.id,
+        sender: message.sender,
+        text: message.text,
+        createdAt: message.createdAt,
+        status: message.status,
+        categoryLabel: message.categoryLabel,
+        supportCards: message.supportCards,
+        source: message.source,
+      );
+    }).toList();
+  }
+
+  Future<List<MindAidMessage>> _displayMessagesForHistory(
+    List<MindAidMessageModel> history,
+  ) async {
+    final displayed = <MindAidMessage>[];
+    for (var index = 0; index < history.length; index++) {
+      final message = history[index];
+      PaaccMindAidResponse? paaccResponse;
+      if (message.sender == 'assistant' &&
+          !message.hasPaaccDisplay &&
+          index > 0 &&
+          history[index - 1].sender == 'user' &&
+          !_historyResponseRequiresSafety(message)) {
+        try {
+          final decision = await _paaccIntentRouter.route(
+            history[index - 1].text,
+          );
+          paaccResponse = const PaaccMindAidResponseComposer().compose(
+            _paaccResolver.resolve(history[index - 1].text, decision),
+          );
+        } catch (_) {
+          // Preserve the recorded response if the optional on-device route
+          // cannot be restored while history is loading.
+        }
+      }
+      displayed.add(
+        MindAidMessage(
+          id: message.id,
+          sender: message.sender == 'user'
+              ? MindAidSender.user
+              : MindAidSender.assistant,
+          text: paaccResponse?.text ?? message.text,
+          createdAt: message.createdAt,
+          status: message.status,
+          categoryLabel: null,
+          supportCards: const [],
+          actions: paaccResponse?.actions ?? message.actions,
+          source: message.source,
+        ),
+      );
+    }
+    return displayed;
+  }
+
+  bool _historyResponseRequiresSafety(MindAidMessageModel message) {
+    if (message.requiresEscalation) return true;
+    if (message.safetyLevel == null) return true;
+    final safetyLevel = MindAidSafetyLevel.values.firstWhere(
+      (level) => level.name == message.safetyLevel,
+      orElse: () => MindAidSafetyLevel.highDistress,
+    );
+    return safetyLevel.blocksCloud;
+  }
+
   @override
   void dispose() {
+    _dialogueExpiryTimer?.cancel();
     _paaccIntentRouter.dispose();
     super.dispose();
   }

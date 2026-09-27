@@ -59,7 +59,16 @@ class _MindAidPageState extends State<MindAidPage> {
         _selectSuggestionAndRecordActivity(userId, suggestion, mindAidContext);
       },
       onNotificationTap: () {},
-      onActionSelected: (action) => _handleAction(action, launchContext),
+      onActionSelected: (messageId, action) async {
+        if (!await provider.consumeAction(userId, messageId, action) ||
+            !mounted) {
+          return;
+        }
+        if (action.type != MindAidActionType.dismissPending) {
+          await _handleAction(action, launchContext);
+          if (mounted) await provider.addReturnPrompt(action);
+        }
+      },
       onFeedback: (messageId, helpful) async {
         if (userId == 'guest') return;
         await provider.submitFeedback(
@@ -289,22 +298,27 @@ class _MindAidPageState extends State<MindAidPage> {
     await provider.startNewConversation(userId);
   }
 
-  void _handleAction(MindAidAction action, MindAidLaunchContext launchContext) {
+  Future<void> _handleAction(
+    MindAidAction action,
+    MindAidLaunchContext launchContext,
+  ) async {
     switch (action.type) {
+      case MindAidActionType.dismissPending:
+        return;
       case MindAidActionType.logMood:
-        Navigator.pushNamed(context, RouteNames.logMood);
+        await Navigator.pushNamed(context, RouteNames.logMood);
         return;
       case MindAidActionType.startBreathing:
-        Navigator.pushNamed(context, RouteNames.mindfulBreathing);
+        await Navigator.pushNamed(context, RouteNames.mindfulBreathing);
         return;
       case MindAidActionType.openAssessment:
-        Navigator.pushNamed(context, RouteNames.studentAssessment);
+        await Navigator.pushNamed(context, RouteNames.studentAssessment);
         return;
       case MindAidActionType.openInsights:
-        Navigator.pushNamed(context, RouteNames.mentalHealthInsights);
+        await Navigator.pushNamed(context, RouteNames.mentalHealthInsights);
         return;
       case MindAidActionType.openCounselingServices:
-        Navigator.pushNamed(context, RouteNames.services);
+        await Navigator.pushNamed(context, RouteNames.services);
         return;
       case MindAidActionType.bookAppointment:
         final concern =
@@ -312,7 +326,7 @@ class _MindAidPageState extends State<MindAidPage> {
                     launchContext.appointmentConcern ??
                     'I would like support with a concern discussed in MindAid.')
                 .toString();
-        Navigator.of(context).push(
+        await Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => PaccCounselingScreen(
               startBooking: true,
@@ -322,7 +336,7 @@ class _MindAidPageState extends State<MindAidPage> {
         );
         return;
       case MindAidActionType.viewAppointments:
-        Navigator.of(
+        await Navigator.of(
           context,
         ).push(MaterialPageRoute(builder: (_) => const PaccCounselingScreen()));
         return;

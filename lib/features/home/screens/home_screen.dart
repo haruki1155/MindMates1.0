@@ -142,6 +142,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onForegroundMessage: _showForegroundNotification,
             )
             .catchError((_) {});
+        _readProviderOrNull<NotificationProvider>(context)?.loadForUser(userId);
         _readProviderOrNull<UserProvider>(
           context,
         )?.recordActivity(userId, UserActivityType.appOpen);
@@ -158,7 +159,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final appointmentProvider = _readProviderOrNull<AppointmentProvider>(
       context,
     );
-    _readProviderOrNull<NotificationProvider>(context)?.loadForUser(userId);
     if (appointmentProvider != null && _loadedAppointmentUserId != userId) {
       _loadedAppointmentUserId = userId;
       WidgetsBinding.instance.addPostFrameCallback((_) {

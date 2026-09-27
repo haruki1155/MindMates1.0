@@ -62,6 +62,7 @@ class MindAidLauncherOverlay extends StatefulWidget {
 class _MindAidLauncherOverlayState extends State<MindAidLauncherOverlay> {
   static const double _launcherSize = 48;
   static const double _edgeMargin = 12;
+  static const double _bottomControlClearance = 88;
 
   Offset? _position;
   Offset _displayedPosition = Offset.zero;
@@ -149,7 +150,12 @@ class _MindAidLauncherOverlayState extends State<MindAidLauncherOverlay> {
     final right =
         constraints.maxWidth - padding.right - _edgeMargin - _launcherSize;
     final bottom =
-        constraints.maxHeight - padding.bottom - _edgeMargin - _launcherSize;
+        constraints.maxHeight -
+        padding.bottom -
+        MediaQuery.viewInsetsOf(context).bottom -
+        _bottomControlClearance -
+        _edgeMargin -
+        _launcherSize;
     return Rect.fromLTRB(
       left,
       top,

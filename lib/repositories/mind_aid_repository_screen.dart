@@ -10,6 +10,7 @@ import '../features/mind_aid/domain/mind_aid_chat_models.dart';
 import '../features/mind_aid/domain/mind_aid_context.dart';
 import '../features/mind_aid/domain/mind_aid_engine_result.dart';
 import '../features/mind_aid/domain/mind_aid_integration_models.dart';
+import '../features/mind_aid/domain/mind_aid_dialogue_state.dart';
 import '../features/mind_aid/domain/mind_aid_dataset_models.dart';
 import '../features/mind_aid/domain/mind_aid_safety.dart';
 import '../models/mind_aid_message_model.dart';
@@ -129,22 +130,40 @@ class MindAidRepository {
     String? conversationId,
   }) async {
     try {
-      final docs = await _firestoreService.getDocuments(
-        FirestoreCollections.mindAidMessages,
-        whereEquals: {
-          'userId': userId,
-          if (conversationId?.trim().isNotEmpty == true)
-            'conversationId': conversationId!.trim(),
-        },
-        orderBy: 'createdAt',
-        descending: false,
-        limit: 50,
+      var query = _firestoreService.firestore
+          .collection(FirestoreCollections.mindAidMessages)
+          .where('userId', isEqualTo: userId);
+      if (conversationId?.trim().isNotEmpty == true) {
+        query = query.where(
+          'conversationId',
+          isEqualTo: conversationId!.trim(),
+        );
+      }
+      final snapshot = await query
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .get();
+      final docs = snapshot.docs.reversed.map(
+        (doc) => {'id': doc.id, ...doc.data()},
       );
       return docs
-          .map((doc) => MindAidMessageModel.fromMap(doc))
+          .map((doc) {
+            final paaccDisplay = doc['paaccDisplay'];
+            if (paaccDisplay is! Map ||
+                doc['requiresEscalation'] == true ||
+                doc['safetyLevel'] != 'safeSupport') {
+              return MindAidMessageModel.fromMap(doc);
+            }
+            return MindAidMessageModel.fromMap({
+              ...doc,
+              'text': paaccDisplay['text'] ?? doc['text'],
+              'actions': paaccDisplay['actions'] ?? doc['actions'],
+              'hasPaaccDisplay': true,
+            });
+          })
           .toList(growable: false);
     } catch (_) {
-      return [];
+      rethrow;
     }
   }
 
@@ -314,6 +333,111 @@ class MindAidRepository {
   Future<List<MindAidSuggestionModel>> fetchSuggestions() async {
     final dataset = await _datasetLoader.load();
     return dataset.suggestions;
+  }
+
+  Future<void> savePaaccDisplayOverride({
+    required String messageId,
+    required String text,
+    required List<MindAidAction> actions,
+  }) async {
+    try {
+      await _firestoreService.updateDocument(
+        FirestoreCollections.mindAidMessages,
+        messageId,
+        {
+          'paaccDisplay': {
+            'text': text,
+            'actions': actions
+                .map(
+                  (action) => {
+                    'type': action.type.name,
+                    'label': action.label,
+                    'payload': action.payload,
+                  },
+                )
+                .toList(growable: false),
+          },
+        },
+      );
+    } catch (_) {
+      // The live response remains available when an older deployment or rule
+      // set does not yet permit this optional display metadata.
+    }
+  }
+
+  DocumentReference<Map<String, dynamic>> _dialogueReference(
+    String userId,
+    String conversationId,
+  ) => _firestoreService.firestore
+      .collection(FirestoreCollections.mindAidDialogueState)
+      .doc(userId)
+      .collection('conversations')
+      .doc(conversationId);
+
+  Future<MindAidDialogueState> loadDialogueState(
+    String userId,
+    String conversationId,
+  ) async {
+    if (userId == 'guest') {
+      return MindAidDialogueState(conversationId: conversationId);
+    }
+    final snapshot = await _dialogueReference(userId, conversationId).get();
+    return MindAidDialogueState.fromMap(conversationId, snapshot.data());
+  }
+
+  Future<void> saveDialogueState(
+    String userId,
+    MindAidDialogueState state,
+  ) async {
+    if (userId == 'guest') return;
+    await _dialogueReference(userId, state.conversationId).set({
+      'userId': userId,
+      'conversationId': state.conversationId,
+      'pending': state.isPendingAt(DateTime.now())
+          ? state.toPendingMap()
+          : null,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<bool> saveDialogueFollowUp(
+    String userId,
+    MindAidMessageModel message,
+  ) => _trySaveMessage(userId: userId, message: message);
+
+  Future<bool> consumeDialogueAction(
+    String userId,
+    String conversationId,
+    String messageId,
+    MindAidAction action, {
+    bool dismiss = false,
+  }) async {
+    if (userId == 'guest') return true;
+    final reference = _dialogueReference(userId, conversationId);
+    return _firestoreService.firestore.runTransaction((transaction) async {
+      final preferences = await transaction.get(
+        _firestoreService.firestore
+            .collection(FirestoreCollections.mindAidPreferences)
+            .doc(userId),
+      );
+      if (preferences.data()?['conversationId'] != conversationId) return false;
+      final snapshot = await transaction.get(reference);
+      final state = MindAidDialogueState.fromMap(
+        conversationId,
+        snapshot.data(),
+      );
+      if (dismiss
+          ? !(state.isPendingAt(DateTime.now()) &&
+                state.sourceMessageId == messageId)
+          : !state.matches(messageId, action, DateTime.now())) {
+        return false;
+      }
+      transaction.update(reference, {
+        'pending': null,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    });
   }
 
   Future<void> _saveMessage({

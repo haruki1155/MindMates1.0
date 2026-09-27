@@ -117,6 +117,20 @@ class MindAidCloudService {
       }
       await batch.commit();
     }
+    while (true) {
+      final stateDocs = await _firestore
+          .collection(FirestoreCollections.mindAidDialogueState)
+          .doc(userId)
+          .collection('conversations')
+          .limit(400)
+          .get();
+      if (stateDocs.docs.isEmpty) break;
+      final batch = _firestore.batch();
+      for (final document in stateDocs.docs) {
+        batch.delete(document.reference);
+      }
+      await batch.commit();
+    }
     await startNewConversation(userId);
   }
 
