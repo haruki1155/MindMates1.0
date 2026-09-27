@@ -286,15 +286,14 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _step = _PaccAppointmentStep.time;
     });
     final provider = _readProviderOrNull<AppointmentProvider>();
-    final slots =
-        await provider?.getAvailableSlots(
-          date,
-        ) ??
-        const [];
+    final slots = await provider?.getAvailableSlots(date) ?? const [];
     if (!mounted || _selectedDate != date) return;
     setState(() {
       _availableTimes = slots.map((slot) => slot.label).toList(growable: false);
-      _noSlotMessage = slots.isEmpty ? provider?.slotAvailabilityMessage ?? 'No appointment times are available for this date. Please choose another date.' : null;
+      _noSlotMessage = slots.isEmpty
+          ? provider?.slotAvailabilityMessage ??
+                'No appointment times are available for this date. Please choose another date.'
+          : null;
       _loadingTimes = false;
     });
   }
@@ -319,7 +318,8 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   }
 
   void _startNewAppointment([AppointmentModel? priorAppointment]) {
-    final appointments = _readProviderOrNull<AppointmentProvider>()?.appointments ??
+    final appointments =
+        _readProviderOrNull<AppointmentProvider>()?.appointments ??
         const <AppointmentModel>[];
     if (appointments.any((appointment) => appointment.isActive)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1154,10 +1154,15 @@ class _TimeSelectionView extends StatelessWidget {
             );
           },
         ),
-        if (!isSaving && availableTimes.isEmpty) Padding(
-          padding: const EdgeInsets.only(top: 20),
-          child: Text(noSlotMessage ?? 'No appointment times are available for this date. Please choose another date.', style: _PaccText.body),
-        ),
+        if (!isSaving && availableTimes.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 20),
+            child: Text(
+              noSlotMessage ??
+                  'No appointment times are available for this date. Please choose another date.',
+              style: _PaccText.body,
+            ),
+          ),
         const SizedBox(height: 34),
         const _ReminderCard(),
         const SizedBox(height: 34),
