@@ -79,6 +79,26 @@ function actionFor(domain: StudentV4DomainId): string {
   return actions[domain];
 }
 
+function domainSummaryFor(domain: {
+  domainId: StudentV4DomainId; domainLabel: string; status: string; focusInsight: string | null; strengthInsight: string | null; suggestedAction: string;
+}) {
+  const summaryByStatus: Record<string, string> = {
+    supported: "Responses in this area were generally supportive during the past 7 days.",
+    mostlySupported: "This area was mostly supportive, with one or more patterns worth noticing.",
+    someStrain: "Responses suggest some strain in this area during the past 7 days.",
+    supportMayHelp: "Responses suggest this area may currently be placing meaningful strain on well-being.",
+    insufficientResponses: "There were not enough responses in this area to create a complete reflection.",
+  };
+  return {domainId: domain.domainId, domainLabel: domain.domainLabel, status: domain.status, summary: summaryByStatus[domain.status], focusInsight: domain.focusInsight, strengthInsight: domain.strengthInsight, suggestedAction: domain.suggestedAction};
+}
+
+function overallSummaryFor(domains: Array<{domainLabel: string; status: string}>, quality: {answered: number; presented: number; confidence: string}): string {
+  const count = (status: string) => domains.filter((domain) => domain.status === status).length;
+  const focus = domains.filter((domain) => domain.status === "someStrain" || domain.status === "supportMayHelp").map((domain) => domain.domainLabel).slice(0, 2);
+  const supported = domains.filter((domain) => domain.status === "supported").map((domain) => domain.domainLabel).slice(0, 2);
+  return `Across the five areas, ${count("supported")} were supported, ${count("mostlySupported")} were mostly supported, ${count("someStrain")} showed some strain, and ${count("supportMayHelp")} may benefit from support. ${focus.length ? `${focus.join(" and ")} ${focus.length === 1 ? "was" : "were"} the clearest area${focus.length === 1 ? "" : "s"} to explore.` : "No single area stood out as needing additional attention."} ${supported.length ? `${supported.join(" and ")} showed supportive patterns.` : ""} You answered ${quality.answered} of ${quality.presented} questions, giving this result ${quality.confidence} response completeness.`;
+}
+
 export function validateStudentV4Answers(answers: StudentV4Answer[]): void {
   if (!Array.isArray(answers) || answers.length !== STUDENT_V4_ITEMS.length) {
     throw new AssessmentValidationError("Student V4 requires all 50 item IDs exactly once.");
@@ -171,6 +191,7 @@ export function calculateStudentV4(answers: StudentV4Answer[]): Record<string, u
   const focusLabels = focus.map((domain) => domain.domainLabel);
   const strengthLabels = strengths.map((domain) => domain.domainLabel);
   const summary = `${profileLabels[profileStatus]} This is a snapshot of the past 7 days based on the areas you answered.`;
+  const domainSummaries = domainResults.map(domainSummaryFor);
   return {
     schemaVersion: "assessment_record_v4",
     assessmentKind: "full",
@@ -181,6 +202,7 @@ export function calculateStudentV4(answers: StudentV4Answer[]): Record<string, u
       recallPeriodDays: 7,
       responseScaleId: "agreement_4_no_neutral_v1",
       algorithmVersion: STUDENT_V4_ALGORITHM_VERSION,
+      referenceSetVersion: "mindmate_wellbeing_refs_v1",
     },
     result: {
       profileStatus,
@@ -200,6 +222,9 @@ export function calculateStudentV4(answers: StudentV4Answer[]): Record<string, u
     },
     interpretation: {
       studentSummary: summary,
+      userSummary: summary,
+      overallResponseSummary: overallSummaryFor(domainResults, {...responseQuality, confidence}),
+      domainSummaries,
       rationale: focusLabels.length
         ? [`Added attention: ${focusLabels.join(", ")}.`, ...(strengthLabels.length ? [`Supportive patterns: ${strengthLabels.join(", ")}.`] : [])]
         : ["No focus construct is shown until enough responses are available."],

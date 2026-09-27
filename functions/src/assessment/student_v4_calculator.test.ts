@@ -48,6 +48,25 @@ test("Student V4 uses agreement codes and creates a generally supported profile"
   assert.equal((profile.responseQuality as Record<string, unknown>).completionPercent, 100);
 });
 
+test("Student V4 emits the deterministic full-result interpretation contract", () => {
+  const first = calculateStudentV4(answersFor("low"));
+  const second = calculateStudentV4(answersFor("low"));
+  const instrument = first.instrument as Record<string, unknown>;
+  const interpretation = first.interpretation as Record<string, unknown>;
+  const domains = interpretation.domainSummaries as Record<string, unknown>[];
+  assert.equal(instrument.referenceSetVersion, "mindmate_wellbeing_refs_v1");
+  assert.equal(typeof interpretation.studentSummary, "string");
+  assert.equal(typeof interpretation.userSummary, "string");
+  assert.equal(typeof interpretation.overallResponseSummary, "string");
+  assert.equal(domains.length, 5);
+  for (const domain of domains) {
+    for (const key of ["domainId", "domainLabel", "status", "summary", "focusInsight", "strengthInsight", "suggestedAction"]) {
+      assert.ok(key in domain);
+    }
+  }
+  assert.deepEqual(first.interpretation, second.interpretation);
+});
+
 test("Student V4 rejects a response code and value mismatch", () => {
   const answers = answersFor("low");
   answers[0] = {...answers[0], responseValue: answers[0].responseValue === 4 ? 1 : 4};

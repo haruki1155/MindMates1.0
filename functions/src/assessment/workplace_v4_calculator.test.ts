@@ -67,3 +67,24 @@ test("workplace V4 profile precedence and non-teaching identity are role-specifi
   assert.equal(nonTeaching.algorithmVersion, "non_teaching_profile_v4");
   assert.ok((nonTeaching.interpretation as Record<string, unknown>).userSummary);
 });
+
+test("workplace V4 emits deterministic role-specific full-result contracts", () => {
+  const cases = [
+    [calculateTeachingV4, TEACHING_V4_ITEMS, ["Teaching Workload & Role Demands", "Collegial & Organizational Support", "Professional Engagement & Meaning", "Sleep & Rest", "Emotional Well-Being"]],
+    [calculateNonTeachingV4, NON_TEACHING_V4_ITEMS, ["Workload & Role Demands", "Supervisor, Team & Organizational Support", "Work Engagement & Meaning", "Sleep & Rest", "Emotional Well-Being"]],
+  ] as const;
+  for (const [calculate, items, labels] of cases) {
+    const first = calculate(answersFor(items));
+    const second = calculate(answersFor(items));
+    const instrument = first.instrument as Record<string, unknown>;
+    const interpretation = first.interpretation as Record<string, unknown>;
+    const domains = interpretation.domainSummaries as Record<string, unknown>[];
+    assert.equal(instrument.referenceSetVersion, "mindmate_wellbeing_refs_v1");
+    assert.equal(typeof interpretation.userSummary, "string");
+    assert.equal(typeof interpretation.overallResponseSummary, "string");
+    assert.deepEqual(domains.map((domain) => domain.domainLabel), labels);
+    for (const domain of domains) for (const key of ["domainId", "domainLabel", "status", "summary", "focusInsight", "strengthInsight", "suggestedAction"]) assert.ok(key in domain);
+    assert.match(interpretation.disclaimer as string, /not an evaluation of your job performance/);
+    assert.deepEqual(first.interpretation, second.interpretation);
+  }
+});
