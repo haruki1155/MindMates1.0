@@ -20,20 +20,21 @@ class MentalHealthInsightsScreen extends StatefulWidget {
 class _MentalHealthInsightsScreenState
     extends State<MentalHealthInsightsScreen> {
   final TextEditingController _searchController = TextEditingController();
-  bool _requestedInsights = false;
+  InsightRecommendationContext? _requestedContext;
   String _searchQuery = '';
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_requestedInsights) return;
-    _requestedInsights = true;
+    final recommendationContext = _recommendationContext();
+    if (_requestedContext == recommendationContext) return;
+    _requestedContext = recommendationContext;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _readProviderOrNull<InsightsProvider>(
         context,
-      )?.loadInsights(_currentUserId());
+      )?.loadInsights(recommendationContext);
     });
   }
 
@@ -97,7 +98,7 @@ class _MentalHealthInsightsScreenState
                           data != null) ...[
                         _InsightsErrorBanner(
                           onRetry: () => insightsProvider?.loadInsights(
-                            _currentUserId(),
+                            _recommendationContext(),
                             forceRefresh: true,
                           ),
                         ),
@@ -178,6 +179,15 @@ class _MentalHealthInsightsScreenState
     return 'preview_user';
   }
 
+  InsightRecommendationContext _recommendationContext() {
+    return InsightRecommendationContext(
+      userId: _currentUserId(),
+      populationRole: _readProviderOrNull<UserProvider>(
+        context,
+      )?.user?.effectivePopulationRole,
+    );
+  }
+
   void _updateSearchQuery(String value) {
     setState(() => _searchQuery = value);
   }
@@ -207,7 +217,7 @@ class _MentalHealthInsightsScreenState
     if (insightsProvider?.errorMessage != null && data == null) {
       return _InsightsErrorState(
         onRetry: () => insightsProvider?.loadInsights(
-          _currentUserId(),
+          _recommendationContext(),
           forceRefresh: true,
         ),
       );

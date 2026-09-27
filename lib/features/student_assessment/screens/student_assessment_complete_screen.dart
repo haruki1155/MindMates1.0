@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../providers/assessment_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/insights_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
@@ -213,7 +214,10 @@ class _StudentAssessmentCompleteScreenState
     if (payload == null) return null;
     if (!mounted) return payload;
     await context.read<UserProvider>().markFullAssessment(userId);
-    if (mounted) await _reportProviderOrNull()?.refreshWeeklyReport(userId);
+    if (mounted) {
+      await _reportProviderOrNull()?.refreshWeeklyReport(userId);
+      await _insightsProviderOrNull()?.refreshLoadedContext(userId);
+    }
     return payload;
   }
 
@@ -233,6 +237,7 @@ class _StudentAssessmentCompleteScreenState
         await context.read<UserProvider>().markFullAssessment(userId);
         if (!mounted) return;
         await _reportProviderOrNull()?.refreshWeeklyReport(userId);
+        await _insightsProviderOrNull()?.refreshLoadedContext(userId);
       } catch (error) {
         debugPrint('Student assessment sync failed: $error');
       }
@@ -283,6 +288,14 @@ class _StudentAssessmentCompleteScreenState
   ReportProvider? _reportProviderOrNull() {
     try {
       return context.read<ReportProvider>();
+    } on ProviderNotFoundException {
+      return null;
+    }
+  }
+
+  InsightsProvider? _insightsProviderOrNull() {
+    try {
+      return context.read<InsightsProvider>();
     } on ProviderNotFoundException {
       return null;
     }

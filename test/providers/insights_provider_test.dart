@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/insights/models/insights_models.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/providers/insights_provider.dart';
 import 'package:mind_mates/repositories/insights_repository.dart';
 
@@ -10,7 +11,7 @@ void main() {
     final loadingStates = <bool>[];
     provider.addListener(() => loadingStates.add(provider.isLoading));
 
-    await provider.loadInsights('user_1');
+    await provider.loadInsights(_context());
 
     expect(loadingStates.first, isTrue);
     expect(loadingStates.last, isFalse);
@@ -23,7 +24,7 @@ void main() {
       _FakeInsightsRepository(shouldThrow: true),
     );
 
-    await provider.loadInsights('user_1');
+    await provider.loadInsights(_context());
 
     expect(provider.data, isNull);
     expect(provider.errorMessage, 'Unable to load insights.');
@@ -34,14 +35,42 @@ void main() {
     final repository = _FakeInsightsRepository();
     final provider = InsightsProvider(repository);
 
-    await provider.loadInsights('user_1');
-    await provider.loadInsights('user_1');
-    await provider.loadInsights('user_1', forceRefresh: true);
-    await provider.loadInsights('user_2');
+    await provider.loadInsights(_context());
+    await provider.loadInsights(_context());
+    await provider.loadInsights(_context(), forceRefresh: true);
+    await provider.loadInsights(_context(userId: 'user_2'));
 
-    expect(repository.calls, ['user_1', 'user_1', 'user_2']);
+    expect(repository.calls, [
+      'user_1:student',
+      'user_1:student',
+      'user_2:student',
+    ]);
   });
+
+  test(
+    'role changes and invalidation trigger a fresh contextual fetch',
+    () async {
+      final repository = _FakeInsightsRepository();
+      final provider = InsightsProvider(repository);
+
+      await provider.loadInsights(_context(role: PopulationRole.student));
+      await provider.loadInsights(_context(role: PopulationRole.teaching));
+      provider.invalidateForUser('user_1');
+      await provider.loadInsights(_context(role: PopulationRole.teaching));
+
+      expect(repository.calls, [
+        'user_1:student',
+        'user_1:teaching',
+        'user_1:teaching',
+      ]);
+    },
+  );
 }
+
+InsightRecommendationContext _context({
+  String userId = 'user_1',
+  PopulationRole? role = PopulationRole.student,
+}) => InsightRecommendationContext(userId: userId, populationRole: role);
 
 class _FakeInsightsRepository extends InsightsRepository {
   _FakeInsightsRepository({this.shouldThrow = false});
@@ -50,8 +79,12 @@ class _FakeInsightsRepository extends InsightsRepository {
   final List<String> calls = [];
 
   @override
-  Future<InsightsDashboardData> fetchInsights(String userId) async {
-    calls.add(userId);
+  Future<InsightsDashboardData> fetchInsights(
+    InsightRecommendationContext context,
+  ) async {
+    calls.add(
+      '${context.userId}:${context.populationRole?.storedValue ?? 'shared'}',
+    );
     if (shouldThrow) throw StateError('boom');
 
     return const InsightsDashboardData(

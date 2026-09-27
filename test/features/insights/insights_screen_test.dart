@@ -6,13 +6,17 @@ import 'package:mind_mates/features/insights/models/insights_models.dart';
 import 'package:mind_mates/features/mood/screens/log_mood_screen.dart';
 import 'package:mind_mates/features/profile/screens/mental_health_insights_screen.dart';
 import 'package:mind_mates/models/mood_model.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/providers/insights_provider.dart';
 import 'package:mind_mates/providers/mood_provider.dart';
 import 'package:mind_mates/providers/report_provider.dart';
+import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/insights_repository.dart';
 import 'package:mind_mates/repositories/mood_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
+import 'package:mind_mates/repositories/user_repository.dart';
+import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/routes/route_names.dart';
 import 'package:provider/provider.dart';
 
@@ -69,6 +73,31 @@ void main() {
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -900));
     await tester.pumpAndSettle();
     expect(find.text('PAACC support services'), findsOneWidget);
+  });
+
+  testWidgets('loads insights with the signed-in population role', (
+    tester,
+  ) async {
+    final repository = _CapturingInsightsRepository();
+    final userProvider = UserProvider(UserRepository())
+      ..setUser(
+        const UserModel(
+          id: 'teaching_user',
+          email: 'teacher@ucu.edu.ph',
+          populationRole: PopulationRole.teaching,
+        ),
+      );
+
+    await tester.pumpWidget(
+      _insightsApp(
+        insightsProvider: InsightsProvider(repository),
+        userProvider: userProvider,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(repository.context?.userId, 'teaching_user');
+    expect(repository.context?.populationRole, PopulationRole.teaching);
   });
 
   testWidgets(
@@ -495,11 +524,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField), 'academic stress');
+    await tester.enterText(find.byType(TextField), 'what is stress');
     await tester.pumpAndSettle();
 
-    expect(find.text('Academic stress: how to manage it'), findsOneWidget);
-    expect(find.text('What is stress?'), findsNothing);
+    expect(find.text('What is stress?'), findsOneWidget);
+    expect(find.text('Academic stress: how to manage it'), findsNothing);
 
     await tester.enterText(find.byType(TextField), 'zzzz no results');
     await tester.pumpAndSettle();
@@ -542,6 +571,7 @@ Widget _insightsApp({
   required InsightsProvider insightsProvider,
   MoodProvider? moodProvider,
   ReportProvider? reportProvider,
+  UserProvider? userProvider,
   TextScaler? textScaler,
   Brightness brightness = Brightness.light,
   bool disableAnimations = false,
@@ -554,6 +584,8 @@ Widget _insightsApp({
         ChangeNotifierProvider<MoodProvider>.value(value: moodProvider),
       if (reportProvider != null)
         ChangeNotifierProvider<ReportProvider>.value(value: reportProvider),
+      if (userProvider != null)
+        ChangeNotifierProvider<UserProvider>.value(value: userProvider),
     ],
     child: MaterialApp(
       theme: brightness == Brightness.dark ? AppTheme.dark : AppTheme.light,
@@ -580,14 +612,18 @@ Widget _insightsApp({
 
 class _EmptyInsightsRepository extends InsightsRepository {
   @override
-  Future<InsightsDashboardData> fetchInsights(String userId) async {
+  Future<InsightsDashboardData> fetchInsights(
+    InsightRecommendationContext context,
+  ) async {
     return const InsightsDashboardData(categories: [], sections: []);
   }
 }
 
 class _FailingInsightsRepository extends InsightsRepository {
   @override
-  Future<InsightsDashboardData> fetchInsights(String userId) {
+  Future<InsightsDashboardData> fetchInsights(
+    InsightRecommendationContext context,
+  ) {
     throw StateError('offline');
   }
 }
@@ -598,7 +634,21 @@ class _StaticInsightsRepository extends InsightsRepository {
   final InsightsDashboardData data;
 
   @override
-  Future<InsightsDashboardData> fetchInsights(String userId) async => data;
+  Future<InsightsDashboardData> fetchInsights(
+    InsightRecommendationContext context,
+  ) async => data;
+}
+
+class _CapturingInsightsRepository extends InsightsRepository {
+  InsightRecommendationContext? context;
+
+  @override
+  Future<InsightsDashboardData> fetchInsights(
+    InsightRecommendationContext value,
+  ) async {
+    context = value;
+    return const InsightsDashboardData(categories: [], sections: []);
+  }
 }
 
 class _FakeMoodRepository extends MoodRepository {

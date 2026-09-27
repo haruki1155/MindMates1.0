@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/insights/models/insights_models.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/repositories/insights_repository.dart';
 
 void main() {
@@ -11,7 +13,7 @@ void main() {
           useFallbackContent: false,
         );
 
-        final data = await repository.fetchInsights('user_1');
+        final data = await repository.fetchInsights(_context());
 
         expect(data.categories, isEmpty);
         expect(data.sections, isEmpty);
@@ -30,7 +32,7 @@ void main() {
         useFallbackContent: false,
       );
 
-      final data = await repository.fetchInsights('user_1');
+      final data = await repository.fetchInsights(_context());
 
       expect(data.categories.single.label, 'Mood tracking');
       expect(_section(data, 'patterns').items.single.id, 'pattern_1');
@@ -53,7 +55,7 @@ void main() {
         useFallbackContent: false,
       );
 
-      final data = await repository.fetchInsights('user_1');
+      final data = await repository.fetchInsights(_context());
       final categoryResources = data.resourcesForCategory('mood_tracking');
 
       expect(_section(data, 'latest').items, hasLength(6));
@@ -65,7 +67,9 @@ void main() {
     test(
       'fallback library provides every category and video placeholder',
       () async {
-        final data = await InsightsRepository().fetchInsights('preview_user');
+        final data = await InsightsRepository().fetchInsights(
+          _context(userId: 'preview_user'),
+        );
 
         expect(data.categories, hasLength(6));
         for (final category in data.categories) {
@@ -98,7 +102,7 @@ void main() {
         useFallbackContent: false,
       );
 
-      final data = await repository.fetchInsights('user_1');
+      final data = await repository.fetchInsights(_context());
 
       expect(_section(data, 'latest').items.map((item) => item.id), [
         'newer',
@@ -132,7 +136,7 @@ void main() {
         useFallbackContent: false,
       );
 
-      final data = await repository.fetchInsights('user_1');
+      final data = await repository.fetchInsights(_context());
 
       expect(_section(data, 'recommended').items.map((item) => item.id), [
         'high_priority',
@@ -166,7 +170,7 @@ void main() {
         useFallbackContent: false,
       );
 
-      final data = await repository.fetchInsights('user_1');
+      final data = await repository.fetchInsights(_context());
 
       expect(_section(data, 'recommended').items, hasLength(1));
       expect(_section(data, 'recommended').items.single.id, 'sleep');
@@ -183,7 +187,7 @@ void main() {
         useFallbackContent: false,
       );
 
-      final data = await repository.fetchInsights('user_1');
+      final data = await repository.fetchInsights(_context());
 
       expect(data.sections.map((section) => section.id), contains('latest'));
       expect(
@@ -252,7 +256,7 @@ void main() {
           useFallbackContent: false,
         );
 
-        final data = await repository.fetchInsights('user_1');
+        final data = await repository.fetchInsights(_context());
 
         expect(_section(data, 'recommended').items.map((item) => item.id), [
           'sleep',
@@ -263,12 +267,146 @@ void main() {
         ]);
       },
     );
+
+    test('role filtering keeps audience-specific content isolated', () async {
+      final repository = InsightsRepository(
+        dataSource: _FakeInsightsDataSource(
+          content: [
+            _content(
+              id: 'student',
+              sectionId: 'recommended',
+              targetRoles: const ['student'],
+            ),
+            _content(
+              id: 'teaching',
+              sectionId: 'recommended',
+              targetRoles: const ['teaching'],
+            ),
+            _content(
+              id: 'non_teaching',
+              sectionId: 'recommended',
+              targetRoles: const ['nonTeaching'],
+            ),
+            _content(
+              id: 'shared',
+              sectionId: 'recommended',
+              targetRoles: const ['all'],
+            ),
+          ],
+          latestReport: _report(),
+        ),
+        useFallbackContent: false,
+      );
+
+      for (final entry in {
+        PopulationRole.student: {'student', 'shared'},
+        PopulationRole.teaching: {'teaching', 'shared'},
+        PopulationRole.nonTeaching: {'non_teaching', 'shared'},
+      }.entries) {
+        final data = await repository.fetchInsights(_context(role: entry.key));
+        expect(
+          _section(data, 'recommended').items.map((item) => item.id).toSet(),
+          entry.value,
+        );
+      }
+
+      final unknown = await repository.fetchInsights(_context(role: null));
+      expect(_section(unknown, 'recommended').items.map((item) => item.id), [
+        'shared',
+      ]);
+    });
+
+    test('domain matches use canonical IDs for every population', () async {
+      final content = [
+        _content(
+          id: 'academic',
+          sectionId: 'latest',
+          targetRoles: const ['student'],
+          domainIds: const ['academicStress'],
+        ),
+        _content(
+          id: 'teaching_workplace',
+          sectionId: 'latest',
+          targetRoles: const ['teaching'],
+          domainIds: const ['workplaceStress'],
+        ),
+        _content(
+          id: 'non_teaching_workplace',
+          sectionId: 'latest',
+          targetRoles: const ['nonTeaching'],
+          domainIds: const ['workplaceResponsibilities'],
+        ),
+        _content(
+          id: 'sleep',
+          sectionId: 'latest',
+          targetRoles: const ['all'],
+          domainIds: const ['sleepRest'],
+        ),
+      ];
+      final cases = [
+        (PopulationRole.student, 'Academic Stress', 'academic'),
+        (PopulationRole.student, 'Academic', 'academic'),
+        (PopulationRole.teaching, 'Workplace Stress', 'teaching_workplace'),
+        (
+          PopulationRole.nonTeaching,
+          'Workplace Responsibilities',
+          'non_teaching_workplace',
+        ),
+        (PopulationRole.student, 'Sleep and Rest', 'sleep'),
+      ];
+
+      for (final (role, label, expectedId) in cases) {
+        final repository = InsightsRepository(
+          dataSource: _FakeInsightsDataSource(
+            content: content,
+            latestReport: _report(topConcernAreas: [label]),
+          ),
+          useFallbackContent: false,
+        );
+        final data = await repository.fetchInsights(_context(role: role));
+        expect(_section(data, 'recommended').items.single.id, expectedId);
+      }
+    });
+
+    test(
+      'Student V4 domain statuses map to the canonical domain IDs',
+      () async {
+        final repository = InsightsRepository(
+          dataSource: _FakeInsightsDataSource(
+            content: [
+              _content(
+                id: 'academic',
+                sectionId: 'latest',
+                targetRoles: const ['student'],
+                domainIds: const ['academicStress'],
+              ),
+            ],
+            latestReport: _report(
+              fullAssessmentDomainStatuses: const {
+                'Academic': 'Some strain indicated',
+              },
+            ),
+          ),
+          useFallbackContent: false,
+        );
+
+        final data = await repository.fetchInsights(
+          _context(role: PopulationRole.student),
+        );
+        expect(_section(data, 'recommended').items.single.id, 'academic');
+      },
+    );
   });
 }
 
 dynamic _section(dynamic data, String id) {
   return data.sections.firstWhere((section) => section.id == id);
 }
+
+InsightRecommendationContext _context({
+  String userId = 'user_1',
+  PopulationRole? role = PopulationRole.student,
+}) => InsightRecommendationContext(userId: userId, populationRole: role);
 
 Map<String, dynamic> _category() {
   return {
@@ -285,8 +423,10 @@ Map<String, dynamic> _content({
   required String id,
   required String sectionId,
   DateTime? publishedAt,
+  List<String>? targetRoles,
+  List<String>? domainIds,
 }) {
-  return {
+  final content = <String, dynamic>{
     'id': id,
     'title': 'Title $id',
     'subtitle': 'Subtitle $id',
@@ -298,6 +438,9 @@ Map<String, dynamic> _content({
     'sortOrder': 1,
     'isActive': true,
   };
+  if (targetRoles != null) content['targetRoles'] = targetRoles;
+  if (domainIds != null) content['domainIds'] = domainIds;
+  return content;
 }
 
 Map<String, dynamic> _rule({
@@ -327,6 +470,7 @@ Map<String, dynamic> _report({
   int moodCheckInCount = 1,
   int breathingSessionCount = 1,
   int mindAidMessageCount = 1,
+  Map<String, String> fullAssessmentDomainStatuses = const {},
 }) {
   return {
     'id': 'report_1',
@@ -343,6 +487,7 @@ Map<String, dynamic> _report({
     'moodCheckInCount': moodCheckInCount,
     'breathingSessionCount': breathingSessionCount,
     'mindAidMessageCount': mindAidMessageCount,
+    'fullAssessmentDomainStatuses': fullAssessmentDomainStatuses,
     'hasEnoughData': true,
   };
 }
