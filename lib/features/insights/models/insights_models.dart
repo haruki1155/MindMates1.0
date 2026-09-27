@@ -1,6 +1,28 @@
 import '../../../core/utils/firestore_mapper.dart';
 import '../../../models/mood_model.dart';
+import '../../../models/profile_roles.dart';
 import '../../../models/report_model.dart';
+
+/// The minimum trusted profile context needed to tailor educational resources.
+/// A missing role intentionally resolves to shared content only.
+class InsightRecommendationContext {
+  const InsightRecommendationContext({
+    required this.userId,
+    this.populationRole,
+  });
+
+  final String userId;
+  final PopulationRole? populationRole;
+
+  @override
+  bool operator ==(Object other) =>
+      other is InsightRecommendationContext &&
+      other.userId == userId &&
+      other.populationRole == populationRole;
+
+  @override
+  int get hashCode => Object.hash(userId, populationRole);
+}
 
 class InsightsDashboardData {
   const InsightsDashboardData({
@@ -72,6 +94,8 @@ class InsightCardItem {
     this.videoUrl,
     this.thumbnailUrl,
     this.durationLabel,
+    this.targetRoles = const ['all'],
+    this.domainIds = const [],
   });
 
   final String id;
@@ -89,6 +113,8 @@ class InsightCardItem {
   final String? videoUrl;
   final String? thumbnailUrl;
   final String? durationLabel;
+  final List<String> targetRoles;
+  final List<String> domainIds;
 
   bool get isVideoPlaceholder => contentType == 'video_placeholder';
 
@@ -112,6 +138,8 @@ class InsightCardItem {
       videoUrl: _stringOrNull(json['videoUrl']),
       thumbnailUrl: _stringOrNull(json['thumbnailUrl']),
       durationLabel: _stringOrNull(json['durationLabel']),
+      targetRoles: _stringListOrDefault(json['targetRoles'], const ['all']),
+      domainIds: _stringListOrDefault(json['domainIds'], const []),
     );
   }
 }
@@ -173,4 +201,13 @@ String? _stringOrNull(Object? value) {
   if (value == null) return null;
   final text = value.toString().trim();
   return text.isEmpty ? null : text;
+}
+
+List<String> _stringListOrDefault(Object? value, List<String> fallback) {
+  if (value is! List) return fallback;
+  final values = value
+      .map((item) => item.toString().trim())
+      .where((item) => item.isNotEmpty)
+      .toList(growable: false);
+  return values.isEmpty ? fallback : values;
 }

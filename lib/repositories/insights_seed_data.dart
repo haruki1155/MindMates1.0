@@ -100,6 +100,8 @@ const insightSeedContent = [
     'source': 'Mental Health Insights Categories.docx',
     'body':
         'College stress can come from deadlines, exams, poor time management, burnout, and unhealthy coping habits. Break large tasks into smaller goals, use a realistic schedule, take breaks, and visit PACC when stress affects study, sleep, or daily life.',
+    'targetRoles': ['student'],
+    'domainIds': ['academicStress'],
   },
   {
     'id': 'burnout_recovery',
@@ -117,6 +119,8 @@ const insightSeedContent = [
     'source': 'Mental Health Insights Categories.docx',
     'body':
         'Burnout is physical, mental, and emotional exhaustion from prolonged stress. It can show as fatigue, low motivation, difficulty concentrating, irritability, and withdrawal. Recovery starts with rest, realistic goals, support, counseling, and consistent self-care.',
+    'targetRoles': ['teaching'],
+    'domainIds': ['workplaceStress'],
   },
   {
     'id': 'healthy_stress_reduction',
@@ -287,6 +291,8 @@ const insightSeedContent = [
     'source': 'Mental Health Insights Categories.docx',
     'body':
         'Emotional resilience is the ability to adapt, recover, and grow after stress or difficulty. Build it through positive relationships, healthy coping skills, focusing on what you can control, learning from challenges, and caring for mental and physical health.',
+    'targetRoles': ['all'],
+    'domainIds': ['emotionalWellbeing'],
   },
   {
     'id': 'anger_frustration',
@@ -440,6 +446,8 @@ const insightSeedContent = [
     'source': 'Mental Health Insights Categories.docx',
     'body':
         'Sleep hygiene means routines and environments that support healthy sleep. Keep your bedroom comfortable, avoid heavy meals before bedtime, exercise regularly, limit naps, and keep a consistent bedtime routine.',
+    'targetRoles': ['all'],
+    'domainIds': ['sleepRest'],
   },
   {
     'id': 'when_to_consult_pacc',
@@ -474,6 +482,90 @@ const insightSeedContent = [
     'source': 'MindMate',
     'body':
         'Mood check-ins help build a clearer picture of your weekly mental wellness patterns. Even a short daily log can make recommendations more relevant.',
+  },
+  {
+    'id': 'student_financial_wellbeing',
+    'title': 'Financial stress: small steps to regain control',
+    'subtitle':
+        'Use practical planning and support when money worries affect your studies.',
+    'categoryId': 'stress_burnout',
+    'categoryLabel': 'Student wellbeing',
+    'sectionId': 'recommended',
+    'imageAsset': '',
+    'publishedAt': '2026-09-27',
+    'sortOrder': 25,
+    'isActive': true,
+    'contentType': 'article',
+    'tags': ['financial wellbeing', 'student', 'planning'],
+    'source': 'MindMate',
+    'body':
+        'Financial concerns can make studying feel harder. Start with a simple weekly plan, identify essential costs, and speak with a trusted campus support person when worries are affecting your wellbeing.',
+    'targetRoles': ['student'],
+    'domainIds': ['financialWellbeing'],
+  },
+  {
+    'id': 'student_social_adjustment',
+    'title': 'Finding support while adjusting to campus life',
+    'subtitle':
+        'Build connection gradually and use support when changes feel overwhelming.',
+    'categoryId': 'emotional_wellbeing',
+    'categoryLabel': 'Student wellbeing',
+    'sectionId': 'recommended',
+    'imageAsset': '',
+    'publishedAt': '2026-09-27',
+    'sortOrder': 26,
+    'isActive': true,
+    'contentType': 'article',
+    'tags': ['social adjustment', 'student', 'connection'],
+    'source': 'MindMate',
+    'body':
+        'Adjustment takes time. Try one manageable connection step, such as joining a class activity, talking with a trusted peer, or asking campus support for help navigating change.',
+    'targetRoles': ['student'],
+    'domainIds': ['socialAdjustment'],
+  },
+  {
+    'id': 'teaching_professional_support',
+    'title': 'Using professional support during demanding teaching weeks',
+    'subtitle':
+        'Create practical support points when teaching responsibilities build up.',
+    'categoryId': 'stress_burnout',
+    'categoryLabel': 'Teaching wellbeing',
+    'sectionId': 'recommended',
+    'imageAsset': '',
+    'publishedAt': '2026-09-27',
+    'sortOrder': 27,
+    'isActive': true,
+    'contentType': 'article',
+    'tags': ['teaching', 'professional support', 'workload'],
+    'source': 'MindMate',
+    'body':
+        'During demanding weeks, identify one colleague or supervisor you can check in with, clarify urgent priorities, and protect a short recovery period after high-pressure tasks.',
+    'targetRoles': ['teaching'],
+    'domainIds': ['professionalSupport', 'professionalWellbeing'],
+  },
+  {
+    'id': 'non_teaching_workplace_support',
+    'title': 'Managing competing workplace responsibilities',
+    'subtitle':
+        'Use clear priorities and support channels when responsibilities pile up.',
+    'categoryId': 'stress_burnout',
+    'categoryLabel': 'Workplace wellbeing',
+    'sectionId': 'recommended',
+    'imageAsset': '',
+    'publishedAt': '2026-09-27',
+    'sortOrder': 28,
+    'isActive': true,
+    'contentType': 'article',
+    'tags': ['non-teaching', 'workplace responsibilities', 'support'],
+    'source': 'MindMate',
+    'body':
+        'When responsibilities compete, list the urgent tasks first, clarify deadlines with your supervisor, and use available workplace support before stress builds further.',
+    'targetRoles': ['nonTeaching'],
+    'domainIds': [
+      'workplaceResponsibilities',
+      'workplaceSupport',
+      'workplaceWellbeing',
+    ],
   },
 ];
 
