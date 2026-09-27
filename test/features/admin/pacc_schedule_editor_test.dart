@@ -223,7 +223,7 @@ void main() {
     expect(find.text('Custom schedule'), findsOneWidget);
     expect(find.byTooltip('Edit 2099-09-30'), findsOneWidget);
     expect(find.byTooltip('Remove 2099-09-30'), findsOneWidget);
-    expect(tester.getTopLeft(find.text('Revision 4')).dy, greaterThan(tester.getTopLeft(find.text('Special Dates')).dy));
+    expect(find.text('Revision 4'), findsNothing);
   });
 
   testWidgets('shows a concise empty special-date state and stays responsive', (tester) async {
@@ -329,7 +329,7 @@ void main() {
     )));
 
     expect(find.textContaining('10:00 AM – 05:00 PM'), findsOneWidget);
-    expect(find.text('Revision 5'), findsOneWidget);
+    expect(find.text('Revision 5'), findsNothing);
   });
 
   testWidgets('applies one shared draft to Monday through Wednesday only', (tester) async {

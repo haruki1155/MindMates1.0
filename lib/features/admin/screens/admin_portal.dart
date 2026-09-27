@@ -3811,7 +3811,6 @@ class _PolishedPaccScheduleLayout extends StatelessWidget {
           decoration: BoxDecoration(color: AdminColors.surfaceMuted, borderRadius: BorderRadius.circular(10), border: Border.all(color: AdminColors.border)),
           child: Wrap(spacing: 10, runSpacing: 6, children: [
             _PaccStatusChip(label: status),
-            Text('Revision $revision', style: const TextStyle(fontSize: 12, color: AdminColors.muted)),
             if (updatedAt != null) Text('Last updated ${_paccDateTime(updatedAt!)}', style: const TextStyle(fontSize: 12, color: AdminColors.muted)),
             if (saveError != null) Text(saveError!, style: const TextStyle(fontSize: 12, color: Colors.red)),
           ]),
