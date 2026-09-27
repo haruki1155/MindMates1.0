@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,6 +8,8 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
+import '../../../services/firebase/firebase_error_message.dart';
+import '../../../services/firebase/firebase_runtime_diagnostics.dart';
 import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
 import '../../counseling/screens/pacc_counseling_screen.dart';
 import '../models/student_assessment_models.dart';
@@ -47,7 +51,7 @@ class _StudentAssessmentCompleteScreenState
   Widget build(BuildContext context) {
     return Consumer<AssessmentProvider>(
       builder: (context, provider, _) {
-        if (provider.isStudentAssessmentV4) {
+        if (provider.isV4FullAssessment) {
           return _buildV4Completion(provider);
         }
         final result = provider.studentResult;
@@ -174,6 +178,7 @@ class _StudentAssessmentCompleteScreenState
           );
         }
         if (snapshot.hasError || snapshot.data == null) {
+          final failure = _StudentV4SaveFailure.from(snapshot.error);
           return Scaffold(
             backgroundColor: QuickAssessmentPalette.background,
             body: Center(
@@ -182,10 +187,17 @@ class _StudentAssessmentCompleteScreenState
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
-                      'Your profile could not be saved yet. Your answers were not treated as a result.',
-                      textAlign: TextAlign.center,
-                    ),
+                    Text(failure.title, textAlign: TextAlign.center),
+                    const SizedBox(height: 8),
+                    Text(failure.message, textAlign: TextAlign.center),
+                    if (failure.reference != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Reference: MM-${failure.reference}',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     FilledButton(
                       onPressed: () => setState(() => _v4SaveFuture = null),
@@ -211,10 +223,34 @@ class _StudentAssessmentCompleteScreenState
     }
     final payload = await provider.saveStudentAssessmentForUser(userId);
     if (payload == null) return null;
-    if (!mounted) return payload;
-    await context.read<UserProvider>().markFullAssessment(userId);
-    if (mounted) await _reportProviderOrNull()?.refreshWeeklyReport(userId);
+    unawaited(_runPostV4SaveWork(userId));
     return payload;
+  }
+
+  Future<void> _runPostV4SaveWork(String userId) async {
+    // The callable result is the completion boundary. Activity and report
+    // refreshes improve the rest of the app, but must never hide a saved V4
+    // assessment from the student.
+    if (!mounted) return;
+    try {
+      await context.read<UserProvider>().markFullAssessment(userId);
+    } catch (error, stackTrace) {
+      FirebaseRuntimeDiagnostics.log(
+        event: 'student_v4_activity_sync_failed',
+        error: error,
+      );
+      debugPrintStack(stackTrace: stackTrace);
+    }
+    if (!mounted) return;
+    try {
+      await _reportProviderOrNull()?.refreshWeeklyReport(userId);
+    } catch (error, stackTrace) {
+      FirebaseRuntimeDiagnostics.log(
+        event: 'student_v4_report_refresh_failed',
+        error: error,
+      );
+      debugPrintStack(stackTrace: stackTrace);
+    }
   }
 
   void _saveResultIfNeeded(AssessmentProvider provider) {
@@ -305,6 +341,40 @@ class _StudentAssessmentCompleteScreenState
   }
 }
 
+class _StudentV4SaveFailure {
+  const _StudentV4SaveFailure({
+    required this.title,
+    required this.message,
+    this.reference,
+  });
+
+  final String title;
+  final String message;
+  final String? reference;
+
+  factory _StudentV4SaveFailure.from(Object? error) {
+    final code = FirebaseRuntimeDiagnostics.firebaseErrorCode(error);
+    final correlationId = FirebaseRuntimeDiagnostics.correlationIdFrom(error);
+    final message = FirebaseErrorMessage.describe(
+      error ?? StateError('missing V4 submission response'),
+      fallback:
+          'Please check your connection and try again. Your answers have not been recorded yet.',
+    );
+    final specific = switch (code) {
+      'resource-exhausted' => message,
+      'failed-precondition' || 'invalid-argument' => message,
+      'unavailable' || 'network-request-failed' => message,
+      _ =>
+        'Please check your connection and try again. Your answers have not been recorded yet.',
+    };
+    return _StudentV4SaveFailure(
+      title: 'We couldn\'t save your assessment.',
+      message: specific,
+      reference: correlationId,
+    );
+  }
+}
+
 class _StudentV4ProfileView extends StatelessWidget {
   const _StudentV4ProfileView({required this.payload});
 
@@ -320,9 +390,18 @@ class _StudentV4ProfileView extends StatelessWidget {
     final strengths = _strings(interpretation['strengthInsights']);
     final actions = _strings(interpretation['suggestedActions']);
     final profileStatus = _v4ProfileLabel(result['profileStatus']?.toString());
+    final populationRole = payload['populationRole']?.toString();
+    final isEmployee =
+        populationRole == 'teaching' || populationRole == 'nonTeaching';
     return Scaffold(
       backgroundColor: QuickAssessmentPalette.background,
-      appBar: AppBar(title: const Text('Your well-being profile')),
+      appBar: AppBar(
+        title: Text(
+          isEmployee
+              ? 'Your Work Well-Being Profile'
+              : 'Your Well-being Profile',
+        ),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -335,7 +414,8 @@ class _StudentV4ProfileView extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              interpretation['studentSummary']?.toString() ??
+              interpretation['userSummary']?.toString() ??
+                  interpretation['studentSummary']?.toString() ??
                   'This is a snapshot of the past 7 days based on the areas you answered.',
               style: const TextStyle(height: 1.5),
             ),
@@ -372,12 +452,7 @@ class _StudentV4ProfileView extends StatelessWidget {
               (domain) => Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _V4InfoCard(
-                  title:
-                      domain['domainId']?.toString().replaceAllMapped(
-                        RegExp(r'([a-z])([A-Z])'),
-                        (match) => '${match.group(1)} ${match.group(2)}',
-                      ) ??
-                      'Well-being area',
+                  title: _v4DomainTitle(domain['domainId']?.toString()),
                   trailing: _v4DomainLabel(domain['status']?.toString()),
                   child: Text(
                     '${domain['answeredCount'] ?? 0}/${domain['presentedCount'] ?? 10} answered. ${domain['isScorable'] == true ? 'This area is available for reflection.' : 'More responses are needed for this area.'}',
@@ -522,6 +597,22 @@ String _v4DomainLabel(String? value) => switch (value) {
   'someStrain' => 'Some strain indicated',
   'supportMayHelp' => 'Support may be helpful',
   _ => 'More responses needed',
+};
+
+String _v4DomainTitle(String? value) => switch (value) {
+  'teachingWorkloadDemands' => 'Teaching Workload & Role Demands',
+  'teachingSupport' => 'Collegial & Organizational Support',
+  'teachingEngagementMeaning' => 'Professional Engagement & Meaning',
+  'nonTeachingWorkloadDemands' => 'Workload & Role Demands',
+  'nonTeachingSupport' => 'Supervisor, Team & Organizational Support',
+  'nonTeachingEngagementMeaning' => 'Work Engagement & Meaning',
+  'sleepRest' => 'Sleep & Rest',
+  'emotionalWellbeing' => 'Emotional Well-Being',
+  final String current => current.replaceAllMapped(
+    RegExp(r'([a-z])([A-Z])'),
+    (match) => '${match.group(1)} ${match.group(2)}',
+  ),
+  _ => 'Well-being area',
 };
 String _v4ConfidenceLabel(String? value) => switch (value) {
   'high' => 'High confidence',

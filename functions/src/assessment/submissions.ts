@@ -9,6 +9,7 @@ import {
 import {
   calculateFull,
   calculateQuick,
+  AssessmentValidationError,
   FullAnswer,
   QuickAnswer,
   validateFullAnswers,
@@ -20,6 +21,17 @@ import {
   validateStudentV4Answers,
 } from "./student_v4_calculator";
 import {STUDENT_V4_INSTRUMENT_VERSION} from "./student_v4_catalog";
+import {
+  calculateNonTeachingV4,
+  calculateTeachingV4,
+  WorkplaceV4Answer,
+  validateNonTeachingV4Answers,
+  validateTeachingV4Answers,
+} from "./workplace_v4_calculator";
+import {
+  NON_TEACHING_V4_INSTRUMENT_VERSION,
+  TEACHING_V4_INSTRUMENT_VERSION,
+} from "./workplace_v4_catalog";
 import {toHttpsError} from "./errors";
 import {quickProfileRoleDecision, submissionHashesMatch} from "./submission_policy";
 
@@ -51,6 +63,17 @@ function objectData(value: unknown): Record<string, unknown> {
 function responsePayload(document: FirebaseFirestore.DocumentSnapshot): Record<string, unknown> {
   const data = document.data() ?? {};
   return {assessmentId: document.id, ...data};
+}
+
+function assessmentErrorWithCorrelation(error: unknown, correlationId: string): never {
+  if (error instanceof HttpsError) {
+    throw new HttpsError(error.code, error.message, {correlationId});
+  }
+  if (error instanceof AssessmentValidationError) {
+    throw new HttpsError("invalid-argument", error.message, {correlationId});
+  }
+  console.error("assessment_internal_error", {correlationId, error});
+  throw new HttpsError("internal", "The assessment could not be saved.", {correlationId});
 }
 
 function hashSubmission(value: unknown): string {
@@ -98,16 +121,16 @@ function parseFullAnswers(value: unknown): FullAnswer[] {
   });
 }
 
-function parseStudentV4Answers(value: unknown): StudentV4Answer[] {
-  if (!Array.isArray(value) || value.length !== 50) throw new HttpsError("invalid-argument", "Student V4 requires 50 responses.");
+function parseV4Answers(value: unknown): StudentV4Answer[] {
+  if (!Array.isArray(value) || value.length !== 50) throw new HttpsError("invalid-argument", "V4 requires 50 responses.");
   return value.map((item) => {
     const data = objectData(item);
     if (typeof data.itemId !== "string" || data.itemId.length > 100 || typeof data.skipped !== "boolean") {
-      throw new HttpsError("invalid-argument", "Invalid Student V4 response.");
+      throw new HttpsError("invalid-argument", "Invalid V4 response.");
     }
     if (data.skipped) return {itemId: data.itemId, skipped: true};
     if (typeof data.responseCode !== "string" || typeof data.responseValue !== "number" || !Number.isInteger(data.responseValue)) {
-      throw new HttpsError("invalid-argument", "Student V4 responses require a code and matching value.");
+      throw new HttpsError("invalid-argument", "V4 responses require a code and matching value.");
     }
     return {
       itemId: data.itemId,
@@ -206,16 +229,21 @@ export const submitQuickAssessmentDev = onCall({enforceAppCheck: false}, submitQ
 
 async function submitFullAssessmentHandler(request: CallableRequest) {
   const correlationId = randomUUID();
-  const uid = uidFrom(request);
+  let uid = "";
+  try {
+  uid = uidFrom(request);
   const data = objectData(request.data);
   const submissionId = submissionIdFrom(data.submissionId);
   const requestedInstrument = data.instrumentVersion?.toString().trim() ?? "";
   const isStudentV4 = requestedInstrument === STUDENT_V4_INSTRUMENT_VERSION;
-  if (requestedInstrument && !isStudentV4) throw new HttpsError("invalid-argument", "Unsupported assessment instrument version.");
-  const v4Answers = isStudentV4 ? parseStudentV4Answers(data.answers) : null;
-  const legacyAnswers = isStudentV4 ? null : parseFullAnswers(data.answers);
+  const isTeachingV4 = requestedInstrument === TEACHING_V4_INSTRUMENT_VERSION;
+  const isNonTeachingV4 = requestedInstrument === NON_TEACHING_V4_INSTRUMENT_VERSION;
+  const isV4 = isStudentV4 || isTeachingV4 || isNonTeachingV4;
+  if (requestedInstrument && !isV4) throw new HttpsError("invalid-argument", "Unsupported assessment instrument version.");
+  const v4Answers = isV4 ? parseV4Answers(data.answers) : null;
+  const legacyAnswers = isV4 ? null : parseFullAnswers(data.answers);
   const answers = v4Answers ?? legacyAnswers!;
-  if (isStudentV4) {
+  if (isV4) {
     console.info("assessment_submission_received", {
       functionName: "submitFullAssessment",
       correlationId,
@@ -231,15 +259,17 @@ async function submitFullAssessmentHandler(request: CallableRequest) {
   if (existing.exists) return responsePayload(existing);
   const profile = await db.collection("users").doc(uid).get();
   const role = profileRole(profile.data() ?? {});
-  if (isStudentV4) {
-    if (role !== "student") throw new HttpsError("failed-precondition", "Student Well-Being V4 is available only to student profiles.");
+  if (isV4) {
+    const expectedRole: AssessmentRole = isStudentV4 ? "student" : isTeachingV4 ? "teaching" : "nonTeaching";
+    if (role !== expectedRole) throw new HttpsError("failed-precondition", "This V4 assessment instrument is not available for your profile role.");
   } else {
     assessmentRequestSummary("submitFullAssessment", correlationId, submissionId, legacyAnswers!, role);
   }
-  try {
     if (isStudentV4) validateStudentV4Answers(v4Answers!);
+    else if (isTeachingV4) validateTeachingV4Answers(v4Answers! as WorkplaceV4Answer[]);
+    else if (isNonTeachingV4) validateNonTeachingV4Answers(v4Answers! as WorkplaceV4Answer[]);
     else validateFullAnswers(role, legacyAnswers!);
-    const result = isStudentV4 ? calculateStudentV4(v4Answers!) : calculateFull(role, legacyAnswers!);
+    const result = isStudentV4 ? calculateStudentV4(v4Answers!) : isTeachingV4 ? calculateTeachingV4(v4Answers! as WorkplaceV4Answer[]) : isNonTeachingV4 ? calculateNonTeachingV4(v4Answers! as WorkplaceV4Answer[]) : calculateFull(role, legacyAnswers!);
     const limitRef = limits.doc(uid);
     const now = Date.now();
     const windowStart = now - 7 * 24 * 60 * 60 * 1000;
@@ -279,7 +309,7 @@ async function submitFullAssessmentHandler(request: CallableRequest) {
     return {...responsePayload(await ref.get()), correlationId};
   } catch (error) {
     console.error("full_assessment_failed", {correlationId, uid, error});
-    return toHttpsError(error);
+    return assessmentErrorWithCorrelation(error, correlationId);
   }
 }
 

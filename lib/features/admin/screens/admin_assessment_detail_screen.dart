@@ -369,7 +369,7 @@ class _V4AssessmentCard extends StatelessWidget {
               children: [
                 _MetadataChip(
                   icon: Icons.assignment_outlined,
-                  label: 'Student well-being reflection',
+                  label: _v4InstrumentLabel(instrument['version']?.toString()),
                 ),
                 _MetadataChip(
                   icon: Icons.calendar_today_outlined,
@@ -401,7 +401,8 @@ class _V4AssessmentCard extends StatelessWidget {
             ),
             const SizedBox(height: 9),
             Text(
-              interpretation['studentSummary']?.toString() ??
+              interpretation['userSummary']?.toString() ??
+                  interpretation['studentSummary']?.toString() ??
                   'Stored V4 result is available.',
               style: const TextStyle(
                 color: AdminColors.muted,
@@ -901,6 +902,14 @@ String _v4ProfileLabel(String? value) => switch (value) {
   'someAreasNeedAttention' => 'Some areas may benefit from attention.',
   'supportMayHelp' => 'Support may be helpful right now.',
   _ => 'More responses are needed for a complete profile.',
+};
+
+String _v4InstrumentLabel(String? version) => switch (version) {
+  'teaching_workplace_reflection_v4' =>
+    'Teaching workplace well-being reflection',
+  'non_teaching_workplace_reflection_v4' =>
+    'Non-teaching workplace well-being reflection',
+  _ => 'Student well-being reflection',
 };
 
 String _v4DomainLabel(String? value) => switch (value) {

@@ -170,18 +170,33 @@ class AssessmentRepository {
     required List<StudentAssessmentAnswer> answers,
     required String submissionId,
   }) async {
+    return saveV4FullAssessment(
+      userId: userId,
+      instrumentVersion: StudentAssessmentV4Questions.instrumentVersion,
+      answers: answers,
+      submissionId: submissionId,
+    );
+  }
+
+  /// V4 results are derived only by the callable backend and remain staging-only.
+  Future<Map<String, Object>> saveV4FullAssessment({
+    required String userId,
+    required String instrumentVersion,
+    required List<StudentAssessmentAnswer> answers,
+    required String submissionId,
+  }) async {
     if (!AppEnvironmentConfig.isStaging) {
-      throw StateError('Student Well-Being V4 is enabled for staging only.');
+      throw StateError('V4 full assessments are enabled for staging only.');
     }
     final response = await _stagingFunctions
         .routedCallable('submitFullAssessment')
         .call({
           'submissionId': submissionId,
-          'instrumentVersion': StudentAssessmentV4Questions.instrumentVersion,
+          'instrumentVersion': instrumentVersion,
           'answers': [for (final answer in answers) answer.toV4Json()],
         });
     FirebaseRuntimeDiagnostics.log(
-      event: 'student_v4_assessment_submitted',
+      event: 'v4_assessment_submitted',
       correlationId: _correlationId(response.data),
     );
     return _objectMap(response.data);

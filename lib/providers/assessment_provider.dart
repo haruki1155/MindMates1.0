@@ -6,6 +6,7 @@ import '../features/quick_assessment/models/quick_assessment_models.dart';
 import '../features/quick_assessment/services/quick_assessment_scoring.dart';
 import '../features/student_assessment/data/student_assessment_questions.dart';
 import '../features/student_assessment/data/student_assessment_v4_questions.dart';
+import '../features/student_assessment/data/workplace_assessment_v4_questions.dart';
 import '../features/student_assessment/models/student_assessment_models.dart';
 import '../features/student_assessment/services/student_assessment_calculator.dart';
 import '../repositories/assessment_repository.dart';
@@ -24,7 +25,7 @@ class AssessmentProvider extends ChangeNotifier {
   List<StudentAssessmentQuestion> _studentQuestions = const [];
   final List<StudentAssessmentAnswer> _studentAnswers = [];
   StudentAssessmentResult? _studentResult;
-  String? _studentV4SubmissionId;
+  String? _v4SubmissionId;
   bool _isSavingQuickAssessment = false;
 
   AssessmentRole? get selectedRole => _selectedRole;
@@ -40,6 +41,16 @@ class AssessmentProvider extends ChangeNotifier {
   bool get isStudentAssessmentV4 =>
       AppEnvironmentConfig.isStaging &&
       activeAssessmentUserType == AssessmentUserType.student;
+  bool get isTeachingAssessmentV4 =>
+      AppEnvironmentConfig.isStaging &&
+      activeAssessmentUserType == AssessmentUserType.faculty;
+  bool get isNonTeachingAssessmentV4 =>
+      AppEnvironmentConfig.isStaging &&
+      activeAssessmentUserType == AssessmentUserType.staff;
+  bool get isV4FullAssessment =>
+      isStudentAssessmentV4 ||
+      isTeachingAssessmentV4 ||
+      isNonTeachingAssessmentV4;
 
   List<QuickAssessmentQuestion> get questions =>
       QuickAssessmentQuestions.questions;
@@ -84,9 +95,13 @@ class AssessmentProvider extends ChangeNotifier {
             ? 'Student Well-Being Reflection'
             : 'Student Assessment';
       case AssessmentUserType.faculty:
-        return 'Teaching Assessment';
+        return isTeachingAssessmentV4
+            ? 'Teaching Work Well-Being Reflection'
+            : 'Teaching Assessment';
       case AssessmentUserType.staff:
-        return 'Non-Teaching Assessment';
+        return isNonTeachingAssessmentV4
+            ? 'Work Well-Being Reflection'
+            : 'Non-Teaching Assessment';
     }
   }
 
@@ -239,7 +254,7 @@ class AssessmentProvider extends ChangeNotifier {
     _studentQuestionIndex = 0;
     _studentAnswers.clear();
     _studentResult = null;
-    _studentV4SubmissionId = isStudentAssessmentV4
+    _v4SubmissionId = isV4FullAssessment
         ? 'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
         : null;
     _studentQuestions = _questionsForActiveRole()
@@ -267,7 +282,7 @@ class AssessmentProvider extends ChangeNotifier {
     );
 
     if (isLastStudentQuestion) {
-      if (!isStudentAssessmentV4) {
+      if (!isV4FullAssessment) {
         _studentResult = StudentAssessmentCalculator.calculate(
           questions: _studentQuestions,
           answers: _studentAnswers,
@@ -290,12 +305,13 @@ class AssessmentProvider extends ChangeNotifier {
   }
 
   Future<Map<String, Object>?> saveStudentAssessmentForUser(String userId) {
-    if (isStudentAssessmentV4) {
-      return _repository.saveStudentV4Assessment(
+    if (isV4FullAssessment) {
+      return _repository.saveV4FullAssessment(
         userId: userId,
+        instrumentVersion: _v4InstrumentVersion,
         answers: _studentAnswers,
         submissionId:
-            _studentV4SubmissionId ??
+            _v4SubmissionId ??
             'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
       );
     }
@@ -333,9 +349,24 @@ class AssessmentProvider extends ChangeNotifier {
             ? StudentAssessmentV4Questions.questions
             : StudentAssessmentQuestions.questions;
       case AssessmentUserType.faculty:
-        return StudentAssessmentQuestions.facultyQuestions;
+        return isTeachingAssessmentV4
+            ? TeachingAssessmentV4Questions.questions
+            : StudentAssessmentQuestions.facultyQuestions;
       case AssessmentUserType.staff:
-        return StudentAssessmentQuestions.staffQuestions;
+        return isNonTeachingAssessmentV4
+            ? NonTeachingAssessmentV4Questions.questions
+            : StudentAssessmentQuestions.staffQuestions;
+    }
+  }
+
+  String get _v4InstrumentVersion {
+    switch (activeAssessmentUserType) {
+      case AssessmentUserType.faculty:
+        return TeachingAssessmentV4Questions.instrumentVersion;
+      case AssessmentUserType.staff:
+        return NonTeachingAssessmentV4Questions.instrumentVersion;
+      case AssessmentUserType.student:
+        return StudentAssessmentV4Questions.instrumentVersion;
     }
   }
 }

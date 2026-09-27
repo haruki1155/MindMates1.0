@@ -48,7 +48,7 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
               children: [
                 _AssessmentHeader(
                   progress: provider.studentProgress,
-                  category: question.section.label,
+                  category: _questionDomainLabel(question),
                   title: provider.activeAssessmentTitle,
                 ),
                 Expanded(
@@ -260,7 +260,9 @@ class _QuestionBody extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(child: _SectionPill(label: question.section.label)),
+              Expanded(
+                child: _SectionPill(label: _questionDomainLabel(question)),
+              ),
               const SizedBox(width: 8),
               _BackButton(enabled: canGoBack, onTap: onBack),
             ],
@@ -336,6 +338,20 @@ class _QuestionBody extends StatelessWidget {
     );
   }
 }
+
+String _questionDomainLabel(StudentAssessmentQuestion question) =>
+    _workplaceDomainLabels[question.v4DomainId] ?? question.section.label;
+
+const _workplaceDomainLabels = <String, String>{
+  'teachingWorkloadDemands': 'Teaching Workload & Role Demands',
+  'teachingSupport': 'Collegial & Organizational Support',
+  'teachingEngagementMeaning': 'Professional Engagement & Meaning',
+  'nonTeachingWorkloadDemands': 'Workload & Role Demands',
+  'nonTeachingSupport': 'Supervisor, Team & Organizational Support',
+  'nonTeachingEngagementMeaning': 'Work Engagement & Meaning',
+  'sleepRest': 'Sleep & Rest',
+  'emotionalWellbeing': 'Emotional Well-Being',
+};
 
 class _ConditionalNotice extends StatelessWidget {
   const _ConditionalNotice();

@@ -4,6 +4,7 @@ import 'package:mind_mates/features/student_assessment/screens/student_assessmen
 import 'package:mind_mates/features/student_assessment/screens/student_assessment_screen.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
 import 'package:mind_mates/features/student_assessment/data/student_assessment_questions.dart';
+import 'package:mind_mates/features/student_assessment/data/student_assessment_v4_questions.dart';
 import 'package:mind_mates/features/student_assessment/models/student_assessment_models.dart';
 import 'package:mind_mates/features/student_assessment/services/student_assessment_calculator.dart';
 import 'package:mind_mates/models/report_model.dart';
@@ -18,6 +19,30 @@ import 'package:mind_mates/services/firebase/firestore_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  group('Student V4 submission contract', () {
+    test('contains and serializes exactly 50 approved V4 responses', () {
+      final answers = [
+        for (final question in StudentAssessmentV4Questions.questions)
+          StudentAssessmentAnswer(
+            questionId: question.id,
+            answer: LikertAnswer.often,
+          ),
+      ];
+
+      expect(StudentAssessmentV4Questions.instrumentVersion, 'student_wellbeing_v4');
+      expect(answers, hasLength(50));
+      for (final answer in answers) {
+        expect(answer.toV4Json(), {
+          'itemId': answer.questionId,
+          'responseCode': 'agree',
+          'responseValue': 3,
+          'skipped': false,
+        });
+      }
+      expect(answers.first.toV4Json()['itemId'], startsWith('student_v4_'));
+    });
+  });
+
   group('StudentAssessmentCalculator', () {
     test('scores risk and protective answers correctly', () {
       expect(
