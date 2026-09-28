@@ -537,10 +537,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       controller: _scheduleController,
     ),
     AdminPortalPage.inquiries => _InquiriesPage(repository: _repository),
-    AdminPortalPage.assessments => _AssessmentsPage(
-      repository: _repository,
-      onBack: () => _setPage(AdminPortalPage.appointments),
-    ),
+    AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
   };
 }
@@ -573,8 +570,7 @@ class _Nav extends StatelessWidget {
     // Notifications are opened from the persistent header bell instead of
     // duplicating the destination in the workspace navigation.
     AdminPortalPage.notifications => false,
-    // Assessment results are intentionally reached from PAACC Appointments.
-    AdminPortalPage.assessments => false,
+    AdminPortalPage.assessments => accessRole.canAccessClinicalData,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
     AdminPortalPage.appointments =>
@@ -598,7 +594,10 @@ class _Nav extends StatelessWidget {
         AdminPortalPage.followUps,
         AdminPortalPage.inquiries,
       ]),
-      const _NavSection('Insights', [AdminPortalPage.reports]),
+      const _NavSection('Insights', [
+        AdminPortalPage.assessments,
+        AdminPortalPage.reports,
+      ]),
       const _NavSection('System', [AdminPortalPage.profile]),
     ];
     return Material(
@@ -4958,9 +4957,8 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
 }
 
 class _AssessmentsPage extends StatefulWidget {
-  const _AssessmentsPage({required this.repository, required this.onBack});
+  const _AssessmentsPage({required this.repository});
   final AdminPortalRepository repository;
-  final VoidCallback onBack;
   @override
   State<_AssessmentsPage> createState() => _AssessmentsPageState();
 }
@@ -4975,7 +4973,7 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
   @override
   Widget build(BuildContext context) => _Page(
     title: 'Assessment Results',
-    subtitle: 'Review and archive assessment records from PAACC appointments',
+    subtitle: 'Review assessment results and historical assessment records',
     child: StreamBuilder<List<AdminAssessmentRecord>>(
       stream: widget.repository.watchAssessments(),
       builder: (context, snapshot) {
@@ -5011,12 +5009,6 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            OutlinedButton.icon(
-              onPressed: widget.onBack,
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('Back to PAACC appointments'),
-            ),
-            const SizedBox(height: 20),
             _CompactSummaryStrip(
               values: {
                 'Active': active.length,

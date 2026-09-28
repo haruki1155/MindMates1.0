@@ -28,7 +28,7 @@ class AdminAssessmentDetailScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Assessment details',
+              'Assessment review',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 2),
@@ -52,32 +52,35 @@ class AdminAssessmentDetailScreen extends StatelessWidget {
           if (snapshot.hasError) {
             return const Center(child: Text('Unable to load assessments.'));
           }
-          final loaded = snapshot.data ?? const <Map<String, dynamic>>[];
-          final assessments = assessmentId == null
-              ? loaded
-              : loaded
+          final allAssessments =
+              snapshot.data ?? const <Map<String, dynamic>>[];
+          final selected = assessmentId == null
+              ? allAssessments.firstOrNull
+              : allAssessments
                     .where((item) => item['id']?.toString() == assessmentId)
-                    .toList();
-          if (assessments.isEmpty) {
+                    .firstOrNull;
+          if (selected == null) {
             return const Center(child: Text('No assessments available.'));
           }
-          return ListView.separated(
+          return ListView(
             padding: EdgeInsets.all(
               MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
             ),
-            itemCount: assessments.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (_, index) => Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1080),
-                child: _AssessmentCard(
-                  assessment: assessments[index],
-                  previous: index + 1 < assessments.length
-                      ? assessments[index + 1]
-                      : null,
+            children: [
+              Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1080),
+                  child: _AssessmentCard(
+                    assessment: selected,
+                    previous: _previousCompatibleAssessment(
+                      selected,
+                      allAssessments,
+                    ),
+                    history: allAssessments,
+                  ),
                 ),
               ),
-            ),
+            ],
           );
         },
       ),
@@ -86,15 +89,24 @@ class AdminAssessmentDetailScreen extends StatelessWidget {
 }
 
 class _AssessmentCard extends StatelessWidget {
-  const _AssessmentCard({required this.assessment, this.previous});
+  const _AssessmentCard({
+    required this.assessment,
+    required this.history,
+    this.previous,
+  });
 
   final Map<String, dynamic> assessment;
   final Map<String, dynamic>? previous;
+  final List<Map<String, dynamic>> history;
 
   @override
   Widget build(BuildContext context) {
     if (assessment['schemaVersion'] == 'assessment_record_v4') {
-      return _V4AssessmentCard(assessment: assessment, previous: previous);
+      return _V4AssessmentCard(
+        assessment: assessment,
+        previous: previous,
+        history: history,
+      );
     }
     final interpretation = _map(assessment['interpretation']);
     if (interpretation == null) {
@@ -294,35 +306,6 @@ class _AssessmentCard extends StatelessWidget {
                 message:
                     'Trend comparison is unavailable because there is no preceding version-compatible assessment.',
               ),
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              childrenPadding: const EdgeInsets.only(bottom: 14),
-              title: const Text(
-                'Authorized raw responses',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-              ),
-              subtitle: const Text('Restricted clinical review information'),
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AdminColors.canvas,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: SelectableText(
-                    (assessment['responses'] ??
-                            assessment['answers'] ??
-                            const [])
-                        .toString(),
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
             const SizedBox(height: 16),
             const _MutedNotice(
               icon: Icons.info_outline,
@@ -337,10 +320,15 @@ class _AssessmentCard extends StatelessWidget {
 }
 
 class _V4AssessmentCard extends StatelessWidget {
-  const _V4AssessmentCard({required this.assessment, this.previous});
+  const _V4AssessmentCard({
+    required this.assessment,
+    required this.history,
+    this.previous,
+  });
 
   final Map<String, dynamic> assessment;
   final Map<String, dynamic>? previous;
+  final List<Map<String, dynamic>> history;
 
   @override
   Widget build(BuildContext context) {
@@ -352,6 +340,7 @@ class _V4AssessmentCard extends StatelessWidget {
     final quality =
         _map(result['responseQuality']) ?? const <String, dynamic>{};
     final domains = _maps(result['domainResults']);
+    final domainSummaries = _maps(interpretation['domainSummaries']);
     final compatible =
         previous?['schemaVersion'] == 'assessment_record_v4' &&
         _map(previous?['instrument'])?['version'] == instrument['version'];
@@ -446,9 +435,12 @@ class _V4AssessmentCard extends StatelessWidget {
                         (domain) => SizedBox(
                           width: width,
                           child: _AreaPanel(
-                            name: _v4DomainLabel(
-                              domain['domainId']?.toString(),
-                            ),
+                            name:
+                                _summaryFor(
+                                  domain,
+                                  domainSummaries,
+                                )?['domainLabel']?.toString() ??
+                                _v4DomainLabel(domain['domainId']?.toString()),
                             pattern: _v4DomainStatusLabel(
                               domain['status']?.toString(),
                             ),
@@ -494,31 +486,368 @@ class _V4AssessmentCard extends StatelessWidget {
                 );
               },
             ),
+            const SizedBox(height: 22),
+            _TextSection(
+              title: 'What the responses suggest overall',
+              text: interpretation['overallResponseSummary']?.toString(),
+            ),
+            const SizedBox(height: 22),
+            _InsightPanel(
+              icon: Icons.lightbulb_outline,
+              title: 'Suggested next steps',
+              values: _strings(interpretation['suggestedActions']),
+            ),
+            const SizedBox(height: 28),
+            const _SectionHeading(
+              title: 'Domain review',
+              description: 'Saved role-specific labels and guidance.',
+            ),
+            for (final domain in domains)
+              _V4DomainReview(
+                domain: domain,
+                summary: _summaryFor(domain, domainSummaries),
+              ),
+            const SizedBox(height: 28),
+            const _SectionHeading(
+              title: 'Assessment responses',
+              description:
+                  'Historical question wording and response labels from this saved assessment.',
+            ),
+            const SizedBox(height: 10),
+            _ResponseReview(
+              itemSnapshot: _maps(assessment['itemSnapshot']),
+              responses: _maps(assessment['responses']),
+              domainSummaries: domainSummaries,
+            ),
+            const SizedBox(height: 28),
+            _AssessmentHistory(
+              history: history,
+              selectedId: assessment['id']?.toString(),
+            ),
+            const SizedBox(height: 20),
+            if (compatible)
+              _V4ChangeSection(
+                current: domains,
+                previous: previous!,
+                domainSummaries: domainSummaries,
+              ),
+            const SizedBox(height: 20),
+            _DiscussionGuide(domainSummaries: domainSummaries),
+            const SizedBox(height: 24),
+            _AssessmentInformation(
+              assessment: assessment,
+              instrument: instrument,
+              quality: quality,
+            ),
             if (!compatible)
               const _MutedNotice(
                 message:
                     'Trend comparison is unavailable because there is no preceding V4 assessment with the same instrument version.',
               ),
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              title: const Text(
-                'Authorized raw responses',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
-              ),
-              subtitle: const Text('Restricted clinical review information'),
-              children: [
-                SelectableText(
-                  (assessment['responses'] ?? const []).toString(),
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-                ),
-              ],
-            ),
           ],
         ),
       ),
     );
   }
 }
+
+class _TextSection extends StatelessWidget {
+  const _TextSection({required this.title, this.text});
+  final String title;
+  final String? text;
+
+  @override
+  Widget build(BuildContext context) {
+    if (text == null || text!.trim().isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 7),
+        Text(
+          text!,
+          style: const TextStyle(color: AdminColors.muted, height: 1.5),
+        ),
+      ],
+    );
+  }
+}
+
+class _V4DomainReview extends StatelessWidget {
+  const _V4DomainReview({required this.domain, this.summary});
+  final Map<String, dynamic> domain;
+  final Map<String, dynamic>? summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final label =
+        summary?['domainLabel']?.toString() ??
+        _v4DomainLabel(domain['domainId']?.toString());
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+      subtitle: Text(
+        '${_v4DomainStatusLabel(domain['status']?.toString())} · '
+        '${domain['answeredCount'] ?? 0}/${domain['presentedCount'] ?? 10} answered',
+      ),
+      children: [
+        if (summary?['summary'] != null)
+          _TextSection(title: 'Summary', text: summary!['summary'].toString()),
+        if (summary?['focusInsight'] != null)
+          _TextSection(
+            title: 'Area to explore',
+            text: summary!['focusInsight'].toString(),
+          ),
+        if (summary?['strengthInsight'] != null)
+          _TextSection(
+            title: 'Supportive pattern',
+            text: summary!['strengthInsight'].toString(),
+          ),
+        if (summary?['suggestedAction'] != null)
+          _TextSection(
+            title: 'Suggested action',
+            text: summary!['suggestedAction'].toString(),
+          ),
+        const SizedBox(height: 10),
+      ],
+    );
+  }
+}
+
+class _ResponseReview extends StatelessWidget {
+  const _ResponseReview({
+    required this.itemSnapshot,
+    required this.responses,
+    required this.domainSummaries,
+  });
+  final List<Map<String, dynamic>> itemSnapshot;
+  final List<Map<String, dynamic>> responses;
+  final List<Map<String, dynamic>> domainSummaries;
+
+  @override
+  Widget build(BuildContext context) {
+    if (itemSnapshot.isEmpty) {
+      return const _MutedNotice(
+        message: 'Historical response wording is unavailable for this record.',
+      );
+    }
+    final responseByItem = {
+      for (final response in responses)
+        response['itemId']?.toString(): response,
+    };
+    final byDomain = <String, List<Map<String, dynamic>>>{};
+    for (final item in itemSnapshot) {
+      final id = item['domainId']?.toString() ?? 'other';
+      (byDomain[id] ??= []).add(item);
+    }
+    return Column(
+      children: byDomain.entries.map((entry) {
+        final items = entry.value
+          ..sort(
+            (a, b) => (a['displayOrder'] as num? ?? 0).compareTo(
+              b['displayOrder'] as num? ?? 0,
+            ),
+          );
+        final label =
+            domainSummaries
+                .where(
+                  (summary) => summary['domainId']?.toString() == entry.key,
+                )
+                .map((summary) => summary['domainLabel']?.toString())
+                .firstOrNull ??
+            _v4DomainLabel(entry.key);
+        final answered = items.where((item) {
+          final response = responseByItem[item['itemId']?.toString()];
+          return response != null &&
+              response['skipped'] != true &&
+              response['responseCode'] != null;
+        }).length;
+        return ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          subtitle: Text('$answered/${items.length} answered'),
+          children: items.asMap().entries.map((entry) {
+            final item = entry.value;
+            final response = responseByItem[item['itemId']?.toString()];
+            return ListTile(
+              dense: true,
+              title: Text(
+                '${entry.key + 1}. ${item['text'] ?? 'Question unavailable'}',
+              ),
+              subtitle: Text(
+                'Response: ${_responseLabel(response?['responseCode'])}',
+              ),
+            );
+          }).toList(),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class _AssessmentHistory extends StatelessWidget {
+  const _AssessmentHistory({required this.history, this.selectedId});
+  final List<Map<String, dynamic>> history;
+  final String? selectedId;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const _SectionHeading(
+        title: 'Assessment history',
+        description: 'Earlier records for this user.',
+      ),
+      const SizedBox(height: 8),
+      for (final item in history.take(8))
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            item['id']?.toString() == selectedId
+                ? Icons.visibility
+                : Icons.history,
+          ),
+          title: Text(
+            _v4InstrumentLabel(
+              _map(item['instrument'])?['version']?.toString(),
+            ),
+          ),
+          subtitle: Text(_date(item['submittedAt'] ?? item['createdAt'])),
+          trailing: Text(
+            _v4ProfileLabel(_map(item['result'])?['profileStatus']?.toString()),
+            textAlign: TextAlign.end,
+            style: const TextStyle(fontSize: 11),
+          ),
+        ),
+    ],
+  );
+}
+
+class _V4ChangeSection extends StatelessWidget {
+  const _V4ChangeSection({
+    required this.current,
+    required this.previous,
+    required this.domainSummaries,
+  });
+  final List<Map<String, dynamic>> current;
+  final Map<String, dynamic> previous;
+  final List<Map<String, dynamic>> domainSummaries;
+
+  @override
+  Widget build(BuildContext context) {
+    final previousById = {
+      for (final domain in _maps(_map(previous['result'])?['domainResults']))
+        domain['domainId']?.toString(): domain,
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionHeading(
+          title: 'Changes since previous assessment',
+          description: 'Recorded status changes only.',
+        ),
+        const SizedBox(height: 8),
+        for (final domain in current)
+          if (previousById[domain['domainId']?.toString()] != null)
+            Text(
+              '${_summaryFor(domain, domainSummaries)?['domainLabel']?.toString() ?? _v4DomainLabel(domain['domainId']?.toString())}: '
+              '${_v4DomainStatusLabel(previousById[domain['domainId']?.toString()]!['status']?.toString())} → '
+              '${_v4DomainStatusLabel(domain['status']?.toString())}',
+            ),
+      ],
+    );
+  }
+}
+
+class _DiscussionGuide extends StatelessWidget {
+  const _DiscussionGuide({required this.domainSummaries});
+  final List<Map<String, dynamic>> domainSummaries;
+
+  @override
+  Widget build(BuildContext context) {
+    final focus = domainSummaries
+        .where((summary) => summary['focusInsight'] != null)
+        .take(3);
+    if (focus.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionHeading(
+          title: 'Counselor discussion guide',
+          description: 'Conversation prompts, not clinical conclusions.',
+        ),
+        const SizedBox(height: 8),
+        for (final domain in focus) ...[
+          Text(
+            domain['domainLabel']?.toString() ?? 'Well-being area',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const Text(
+            '• How has this area felt recently?\n• What has made it easier or more difficult?\n• What support might be useful?',
+          ),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+class _AssessmentInformation extends StatelessWidget {
+  const _AssessmentInformation({
+    required this.assessment,
+    required this.instrument,
+    required this.quality,
+  });
+  final Map<String, dynamic> assessment;
+  final Map<String, dynamic> instrument;
+  final Map<String, dynamic> quality;
+
+  @override
+  Widget build(BuildContext context) => ExpansionTile(
+    tilePadding: EdgeInsets.zero,
+    title: const Text(
+      'Assessment information',
+      style: TextStyle(fontWeight: FontWeight.w800),
+    ),
+    children: [
+      _metadataLine(
+        'Instrument',
+        _v4InstrumentLabel(instrument['version']?.toString()),
+      ),
+      _metadataLine('Questionnaire version', instrument['version']?.toString()),
+      _metadataLine('Schema', assessment['schemaVersion']?.toString()),
+      _metadataLine('Algorithm', assessment['algorithmVersion']?.toString()),
+      _metadataLine(
+        'Recall period',
+        '${instrument['recallPeriodDays'] ?? 'Unavailable'} days',
+      ),
+      _metadataLine(
+        'Questions answered',
+        '${quality['answered'] ?? 0}/${quality['presented'] ?? 50}',
+      ),
+      _metadataLine(
+        'Calculation authority',
+        assessment['calculationAuthority']?.toString(),
+      ),
+      _metadataLine(
+        'Verification',
+        assessment['verificationStatus']?.toString(),
+      ),
+    ],
+  );
+}
+
+Widget _metadataLine(String label, String? value) => ListTile(
+  dense: true,
+  title: Text(label),
+  trailing: Text(value?.isNotEmpty == true ? value! : 'Unavailable'),
+);
 
 class _MetadataChip extends StatelessWidget {
   const _MetadataChip({required this.icon, required this.label});
@@ -890,6 +1219,41 @@ List<String> _strings(Object? value) => value is List
           .where((item) => item.isNotEmpty)
           .toList()
     : const [];
+
+Map<String, dynamic>? _summaryFor(
+  Map<String, dynamic> domain,
+  List<Map<String, dynamic>> summaries,
+) => summaries
+    .where(
+      (summary) =>
+          summary['domainId']?.toString() == domain['domainId']?.toString(),
+    )
+    .firstOrNull;
+
+Map<String, dynamic>? _previousCompatibleAssessment(
+  Map<String, dynamic> selected,
+  List<Map<String, dynamic>> history,
+) {
+  final index = history.indexWhere((item) => item['id'] == selected['id']);
+  if (index < 0) return null;
+  final version = _map(selected['instrument'])?['version']?.toString();
+  for (final candidate in history.skip(index + 1)) {
+    if (candidate['schemaVersion'] == 'assessment_record_v4' &&
+        _map(candidate['instrument'])?['version']?.toString() == version) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+String _responseLabel(Object? responseCode) =>
+    switch (responseCode?.toString()) {
+      'stronglyDisagree' => 'Strongly Disagree',
+      'disagree' => 'Disagree',
+      'agree' => 'Agree',
+      'stronglyAgree' => 'Strongly Agree',
+      _ => 'Not answered',
+    };
 
 String _assessmentType(Map<String, dynamic> assessment) {
   final type = assessment['type']?.toString().toLowerCase() ?? '';
