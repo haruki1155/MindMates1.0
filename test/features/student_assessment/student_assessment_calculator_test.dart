@@ -687,7 +687,22 @@ void main() {
       expect(find.text('Back'), findsOneWidget);
       expect(find.text('Skip'), findsNothing);
       expect(find.text('Academic'), findsWidgets);
-      expect(find.textContaining('Question 1 of'), findsNothing);
+      expect(
+        find.text('Academic · Question 1 of 10 in this area'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('assessment-domain-progress')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Agree'));
+      await tester.pump();
+
+      expect(
+        find.text('Academic · Question 2 of 10 in this area'),
+        findsOneWidget,
+      );
     });
   });
 

@@ -39,6 +39,10 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
             ),
           );
         }
+        final domainProgress = _domainProgressFor(
+          questions: provider.studentQuestions,
+          currentQuestion: question,
+        );
 
         return Scaffold(
           backgroundColor: _StudentPalette.background,
@@ -50,6 +54,7 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
                   progress: provider.studentProgress,
                   category: _questionDomainLabel(question),
                   title: provider.activeAssessmentTitle,
+                  domainProgress: domainProgress,
                 ),
                 Expanded(
                   child: AnimatedSwitcher(
@@ -107,11 +112,13 @@ class _AssessmentHeader extends StatelessWidget {
     required this.progress,
     required this.category,
     required this.title,
+    required this.domainProgress,
   });
 
   final double progress;
   final String category;
   final String title;
+  final _DomainProgress domainProgress;
 
   @override
   Widget build(BuildContext context) {
@@ -175,12 +182,21 @@ class _AssessmentHeader extends StatelessWidget {
           _ProgressBar(value: progress, height: 7),
           const SizedBox(height: 14),
           Text(
-            category,
-            overflow: TextOverflow.ellipsis,
+            '$category · Question ${domainProgress.current} of ${domainProgress.total} in this area',
             style: const TextStyle(
               color: _StudentPalette.secondaryText,
               fontSize: 12,
               fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Semantics(
+            label:
+                '$category progress: question ${domainProgress.current} of ${domainProgress.total} in this area',
+            child: _ProgressBar(
+              key: const ValueKey('assessment-domain-progress'),
+              value: domainProgress.value,
+              height: 5,
             ),
           ),
         ],
@@ -189,9 +205,38 @@ class _AssessmentHeader extends StatelessWidget {
   }
 }
 
+class _DomainProgress {
+  const _DomainProgress({required this.current, required this.total});
+
+  final int current;
+  final int total;
+
+  double get value => total == 0 ? 0 : current / total;
+}
+
+_DomainProgress _domainProgressFor({
+  required List<StudentAssessmentQuestion> questions,
+  required StudentAssessmentQuestion currentQuestion,
+}) {
+  final domainKey = currentQuestion.v4DomainId ?? currentQuestion.section.name;
+  final domainQuestions = questions
+      .where(
+        (question) =>
+            (question.v4DomainId ?? question.section.name) == domainKey,
+      )
+      .toList(growable: false);
+  final index = domainQuestions.indexWhere(
+    (question) => question.id == currentQuestion.id,
+  );
+  return _DomainProgress(
+    current: index < 0 ? 1 : index + 1,
+    total: domainQuestions.isEmpty ? 1 : domainQuestions.length,
+  );
+}
+
 /// The animated overall assessment progress gauge.
 class _ProgressBar extends StatelessWidget {
-  const _ProgressBar({required this.value, required this.height});
+  const _ProgressBar({super.key, required this.value, required this.height});
 
   final double value;
   final double height;
