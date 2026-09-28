@@ -372,12 +372,6 @@ class _V4AssessmentCard extends StatelessWidget {
                       assessment['verificationStatus']?.toString() ??
                       'Verification unavailable',
                 ),
-                _MetadataChip(
-                  icon: Icons.history_outlined,
-                  label:
-                      instrument['version']?.toString() ??
-                      'Version unavailable',
-                ),
               ],
             ),
             const SizedBox(height: 22),
@@ -486,17 +480,6 @@ class _V4AssessmentCard extends StatelessWidget {
                 );
               },
             ),
-            const SizedBox(height: 22),
-            _TextSection(
-              title: 'What the responses suggest overall',
-              text: interpretation['overallResponseSummary']?.toString(),
-            ),
-            const SizedBox(height: 22),
-            _InsightPanel(
-              icon: Icons.lightbulb_outline,
-              title: 'Suggested next steps',
-              values: _strings(interpretation['suggestedActions']),
-            ),
             const SizedBox(height: 28),
             const _SectionHeading(
               title: 'Domain review',
@@ -531,8 +514,6 @@ class _V4AssessmentCard extends StatelessWidget {
                 previous: previous!,
                 domainSummaries: domainSummaries,
               ),
-            const SizedBox(height: 20),
-            _DiscussionGuide(domainSummaries: domainSummaries),
             const SizedBox(height: 24),
             _AssessmentInformation(
               assessment: assessment,
@@ -765,8 +746,9 @@ class _V4ChangeSection extends StatelessWidget {
   }
 }
 
-class _DiscussionGuide extends StatelessWidget {
-  const _DiscussionGuide({required this.domainSummaries});
+/*
+class _RemovedDiscussionGuide extends StatelessWidget {
+  const _RemovedDiscussionGuide({required this.domainSummaries});
   final List<Map<String, dynamic>> domainSummaries;
 
   @override
@@ -798,6 +780,7 @@ class _DiscussionGuide extends StatelessWidget {
   }
 }
 
+*/
 class _AssessmentInformation extends StatelessWidget {
   const _AssessmentInformation({
     required this.assessment,
@@ -820,7 +803,6 @@ class _AssessmentInformation extends StatelessWidget {
         'Instrument',
         _v4InstrumentLabel(instrument['version']?.toString()),
       ),
-      _metadataLine('Questionnaire version', instrument['version']?.toString()),
       _metadataLine('Schema', assessment['schemaVersion']?.toString()),
       _metadataLine('Algorithm', assessment['algorithmVersion']?.toString()),
       _metadataLine(
