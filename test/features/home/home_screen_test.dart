@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/home/data/daily_affirmation_quotes.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
+import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
 import 'package:mind_mates/models/mood_model.dart';
 import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/models/user_model.dart';
@@ -658,6 +659,63 @@ void main() {
     expect(find.textContaining('up to 2 times in 7 days'), findsOneWidget);
     expect(find.text('Start Assessment?'), findsNothing);
   });
+
+  testWidgets(
+    'home uses the authenticated Teaching profile instead of a stale Student assessment selection',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final assessmentProvider = AssessmentProvider(_FakeAssessmentRepository())
+        ..selectRole(AssessmentRole.student);
+      final userProvider = UserProvider(_FakeUserRepository())
+        ..setUser(
+          const UserModel(
+            id: 'teaching_user',
+            email: 'teaching@example.com',
+            populationRole: PopulationRole.teaching,
+          ),
+        );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+            ChangeNotifierProvider<MoodProvider>(
+              create: (_) => MoodProvider(_FakeMoodRepository()),
+            ),
+            ChangeNotifierProvider<ReportProvider>(
+              create: (_) => ReportProvider(_FakeReportRepository()),
+            ),
+            ChangeNotifierProvider<InsightsProvider>(
+              create: (_) => InsightsProvider(InsightsRepository()),
+            ),
+            ChangeNotifierProvider<AssessmentProvider>.value(
+              value: assessmentProvider,
+            ),
+            ChangeNotifierProvider(
+              create: (_) => BreathingProvider(_FakeBreathingRepository()),
+            ),
+          ],
+          child: MaterialApp(
+            theme: ThemeData(splashFactory: NoSplash.splashFactory),
+            routes: _testRoutes(),
+            home: const HomeScreen(),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Start Assessment'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+      await tester.pumpAndSettle();
+
+      expect(
+        assessmentProvider.activeAssessmentTitle,
+        'Teaching Work Well-Being Reflection',
+      );
+    },
+  );
 
   testWidgets('home shows fallback warning when eligibility check throws', (
     tester,

@@ -753,8 +753,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final assessmentProvider = context.read<AssessmentProvider>();
       final savedRole = context.read<UserProvider>().user?.assessmentRole;
       final role =
-          assessmentProvider.selectedRole ??
           savedRole ??
+          assessmentProvider.selectedRole ??
           AssessmentRole.student;
 
       if (assessmentProvider.selectedRole != role) {

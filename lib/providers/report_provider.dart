@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../models/assessment_explanation_model.dart';
 import '../models/report_model.dart';
 import '../repositories/report_repository.dart';
 
@@ -15,6 +16,10 @@ class ReportProvider extends ChangeNotifier {
   ReportModel? get latestReport => _latestReport;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+
+  Future<V4AssessmentResponseReviewData?> fetchLatestV4ResponseReview(
+    String userId,
+  ) => _repository.fetchLatestV4ResponseReview(userId);
 
   Future<void> loadLatestReport(String userId) async {
     _isLoading = true;

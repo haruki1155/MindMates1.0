@@ -294,6 +294,22 @@ class ReportRepository {
     return generateWeeklyReport(userId);
   }
 
+  /// Loads a user's saved V4 response review without copying raw answers into
+  /// the weekly report document.
+  Future<V4AssessmentResponseReviewData?> fetchLatestV4ResponseReview(
+    String userId,
+  ) async {
+    final latestFull = _assessmentSummary(
+      await _fetchAssessments(userId),
+    ).latestFull;
+    if (latestFull == null ||
+        latestFull['schemaVersion'] != 'assessment_record_v4') {
+      return null;
+    }
+    final review = V4AssessmentResponseReviewData.fromAssessment(latestFull);
+    return review.isUsable ? review : null;
+  }
+
   Future<String> generateWeeklyReport(String userId, {DateTime? now}) async {
     final generatedAt = now ?? DateTime.now();
     final weekStart = _weekStartFor(generatedAt);

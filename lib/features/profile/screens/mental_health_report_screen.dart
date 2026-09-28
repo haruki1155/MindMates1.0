@@ -6,6 +6,7 @@ import '../../../models/assessment_explanation_model.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
+import '../../student_assessment/widgets/v4_assessment_response_review.dart';
 
 class MentalHealthReportScreen extends StatefulWidget {
   const MentalHealthReportScreen({super.key});
@@ -18,6 +19,7 @@ class MentalHealthReportScreen extends StatefulWidget {
 class _MentalHealthReportScreenState extends State<MentalHealthReportScreen> {
   String? _loadedUserId;
   bool _isRefreshing = false;
+  V4AssessmentResponseReviewData? _fullResponseReview;
 
   @override
   void didChangeDependencies() {
@@ -52,6 +54,7 @@ class _MentalHealthReportScreenState extends State<MentalHealthReportScreen> {
                 report: provider?.latestReport,
                 isLoading: provider?.isLoading ?? false,
                 errorMessage: provider?.errorMessage,
+                fullResponseReview: _fullResponseReview,
               ),
             ),
     );
@@ -66,6 +69,16 @@ class _MentalHealthReportScreenState extends State<MentalHealthReportScreen> {
       // Rebuild on every visit/refresh so the latest of the two allowed weekly
       // full assessments is reflected immediately.
       await provider.refreshWeeklyReport(userId);
+      V4AssessmentResponseReviewData? review;
+      try {
+        review = await provider.fetchLatestV4ResponseReview(userId);
+      } catch (error, stackTrace) {
+        debugPrint('Unable to load saved assessment responses: $error');
+        debugPrintStack(stackTrace: stackTrace);
+      }
+      if (mounted && _loadedUserId == userId) {
+        setState(() => _fullResponseReview = review);
+      }
     } finally {
       _isRefreshing = false;
     }
@@ -102,11 +115,13 @@ class _AssessmentSummaryBody extends StatelessWidget {
     required this.report,
     required this.isLoading,
     required this.errorMessage,
+    required this.fullResponseReview,
   });
 
   final ReportModel? report;
   final bool isLoading;
   final String? errorMessage;
+  final V4AssessmentResponseReviewData? fullResponseReview;
 
   @override
   Widget build(BuildContext context) {
@@ -157,6 +172,7 @@ class _AssessmentSummaryBody extends StatelessWidget {
                   value.fullAssessmentSummary ??
                   'Your latest full assessment result is available.',
               sectorStatuses: value.fullAssessmentDomainStatuses,
+              responseReview: fullResponseReview,
             ),
         ],
         if (hasQuick) ...[
@@ -227,21 +243,25 @@ class _AssessmentResultCard extends StatelessWidget {
     required this.status,
     required this.summary,
     required this.sectorStatuses,
+    this.responseReview,
   });
 
   final String title;
   final String status;
   final String summary;
   final Map<String, String> sectorStatuses;
+  final V4AssessmentResponseReviewData? responseReview;
 
   @override
   Widget build(BuildContext context) => _Panel(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: Text(title, style: _TextStyles.heading)),
+            Text(title, style: _TextStyles.heading),
+            const SizedBox(height: 8),
             _StatusChip(label: _readable(status)),
           ],
         ),
@@ -252,16 +272,30 @@ class _AssessmentResultCard extends StatelessWidget {
           const Text('Well-being status by sector', style: _TextStyles.section),
           const SizedBox(height: 9),
           for (final entry in sectorStatuses.entries) ...[
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: Text(entry.key, style: _TextStyles.body)),
-                const SizedBox(width: 10),
+                Text(entry.key, style: _TextStyles.body),
+                const SizedBox(height: 6),
                 _StatusChip(label: _readable(entry.value), compact: true),
               ],
             ),
             if (entry.key != sectorStatuses.keys.last)
               const Divider(height: 18),
           ],
+        ],
+        if (responseReview != null) ...[
+          const SizedBox(height: 16),
+          const Text('Assessment Responses', style: _TextStyles.section),
+          const SizedBox(height: 8),
+          Material(
+            color: Colors.transparent,
+            child: V4AssessmentResponseReview(
+              itemSnapshot: responseReview!.itemSnapshot,
+              responses: responseReview!.responses,
+              domainSummaries: responseReview!.domainSummaries,
+            ),
+          ),
         ],
       ],
     ),

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/profile/screens/mental_health_report_screen.dart';
 import 'package:mind_mates/features/profile/screens/profile_screen.dart';
 import 'package:mind_mates/models/mental_health_activity_summary.dart';
+import 'package:mind_mates/models/assessment_explanation_model.dart';
 import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/auth_provider.dart';
@@ -164,6 +165,105 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'mental health summary exposes saved V4 assessment response groups',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(360, 1800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final review = V4AssessmentResponseReviewData.fromAssessment({
+        'itemSnapshot': [
+          {
+            'itemId': 'teaching_v4_workload_demands_01',
+            'domainId': 'teachingWorkloadDemands',
+            'displayOrder': 1,
+            'text': 'My workload feels manageable.',
+          },
+        ],
+        'responses': [
+          {
+            'itemId': 'teaching_v4_workload_demands_01',
+            'responseCode': 'agree',
+            'skipped': false,
+          },
+        ],
+        'interpretation': {
+          'domainSummaries': [
+            {
+              'domainId': 'teachingWorkloadDemands',
+              'domainLabel': 'Teaching Workload & Role Demands',
+            },
+          ],
+        },
+      });
+      final report = ReportModel.fromJson({
+        'id': 'report_v4',
+        'userId': 'user_1',
+        'generatedAt': DateTime(2026, 9, 28).toIso8601String(),
+        'fullAssessmentStatus': 'mostlySupported',
+        'fullAssessmentSummary': 'Saved V4 summary.',
+      });
+      final userProvider = UserProvider(_FakeUserRepository())
+        ..setUser(const UserModel(id: 'user_1', email: 'user@example.com'));
+      final reportProvider = ReportProvider(
+        _FakeReportRepository(report, review: review),
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+            ChangeNotifierProvider<ReportProvider>.value(value: reportProvider),
+          ],
+          child: const MaterialApp(home: MentalHealthReportScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Assessment Responses'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('v4-response-group-teachingWorkloadDemands')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'mental health summary puts a long assessment status below its title on a narrow phone',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(320, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final report = ReportModel.fromJson({
+        'id': 'report_narrow',
+        'userId': 'user_1',
+        'generatedAt': DateTime(2026, 9, 28).toIso8601String(),
+        'fullAssessmentStatus': 'someAreasNeedAttention',
+        'fullAssessmentSummary': 'Saved assessment summary.',
+      });
+      final userProvider = UserProvider(_FakeUserRepository())
+        ..setUser(const UserModel(id: 'user_1', email: 'user@example.com'));
+      final reportProvider = ReportProvider(_FakeReportRepository(report));
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+            ChangeNotifierProvider<ReportProvider>.value(value: reportProvider),
+          ],
+          child: const MaterialApp(home: MentalHealthReportScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final title = tester.getRect(
+        find.text('Latest Psychological Assessment'),
+      );
+      final status = tester.getRect(find.text('Some Areas Need Attention'));
+      expect(status.top, greaterThanOrEqualTo(title.bottom));
+    },
+  );
 
   testWidgets('mental health report shows daily activity summary', (
     tester,
@@ -444,9 +544,10 @@ class _FakeAuthRepository extends AuthRepository {
 }
 
 class _FakeReportRepository extends ReportRepository {
-  _FakeReportRepository(this.report);
+  _FakeReportRepository(this.report, {this.review});
 
   final ReportModel report;
+  final V4AssessmentResponseReviewData? review;
   int refreshCount = 0;
 
   @override
@@ -457,6 +558,11 @@ class _FakeReportRepository extends ReportRepository {
     refreshCount += 1;
     return report.id;
   }
+
+  @override
+  Future<V4AssessmentResponseReviewData?> fetchLatestV4ResponseReview(
+    String userId,
+  ) async => review;
 }
 
 class _FakeActivityRepository extends MentalHealthActivityRepository {

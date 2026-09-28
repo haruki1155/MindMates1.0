@@ -47,6 +47,60 @@ class AssessmentAreaExplanation {
   };
 }
 
+/// A presentation-safe, immutable view of saved V4 responses. This carries
+/// only the fields required to render an owner's historical response review.
+class V4AssessmentResponseReviewData {
+  const V4AssessmentResponseReviewData({
+    required this.itemSnapshot,
+    required this.responses,
+    required this.domainSummaries,
+  });
+
+  final List<Map<String, dynamic>> itemSnapshot;
+  final List<Map<String, dynamic>> responses;
+  final List<Map<String, dynamic>> domainSummaries;
+
+  factory V4AssessmentResponseReviewData.fromAssessment(
+    Map<String, dynamic> assessment,
+  ) {
+    final interpretation = _map(assessment['interpretation']);
+    return V4AssessmentResponseReviewData(
+      itemSnapshot: _maps(assessment['itemSnapshot'])
+          .map(
+            (item) => {
+              'itemId': item['itemId'],
+              'domainId': item['domainId'],
+              'displayOrder': item['displayOrder'],
+              'text': item['text'],
+            },
+          )
+          .toList(growable: false),
+      responses: _maps(assessment['responses'])
+          .map(
+            (response) => {
+              'itemId': response['itemId'],
+              'responseCode': response['responseCode'],
+              'skipped': response['skipped'],
+            },
+          )
+          .toList(growable: false),
+      domainSummaries: _maps(interpretation['domainSummaries'])
+          .map(
+            (domain) => {
+              'domainId': domain['domainId'],
+              'domainLabel': domain['domainLabel'],
+            },
+          )
+          .toList(growable: false),
+    );
+  }
+
+  bool get isUsable =>
+      itemSnapshot.isNotEmpty &&
+      responses.isNotEmpty &&
+      domainSummaries.isNotEmpty;
+}
+
 /// Presentation-safe explanation shared by the student report and counselor view.
 /// Raw scores remain in the assessment record but are intentionally omitted here.
 class AssessmentExplanationModel {
@@ -337,6 +391,9 @@ List<String> _legacyFocusInsights(List<AssessmentAreaExplanation> areas) =>
 
 Map<String, dynamic> _map(Object? value) =>
     value is Map ? Map<String, dynamic>.from(value) : const {};
+List<Map<String, dynamic>> _maps(Object? value) => value is List
+    ? value.map(_map).where((item) => item.isNotEmpty).toList(growable: false)
+    : const [];
 List<String> _strings(Object? value) => value is List
     ? value
           .map((item) => item.toString().trim())
