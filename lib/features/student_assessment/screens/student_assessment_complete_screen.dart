@@ -384,8 +384,9 @@ class _StudentV4ProfileView extends StatelessWidget {
   Widget build(BuildContext context) {
     final result = _map(payload['result']);
     final interpretation = _map(payload['interpretation']);
+    final instrument = _map(payload['instrument']);
     final quality = _map(result['responseQuality']);
-    final domains = _maps(result['domainResults']);
+    final domainSummaries = _maps(interpretation['domainSummaries']);
     final focus = _strings(interpretation['focusInsights']);
     final strengths = _strings(interpretation['strengthInsights']);
     final actions = _strings(interpretation['suggestedActions']);
@@ -393,88 +394,146 @@ class _StudentV4ProfileView extends StatelessWidget {
     final populationRole = payload['populationRole']?.toString();
     final isEmployee =
         populationRole == 'teaching' || populationRole == 'nonTeaching';
+    final summary =
+        _v4NonEmptyText(interpretation['userSummary']) ??
+        _v4NonEmptyText(interpretation['studentSummary']) ??
+        'This is a snapshot of the past 7 days based on the areas you answered.';
+    final overallResponseSummary =
+        _v4NonEmptyText(interpretation['overallResponseSummary']) ??
+        'Your responses are considered across five well-being areas.';
+    final disclaimer =
+        _v4NonEmptyText(interpretation['disclaimer']) ??
+        'This is a non-clinical well-being reflection, not a diagnosis.';
     return Scaffold(
       backgroundColor: QuickAssessmentPalette.background,
       appBar: AppBar(
-        title: Text(
-          isEmployee
-              ? 'Your Work Well-Being Profile'
-              : 'Your Well-being Profile',
-        ),
+        title: const Text('Your Full Well-Being Assessment Result'),
       ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
             Text(
-              profileStatus,
+              'Full Assessment Result',
               style: Theme.of(
                 context,
               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
             Text(
-              interpretation['userSummary']?.toString() ??
-                  interpretation['studentSummary']?.toString() ??
-                  'This is a snapshot of the past 7 days based on the areas you answered.',
-              style: const TextStyle(height: 1.5),
+              '${_v4AssessmentLabel(populationRole, instrument)} · ${_v4CompletedLabel(payload['createdAt'])}',
+              style: const TextStyle(
+                color: _ResultPalette.secondaryText,
+                height: 1.4,
+              ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             _V4InfoCard(
-              title: 'Response confidence',
-              child: Text(
-                '${quality['answered'] ?? 0} of ${quality['presented'] ?? 50} answered · ${_v4ConfidenceLabel(quality['confidence']?.toString())}. Skipped questions are excluded.',
+              title: 'Overall Well-Being Status',
+              child: Text(profileStatus, style: const TextStyle(height: 1.45)),
+            ),
+            const SizedBox(height: 12),
+            _V4InfoCard(
+              title: 'Assessment Summary',
+              child: Text(summary, style: const TextStyle(height: 1.5)),
+            ),
+            const SizedBox(height: 12),
+            _V4InfoCard(
+              title: 'What Your Responses Suggest Overall',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    overallResponseSummary,
+                    style: const TextStyle(height: 1.5),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(_v4ResponseQualityDetail(quality)),
+                ],
               ),
             ),
-            if (strengths.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _V4InfoCard(
-                title: 'Your strengths',
-                child: _V4Bullets(values: strengths),
-              ),
-            ],
-            if (focus.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _V4InfoCard(
-                title: 'Areas to explore',
-                child: _V4Bullets(values: focus),
-              ),
-            ],
             const SizedBox(height: 18),
             Text(
-              'Well-being areas',
+              'Well-Being Areas',
               style: Theme.of(
                 context,
               ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
-            ...domains.map(
-              (domain) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _V4InfoCard(
-                  title: _v4DomainTitle(domain['domainId']?.toString()),
-                  trailing: _v4DomainLabel(domain['status']?.toString()),
-                  child: Text(
-                    '${domain['answeredCount'] ?? 0}/${domain['presentedCount'] ?? 10} answered. ${domain['isScorable'] == true ? 'This area is available for reflection.' : 'More responses are needed for this area.'}',
+            if (domainSummaries.isEmpty)
+              const _V4InfoCard(
+                title: 'Well-being areas',
+                child: Text(
+                  'Area-by-area reflections are unavailable for this saved result.',
+                ),
+              )
+            else
+              ...domainSummaries.map(
+                (domain) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _V4InfoCard(
+                    title:
+                        domain['domainLabel']?.toString().trim().isNotEmpty ==
+                            true
+                        ? domain['domainLabel']!.toString()
+                        : _v4DomainTitle(domain['domainId']?.toString()),
+                    trailing: _v4DomainLabel(domain['status']?.toString()),
+                    child: Text(
+                      domain['summary']?.toString().trim().isNotEmpty == true
+                          ? domain['summary']!.toString()
+                          : 'This area is available for reflection based on your saved responses.',
+                      style: const TextStyle(height: 1.45),
+                    ),
                   ),
                 ),
               ),
-            ),
-            if (actions.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _V4InfoCard(
-                title: 'Practical next steps',
-                child: _V4Bullets(values: actions),
-              ),
-            ],
             const SizedBox(height: 12),
-            Text(
-              interpretation['disclaimer']?.toString() ??
-                  'This is a 7-day reflection profile, not a diagnosis.',
-              style: const TextStyle(
-                fontSize: 12,
-                height: 1.45,
-                color: _ResultPalette.secondaryText,
+            _V4InfoCard(
+              title: 'Strengths',
+              child: strengths.isNotEmpty
+                  ? _V4Bullets(values: strengths)
+                  : const Text(
+                      'No specific strengths were included with this saved result.',
+                    ),
+            ),
+            const SizedBox(height: 12),
+            _V4InfoCard(
+              title: 'Areas to Explore',
+              child: focus.isNotEmpty
+                  ? _V4Bullets(values: focus)
+                  : const Text(
+                      'No specific areas to explore were included with this saved result.',
+                    ),
+            ),
+            const SizedBox(height: 12),
+            _V4InfoCard(
+              title: 'Suggested Next Steps',
+              child: actions.isNotEmpty
+                  ? _V4Bullets(values: actions)
+                  : const Text(
+                      'Choose one small, supportive step that feels practical this week.',
+                    ),
+            ),
+            const SizedBox(height: 12),
+            _V4InfoCard(
+              title: 'Response Completeness',
+              child: Text(
+                _v4CompletenessCopy(quality),
+                style: const TextStyle(height: 1.45),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _V4InfoCard(
+              title: 'About This Result',
+              child: Text(
+                isEmployee
+                    ? '$disclaimer This result is not a measure of job performance or fitness for work.'
+                    : disclaimer,
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.45,
+                  color: _ResultPalette.secondaryText,
+                ),
               ),
             ),
             const SizedBox(height: 18),
@@ -584,6 +643,10 @@ List<String> _strings(Object? value) => value is List
           .where((item) => item.isNotEmpty)
           .toList()
     : const <String>[];
+String? _v4NonEmptyText(Object? value) => switch (value) {
+  String current when current.trim().isNotEmpty => current,
+  _ => null,
+};
 String _v4ProfileLabel(String? value) => switch (value) {
   'generallySupported' => 'Well-being appears generally supported.',
   'mostlySupported' => 'Mostly supported, with an area to explore.',
@@ -618,6 +681,59 @@ String _v4ConfidenceLabel(String? value) => switch (value) {
   'high' => 'High confidence',
   'usableWithCaution' => 'Usable with caution',
   _ => 'Limited responses',
+};
+
+String _v4AssessmentLabel(
+  String? populationRole,
+  Map<String, dynamic> instrument,
+) {
+  final version = instrument['version']?.toString();
+  if (populationRole == 'teaching' ||
+      version?.startsWith('teaching_') == true) {
+    return 'Teaching work well-being assessment';
+  }
+  if (populationRole == 'nonTeaching' ||
+      version?.startsWith('non_teaching_') == true) {
+    return 'Non-Teaching work well-being assessment';
+  }
+  return 'Student well-being assessment';
+}
+
+String _v4CompletedLabel(Object? value) {
+  final completedAt = value is DateTime
+      ? value
+      : value is String
+      ? DateTime.tryParse(value)
+      : null;
+  if (completedAt == null) return 'Saved result';
+  final date = completedAt.toLocal();
+  return 'Completed ${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+}
+
+String _v4CompletenessCopy(Map<String, dynamic> quality) {
+  final answered = _v4Int(quality['answered']);
+  final presented = _v4Int(quality['presented']);
+  if (answered == null || presented == null || presented <= 0) {
+    return 'More responses are needed for a complete result.';
+  }
+  final confidence = _v4ConfidenceLabel(quality['confidence']?.toString());
+  return '$answered of $presented answered. $confidence. Skipped questions are excluded.';
+}
+
+String _v4ResponseQualityDetail(Map<String, dynamic> quality) {
+  final answered = _v4Int(quality['answered']);
+  final presented = _v4Int(quality['presented']);
+  if (answered == null || presented == null || presented <= 0) {
+    return 'Response completeness details are unavailable for this saved result.';
+  }
+  return _v4CompletenessCopy(quality);
+}
+
+int? _v4Int(Object? value) => switch (value) {
+  int current => current,
+  num current => current.toInt(),
+  String current => int.tryParse(current),
+  _ => null,
 };
 
 class _Hero extends StatelessWidget {
