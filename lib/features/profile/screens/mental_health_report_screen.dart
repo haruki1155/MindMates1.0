@@ -194,20 +194,22 @@ class _AssessmentSummaryBody extends StatelessWidget {
         ],
         if (hasQuick) ...[
           const SizedBox(height: 14),
-          if (value.quickAssessmentExplanation != null)
-            _AssessmentExplanationCard(
-              title: 'Latest Quick Check-In',
-              explanation: value.quickAssessmentExplanation!,
-            )
-          else
-            _AssessmentResultCard(
-              title: 'Quick Assessment',
-              status: value.quickAssessmentStatus ?? 'Result available',
-              summary:
-                  value.quickAssessmentSummary ??
-                  'Your quick assessment result is available.',
-              sectorStatuses: value.quickAssessmentAreaStatuses,
-            ),
+          _CollapsibleAssessmentSection(
+            title: 'Quick Assessment',
+            child: value.quickAssessmentExplanation != null
+                ? _AssessmentExplanationCard(
+                    title: 'Latest Quick Check-In',
+                    explanation: value.quickAssessmentExplanation!,
+                  )
+                : _AssessmentResultCard(
+                    title: 'Quick Assessment',
+                    status: value.quickAssessmentStatus ?? 'Result available',
+                    summary:
+                        value.quickAssessmentSummary ??
+                        'Your quick assessment result is available.',
+                    sectorStatuses: value.quickAssessmentAreaStatuses,
+                  ),
+          ),
         ],
         const SizedBox(height: 14),
         _HistoryNote(assessmentCount: value.assessmentCount),
@@ -331,7 +333,6 @@ class _V4FullAssessmentResultCard extends StatelessWidget {
     final payload = result.payload;
     final calculation = _v4Map(payload['result']);
     final interpretation = _v4Map(payload['interpretation']);
-    final instrument = _v4Map(payload['instrument']);
     final domains = _v4Maps(interpretation['domainSummaries']);
     final strengths = _v4Strings(interpretation['strengthInsights']);
     final focus = _v4Strings(interpretation['focusInsights']);
@@ -345,9 +346,6 @@ class _V4FullAssessmentResultCard extends StatelessWidget {
     final overall =
         _v4Text(interpretation['overallResponseSummary']) ??
         'Your responses are considered across five well-being areas.';
-    final quality = _v4Map(calculation['responseQuality']);
-    final answered = _v4Int(quality['answeredCount']);
-    final presented = _v4Int(quality['presentedCount']);
     final responseReviewAvailable =
         _v4Maps(payload['itemSnapshot']).isNotEmpty &&
         _v4Maps(payload['responses']).isNotEmpty &&
@@ -422,24 +420,7 @@ class _V4FullAssessmentResultCard extends StatelessWidget {
               style: _TextStyles.muted,
             ),
           const SizedBox(height: 14),
-          const Text('Response Completeness', style: _TextStyles.section),
-          const SizedBox(height: 6),
-          Text(
-            presented > 0
-                ? '$answered of $presented answered. ${_v4QualityLabel(quality['confidence']?.toString())}'
-                : 'Response completeness was not recorded for this saved result.',
-            style: _TextStyles.body,
-          ),
-          const SizedBox(height: 14),
-          _V4Transparency(
-            title: 'How This Result Was Created',
-            child: Text(
-              'This V4 assessment uses 50 questions across five well-being areas and a seven-day recall period. The server calculated this saved result deterministically. Generative AI does not determine the Full Assessment result. Instrument: ${_v4Text(instrument['version']) ?? 'not recorded'}; algorithm: ${_v4Text(instrument['algorithmVersion']) ?? _v4Text(payload['algorithmVersion']) ?? 'not recorded'}; record format: ${_v4Text(payload['schemaVersion']) ?? 'not recorded'}.',
-              style: _TextStyles.muted,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const _V4Transparency(
+          const _V4DisclosureSection(
             title: 'References & Resources',
             child: Text(
               'Hefferon, K., & Boniwell, I. (2011). Positive Psychology: Theory, Research and Applications. Open University Press. This is a conceptual and questionnaire-design reference, not validation of MindMate.',
@@ -528,8 +509,31 @@ class _V4ListSection extends StatelessWidget {
   );
 }
 
-class _V4Transparency extends StatelessWidget {
-  const _V4Transparency({required this.title, required this.child});
+class _CollapsibleAssessmentSection extends StatelessWidget {
+  const _CollapsibleAssessmentSection({
+    required this.title,
+    required this.child,
+  });
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => _Panel(
+    child: Material(
+      color: Colors.transparent,
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        title: Text(title, style: _TextStyles.heading),
+        childrenPadding: const EdgeInsets.only(top: 8),
+        children: [child],
+      ),
+    ),
+  );
+}
+
+class _V4DisclosureSection extends StatelessWidget {
+  const _V4DisclosureSection({required this.title, required this.child});
 
   final String title;
   final Widget child;
@@ -855,9 +859,6 @@ List<String> _v4Strings(Object? value) => value is List
 String? _v4Text(Object? value) =>
     value is String && value.trim().isNotEmpty ? value.trim() : null;
 
-int _v4Int(Object? value) =>
-    value is num ? value.toInt() : int.tryParse(value?.toString() ?? '') ?? 0;
-
 String _v4ProfileLabel(String? value) => switch (value) {
   'generallySupported' => 'Well-being appears generally supported.',
   'mostlySupported' => 'Mostly supported, with an area to explore.',
@@ -872,13 +873,6 @@ String _v4DomainLabel(String? value) => switch (value) {
   'someStrain' => 'Some strain indicated',
   'supportMayHelp' => 'Support may be helpful',
   _ => 'More responses needed',
-};
-
-String _v4QualityLabel(String? value) => switch (value) {
-  'high' => 'High confidence.',
-  'usableWithCaution' => 'Usable with caution.',
-  'limited' => 'Limited response coverage.',
-  _ => 'Response quality was saved with this result.',
 };
 
 String _readable(String value) {

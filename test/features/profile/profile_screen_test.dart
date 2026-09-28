@@ -274,6 +274,8 @@ void main() {
         'generatedAt': DateTime(2026, 9, 28).toIso8601String(),
         'fullAssessmentStatus': 'someAreasNeedAttention',
         'fullAssessmentSummary': 'Compact report summary.',
+        'quickAssessmentStatus': 'moderate',
+        'quickAssessmentSummary': 'Saved quick assessment summary.',
       });
       final userProvider = UserProvider(_FakeUserRepository())
         ..setUser(const UserModel(id: 'user_1', email: 'user@example.com'));
@@ -301,6 +303,16 @@ void main() {
       expect(find.text('Saved focus insight.'), findsOneWidget);
       expect(find.text('Saved strength.'), findsOneWidget);
       expect(find.text('Saved next step.'), findsOneWidget);
+      expect(find.text('Response Completeness'), findsNothing);
+      expect(find.text('How This Result Was Created'), findsNothing);
+      expect(find.text('References & Resources'), findsOneWidget);
+      expect(find.text('Quick Assessment'), findsOneWidget);
+      expect(find.text('Saved quick assessment summary.'), findsNothing);
+
+      await tester.tap(find.text('Quick Assessment'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Saved quick assessment summary.'), findsOneWidget);
     },
   );
 
@@ -422,10 +434,10 @@ void main() {
 
     expect(find.text('Latest Psychological Assessment'), findsOneWidget);
     expect(find.text('Quick Assessment'), findsOneWidget);
-    expect(find.text('Well-being status by sector'), findsNWidgets(2));
+    expect(find.text('Well-being status by sector'), findsOneWidget);
     expect(find.text('Academic Stress'), findsOneWidget);
     expect(find.text('Sleep and Rest'), findsOneWidget);
-    expect(find.text('Stress load'), findsOneWidget);
+    expect(find.text('Stress load'), findsNothing);
     expect(find.text('At Risk'), findsNWidgets(2));
     expect(find.text('Stable'), findsOneWidget);
     expect(
@@ -436,6 +448,11 @@ void main() {
     expect(find.text('Weekly mood'), findsNothing);
     expect(activityRepository.loadCount, 0);
     expect(reportRepository.refreshCount, 1);
+
+    await tester.tap(find.text('Quick Assessment'));
+    await tester.pumpAndSettle();
+    expect(find.text('Stress load'), findsOneWidget);
+    expect(find.text('Well-being status by sector'), findsNWidgets(2));
 
     final refresh = tester
         .state<RefreshIndicatorState>(find.byType(RefreshIndicator))
