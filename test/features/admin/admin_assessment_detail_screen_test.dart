@@ -32,7 +32,7 @@ void main() {
       expect(find.text('Well-being areas'), findsOneWidget);
       expect(find.text('Current strengths'), findsOneWidget);
       expect(find.text('Areas to explore'), findsOneWidget);
-      expect(find.text('Assessment information'), findsOneWidget);
+      expect(find.text('Assessment information'), findsNothing);
 
       expect(find.text('What the responses suggest overall'), findsNothing);
       expect(find.text('Suggested next steps'), findsNothing);

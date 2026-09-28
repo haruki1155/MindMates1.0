@@ -514,12 +514,6 @@ class _V4AssessmentCard extends StatelessWidget {
                 previous: previous!,
                 domainSummaries: domainSummaries,
               ),
-            const SizedBox(height: 24),
-            _AssessmentInformation(
-              assessment: assessment,
-              instrument: instrument,
-              quality: quality,
-            ),
             if (!compatible)
               const _MutedNotice(
                 message:
@@ -781,56 +775,6 @@ class _RemovedDiscussionGuide extends StatelessWidget {
 }
 
 */
-class _AssessmentInformation extends StatelessWidget {
-  const _AssessmentInformation({
-    required this.assessment,
-    required this.instrument,
-    required this.quality,
-  });
-  final Map<String, dynamic> assessment;
-  final Map<String, dynamic> instrument;
-  final Map<String, dynamic> quality;
-
-  @override
-  Widget build(BuildContext context) => ExpansionTile(
-    tilePadding: EdgeInsets.zero,
-    title: const Text(
-      'Assessment information',
-      style: TextStyle(fontWeight: FontWeight.w800),
-    ),
-    children: [
-      _metadataLine(
-        'Instrument',
-        _v4InstrumentLabel(instrument['version']?.toString()),
-      ),
-      _metadataLine('Schema', assessment['schemaVersion']?.toString()),
-      _metadataLine('Algorithm', assessment['algorithmVersion']?.toString()),
-      _metadataLine(
-        'Recall period',
-        '${instrument['recallPeriodDays'] ?? 'Unavailable'} days',
-      ),
-      _metadataLine(
-        'Questions answered',
-        '${quality['answered'] ?? 0}/${quality['presented'] ?? 50}',
-      ),
-      _metadataLine(
-        'Calculation authority',
-        assessment['calculationAuthority']?.toString(),
-      ),
-      _metadataLine(
-        'Verification',
-        assessment['verificationStatus']?.toString(),
-      ),
-    ],
-  );
-}
-
-Widget _metadataLine(String label, String? value) => ListTile(
-  dense: true,
-  title: Text(label),
-  trailing: Text(value?.isNotEmpty == true ? value! : 'Unavailable'),
-);
-
 class _MetadataChip extends StatelessWidget {
   const _MetadataChip({required this.icon, required this.label});
   final IconData icon;
