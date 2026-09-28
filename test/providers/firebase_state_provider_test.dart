@@ -1,11 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mind_mates/models/journal_model.dart';
 import 'package:mind_mates/models/mood_model.dart';
 import 'package:mind_mates/models/report_model.dart';
-import 'package:mind_mates/providers/journal_provider.dart';
 import 'package:mind_mates/providers/mood_provider.dart';
 import 'package:mind_mates/providers/report_provider.dart';
-import 'package:mind_mates/repositories/journal_repository.dart';
 import 'package:mind_mates/repositories/mood_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 
@@ -51,25 +48,6 @@ void main() {
       expect(provider.todayMood?.level, 3);
       expect(provider.dailySaveResult?.created, isTrue);
       expect(repository.saveCalls, 1);
-    });
-  });
-
-  group('JournalProvider', () {
-    test('creates journal and updates local state', () async {
-      final repository = _FakeJournalRepository();
-      final provider = JournalProvider(repository);
-
-      final success = await provider.createJournal(
-        userId: 'user_1',
-        content: 'Today felt manageable.',
-        moodLevel: 4,
-        tags: const ['check-in'],
-      );
-
-      expect(success, isTrue);
-      expect(provider.journals.single.content, 'Today felt manageable.');
-      expect(provider.journals.single.tags, ['check-in']);
-      expect(repository.createdUserId, 'user_1');
     });
   });
 
@@ -165,29 +143,6 @@ class _FakeMoodRepository extends MoodRepository {
 
   @override
   Future<List<MoodModel>> fetchRecentMoods(String userId, {int limit = 14}) {
-    return Future.value(const []);
-  }
-}
-
-class _FakeJournalRepository extends JournalRepository {
-  String? createdUserId;
-
-  @override
-  Future<String> createJournal({
-    required String userId,
-    required String content,
-    int? moodLevel,
-    List<String> tags = const [],
-  }) async {
-    createdUserId = userId;
-    return 'journal_1';
-  }
-
-  @override
-  Future<List<JournalModel>> fetchRecentJournals(
-    String userId, {
-    int limit = 20,
-  }) {
     return Future.value(const []);
   }
 }

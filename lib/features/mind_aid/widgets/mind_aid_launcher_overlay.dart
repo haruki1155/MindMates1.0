@@ -193,11 +193,6 @@ class _MindAidLauncherOverlayState extends State<MindAidLauncherOverlay> {
           source: 'mood',
           openingPrompt: 'Help me understand how I have been feeling.',
         );
-      case RouteNames.journal:
-        return const MindAidLaunchContext(
-          source: 'journal',
-          openingPrompt: 'Help me reflect without sharing my journal text.',
-        );
       case RouteNames.studentAssessment:
       case RouteNames.studentAssessmentComplete:
         return const MindAidLaunchContext(

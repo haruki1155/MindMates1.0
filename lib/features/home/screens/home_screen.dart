@@ -210,6 +210,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     final unreadNotifications =
         _watchProviderOrNull<NotificationProvider>(context)?.unreadCount ?? 0;
+    final todayMood = _watchProviderOrNull<MoodProvider>(context)?.todayMood;
+    final todayMoodLabel = todayMood == null
+        ? null
+        : (todayMood.label?.trim().isNotEmpty ?? false)
+        ? todayMood.label!.trim()
+        : 'Mood logged';
     final user = _userFor(data, assessmentProvider);
     final nextAppointment = _nextAppointment(
       appointmentProvider?.appointments ?? const [],
@@ -249,6 +255,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               delay: 70,
                               child: HomeWelcomeCard(
                                 user: user,
+                                todayMoodLabel: todayMoodLabel,
                                 onNotificationTap: _openNotifications,
                                 unreadNotificationCount: unreadNotifications,
                                 onCalendarTap: _openAppointmentCalendar,
@@ -438,7 +445,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final activityDates = backendActivityDates.isNotEmpty
         ? backendActivityDates
         : moods.map((mood) => mood.createdAt).toList();
-    final displayName = user?.displayName.trim();
+    // Profile setup stores the chosen nickname in the backwards-compatible
+    // firstName field. Use it for the greeting rather than the registration
+    // name, which may contain middle and last names.
+    final displayName = user?.firstName?.trim();
     final role = user?.roleLabel;
 
     return base.copyWith(
@@ -447,6 +457,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ? base.user.displayName
             : displayName,
         role: role ?? base.user.role,
+        profilePhotoUrl: user?.profilePhotoUrl,
       ),
       assessment: user == null
           ? base.assessment
@@ -476,7 +487,7 @@ class _HomeScreenState extends State<HomeScreen> {
               description: user.dayStreak == 0
                   ? 'Start with one check-in today'
                   : 'Keep your wellness rhythm going',
-              linkLabel: 'View',
+              linkLabel: '',
               lastActiveAt: user.lastActiveAt,
             ),
       days: activityDates.isEmpty
@@ -538,6 +549,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ? assessmentName
           : data.user.displayName.trim(),
       role: assessmentRole?.label ?? data.user.role,
+      profilePhotoUrl: data.user.profilePhotoUrl,
     );
   }
 
@@ -896,13 +908,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (title == 'Facial Recognition') {
       _openLogMood();
-      return;
-    }
-
-    if (title == 'Quiet reflection' ||
-        title == 'Journal' ||
-        title == 'My Journal') {
-      Navigator.of(context).pushNamed(RouteNames.journal);
       return;
     }
 

@@ -94,12 +94,17 @@ class AppointmentProvider extends ChangeNotifier {
           ? _appointments
           : const <AppointmentModel>[];
       _loadedUserId = appointment.userId;
-      _appointments =
-          [
-              created,
-              ...existing,
-            ].where((item) => item.userId == appointment.userId).toList()
-            ..sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
+      final merged = <AppointmentModel>[];
+      for (final item in [created, ...existing]) {
+        if (item.userId != appointment.userId ||
+            (item.id.isNotEmpty &&
+                merged.any((entry) => entry.id == item.id))) {
+          continue;
+        }
+        merged.add(item);
+      }
+      _appointments = merged
+        ..sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
       return true;
     } catch (error, stackTrace) {
       FirebaseErrorMessage.log(

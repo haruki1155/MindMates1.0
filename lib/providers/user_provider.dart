@@ -165,10 +165,6 @@ class UserProvider extends ChangeNotifier {
     return recordActivity(uid, UserActivityType.moodCheckIn);
   }
 
-  Future<void> markJournalEntry(String uid) {
-    return recordActivity(uid, UserActivityType.journalEntry);
-  }
-
   Future<void> markBreathingSession(String uid) {
     return recordActivity(uid, UserActivityType.breathingSession);
   }

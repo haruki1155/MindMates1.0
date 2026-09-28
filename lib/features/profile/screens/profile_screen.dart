@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_assets.dart';
@@ -12,10 +15,20 @@ import '../../../providers/sleep_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
 
+typedef EditProfileImagePicker = Future<EditProfileImage?> Function();
+
+class EditProfileImage {
+  const EditProfileImage({required this.bytes, required this.contentType});
+
+  final Uint8List bytes;
+  final String contentType;
+}
+
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key, this.data});
+  const ProfileScreen({super.key, this.data, this.imagePicker});
 
   final ProfileViewData? data;
+  final EditProfileImagePicker? imagePicker;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -165,8 +178,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                             child: _ProfileSummaryCard(
                               data: data,
                               isLoading: userProvider.isLoading,
-                              onEditTap: () =>
-                                  _openEditProfile(context, userProvider.user),
+                              onEditTap: () => _openEditProfile(
+                                context,
+                                userProvider.user,
+                                imagePicker: widget.imagePicker,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 18),
@@ -335,7 +351,11 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  Future<void> _openEditProfile(BuildContext context, UserModel? user) async {
+  Future<void> _openEditProfile(
+    BuildContext context,
+    UserModel? user, {
+    EditProfileImagePicker? imagePicker,
+  }) async {
     if (user == null) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -349,7 +369,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _EditProfileSheet(user: user),
+      builder: (_) => _EditProfileSheet(user: user, imagePicker: imagePicker),
     );
   }
 
@@ -1272,9 +1292,10 @@ class _SkeletonBoxState extends State<_SkeletonBox>
 }
 
 class _EditProfileSheet extends StatefulWidget {
-  const _EditProfileSheet({required this.user});
+  const _EditProfileSheet({required this.user, this.imagePicker});
 
   final UserModel user;
+  final EditProfileImagePicker? imagePicker;
 
   @override
   State<_EditProfileSheet> createState() => _EditProfileSheetState();
@@ -1287,6 +1308,8 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
   late final TextEditingController _lastNameController;
   late final TextEditingController _schoolIdController;
   late final TextEditingController _departmentController;
+  Uint8List? _image;
+  String _contentType = 'image/jpeg';
 
   @override
   void initState() {
@@ -1352,6 +1375,12 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
                   ),
                   const SizedBox(height: 18),
                   const Text('Edit Profile', style: _ProfileText.title),
+                  const SizedBox(height: 14),
+                  _EditProfilePhotoPicker(
+                    image: _image,
+                    photoUrl: widget.user.profilePhotoUrl,
+                    onTap: isSaving ? null : _pickImage,
+                  ),
                   const SizedBox(height: 14),
                   _EditField(
                     controller: _firstNameController,
@@ -1443,6 +1472,69 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     return null;
   }
 
+  Future<void> _pickImage() async {
+    try {
+      final selected = widget.imagePicker != null
+          ? await widget.imagePicker!()
+          : await _pickGalleryImage();
+      if (selected == null || !mounted) return;
+      if (selected.bytes.isEmpty) {
+        _showMessage('The selected photo is empty. Please choose another one.');
+        return;
+      }
+      if (selected.bytes.length > 5 * 1024 * 1024) {
+        _showMessage('Choose an image smaller than 5 MB.');
+        return;
+      }
+      setState(() {
+        _image = selected.bytes;
+        _contentType = selected.contentType;
+      });
+    } on FormatException catch (error) {
+      if (mounted) _showMessage(error.message.toString());
+    } catch (_) {
+      if (mounted) {
+        _showMessage(
+          'Unable to open your photos. Check photo permissions and try again.',
+        );
+      }
+    }
+  }
+
+  Future<EditProfileImage?> _pickGalleryImage() async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+      maxWidth: 1024,
+      maxHeight: 1024,
+    );
+    if (picked == null) return null;
+
+    final name = picked.name.toLowerCase();
+    final reportedType = picked.mimeType?.toLowerCase();
+    final contentType = reportedType == 'image/png' || name.endsWith('.png')
+        ? 'image/png'
+        : reportedType == 'image/jpeg' ||
+              name.endsWith('.jpg') ||
+              name.endsWith('.jpeg')
+        ? 'image/jpeg'
+        : null;
+    if (contentType == null) {
+      throw const FormatException('Only JPG and PNG photos are supported.');
+    }
+
+    return EditProfileImage(
+      bytes: await picked.readAsBytes(),
+      contentType: contentType,
+    );
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
@@ -1456,6 +1548,21 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
     if (!mounted) return;
 
     if (success) {
+      if (_image != null) {
+        final uploaded = await context.read<UserProvider>().uploadProfileImage(
+          widget.user.id,
+          _image!,
+          contentType: _contentType,
+        );
+        if (!mounted) return;
+        if (!uploaded) {
+          _showMessage(
+            context.read<UserProvider>().errorMessage ??
+                'Your profile was saved, but the photo could not be uploaded.',
+          );
+          return;
+        }
+      }
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -1555,6 +1662,54 @@ class _EditProfileSheetState extends State<_EditProfileSheet> {
               : 'Unable to submit request.',
         ),
       ),
+    );
+  }
+}
+
+class _EditProfilePhotoPicker extends StatelessWidget {
+  const _EditProfilePhotoPicker({
+    required this.image,
+    required this.photoUrl,
+    required this.onTap,
+  });
+
+  final Uint8List? image;
+  final String? photoUrl;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final existingUrl = photoUrl?.trim() ?? '';
+    final imageProvider = image != null
+        ? MemoryImage(image!) as ImageProvider<Object>
+        : existingUrl.isNotEmpty
+        ? NetworkImage(existingUrl)
+        : null;
+
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 28,
+          backgroundColor: _ProfileColors.sun,
+          backgroundImage: imageProvider,
+          child: imageProvider == null
+              ? const Icon(Icons.person_rounded, color: Colors.black)
+              : null,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            'Add or replace your profile photo.',
+            style: _ProfileText.body,
+          ),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
+          onPressed: onTap,
+          icon: const Icon(Icons.photo_library_outlined),
+          label: Text(imageProvider == null ? 'Upload photo' : 'Change photo'),
+        ),
+      ],
     );
   }
 }

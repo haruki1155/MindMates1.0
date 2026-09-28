@@ -245,7 +245,7 @@ class _MindAidPageState extends State<MindAidPage> {
           editing ? 'AI privacy settings' : 'Choose how MindAid works',
         ),
         content: const Text(
-          'MindAid is a non-clinical automated wellness assistant, not a therapist, diagnostic tool, treatment service, or emergency response service. It can provide general wellness information and coping suggestions when PACC or administrators are unavailable, but chats are not monitored in real time. Dialogflow can make MindAid more conversational. With your permission, it receives your chat turns and limited derived signals such as mood trends and assessment level. Journal text, mood notes, raw answers, and contact details are never sent. You can instead keep using the local assistant.',
+          'MindAid is a non-clinical automated wellness assistant, not a therapist, diagnostic tool, treatment service, or emergency response service. It can provide general wellness information and coping suggestions when PACC or administrators are unavailable, but chats are not monitored in real time. Dialogflow can make MindAid more conversational. With your permission, it receives your chat turns and limited derived signals such as mood trends and assessment level. Mood notes, raw answers, and contact details are never sent. You can instead keep using the local assistant.',
         ),
         actions: [
           TextButton(

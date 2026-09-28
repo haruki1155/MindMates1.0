@@ -128,10 +128,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
     setState(() => _saving = true);
     try {
-      final firstName = _firstName.text.trim();
+      final nickname = _firstName.text.trim();
       final updated = user.copyWith(
-        firstName: firstName,
-        name: firstName,
+        // `firstName` remains the persisted compatibility field. Here it is
+        // the name the person chooses for MindMate to use.
+        firstName: nickname,
+        name: nickname,
         profileSetupCompleted: true,
       );
       if (!await provider.updateProfile(updated)) {
@@ -331,7 +333,7 @@ class _ProfileCard extends StatelessWidget {
             ),
             const SizedBox(height: 7),
             const Text(
-              'We’ll use your first name throughout the app.',
+              'We’ll use this nickname throughout MindMate.',
               style: TextStyle(
                 color: _Colors.muted,
                 fontSize: 12,
@@ -345,7 +347,7 @@ class _ProfileCard extends StatelessWidget {
               enabled: !saving,
               textCapitalization: TextCapitalization.words,
               textInputAction: TextInputAction.done,
-              autofillHints: const [AutofillHints.givenName],
+              autofillHints: const [AutofillHints.nickname],
               onFieldSubmitted: (_) {
                 if (!saving) onSave();
               },
@@ -355,8 +357,8 @@ class _ProfileCard extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
               decoration: InputDecoration(
-                labelText: 'First name',
-                hintText: 'Enter your first name',
+                labelText: 'Nickname',
+                hintText: 'Enter the name you want us to use',
                 prefixIcon: const Icon(Icons.person_outline_rounded),
                 filled: true,
                 fillColor: _Colors.fieldSurface,
@@ -371,7 +373,7 @@ class _ProfileCard extends StatelessWidget {
                 ),
               ),
               validator: (value) => value == null || value.trim().isEmpty
-                  ? 'First name is required'
+                  ? 'Nickname is required'
                   : null,
             ),
             const SizedBox(height: 14),
@@ -521,7 +523,7 @@ class _NameInfo extends StatelessWidget {
           SizedBox(width: 9),
           Expanded(
             child: Text(
-              'Your display name is set automatically from this first name.',
+              'Your display name is set automatically from this nickname.',
               style: TextStyle(
                 color: Color(0xFF725715),
                 fontSize: 12,

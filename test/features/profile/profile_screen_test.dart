@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -48,6 +50,51 @@ void main() {
     expect(find.byType(FractionallySizedBox), findsNothing);
     expect(find.text('20'), findsOneWidget);
     expect(find.text('--/10'), findsNWidgets(2));
+  });
+
+  testWidgets('Edit Profile offers a photo upload action', (tester) async {
+    final imageBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+    );
+    final repository = _FakeUserRepository();
+    final provider = UserProvider(repository)
+      ..setUser(
+        const UserModel(
+          id: 'user_1',
+          email: 'leo@example.com',
+          firstName: 'Leonardo',
+          lastName: 'Molar',
+          schoolId: '2026-0001',
+          department: 'Computer Science',
+        ),
+      );
+
+    await tester.pumpWidget(
+      _profileApp(
+        provider,
+        imagePicker: () async => EditProfileImage(
+          bytes: imageBytes,
+          contentType: 'image/png',
+        ),
+      ),
+    );
+    await tester.tap(find.byTooltip('Edit profile'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Upload photo'), findsOneWidget);
+    await tester.tap(find.text('Upload photo'));
+    await tester.pump();
+    expect(find.text('Change photo'), findsOneWidget);
+
+    final saveButton = find.widgetWithText(FilledButton, 'Save Profile');
+    await tester.ensureVisible(saveButton);
+    await tester.tap(saveButton);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(repository.uploadedBytes, imageBytes);
+    expect(provider.user?.profilePhotoUrl, 'https://example.com/profile.png');
   });
 
   testWidgets('mental health summary buttons and routes are ready', (
@@ -556,6 +603,7 @@ Widget _profileApp(
   ProfileViewData? data,
   ReportProvider? reportProvider,
   AuthProvider? authProvider,
+  EditProfileImagePicker? imagePicker,
 }) {
   return MultiProvider(
     providers: [
@@ -567,7 +615,7 @@ Widget _profileApp(
     ],
     child: MaterialApp(
       theme: ThemeData(splashFactory: NoSplash.splashFactory),
-      home: ProfileScreen(data: data),
+      home: ProfileScreen(data: data, imagePicker: imagePicker),
       routes: {
         RouteNames.login: (_) =>
             const Scaffold(body: Center(child: Text('Login target'))),
@@ -608,6 +656,8 @@ ProfileViewData _dataFrom(UserModel user) {
 
 class _FakeUserRepository extends UserRepository {
   UserModel? updatedUser;
+  Uint8List? uploadedBytes;
+  String? uploadedContentType;
 
   @override
   Future<UserModel?> fetchUserProfile(String uid) async {
@@ -617,6 +667,20 @@ class _FakeUserRepository extends UserRepository {
   @override
   Future<void> updateUserProfile(String uid, UserModel user) async {
     updatedUser = user;
+  }
+
+  @override
+  Future<({String path, String url})> uploadProfileImage(
+    String uid,
+    Uint8List bytes, {
+    required String contentType,
+  }) async {
+    uploadedBytes = bytes;
+    uploadedContentType = contentType;
+    return (
+      path: 'profile_images/$uid/avatar.png',
+      url: 'https://example.com/profile.png',
+    );
   }
 }
 

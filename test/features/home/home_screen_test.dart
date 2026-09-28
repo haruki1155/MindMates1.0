@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/home/data/daily_affirmation_quotes.dart';
+import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
@@ -24,6 +25,13 @@ import 'package:mind_mates/routes/app_pages.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  test('home dashboard no longer includes Journal', () {
+    expect(
+      HomeDashboardData.mock().toolkitItems.map((item) => item.title),
+      isNot(contains('My Journal')),
+    );
+  });
+
   testWidgets('announcement actions are interactive', (tester) async {
     var viewMoreCalls = 0;
     var detailCalls = 0;
@@ -99,6 +107,7 @@ void main() {
           lastName: 'Molar',
           role: 'student',
           dayStreak: 5,
+          profilePhotoUrl: 'https://example.com/profile.png',
         ),
       );
     final moodProvider = MoodProvider(_FakeMoodRepository());
@@ -142,9 +151,12 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Welcome back, Leonardo Molar!'), findsOneWidget);
+    expect(find.text('Welcome, Leonardo!'), findsOneWidget);
+    expect(find.byKey(const Key('home-profile-photo')), findsOneWidget);
+    expect(find.text('Today’s mood: Good'), findsOneWidget);
     expect(find.text('Student'), findsOneWidget);
     expect(find.text('Day streak'), findsOneWidget);
+    expect(find.text('View ->'), findsNothing);
     expect(find.text('5'), findsWidgets);
     await tester.scrollUntilVisible(
       find.text('View Summary'),
