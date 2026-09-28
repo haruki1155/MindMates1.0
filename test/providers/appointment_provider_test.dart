@@ -100,6 +100,32 @@ void main() {
     expect(saved, isTrue);
     expect(repository.lastRequestId, 'booking_retry_safe_01');
   });
+
+  test(
+    'idempotent booking replay does not duplicate the local appointment',
+    () async {
+      final repository = _FakeAppointmentRepository([]);
+      final provider = AppointmentProvider(repository);
+      final appointment = _appointment('new', 'user_1');
+
+      expect(
+        await provider.createAppointment(
+          appointment,
+          requestId: 'booking_retry_safe_01',
+        ),
+        isTrue,
+      );
+      expect(
+        await provider.createAppointment(
+          appointment,
+          requestId: 'booking_retry_safe_01',
+        ),
+        isTrue,
+      );
+
+      expect(provider.appointments.map((item) => item.id), ['created_1']);
+    },
+  );
 }
 
 AppointmentModel _appointment(String id, String userId) {

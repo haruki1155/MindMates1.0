@@ -285,7 +285,6 @@ class MindAidRepository {
         assessment: context.assessment,
         conversationSummary: context.conversationSummary,
         preferredSupportStyle: context.preferredSupportStyle,
-        journalText: context.journalText,
         wellnessSnapshot: context.wellnessSnapshot,
       ),
       dataset,

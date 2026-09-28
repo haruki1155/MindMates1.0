@@ -347,6 +347,7 @@ class HomeWelcomeCard extends StatelessWidget {
   const HomeWelcomeCard({
     super.key,
     required this.user,
+    this.todayMoodLabel,
     required this.onNotificationTap,
     this.unreadNotificationCount = 0,
     required this.onCalendarTap,
@@ -354,6 +355,7 @@ class HomeWelcomeCard extends StatelessWidget {
   });
 
   final HomeUserData user;
+  final String? todayMoodLabel;
   final VoidCallback onNotificationTap;
   final int unreadNotificationCount;
   final VoidCallback onCalendarTap;
@@ -363,8 +365,8 @@ class HomeWelcomeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final displayName = user.displayName.trim();
     final welcomeText = displayName.isEmpty
-        ? 'Welcome back!'
-        : 'Welcome back, $displayName!';
+        ? 'Welcome!'
+        : 'Welcome, $displayName!';
 
     return Container(
       padding: const EdgeInsets.all(HomeMetrics.cardPadding),
@@ -376,12 +378,11 @@ class HomeWelcomeCard extends StatelessWidget {
             children: [
               HomeCircleIconButton(
                 icon: Icons.person_outline,
-                assetName: 'Customer.png',
-                assetColor: HomePalette.text,
                 tooltip: 'Profile',
                 onTap: onProfileTap,
                 size: 36,
                 iconSize: 20,
+                child: _HomeProfileAvatar(photoUrl: user.profilePhotoUrl),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -427,14 +428,32 @@ class HomeWelcomeCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 18),
-          const Text(
+          Text(
             'How are you feeling today?',
-            style: TextStyle(
+            style: const TextStyle(
               color: HomePalette.mutedGold,
               fontSize: 14,
               fontWeight: FontWeight.w800,
             ),
           ),
+          if ((todayMoodLabel ?? '').isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: HomePalette.softGold.withAlpha(120),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                'Today’s mood: ${todayMoodLabel!}',
+                style: const TextStyle(
+                  color: HomePalette.text,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -493,6 +512,43 @@ class _NotificationBell extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _HomeProfileAvatar extends StatelessWidget {
+  const _HomeProfileAvatar({this.photoUrl});
+
+  final String? photoUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = photoUrl?.trim() ?? '';
+    if (url.isEmpty) {
+      return const HomeDashboardAssetImage(
+        assetName: 'Customer.png',
+        width: 20,
+        height: 20,
+        color: HomePalette.text,
+      );
+    }
+
+    return ClipOval(
+      child: Image.network(
+        url,
+        key: const Key('home-profile-photo'),
+        width: 36,
+        height: 36,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => const Center(
+          child: HomeDashboardAssetImage(
+            assetName: 'Customer.png',
+            width: 20,
+            height: 20,
+            color: HomePalette.text,
+          ),
+        ),
       ),
     );
   }
@@ -732,20 +788,6 @@ class HomeStreakCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: HomeTextStyles.body,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      streak == null
-                          ? 'Backend-ready for account activity'
-                          : '${streak.linkLabel} ->',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: HomePalette.text,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        decoration: TextDecoration.underline,
-                      ),
                     ),
                   ],
                 ),
@@ -1985,6 +2027,7 @@ class HomeCircleIconButton extends StatelessWidget {
     this.assetColor,
     this.size = 44,
     this.iconSize = 22,
+    this.child,
   });
 
   final IconData icon;
@@ -1994,6 +2037,7 @@ class HomeCircleIconButton extends StatelessWidget {
   final Color? assetColor;
   final double size;
   final double iconSize;
+  final Widget? child;
 
   @override
   Widget build(BuildContext context) {
@@ -2010,16 +2054,18 @@ class HomeCircleIconButton extends StatelessWidget {
           child: SizedBox(
             width: size,
             height: size,
-            child: assetName == null
-                ? Icon(icon, size: iconSize, color: HomePalette.text)
-                : Center(
-                    child: HomeDashboardAssetImage(
-                      assetName: assetName!,
-                      width: iconSize,
-                      height: iconSize,
-                      color: assetColor,
-                    ),
-                  ),
+            child:
+                child ??
+                (assetName == null
+                    ? Icon(icon, size: iconSize, color: HomePalette.text)
+                    : Center(
+                        child: HomeDashboardAssetImage(
+                          assetName: assetName!,
+                          width: iconSize,
+                          height: iconSize,
+                          color: assetColor,
+                        ),
+                      )),
           ),
         ),
       ),

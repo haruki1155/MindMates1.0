@@ -34,7 +34,6 @@ class MindAidChatRequest {
     this.assessment,
     this.conversationSummary,
     this.preferredSupportStyle,
-    this.journalText,
     this.wellnessSnapshot,
   });
 
@@ -47,7 +46,6 @@ class MindAidChatRequest {
   final MindAidAssessmentContext? assessment;
   final String? conversationSummary;
   final MindAidSupportStyle? preferredSupportStyle;
-  final String? journalText;
   final MindAidWellnessSnapshot? wellnessSnapshot;
 }
 

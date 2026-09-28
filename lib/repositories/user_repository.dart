@@ -16,7 +16,6 @@ enum UserActivityType {
   fullAssessment,
   mindAidMessage,
   moodCheckIn,
-  journalEntry,
   breathingSession,
   secretChatPost,
   secretChatComment,

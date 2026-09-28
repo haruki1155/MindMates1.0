@@ -32,6 +32,8 @@ void main() {
       ),
     );
 
+    expect(find.widgetWithText(TextFormField, 'Nickname'), findsOneWidget);
+
     await tester.tap(find.text('Add a photo (optional)'));
     await tester.pumpAndSettle();
     expect(find.text('Change photo'), findsOneWidget);

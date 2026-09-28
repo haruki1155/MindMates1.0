@@ -217,13 +217,6 @@ service cloud.firestore {
           && resource.data.timezone != 'Asia/Manila');
     }
 
-    match /journals/{journalId} {
-      allow create: if isVerifiedEmail() && isOwner(request.resource.data.userId);
-      allow read, delete: if isOwner(resource.data.userId);
-      allow update: if isOwner(resource.data.userId)
-        && request.resource.data.userId == resource.data.userId;
-    }
-
     match /reports/{reportId} {
       allow create: if isOwner(request.resource.data.userId) || isAdmin();
       allow read: if isOwner(resource.data.userId) || isAdmin();

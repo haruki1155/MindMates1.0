@@ -49,7 +49,6 @@ class MindAidChatEngine {
       assessment: request.assessment,
       conversationSummary: request.conversationSummary,
       preferredSupportStyle: request.preferredSupportStyle,
-      journalText: request.journalText,
       wellnessSnapshot: request.wellnessSnapshot,
     );
 
