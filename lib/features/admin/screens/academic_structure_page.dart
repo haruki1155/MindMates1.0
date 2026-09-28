@@ -16,6 +16,10 @@ class AcademicStructurePage extends StatefulWidget {
 class _AcademicStructurePageState extends State<AcademicStructurePage> {
   String query = '';
   String status = 'Active';
+  bool _initializingCatalog = false;
+  final Set<String> _updatingStructureIds = <String>{};
+  List<College> _loadedColleges = const <College>[];
+  List<Department> _loadedDepartments = const <Department>[];
 
   bool _matches(OrganizationRecord item) =>
       (status == 'All' || (status == 'Active' ? item.active : !item.active)) &&
@@ -113,11 +117,11 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
                     if (!courseSnapshot.hasData) {
                       return const _StructureSkeleton();
                     }
-                    final departments = departmentSnapshot.data!;
+                    final departments = _loadedDepartments =
+                        departmentSnapshot.data!;
                     final courses = courseSnapshot.data!;
-                    final colleges = collegeSnapshot.data!
-                        .where(_matches)
-                        .toList();
+                    _loadedColleges = collegeSnapshot.data!;
+                    final colleges = _loadedColleges.where(_matches).toList();
                     if (colleges.isEmpty) return _empty();
                     return Card(
                       child: Padding(
@@ -179,18 +183,24 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
       subtitle: Text(
         '${college.code} • ${college.active ? 'Active' : 'Inactive'}',
       ),
-      trailing: PopupMenuButton<String>(
-        onSelected: (value) => value == 'edit'
-            ? _edit('college', college: college)
-            : _toggle('college', college),
-        itemBuilder: (_) => [
-          const PopupMenuItem(value: 'edit', child: Text('Edit')),
-          PopupMenuItem(
-            value: 'toggle',
-            child: Text(college.active ? 'Archive' : 'Restore'),
-          ),
-        ],
-      ),
+      trailing: _updatingStructureIds.contains(college.id)
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : PopupMenuButton<String>(
+              onSelected: (value) => value == 'edit'
+                  ? _edit('college', college: college)
+                  : _toggle('college', college),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                PopupMenuItem(
+                  value: 'toggle',
+                  child: Text(college.active ? 'Archive' : 'Restore'),
+                ),
+              ],
+            ),
       children: collegeDepartments
           .map((department) => _departmentTile(department, courses))
           .toList(),
@@ -214,18 +224,24 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
       subtitle: Text(
         '${department.code} • ${department.active ? 'Active' : 'Inactive'}',
       ),
-      trailing: PopupMenuButton<String>(
-        onSelected: (value) => value == 'edit'
-            ? _edit('department', department: department)
-            : _toggle('department', department),
-        itemBuilder: (_) => [
-          const PopupMenuItem(value: 'edit', child: Text('Edit')),
-          PopupMenuItem(
-            value: 'toggle',
-            child: Text(department.active ? 'Archive' : 'Restore'),
-          ),
-        ],
-      ),
+      trailing: _updatingStructureIds.contains(department.id)
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : PopupMenuButton<String>(
+              onSelected: (value) => value == 'edit'
+                  ? _edit('department', department: department)
+                  : _toggle('department', department),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                PopupMenuItem(
+                  value: 'toggle',
+                  child: Text(department.active ? 'Archive' : 'Restore'),
+                ),
+              ],
+            ),
       children: courses
           .where(
             (course) =>
@@ -242,18 +258,27 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
                 subtitle: Text(
                   '${course.code} • ${course.active ? 'Active' : 'Inactive'}',
                 ),
-                trailing: PopupMenuButton<String>(
-                  onSelected: (value) => value == 'edit'
-                      ? _edit('course', course: course)
-                      : _toggle('course', course),
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                    PopupMenuItem(
-                      value: 'toggle',
-                      child: Text(course.active ? 'Archive' : 'Restore'),
-                    ),
-                  ],
-                ),
+                trailing: _updatingStructureIds.contains(course.id)
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : PopupMenuButton<String>(
+                        onSelected: (value) => value == 'edit'
+                            ? _edit('course', course: course)
+                            : _toggle('course', course),
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Text('Edit'),
+                          ),
+                          PopupMenuItem(
+                            value: 'toggle',
+                            child: Text(course.active ? 'Archive' : 'Restore'),
+                          ),
+                        ],
+                      ),
               ),
             ),
           )
@@ -294,9 +319,19 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: _initializeCatalog,
-                icon: const Icon(Icons.download_outlined),
-                label: const Text('Load current catalog'),
+                onPressed: _initializingCatalog ? null : _initializeCatalog,
+                icon: _initializingCatalog
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.download_outlined),
+                label: Text(
+                  _initializingCatalog
+                      ? 'Loading catalog…'
+                      : 'Load current catalog',
+                ),
               ),
             ],
           ],
@@ -322,6 +357,8 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
   );
 
   Future<void> _initializeCatalog() async {
+    if (_initializingCatalog) return;
+    setState(() => _initializingCatalog = true);
     try {
       final count = await widget.repository.initializeAcademicStructure();
       if (mounted) {
@@ -345,6 +382,8 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _initializingCatalog = false);
     }
   }
 
@@ -360,8 +399,8 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
     final code = TextEditingController(
       text: college?.code ?? department?.code ?? course?.code,
     );
-    final colleges = await widget.repository.watchColleges().first;
-    final departments = await widget.repository.watchDepartments().first;
+    final colleges = _loadedColleges;
+    final departments = _loadedDepartments;
     if (!mounted) {
       name.dispose();
       code.dispose();
@@ -494,6 +533,7 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
   }
 
   Future<void> _toggle(String kind, OrganizationRecord item) async {
+    if (_updatingStructureIds.contains(item.id)) return;
     final action = item.active ? 'archive' : 'restore';
     final ok = await showDialog<bool>(
       context: context,
@@ -519,6 +559,7 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
       ),
     );
     if (ok != true) return;
+    setState(() => _updatingStructureIds.add(item.id));
     try {
       await widget.repository.archiveOrganizationRecord(
         kind: kind,
@@ -544,6 +585,8 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _updatingStructureIds.remove(item.id));
     }
   }
 }

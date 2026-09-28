@@ -30,6 +30,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
   String staffStatusFilter = 'All account statuses';
   final Set<String> _updatingStaff = <String>{};
   final Set<String> _selectedStaffIds = <String>{};
+  bool _bulkUpdatingStaff = false;
+  String? _bulkActionInProgress;
   final searchController = TextEditingController();
   late Future<List<PublicAppUserRecord>> publicUsers;
   int? publicUserCount;
@@ -467,18 +469,44 @@ class _UserManagementPageState extends State<UserManagementPage> {
           if (_selectedStaffIds.isNotEmpty) ...[
             if (activeSelected > 0)
               OutlinedButton.icon(
-                onPressed: () => _bulkStaffAction(staff, 'suspend'),
-                icon: const Icon(Icons.pause_circle_outline, size: 17),
-                label: Text('Suspend selected ($activeSelected)'),
+                onPressed: _bulkUpdatingStaff
+                    ? null
+                    : () => _bulkStaffAction(staff, 'suspend'),
+                icon: _bulkUpdatingStaff
+                    ? const SizedBox(
+                        width: 17,
+                        height: 17,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.pause_circle_outline, size: 17),
+                label: Text(
+                  _bulkActionInProgress == 'suspend'
+                      ? 'Suspending accounts…'
+                      : 'Suspend selected ($activeSelected)',
+                ),
               ),
             if (suspendedSelected > 0)
               FilledButton.icon(
-                onPressed: () => _bulkStaffAction(staff, 'reactivate'),
-                icon: const Icon(Icons.play_circle_outline, size: 17),
-                label: Text('Reactivate selected ($suspendedSelected)'),
+                onPressed: _bulkUpdatingStaff
+                    ? null
+                    : () => _bulkStaffAction(staff, 'reactivate'),
+                icon: _bulkUpdatingStaff
+                    ? const SizedBox(
+                        width: 17,
+                        height: 17,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.play_circle_outline, size: 17),
+                label: Text(
+                  _bulkActionInProgress == 'reactivate'
+                      ? 'Reactivating accounts…'
+                      : 'Reactivate selected ($suspendedSelected)',
+                ),
               ),
             TextButton(
-              onPressed: () => setState(() => _selectedStaffIds.clear()),
+              onPressed: _bulkUpdatingStaff
+                  ? null
+                  : () => setState(() => _selectedStaffIds.clear()),
               child: const Text('Clear selection'),
             ),
           ],
@@ -492,6 +520,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
   }
 
   Future<void> _bulkStaffAction(List<UserModel> staff, String action) async {
+    if (_bulkUpdatingStaff) return;
     final selected = staff
         .where(
           (user) =>
@@ -528,7 +557,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
       reason.dispose();
       return;
     }
-    setState(() => _updatingStaff.addAll(selected.map((user) => user.id)));
+    setState(() {
+      _bulkUpdatingStaff = true;
+      _bulkActionInProgress = action;
+      _updatingStaff.addAll(selected.map((user) => user.id));
+    });
     try {
       final affected = await widget.repository.bulkManageStaffAccounts(
         userIds: selected.map((user) => user.id).toList(),
@@ -565,9 +598,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
       }
     } finally {
       if (mounted) {
-        setState(
-          () => _updatingStaff.removeAll(selected.map((user) => user.id)),
-        );
+        setState(() {
+          _updatingStaff.removeAll(selected.map((user) => user.id));
+          _bulkUpdatingStaff = false;
+          _bulkActionInProgress = null;
+        });
       }
     }
     reason.dispose();
@@ -591,7 +626,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
       ),
       PopupMenuButton<String>(
         tooltip: 'More staff actions',
-        onSelected: (action) => _handleStaffAction(user, action),
+        onSelected: _updatingStaff.contains(user.id)
+            ? null
+            : (action) => _handleStaffAction(user, action),
         itemBuilder: (_) => [
           if (status == StaffAccountStatus.pending)
             const PopupMenuItem(
@@ -909,12 +946,24 @@ class _UserManagementPageState extends State<UserManagementPage> {
       ),
     );
     if (confirmed == true && reason.text.trim().length >= 3) {
-      await widget.repository.reviewStaffRegistration(
-        userId: user.id,
-        approve: false,
-        accessRole: AccessRole.portalStaff,
-        reason: reason.text,
-      );
+      if (_updatingStaff.contains(user.id)) return;
+      setState(() => _updatingStaff.add(user.id));
+      try {
+        await widget.repository.reviewStaffRegistration(
+          userId: user.id,
+          approve: false,
+          accessRole: AccessRole.portalStaff,
+          reason: reason.text,
+        );
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(_friendlyAdminError(error))));
+        }
+      } finally {
+        if (mounted) setState(() => _updatingStaff.remove(user.id));
+      }
     }
     reason.dispose();
   }
@@ -1255,11 +1304,23 @@ class _UserManagementPageState extends State<UserManagementPage> {
       ),
     );
     if (confirmed == true && reason.text.trim().length >= 3) {
-      await widget.repository.assignAccessRole(
-        userId: user.id,
-        accessRole: role,
-        reason: reason.text,
-      );
+      if (_updatingStaff.contains(user.id)) return;
+      setState(() => _updatingStaff.add(user.id));
+      try {
+        await widget.repository.assignAccessRole(
+          userId: user.id,
+          accessRole: role,
+          reason: reason.text,
+        );
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(_friendlyAdminError(error))));
+        }
+      } finally {
+        if (mounted) setState(() => _updatingStaff.remove(user.id));
+      }
     }
     reason.dispose();
   }

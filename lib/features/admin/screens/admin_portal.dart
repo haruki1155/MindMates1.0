@@ -1736,46 +1736,67 @@ class _OrganizationDirectoryPanel extends StatelessWidget {
   }
 }
 
-class _RoleCorrectionQueue extends StatelessWidget {
+class _RoleCorrectionQueue extends StatefulWidget {
   const _RoleCorrectionQueue({required this.repository});
   final AdminPortalRepository repository;
 
   @override
-  Widget build(BuildContext context) =>
-      StreamBuilder<List<AdminRoleCorrectionRequest>>(
-        stream: repository.watchRoleCorrectionRequests(),
-        builder: (context, snapshot) {
-          final requests =
-              snapshot.data ?? const <AdminRoleCorrectionRequest>[];
-          if (requests.isEmpty) return const SizedBox.shrink();
-          return ExpansionTile(
-            initiallyExpanded: true,
-            title: Text('Role correction requests (${requests.length})'),
-            children: requests
-                .map(
-                  (request) => ListTile(
-                    title: Text(
-                      '${request.currentRole} → ${request.requestedRole}',
+  State<_RoleCorrectionQueue> createState() => _RoleCorrectionQueueState();
+}
+
+class _RoleCorrectionQueueState extends State<_RoleCorrectionQueue> {
+  final Set<String> _reviewingIds = <String>{};
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) => StreamBuilder<List<AdminRoleCorrectionRequest>>(
+    stream: widget.repository.watchRoleCorrectionRequests(),
+    builder: (context, snapshot) {
+      final requests = snapshot.data ?? const <AdminRoleCorrectionRequest>[];
+      if (requests.isEmpty) return const SizedBox.shrink();
+      return ExpansionTile(
+        initiallyExpanded: true,
+        title: Text('Role correction requests (${requests.length})'),
+        children: requests
+            .map(
+              (request) => ListTile(
+                title: Text(
+                  '${request.currentRole} → ${request.requestedRole}',
+                ),
+                subtitle: Text(request.reason),
+                trailing: Wrap(
+                  children: [
+                    TextButton(
+                      onPressed: _reviewingIds.contains(request.id)
+                          ? null
+                          : () => _review(context, request, false),
+                      child: Text(
+                        _reviewingIds.contains(request.id)
+                            ? 'Processing…'
+                            : 'Reject',
+                      ),
                     ),
-                    subtitle: Text(request.reason),
-                    trailing: Wrap(
-                      children: [
-                        TextButton(
-                          onPressed: () => _review(context, request, false),
-                          child: const Text('Reject'),
-                        ),
-                        FilledButton(
-                          onPressed: () => _review(context, request, true),
-                          child: const Text('Approve'),
-                        ),
-                      ],
+                    FilledButton(
+                      onPressed: _reviewingIds.contains(request.id)
+                          ? null
+                          : () => _review(context, request, true),
+                      child: _reviewingIds.contains(request.id)
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Approve'),
                     ),
-                  ),
-                )
-                .toList(),
-          );
-        },
+                  ],
+                ),
+              ),
+            )
+            .toList(),
       );
+    },
+  );
 
   Future<void> _review(
     BuildContext context,
@@ -1806,11 +1827,33 @@ class _RoleCorrectionQueue extends StatelessWidget {
       ),
     );
     if (confirmed == true && controller.text.trim().length >= 3) {
-      await repository.reviewRoleCorrection(
-        requestId: request.id,
-        approve: approve,
-        reason: controller.text,
-      );
+      if (_reviewingIds.contains(request.id)) {
+        controller.dispose();
+        return;
+      }
+      setState(() => _reviewingIds.add(request.id));
+      try {
+        await widget.repository.reviewRoleCorrection(
+          requestId: request.id,
+          approve: approve,
+          reason: controller.text,
+        );
+      } catch (error) {
+        if (mounted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                FirebaseErrorMessage.describe(
+                  error,
+                  fallback: 'Unable to review the role correction.',
+                ),
+              ),
+            ),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _reviewingIds.remove(request.id));
+      }
     }
     controller.dispose();
   }
@@ -1833,6 +1876,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
   String departmentFilter = 'All departments';
   bool showHistory = false;
   final Set<String> selectedIds = <String>{};
+  final Set<String> _archivingIds = <String>{};
   bool archiving = false;
   final _search = TextEditingController();
 
@@ -2089,17 +2133,19 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                           Checkbox(
                             value: allSelected,
                             tristate: selectedIds.isNotEmpty && !allSelected,
-                            onChanged: (value) => setState(() {
-                              if (allSelected || value == false) {
-                                selectedIds.clear();
-                              } else {
-                                selectedIds.addAll(
-                                  selectable.map(
-                                    (appointment) => appointment.id,
-                                  ),
-                                );
-                              }
-                            }),
+                            onChanged: archiving
+                                ? null
+                                : (value) => setState(() {
+                                    if (allSelected || value == false) {
+                                      selectedIds.clear();
+                                    } else {
+                                      selectedIds.addAll(
+                                        selectable.map(
+                                          (appointment) => appointment.id,
+                                        ),
+                                      );
+                                    }
+                                  }),
                           ),
                           Text('Select finished (${selectable.length})'),
                         ],
@@ -2107,14 +2153,26 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                       if (selectedIds.isNotEmpty)
                         FilledButton.icon(
                           onPressed: archiving ? null : _bulkArchive,
-                          icon: const Icon(Icons.archive_outlined),
+                          icon: archiving
+                              ? const SizedBox(
+                                  width: 17,
+                                  height: 17,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.archive_outlined),
                           label: Text(
-                            'Move to history (${selectedIds.length})',
+                            archiving
+                                ? 'Moving ${selectedIds.length} appointments…'
+                                : 'Move to history (${selectedIds.length})',
                           ),
                         ),
                       if (selectedIds.isNotEmpty)
                         TextButton(
-                          onPressed: () => setState(() => selectedIds.clear()),
+                          onPressed: archiving
+                              ? null
+                              : () => setState(() => selectedIds.clear()),
                           child: const Text('Clear selection'),
                         ),
                     ],
@@ -2145,20 +2203,25 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                 repository: widget.repository,
                 now: now,
                 selected: selectedIds.contains(items[index].id),
+                archiving: _archivingIds.contains(items[index].id),
                 onSelected:
                     !showHistory &&
                         items[index].isFinalized &&
                         !items[index].isArchived
-                    ? (value) => setState(() {
-                        if (value) {
-                          selectedIds.add(items[index].id);
-                        } else {
-                          selectedIds.remove(items[index].id);
-                        }
-                      })
+                    ? (archiving
+                          ? null
+                          : (value) => setState(() {
+                              if (value) {
+                                selectedIds.add(items[index].id);
+                              } else {
+                                selectedIds.remove(items[index].id);
+                              }
+                            }))
                     : null,
                 onArchive: !showHistory && !items[index].isArchived
-                    ? () => _archiveOne(items[index])
+                    ? (_archivingIds.contains(items[index].id) || archiving
+                          ? null
+                          : () => _archiveOne(items[index]))
                     : null,
               ),
             ],
@@ -2189,6 +2252,8 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
       ),
     );
     if (confirmed != true) return;
+    if (_archivingIds.contains(appointment.id)) return;
+    setState(() => _archivingIds.add(appointment.id));
     try {
       await widget.repository.archiveAppointments(
         appointmentIds: [appointment.id],
@@ -2209,6 +2274,8 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _archivingIds.remove(appointment.id));
     }
   }
 
@@ -2665,6 +2732,7 @@ class _AppointmentCard extends StatelessWidget {
     required this.item,
     required this.repository,
     required this.selected,
+    required this.archiving,
     required this.onSelected,
     required this.onArchive,
     required this.now,
@@ -2672,6 +2740,7 @@ class _AppointmentCard extends StatelessWidget {
   final AppointmentModel item;
   final AdminPortalRepository repository;
   final bool selected;
+  final bool archiving;
   final ValueChanged<bool>? onSelected;
   final VoidCallback? onArchive;
   final DateTime now;
@@ -2730,8 +2799,14 @@ class _AppointmentCard extends StatelessWidget {
             item.isFinalized && !item.isArchived && onArchive != null
             ? IconButton(
                 tooltip: 'Move to history',
-                onPressed: onArchive,
-                icon: const Icon(Icons.archive_outlined, size: 19),
+                onPressed: archiving ? null : onArchive,
+                icon: archiving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.archive_outlined, size: 19),
               )
             : const SizedBox.shrink();
         if (box.maxWidth < 700) {
@@ -2807,6 +2882,7 @@ class _AppointmentCard extends StatelessWidget {
     List<AppointmentSlot> proposedSlots = const [];
     AppointmentSlot? proposedSlot;
     var loadingProposedSlots = false;
+    var submitting = false;
     String? proposedSlotsMessage;
     await showDialog<void>(
       context: context,
@@ -2957,10 +3033,12 @@ class _AppointmentCard extends StatelessWidget {
                                 child: Text('Re-schedule appointment'),
                               ),
                             ],
-                      onChanged: (value) => setDialogState(() {
-                        action = value!;
-                        reason = _appointmentReasons(action).first;
-                      }),
+                      onChanged: submitting
+                          ? null
+                          : (value) => setDialogState(() {
+                              action = value!;
+                              reason = _appointmentReasons(action).first;
+                            }),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
@@ -2977,8 +3055,9 @@ class _AppointmentCard extends StatelessWidget {
                             ),
                           )
                           .toList(),
-                      onChanged: (value) =>
-                          setDialogState(() => reason = value!),
+                      onChanged: submitting
+                          ? null
+                          : (value) => setDialogState(() => reason = value!),
                     ),
                     if (action == 'rescheduled') ...[
                       const SizedBox(height: 12),
@@ -3109,9 +3188,11 @@ class _AppointmentCard extends StatelessWidget {
                       CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
                         value: offerFollowUp,
-                        onChanged: (value) => setDialogState(
-                          () => offerFollowUp = value ?? false,
-                        ),
+                        onChanged: submitting
+                            ? null
+                            : (value) => setDialogState(
+                                () => offerFollowUp = value ?? false,
+                              ),
                         title: const Text('Offer a follow-up session'),
                       ),
                       if (offerFollowUp)
@@ -3132,97 +3213,124 @@ class _AppointmentCard extends StatelessWidget {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
+              onPressed: submitting ? null : () => Navigator.pop(dialogContext),
               child: Text(canReview ? 'Cancel' : 'Close'),
             ),
             if (canReview)
               FilledButton(
-                onPressed: () async {
-                  final rescheduleReason = action == 'rescheduled'
-                      ? [
-                          if (reason != 'Other') reason,
-                          customReason.text.trim(),
-                        ].where((part) => part.isNotEmpty).join(': ')
-                      : null;
-                  if (action == 'rescheduled' &&
-                      (rescheduleReason == null ||
-                          rescheduleReason.trim().length < 3)) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Enter a reschedule reason of at least 3 characters.',
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-                  if (action == 'completed' &&
-                      sessionSummary.text.trim().length < 3) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Enter an internal session summary of at least 3 characters.',
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-                  if (action == 'completed' &&
-                      offerFollowUp &&
-                      followUpMessage.text.trim().isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Enter a client follow-up message.'),
-                      ),
-                    );
-                    return;
-                  }
-                  if (action == 'rescheduled' &&
-                      (proposedDate == null || proposedSlot == null)) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Enter a reply and choose an available appointment time.',
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-                  try {
-                    await repository.reviewAppointment(
-                      appointmentId: item.id,
-                      action: action,
-                      reply: action == 'completed'
-                          ? 'Appointment completed.'
-                          : rescheduleReason ?? reason,
-                      proposedScheduledAt: proposedSlot?.start,
-                      proposedScheduledTime: proposedSlot?.label,
-                      rescheduleReason: rescheduleReason,
-                      sessionSummary: action == 'completed'
-                          ? sessionSummary.text.trim()
-                          : null,
-                      offerFollowUp: action == 'completed' && offerFollowUp,
-                      followUpMessage: action == 'completed' && offerFollowUp
-                          ? followUpMessage.text.trim()
-                          : null,
-                    );
-                    if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  } catch (error) {
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            FirebaseErrorMessage.describe(
-                              error,
-                              fallback: 'Unable to update the appointment.',
+                onPressed: submitting
+                    ? null
+                    : () async {
+                        if (submitting) return;
+                        final rescheduleReason = action == 'rescheduled'
+                            ? [
+                                if (reason != 'Other') reason,
+                                customReason.text.trim(),
+                              ].where((part) => part.isNotEmpty).join(': ')
+                            : null;
+                        if (action == 'rescheduled' &&
+                            (rescheduleReason == null ||
+                                rescheduleReason.trim().length < 3)) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Enter a reschedule reason of at least 3 characters.',
+                              ),
                             ),
+                          );
+                          return;
+                        }
+                        if (action == 'completed' &&
+                            sessionSummary.text.trim().length < 3) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Enter an internal session summary of at least 3 characters.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        if (action == 'completed' &&
+                            offerFollowUp &&
+                            followUpMessage.text.trim().isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Enter a client follow-up message.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        if (action == 'rescheduled' &&
+                            (proposedDate == null || proposedSlot == null)) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Enter a reply and choose an available appointment time.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        setDialogState(() => submitting = true);
+                        try {
+                          await repository.reviewAppointment(
+                            appointmentId: item.id,
+                            action: action,
+                            reply: action == 'completed'
+                                ? 'Appointment completed.'
+                                : rescheduleReason ?? reason,
+                            proposedScheduledAt: proposedSlot?.start,
+                            proposedScheduledTime: proposedSlot?.label,
+                            rescheduleReason: rescheduleReason,
+                            sessionSummary: action == 'completed'
+                                ? sessionSummary.text.trim()
+                                : null,
+                            offerFollowUp:
+                                action == 'completed' && offerFollowUp,
+                            followUpMessage:
+                                action == 'completed' && offerFollowUp
+                                ? followUpMessage.text.trim()
+                                : null,
+                          );
+                          if (dialogContext.mounted) {
+                            Navigator.pop(dialogContext);
+                          }
+                        } catch (error) {
+                          if (dialogContext.mounted) {
+                            setDialogState(() => submitting = false);
+                          }
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  FirebaseErrorMessage.describe(
+                                    error,
+                                    fallback:
+                                        'Unable to update the appointment.',
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                child: submitting
+                    ? const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                        ),
-                      );
-                    }
-                  }
-                },
-                child: const Text('Send decision'),
+                          SizedBox(width: 8),
+                          Text('Sending decision…'),
+                        ],
+                      )
+                    : const Text('Send decision'),
               ),
           ],
         ),
@@ -4968,6 +5076,7 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
   String statusFilter = 'All Statuses';
   String roleFilter = 'All Roles';
   String archiveFilter = 'Active';
+  final Set<String> _busyAssessmentIds = <String>{};
 
   @override
   Widget build(BuildContext context) => _Page(
@@ -5131,12 +5240,23 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
                                 tooltip: assessment.isArchived
                                     ? 'Restore assessment'
                                     : 'Archive assessment',
-                                onPressed: () => _setArchived(assessment),
-                                icon: Icon(
-                                  assessment.isArchived
-                                      ? Icons.unarchive_outlined
-                                      : Icons.archive_outlined,
-                                ),
+                                onPressed:
+                                    _busyAssessmentIds.contains(assessment.id)
+                                    ? null
+                                    : () => _setArchived(assessment),
+                                icon: _busyAssessmentIds.contains(assessment.id)
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : Icon(
+                                        assessment.isArchived
+                                            ? Icons.unarchive_outlined
+                                            : Icons.archive_outlined,
+                                      ),
                               ),
                             ],
                           ),
@@ -5152,6 +5272,7 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
   );
 
   Future<void> _setArchived(AdminAssessmentRecord assessment) async {
+    if (_busyAssessmentIds.contains(assessment.id)) return;
     final archive = !assessment.isArchived;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -5175,6 +5296,7 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
       ),
     );
     if (confirmed != true) return;
+    setState(() => _busyAssessmentIds.add(assessment.id));
     try {
       await widget.repository.setAssessmentArchived(assessment.id, archive);
       if (mounted) {
@@ -5192,6 +5314,8 @@ class _AssessmentsPageState extends State<_AssessmentsPage> {
           SnackBar(content: Text('Unable to update assessment: $error')),
         );
       }
+    } finally {
+      if (mounted) setState(() => _busyAssessmentIds.remove(assessment.id));
     }
   }
 }
@@ -5640,7 +5764,7 @@ class _InquiryDetailScreen extends StatelessWidget {
   );
 }
 
-class _InquiryDetails extends StatelessWidget {
+class _InquiryDetails extends StatefulWidget {
   const _InquiryDetails({
     required this.item,
     required this.repository,
@@ -5649,8 +5773,20 @@ class _InquiryDetails extends StatelessWidget {
   final AdminInquiryModel? item;
   final AdminPortalRepository repository;
   final VoidCallback onUpdated;
+
+  @override
+  State<_InquiryDetails> createState() => _InquiryDetailsState();
+}
+
+class _InquiryDetailsState extends State<_InquiryDetails> {
+  bool _acknowledging = false;
+  bool _updatingStatus = false;
+  bool _previewingPdf = false;
+  bool _downloadingPdf = false;
+
   @override
   Widget build(BuildContext context) {
+    final item = widget.item;
     if (item == null) {
       return const _EmptyPanel(
         message: 'Select an inquiry to view its details.',
@@ -5668,12 +5804,12 @@ class _InquiryDetails extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               _Tag(
-                label: item!.status.label,
-                color: _statusColor(item!.status.storedValue),
+                label: item.status.label,
+                color: _statusColor(item.status.storedValue),
               ),
-              _Tag(label: item!.category, color: AdminColors.surfaceMuted),
+              _Tag(label: item.category, color: AdminColors.surfaceMuted),
               Text(
-                _date(item!.createdAt),
+                _date(item.createdAt),
                 style: const TextStyle(
                   color: AdminColors.muted,
                   fontSize: 11,
@@ -5684,13 +5820,13 @@ class _InquiryDetails extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            item!.subject,
+            item.subject,
             style: Theme.of(
               context,
             ).textTheme.headlineSmall?.copyWith(fontSize: 20),
           ),
           const SizedBox(height: 16),
-          _InquirySender(item: item!),
+          _InquirySender(item: item),
           const Divider(height: 34),
           const _InquirySectionHeading(
             icon: Icons.chat_bubble_outline,
@@ -5706,34 +5842,54 @@ class _InquiryDetails extends StatelessWidget {
               border: Border.all(color: AdminColors.border),
             ),
             child: SelectableText(
-              item!.message.trim().isEmpty
+              item.message.trim().isEmpty
                   ? 'No message was provided.'
-                  : item!.message,
+                  : item.message,
               style: const TextStyle(fontSize: 14, height: 1.55),
             ),
           ),
-          if (item!.isFormSubmission) ...[
+          if (item.isFormSubmission) ...[
             const Divider(height: 34),
             const _InquirySectionHeading(
               icon: Icons.description_outlined,
               title: 'Form responses',
             ),
             const SizedBox(height: 12),
-            _InquiryResponseGrid(responses: item!.formData),
+            _InquiryResponseGrid(responses: item.formData),
             const SizedBox(height: 14),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 OutlinedButton.icon(
-                  onPressed: () => InquiryPdfService.preview(item!),
-                  icon: const Icon(Icons.preview_outlined),
-                  label: const Text('PDF preview'),
+                  onPressed: _previewingPdf || _downloadingPdf
+                      ? null
+                      : _previewPdf,
+                  icon: _previewingPdf
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.preview_outlined),
+                  label: Text(
+                    _previewingPdf ? 'Preparing preview…' : 'PDF preview',
+                  ),
                 ),
                 FilledButton.icon(
-                  onPressed: () => InquiryPdfService.download(item!),
-                  icon: const Icon(Icons.download_outlined),
-                  label: const Text('Download PDF'),
+                  onPressed: _previewingPdf || _downloadingPdf
+                      ? null
+                      : _downloadPdf,
+                  icon: _downloadingPdf
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download_outlined),
+                  label: Text(
+                    _downloadingPdf ? 'Preparing PDF…' : 'Download PDF',
+                  ),
                 ),
               ],
             ),
@@ -5749,22 +5905,25 @@ class _InquiryDetails extends StatelessWidget {
             runSpacing: 10,
             children: [
               OutlinedButton.icon(
-                onPressed: item!.isAcknowledged
+                onPressed: item.isAcknowledged || _acknowledging
                     ? null
                     : () => _acknowledge(context),
                 icon: Icon(
-                  item!.isAcknowledged
+                  item.isAcknowledged
                       ? Icons.check_circle_outline
                       : Icons.notifications_active_outlined,
                 ),
                 label: Text(
-                  item!.isAcknowledged
+                  item.isAcknowledged
                       ? 'Receipt acknowledged'
+                      : _acknowledging
+                      ? 'Acknowledging…'
                       : 'Acknowledge receipt',
                 ),
               ),
               _InquiryStatusMenu(
-                current: item!.status,
+                current: item.status,
+                enabled: !_updatingStatus && !_acknowledging,
                 onSelected: (next) => _updateStatus(context, next),
               ),
             ],
@@ -5775,8 +5934,10 @@ class _InquiryDetails extends StatelessWidget {
   }
 
   Future<void> _acknowledge(BuildContext context) async {
+    if (_acknowledging) return;
+    setState(() => _acknowledging = true);
     try {
-      await repository.acknowledgeInquiry(item!.id);
+      await widget.repository.acknowledgeInquiry(widget.item!.id);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Receipt notification sent.')),
@@ -5788,14 +5949,17 @@ class _InquiryDetails extends StatelessWidget {
           SnackBar(content: Text('Unable to acknowledge inquiry: $error')),
         );
       }
+    } finally {
+      if (mounted) setState(() => _acknowledging = false);
     }
   }
 
   Future<void> _updateStatus(BuildContext context, InquiryStatus next) async {
-    if (next == item!.status) return;
+    if (_updatingStatus || next == widget.item!.status) return;
+    setState(() => _updatingStatus = true);
     try {
-      await repository.updateInquiryStatus(item!.id, next);
-      onUpdated();
+      await widget.repository.updateInquiryStatus(widget.item!.id, next);
+      widget.onUpdated();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -5809,6 +5973,28 @@ class _InquiryDetails extends StatelessWidget {
           SnackBar(content: Text('Unable to update inquiry: $error')),
         );
       }
+    } finally {
+      if (mounted) setState(() => _updatingStatus = false);
+    }
+  }
+
+  Future<void> _previewPdf() async {
+    if (_previewingPdf || _downloadingPdf) return;
+    setState(() => _previewingPdf = true);
+    try {
+      await InquiryPdfService.preview(widget.item!);
+    } finally {
+      if (mounted) setState(() => _previewingPdf = false);
+    }
+  }
+
+  Future<void> _downloadPdf() async {
+    if (_previewingPdf || _downloadingPdf) return;
+    setState(() => _downloadingPdf = true);
+    try {
+      await InquiryPdfService.download(widget.item!);
+    } finally {
+      if (mounted) setState(() => _downloadingPdf = false);
     }
   }
 }
@@ -5953,14 +6139,19 @@ class _InquiryResponseGrid extends StatelessWidget {
 }
 
 class _InquiryStatusMenu extends StatelessWidget {
-  const _InquiryStatusMenu({required this.current, required this.onSelected});
+  const _InquiryStatusMenu({
+    required this.current,
+    required this.onSelected,
+    required this.enabled,
+  });
   final InquiryStatus current;
   final ValueChanged<InquiryStatus> onSelected;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) => PopupMenuButton<InquiryStatus>(
     tooltip: 'Change inquiry status',
-    onSelected: onSelected,
+    onSelected: enabled ? onSelected : null,
     itemBuilder: (context) => InquiryStatus.values
         .map(
           (status) => PopupMenuItem(

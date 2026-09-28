@@ -37,6 +37,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   bool _downloading = false;
   bool _previewing = false;
   bool _filterLoading = false;
+  bool _creatingAcademicYear = false;
   int _reportRequestId = 0;
 
   @override
@@ -199,6 +200,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
           onAddYear: widget.repository.currentAccessRole == AccessRole.admin
               ? () => _createAcademicYear(report.population.schoolYear)
               : null,
+          creatingYear: _creatingAcademicYear,
           onPeriodChanged: (value) {
             setState(() => _period = value);
             _reloadReport();
@@ -426,11 +428,13 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   }
 
   Future<void> _createAcademicYear(String copyFrom) async {
+    if (_creatingAcademicYear) return;
     final choice = await showDialog<_NewAcademicYearChoice>(
       context: context,
       builder: (_) => const _NewAcademicYearDialog(),
     );
     if (choice == null) return;
+    setState(() => _creatingAcademicYear = true);
     try {
       await widget.repository.createAcademicYear(
         schoolYear: choice.schoolYear,
@@ -450,6 +454,8 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
       if (mounted) {
         _showReportSnackBar(context, _friendlyReportError(error), error: true);
       }
+    } finally {
+      if (mounted) setState(() => _creatingAcademicYear = false);
     }
   }
 }
@@ -1296,6 +1302,7 @@ class _AdminReportControls extends StatelessWidget {
     required this.departmentOptions,
     required this.onYearChanged,
     required this.onAddYear,
+    required this.creatingYear,
     required this.onPeriodChanged,
     required this.onCustomPeriod,
     required this.onDepartmentChanged,
@@ -1313,6 +1320,7 @@ class _AdminReportControls extends StatelessWidget {
   final List<ReportFilterOption> departmentOptions;
   final ValueChanged<String> onYearChanged;
   final VoidCallback? onAddYear;
+  final bool creatingYear;
   final ValueChanged<_ReportPeriod> onPeriodChanged;
   final VoidCallback onCustomPeriod;
   final ValueChanged<String> onDepartmentChanged;
@@ -1353,9 +1361,17 @@ class _AdminReportControls extends StatelessWidget {
               ),
               if (onAddYear != null)
                 TextButton.icon(
-                  onPressed: onAddYear,
-                  icon: const Icon(Icons.add, size: 17),
-                  label: const Text('Add academic year'),
+                  onPressed: creatingYear ? null : onAddYear,
+                  icon: creatingYear
+                      ? const SizedBox(
+                          width: 17,
+                          height: 17,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add, size: 17),
+                  label: Text(
+                    creatingYear ? 'Creating year…' : 'Add academic year',
+                  ),
                 ),
             ],
           ),
