@@ -62,6 +62,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   List<String> _availableTimes = const [];
   bool _loadingTimes = false;
   String? _parentAppointmentId;
+  String? _bookingRequestId;
 
   DateTime get _today => DateUtils.dateOnly(widget._nowProvider());
 
@@ -340,6 +341,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _parentAppointmentId = priorAppointment?.hasAvailableFollowUpOffer == true
           ? priorAppointment?.id
           : null;
+      _bookingRequestId = _newBookingRequestId();
       if (priorAppointment != null) {
         _ageController.text = priorAppointment.age?.toString() ?? '';
         _addressController.text = priorAppointment.address ?? '';
@@ -426,7 +428,10 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       parentAppointmentId: _parentAppointmentId,
     );
 
-    final saved = await provider.createAppointment(appointment);
+    final saved = await provider.createAppointment(
+      appointment,
+      requestId: _bookingRequestId ??= _newBookingRequestId(),
+    );
     if (!mounted) return;
     if (!saved) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -438,6 +443,9 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     }
     setState(() => _step = _PaccAppointmentStep.confirmation);
   }
+
+  String _newBookingRequestId() =>
+      'booking_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
 
   void _showAppointmentDetails(AppointmentModel appointment) {
     showAppointmentDetailsSheet(

@@ -374,11 +374,14 @@ void main() {
     expect(find.text('Choose Time'), findsNothing);
   });
 
-  testWidgets('shows a safe no-slot message supplied by the backend', (tester) async {
+  testWidgets('shows a safe no-slot message supplied by the backend', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = _FakeAppointmentRepository()
-      ..slotAvailabilityMessage = 'The counselor is unavailable on this date. Please choose another available date.';
+      ..slotAvailabilityMessage =
+          'The counselor is unavailable on this date. Please choose another available date.';
     await tester.pumpWidget(_paccApp(appointmentRepository: repository));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Book Appointment').first);
@@ -387,7 +390,12 @@ void main() {
     await tester.ensureVisible(find.text('29'));
     await tester.tap(find.text('29'));
     await tester.pumpAndSettle();
-    expect(find.text('The counselor is unavailable on this date. Please choose another available date.'), findsOneWidget);
+    expect(
+      find.text(
+        'The counselor is unavailable on this date. Please choose another available date.',
+      ),
+      findsOneWidget,
+    );
   });
 }
 
@@ -514,8 +522,9 @@ class _FakeAppointmentRepository extends AppointmentRepository {
 
   @override
   Future<AppointmentModel> createAppointment(
-    AppointmentModel appointment,
-  ) async {
+    AppointmentModel appointment, {
+    String? requestId,
+  }) async {
     if (shouldFail) throw StateError('save failed');
     final created = appointment.copyWith(
       id: 'appointment_${appointments.length + 1}',

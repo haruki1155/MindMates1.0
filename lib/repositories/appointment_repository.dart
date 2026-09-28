@@ -73,8 +73,9 @@ class AppointmentRepository {
   }
 
   Future<AppointmentModel> createAppointment(
-    AppointmentModel appointment,
-  ) async {
+    AppointmentModel appointment, {
+    String? requestId,
+  }) async {
     // Callable data does not share Firestore's DateTime/Timestamp mapper.
     // The backend contract intentionally uses epoch milliseconds so it can
     // validate time without relying on a client serializer.
@@ -84,6 +85,9 @@ class AppointmentRepository {
       ..remove('updatedAt');
     if ((appointment.parentAppointmentId ?? '').trim().isNotEmpty) {
       payload['parentAppointmentId'] = appointment.parentAppointmentId!.trim();
+    }
+    if (requestId != null && requestId.trim().isNotEmpty) {
+      payload['requestId'] = requestId.trim();
     }
     final result = await _functionClient
         .routedCallable('createAppointmentRequest')
@@ -96,7 +100,6 @@ class AppointmentRepository {
       updatedAt: DateTime.now(),
     );
   }
-
 }
 
 class AppointmentSlot {

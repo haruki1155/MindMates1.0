@@ -1838,6 +1838,13 @@ export const getAvailableAppointmentSlots = onCall(async (request) => {
 export const createAppointmentRequest = onCall(async (request) => {
   const userId = requireAuthenticatedUser(request);
   const input = (request.data ?? {}) as Record<string, unknown>;
+  const requestIdValue = input.requestId;
+  const requestId = requestIdValue == null
+    ? ""
+    : boundedText(requestIdValue, "Booking request ID", 100);
+  if (requestId && !/^[A-Za-z0-9_-]{8,100}$/.test(requestId)) {
+    throw new HttpsError("invalid-argument", "A valid booking request ID is required.");
+  }
   const concern = boundedText(input.concern, "Concern", 2_000, {required: true});
   let schedule: {millis: number; scheduledTime: string};
   try {
@@ -1856,10 +1863,15 @@ export const createAppointmentRequest = onCall(async (request) => {
   const policyDocument = db.collection("appointment_policy").doc("current");
   const rateLimit = db.collection("_appointment_rate_limits").doc(userId);
   const activeAppointmentLock = db.collection("appointment_user_locks").doc(userId);
+  const bookingRequest = requestId
+    ? db.collection("appointment_booking_requests").doc(`${userId}_${requestId}`)
+    : null;
   const profile = await db.collection("users").doc(userId).get();
+  let appointmentId = appointment.id;
+  let idempotentReplay = false;
   await db.runTransaction(async (transaction) => {
     const parent = parentAppointmentId ? db.collection("appointments").doc(parentAppointmentId) : null;
-    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, activeLockSnapshot, parentSnapshot] = await Promise.all([
+    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, activeLockSnapshot, parentSnapshot, bookingRequestSnapshot] = await Promise.all([
       transaction.get(slot),
       transaction.get(availability),
       transaction.get(policyDocument),
@@ -1867,7 +1879,18 @@ export const createAppointmentRequest = onCall(async (request) => {
       transaction.get(rateLimit),
       transaction.get(activeAppointmentLock),
       parent ? transaction.get(parent) : Promise.resolve(null),
+      bookingRequest ? transaction.get(bookingRequest) : Promise.resolve(null),
     ]);
+    if (bookingRequestSnapshot?.exists) {
+      const existingRequest = bookingRequestSnapshot.data();
+      const existingAppointmentId = String(existingRequest?.appointmentId ?? "").trim();
+      if (String(existingRequest?.userId ?? "") !== userId || !existingAppointmentId) {
+        throw new HttpsError("failed-precondition", "This booking request cannot be replayed.");
+      }
+      appointmentId = existingAppointmentId;
+      idempotentReplay = true;
+      return;
+    }
     if (activeLockSnapshot.exists) {
       throw new HttpsError(
         "resource-exhausted",
@@ -1930,6 +1953,13 @@ export const createAppointmentRequest = onCall(async (request) => {
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
+    if (bookingRequest) {
+      transaction.create(bookingRequest, {
+        userId,
+        appointmentId: appointment.id,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
     transaction.create(appointment, {
       // Profile-derived identity wins over client payloads. Contact fields stay
       // editable by design, with a profile value only as the initial fallback.
@@ -1951,7 +1981,7 @@ export const createAppointmentRequest = onCall(async (request) => {
     }
     createAppointmentEvent(transaction, appointment, "appointment_requested", userId, "", "requested");
   });
-  return {ok: true, appointmentId: appointment.id};
+  return {ok: true, appointmentId, idempotentReplay};
 });
 
 export const respondToAppointment = onCall(async (request) => {

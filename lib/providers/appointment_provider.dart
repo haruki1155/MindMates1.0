@@ -74,13 +74,19 @@ class AppointmentProvider extends ChangeNotifier {
         );
   }
 
-  Future<bool> createAppointment(AppointmentModel appointment) async {
+  Future<bool> createAppointment(
+    AppointmentModel appointment, {
+    String? requestId,
+  }) async {
     if (_isSaving) return false;
     _isSaving = true;
     _errorMessage = null;
     notifyListeners();
     try {
-      final created = await _repository.createAppointment(appointment);
+      final created = await _repository.createAppointment(
+        appointment,
+        requestId: requestId,
+      );
       if (created.userId != appointment.userId) {
         throw StateError('Appointment owner mismatch.');
       }
@@ -127,7 +133,8 @@ class AppointmentProvider extends ChangeNotifier {
         error,
         fallback: 'Unable to load available appointment times.',
       );
-      _slotAvailabilityMessage = 'Unable to load appointment times. Please try again.';
+      _slotAvailabilityMessage =
+          'Unable to load appointment times. Please try again.';
       notifyListeners();
       return const [];
     }

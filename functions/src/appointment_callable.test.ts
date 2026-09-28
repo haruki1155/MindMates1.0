@@ -90,17 +90,49 @@ before(async () => {
 
 after(async () => {
   const appointments = await db.collection("appointments").where("userId", "==", userId).get();
+  const bookingRequests = await db.collection("appointment_booking_requests").where("userId", "==", userId).get();
   const slots = await db.collection("appointment_slots").get();
   const appointmentIds = new Set(appointments.docs.map((snapshot) => snapshot.id));
   const deletes = [
     db.collection("users").doc(userId).delete(),
     lock.delete(),
+    ...bookingRequests.docs.map((snapshot) => snapshot.ref.delete()),
     ...appointments.docs.map((snapshot) => snapshot.ref.delete()),
     ...slots.docs
       .filter((snapshot) => appointmentIds.has(String(snapshot.data().appointmentId ?? "")))
       .map((snapshot) => snapshot.ref.delete()),
   ];
   await Promise.all(deletes);
+});
+
+test("the same booking request ID replays the original appointment", async () => {
+  const [slot] = await nextWeekdaySlots(115);
+  const requestId = `${prefix}-replay`;
+  const [first, replay] = await Promise.all([
+    create.run({
+      auth: {uid: userId},
+      data: {...booking(slot), requestId},
+    }) as Promise<{appointmentId: string; idempotentReplay?: boolean}>,
+    create.run({
+      auth: {uid: userId},
+      data: {...booking(slot), requestId},
+    }) as Promise<{appointmentId: string; idempotentReplay?: boolean}>,
+  ]);
+
+  assert.equal(replay.appointmentId, first.appointmentId);
+  assert.equal(
+    [first.idempotentReplay, replay.idempotentReplay].filter(Boolean).length,
+    1,
+  );
+  const appointments = await db.collection("appointments").where("userId", "==", userId).get();
+  assert.equal(appointments.size, 1);
+
+  await Promise.all([
+    db.collection("appointments").doc(first.appointmentId).delete(),
+    db.collection("appointment_slots").doc(`pacc_${slot}`).delete(),
+    db.collection("appointment_booking_requests").doc(`${userId}_${requestId}`).delete(),
+    lock.delete(),
+  ]);
 });
 
 test("the real booking callable serializes concurrent active appointments", async () => {

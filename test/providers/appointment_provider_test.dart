@@ -47,7 +47,10 @@ void main() {
 
     expect(saved, isFalse);
     expect(provider.appointments, isEmpty);
-    expect(provider.errorMessage, 'Unable to save appointment. Please try again.');
+    expect(
+      provider.errorMessage,
+      'Unable to save appointment. Please try again.',
+    );
     expect(provider.isSaving, isFalse);
   });
 
@@ -84,6 +87,19 @@ void main() {
     expect(await first, isTrue);
     expect(provider.appointments, hasLength(1));
   });
+
+  test('passes a stable booking request ID to the repository', () async {
+    final repository = _FakeAppointmentRepository([]);
+    final provider = AppointmentProvider(repository);
+
+    final saved = await provider.createAppointment(
+      _appointment('new', 'user_1'),
+      requestId: 'booking_retry_safe_01',
+    );
+
+    expect(saved, isTrue);
+    expect(repository.lastRequestId, 'booking_retry_safe_01');
+  });
 }
 
 AppointmentModel _appointment(String id, String userId) {
@@ -110,6 +126,7 @@ class _FakeAppointmentRepository extends AppointmentRepository {
   bool shouldFail = false;
   bool returnAllUsers = false;
   int createCalls = 0;
+  String? lastRequestId;
   Completer<AppointmentModel>? saveCompleter;
 
   @override
@@ -125,9 +142,11 @@ class _FakeAppointmentRepository extends AppointmentRepository {
 
   @override
   Future<AppointmentModel> createAppointment(
-    AppointmentModel appointment,
-  ) async {
+    AppointmentModel appointment, {
+    String? requestId,
+  }) async {
     createCalls += 1;
+    lastRequestId = requestId;
     if (shouldFail) throw StateError('save failed');
     if (saveCompleter != null) return saveCompleter!.future;
     return appointment.copyWith(id: 'created_1');
