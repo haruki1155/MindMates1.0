@@ -14,6 +14,19 @@ import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('splash clips the square logo asset to a circle', (tester) async {
+    await tester.pumpWidget(
+      _SplashHarness(
+        authProvider: AuthProvider(_FakeAuthRepository()),
+        userProvider: UserProvider(_FakeUserRepository()),
+      ),
+    );
+
+    expect(find.byType(ClipOval), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1901));
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('splash routes signed out users to login', (tester) async {
     await tester.pumpWidget(
       _SplashHarness(

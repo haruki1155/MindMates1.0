@@ -157,9 +157,11 @@ class _SplashContent extends StatelessWidget {
                         ),
                       ],
                     ),
-                    child: Image.asset(
-                      'assets/images/APP LOGO/MindMate_LOGO.jpg',
-                      fit: BoxFit.contain,
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/images/APP LOGO/MindMate_LOGO.jpg',
+                        fit: BoxFit.cover,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 24),
