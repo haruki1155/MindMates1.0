@@ -58,9 +58,10 @@ test("Student V4 emits the deterministic full-result interpretation contract", (
   assert.equal(typeof interpretation.studentSummary, "string");
   assert.equal(typeof interpretation.userSummary, "string");
   assert.equal(typeof interpretation.overallResponseSummary, "string");
+  assert.equal(interpretation.resultNarrativeVersion, "v4_result_narrative_v1");
   assert.equal(domains.length, 5);
   for (const domain of domains) {
-    for (const key of ["domainId", "domainLabel", "status", "summary", "focusInsight", "strengthInsight", "suggestedAction"]) {
+    for (const key of ["domainId", "domainLabel", "status", "summary", "focusInsight", "strengthInsight", "suggestedAction", "reflectionPrompt"]) {
       assert.ok(key in domain);
     }
   }
@@ -130,7 +131,7 @@ test("Student V4 preserves every profile status with deterministic, non-diagnost
     const explanationText = [
       interpretation.userSummary,
       interpretation.overallResponseSummary,
-      ...domainSummaries.flatMap((domain) => [domain.summary, domain.focusInsight, domain.strengthInsight, domain.suggestedAction]),
+      ...domainSummaries.flatMap((domain) => [domain.summary, domain.focusInsight, domain.strengthInsight, domain.suggestedAction, domain.reflectionPrompt]),
     ].filter((value): value is string => typeof value === "string").join(" ");
     assert.doesNotMatch(explanationText, /diagnostic|at risk|\/100/i);
   }

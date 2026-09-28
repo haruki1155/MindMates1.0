@@ -82,8 +82,9 @@ test("workplace V4 emits deterministic role-specific full-result contracts", () 
     assert.equal(instrument.referenceSetVersion, "mindmate_wellbeing_refs_v1");
     assert.equal(typeof interpretation.userSummary, "string");
     assert.equal(typeof interpretation.overallResponseSummary, "string");
+    assert.equal(interpretation.resultNarrativeVersion, "v4_result_narrative_v1");
     assert.deepEqual(domains.map((domain) => domain.domainLabel), labels);
-    for (const domain of domains) for (const key of ["domainId", "domainLabel", "status", "summary", "focusInsight", "strengthInsight", "suggestedAction"]) assert.ok(key in domain);
+    for (const domain of domains) for (const key of ["domainId", "domainLabel", "status", "summary", "focusInsight", "strengthInsight", "suggestedAction", "reflectionPrompt"]) assert.ok(key in domain);
     assert.match(interpretation.disclaimer as string, /not an evaluation of your job performance/);
     assert.deepEqual(first.interpretation, second.interpretation);
   }
@@ -120,7 +121,7 @@ test("Teaching and Non-Teaching V4 preserve all profile statuses and safe explan
       const explanationText = [
         interpretation.userSummary,
         interpretation.overallResponseSummary,
-        ...domainSummaries.flatMap((domain) => [domain.summary, domain.focusInsight, domain.strengthInsight, domain.suggestedAction]),
+        ...domainSummaries.flatMap((domain) => [domain.summary, domain.focusInsight, domain.strengthInsight, domain.suggestedAction, domain.reflectionPrompt]),
       ].filter((value): value is string => typeof value === "string").join(" ");
       assert.doesNotMatch(explanationText, /diagnostic|at risk|\/100/i);
     }

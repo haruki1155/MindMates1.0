@@ -49,6 +49,10 @@ void main() {
       await _expectTextVisible(tester, 'Assessment Summary');
       await _expectTextVisible(tester, 'What Your Responses Suggest Overall');
       await _expectTextVisible(tester, 'Well-Being Areas');
+      await _expectTextVisible(tester, 'What to notice');
+      await _expectTextVisible(tester, 'Supportive pattern');
+      await _expectTextVisible(tester, 'A practical next step');
+      await _expectTextVisible(tester, 'Reflection prompt');
       await _expectTextVisible(tester, 'Strengths');
       await _expectTextVisible(tester, 'Areas to Explore');
       await _expectTextVisible(tester, 'Suggested Next Steps');
@@ -467,9 +471,18 @@ List<Map<String, Object?>> _domainSummariesFor(String instrumentVersion) {
         'domainLabel': labels[index],
         'status': 'mostlySupported',
         'summary': '${labels[index]} was mostly supportive.',
-        'focusInsight': null,
-        'strengthInsight': null,
-        'suggestedAction': null,
+        'focusInsight': index == 0
+            ? 'One reported pattern in this area may be worth noticing.'
+            : null,
+        'strengthInsight': index == 0
+            ? 'One supportive pattern was identified in this area.'
+            : null,
+        'suggestedAction': index == 0
+            ? 'Choose one manageable next step for this area this week.'
+            : null,
+        'reflectionPrompt': index == 0
+            ? 'What would make this area feel more manageable this week?'
+            : null,
       },
   ];
 }

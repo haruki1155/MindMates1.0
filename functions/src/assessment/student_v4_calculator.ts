@@ -89,7 +89,14 @@ function domainSummaryFor(domain: {
     supportMayHelp: "Responses suggest this area may currently be placing meaningful strain on well-being.",
     insufficientResponses: "There were not enough responses in this area to create a complete reflection.",
   };
-  return {domainId: domain.domainId, domainLabel: domain.domainLabel, status: domain.status, summary: summaryByStatus[domain.status], focusInsight: domain.focusInsight, strengthInsight: domain.strengthInsight, suggestedAction: domain.suggestedAction};
+  const reflectionPrompt = domain.status === "insufficientResponses"
+    ? `If you choose to revisit ${domain.domainLabel}, what would make the remaining questions easier to answer?`
+    : domain.focusInsight
+      ? `What has been making ${domain.domainLabel.toLowerCase()} feel more difficult during the past 7 days?`
+      : domain.strengthInsight
+        ? `What has been helping ${domain.domainLabel.toLowerCase()} feel supportive during the past 7 days?`
+        : `What is one small step that could help you maintain ${domain.domainLabel.toLowerCase()} this week?`;
+  return {domainId: domain.domainId, domainLabel: domain.domainLabel, status: domain.status, summary: summaryByStatus[domain.status], focusInsight: domain.focusInsight, strengthInsight: domain.strengthInsight, suggestedAction: domain.suggestedAction, reflectionPrompt};
 }
 
 function overallSummaryFor(domains: Array<{domainLabel: string; status: string}>, quality: {answered: number; presented: number; confidence: string}): string {
@@ -221,6 +228,7 @@ export function calculateStudentV4(answers: StudentV4Answer[]): Record<string, u
       policyStatus: "provisional_pending_local_validation",
     },
     interpretation: {
+      resultNarrativeVersion: "v4_result_narrative_v1",
       studentSummary: summary,
       userSummary: summary,
       overallResponseSummary: overallSummaryFor(domainResults, {...responseQuality, confidence}),

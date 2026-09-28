@@ -475,27 +475,14 @@ class _StudentV4ProfileView extends StatelessWidget {
               const _V4InfoCard(
                 title: 'Well-being areas',
                 child: Text(
-                  'Area-by-area reflections are unavailable for this saved result.',
+                  'Detailed area-by-area reflections were not included with this earlier saved result.',
                 ),
               )
             else
               ...domainSummaries.map(
                 (domain) => Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: _V4InfoCard(
-                    title:
-                        domain['domainLabel']?.toString().trim().isNotEmpty ==
-                            true
-                        ? domain['domainLabel']!.toString()
-                        : _v4DomainTitle(domain['domainId']?.toString()),
-                    trailing: _v4DomainLabel(domain['status']?.toString()),
-                    child: Text(
-                      domain['summary']?.toString().trim().isNotEmpty == true
-                          ? domain['summary']!.toString()
-                          : 'This area is available for reflection based on your saved responses.',
-                      style: const TextStyle(height: 1.45),
-                    ),
-                  ),
+                  child: _V4DomainReflectionCard(domain: domain),
                 ),
               ),
             const SizedBox(height: 12),
@@ -648,6 +635,79 @@ class _V4TransparencySection extends StatelessWidget {
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
       childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       children: [child],
+    ),
+  );
+}
+
+class _V4DomainReflectionCard extends StatelessWidget {
+  const _V4DomainReflectionCard({required this.domain});
+
+  final Map<String, dynamic> domain;
+
+  @override
+  Widget build(BuildContext context) {
+    final focus = _v4NonEmptyText(domain['focusInsight']);
+    final strength = _v4NonEmptyText(domain['strengthInsight']);
+    final action = _v4NonEmptyText(domain['suggestedAction']);
+    final prompt = _v4NonEmptyText(domain['reflectionPrompt']);
+    final hasDetails =
+        focus != null || strength != null || action != null || prompt != null;
+    final title =
+        _v4NonEmptyText(domain['domainLabel']) ??
+        _v4DomainTitle(domain['domainId']?.toString());
+    final summary =
+        _v4NonEmptyText(domain['summary']) ??
+        'This area is available for reflection based on your saved responses.';
+    return _V4InfoCard(
+      title: title,
+      trailing: _v4DomainLabel(domain['status']?.toString()),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(summary, style: const TextStyle(height: 1.45)),
+          if (hasDetails) ...[
+            const SizedBox(height: 12),
+            if (focus != null)
+              _V4DomainDetail(label: 'What to notice', value: focus),
+            if (strength != null)
+              _V4DomainDetail(label: 'Supportive pattern', value: strength),
+            if (action != null)
+              _V4DomainDetail(label: 'A practical next step', value: action),
+            if (prompt != null)
+              _V4DomainDetail(label: 'Reflection prompt', value: prompt),
+          ] else
+            const Padding(
+              padding: EdgeInsets.only(top: 10),
+              child: Text(
+                'Detailed reflections were not included with this earlier saved result.',
+                style: TextStyle(
+                  color: _ResultPalette.secondaryText,
+                  height: 1.4,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _V4DomainDetail extends StatelessWidget {
+  const _V4DomainDetail({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 3),
+        Text(value, style: const TextStyle(height: 1.45)),
+      ],
     ),
   );
 }
