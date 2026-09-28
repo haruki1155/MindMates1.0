@@ -52,6 +52,14 @@ void main() {
       await _expectTextVisible(tester, 'Strengths');
       await _expectTextVisible(tester, 'Areas to Explore');
       await _expectTextVisible(tester, 'Suggested Next Steps');
+      await _expectTextVisible(tester, 'Assessment Responses');
+      final responseGroup = find.byKey(
+        const ValueKey('v4-response-group-domain_0'),
+      );
+      await _scrollIntoView(tester, responseGroup);
+      await tester.tap(responseGroup);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('1. Saved review question 1.'), findsOneWidget);
       await _expectTextVisible(tester, 'Response Completeness');
       await _expectTextVisible(tester, 'About This Result');
       expect(
@@ -176,6 +184,11 @@ void main() {
       tester,
       'More responses are needed for a complete result.',
     );
+    await _expectTextVisible(tester, 'Assessment Responses');
+    await _expectTextVisible(
+      tester,
+      'Saved assessment responses are unavailable for this result.',
+    );
   });
 
   testWidgets('renders safe fallbacks for malformed optional V4 fields', (
@@ -222,11 +235,7 @@ void main() {
 
 Future<void> _expectTextVisible(WidgetTester tester, String value) async {
   final finder = find.text(value);
-  await tester.scrollUntilVisible(
-    finder,
-    200,
-    scrollable: find.byType(Scrollable).first,
-  );
+  await _scrollIntoView(tester, finder);
   expect(finder, findsOneWidget);
 }
 
@@ -235,12 +244,19 @@ Future<void> _expectTextContainingVisible(
   String value,
 ) async {
   final finder = find.textContaining(value);
-  await tester.scrollUntilVisible(
-    finder,
-    200,
-    scrollable: find.byType(Scrollable).first,
-  );
+  await _scrollIntoView(tester, finder);
   expect(finder, findsOneWidget);
+}
+
+Future<void> _scrollIntoView(WidgetTester tester, Finder finder) async {
+  for (
+    var attempt = 0;
+    attempt < 12 && finder.evaluate().isEmpty;
+    attempt += 1
+  ) {
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -220));
+    await tester.pump(const Duration(milliseconds: 100));
+  }
 }
 
 class _V4Repository extends AssessmentRepository {
@@ -274,6 +290,8 @@ class _V4Repository extends AssessmentRepository {
           ? 'teaching_profile_v4'
           : 'non_teaching_profile_v4',
     },
+    'itemSnapshot': _itemSnapshot(),
+    'responses': _savedResponses(),
     'result': {
       'profileStatus': 'mostlySupported',
       'responseQuality': {
@@ -383,6 +401,21 @@ List<Map<String, Object?>> _domainSummariesFor(String instrumentVersion) {
       },
   ];
 }
+
+List<Map<String, Object>> _itemSnapshot() => [
+  for (var index = 1; index <= 50; index += 1)
+    {
+      'itemId': 'item_$index',
+      'domainId': 'domain_${(index - 1) ~/ 10}',
+      'displayOrder': index,
+      'text': 'Saved review question $index.',
+    },
+];
+
+List<Map<String, Object>> _savedResponses() => [
+  for (var index = 1; index <= 50; index += 1)
+    {'itemId': 'item_$index', 'responseCode': 'agree', 'skipped': false},
+];
 
 class _ActivityRepository extends UserRepository {
   @override

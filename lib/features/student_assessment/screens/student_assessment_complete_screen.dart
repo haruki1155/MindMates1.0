@@ -14,6 +14,7 @@ import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
 import '../../counseling/screens/pacc_counseling_screen.dart';
 import '../models/student_assessment_models.dart';
 import '../models/assessment_interpretation_models.dart';
+import '../widgets/v4_assessment_response_review.dart';
 
 class StudentAssessmentCompleteScreen extends StatefulWidget {
   const StudentAssessmentCompleteScreen({super.key});
@@ -513,6 +514,19 @@ class _StudentV4ProfileView extends StatelessWidget {
                   : const Text(
                       'Choose one small, supportive step that feels practical this week.',
                     ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Assessment Responses',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            V4AssessmentResponseReview(
+              itemSnapshot: _maps(payload['itemSnapshot']),
+              responses: _maps(payload['responses']),
+              domainSummaries: domainSummaries,
             ),
             const SizedBox(height: 12),
             _V4InfoCard(
