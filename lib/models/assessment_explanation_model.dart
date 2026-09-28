@@ -101,6 +101,39 @@ class V4AssessmentResponseReviewData {
       domainSummaries.isNotEmpty;
 }
 
+/// Presentation-safe, immutable fields from an owner's saved V4 result.
+/// This is intentionally a view of the persisted server result: it does not
+/// derive scores, interpretations, or question text.
+class V4FullAssessmentResultData {
+  const V4FullAssessmentResultData({required this.payload});
+
+  final Map<String, dynamic> payload;
+
+  factory V4FullAssessmentResultData.fromAssessment(
+    Map<String, dynamic> assessment,
+  ) => V4FullAssessmentResultData(
+    payload: {
+      'schemaVersion': assessment['schemaVersion'],
+      'createdAt': assessment['createdAt'],
+      'populationRole': assessment['populationRole'],
+      'algorithmVersion': assessment['algorithmVersion'],
+      'instrument': _map(assessment['instrument']),
+      'result': _map(assessment['result']),
+      'interpretation': _map(assessment['interpretation']),
+      'itemSnapshot': _maps(assessment['itemSnapshot']),
+      'responses': _maps(assessment['responses']),
+    },
+  );
+
+  bool get isUsable {
+    final result = _map(payload['result']);
+    final interpretation = _map(payload['interpretation']);
+    return _text(result['profileStatus']).isNotEmpty ||
+        _text(interpretation['userSummary']).isNotEmpty ||
+        _text(interpretation['studentSummary']).isNotEmpty;
+  }
+}
+
 /// Presentation-safe explanation shared by the student report and counselor view.
 /// Raw scores remain in the assessment record but are intentionally omitted here.
 class AssessmentExplanationModel {

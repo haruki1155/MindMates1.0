@@ -310,6 +310,23 @@ class ReportRepository {
     return review.isUsable ? review : null;
   }
 
+  /// Loads the immutable server-generated V4 result for the owner's summary
+  /// screen. It intentionally returns saved fields only; Flutter never
+  /// recalculates the assessment result.
+  Future<V4FullAssessmentResultData?> fetchLatestV4FullAssessmentResult(
+    String userId,
+  ) async {
+    final latestFull = _assessmentSummary(
+      await _fetchAssessments(userId),
+    ).latestFull;
+    if (latestFull == null ||
+        latestFull['schemaVersion'] != 'assessment_record_v4') {
+      return null;
+    }
+    final result = V4FullAssessmentResultData.fromAssessment(latestFull);
+    return result.isUsable ? result : null;
+  }
+
   Future<String> generateWeeklyReport(String userId, {DateTime? now}) async {
     final generatedAt = now ?? DateTime.now();
     final weekStart = _weekStartFor(generatedAt);

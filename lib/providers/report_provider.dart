@@ -21,6 +21,10 @@ class ReportProvider extends ChangeNotifier {
     String userId,
   ) => _repository.fetchLatestV4ResponseReview(userId);
 
+  Future<V4FullAssessmentResultData?> fetchLatestV4FullAssessmentResult(
+    String userId,
+  ) => _repository.fetchLatestV4FullAssessmentResult(userId);
+
   Future<void> loadLatestReport(String userId) async {
     _isLoading = true;
     _errorMessage = null;

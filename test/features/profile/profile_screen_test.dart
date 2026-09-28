@@ -230,6 +230,81 @@ void main() {
   );
 
   testWidgets(
+    'mental health summary renders the saved V4 full assessment result',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(360, 2200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final fullResult = V4FullAssessmentResultData.fromAssessment({
+        'schemaVersion': 'assessment_record_v4',
+        'createdAt': '2026-09-28T08:00:00.000',
+        'populationRole': 'teaching',
+        'instrument': {
+          'version': 'teaching_wellbeing_v4',
+          'algorithmVersion': 'teaching_profile_v4',
+          'referenceSetVersion': 'mindmate_wellbeing_refs_v1',
+        },
+        'result': {
+          'profileStatus': 'someAreasNeedAttention',
+          'responseQuality': {'answeredCount': 50, 'presentedCount': 50},
+        },
+        'interpretation': {
+          'userSummary': 'Saved teaching assessment summary.',
+          'overallResponseSummary': 'Saved overall response pattern.',
+          'domainSummaries': [
+            {
+              'domainId': 'teachingWorkloadDemands',
+              'domainLabel': 'Teaching Workload & Role Demands',
+              'status': 'someStrain',
+              'summary': 'Saved workload reflection.',
+              'focusInsight': 'Saved focus insight.',
+              'suggestedAction': 'Saved action.',
+            },
+          ],
+          'strengthInsights': ['Saved strength.'],
+          'focusInsights': ['Saved area to explore.'],
+          'suggestedActions': ['Saved next step.'],
+        },
+        'itemSnapshot': const [],
+        'responses': const [],
+      });
+      final report = ReportModel.fromJson({
+        'id': 'report_v4_full',
+        'userId': 'user_1',
+        'generatedAt': DateTime(2026, 9, 28).toIso8601String(),
+        'fullAssessmentStatus': 'someAreasNeedAttention',
+        'fullAssessmentSummary': 'Compact report summary.',
+      });
+      final userProvider = UserProvider(_FakeUserRepository())
+        ..setUser(const UserModel(id: 'user_1', email: 'user@example.com'));
+      final reportProvider = ReportProvider(
+        _FakeReportRepository(report, fullResult: fullResult),
+      );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+            ChangeNotifierProvider<ReportProvider>.value(value: reportProvider),
+          ],
+          child: const MaterialApp(home: MentalHealthReportScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Latest Full Well-Being Assessment'), findsOneWidget);
+      expect(find.text('Saved teaching assessment summary.'), findsOneWidget);
+      expect(find.text('What Your Responses Suggest Overall'), findsOneWidget);
+      expect(find.text('Saved overall response pattern.'), findsOneWidget);
+      expect(find.text('Teaching Workload & Role Demands'), findsOneWidget);
+      expect(find.text('Saved workload reflection.'), findsOneWidget);
+      expect(find.text('Saved focus insight.'), findsOneWidget);
+      expect(find.text('Saved strength.'), findsOneWidget);
+      expect(find.text('Saved next step.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'mental health summary puts a long assessment status below its title on a narrow phone',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(320, 900));
@@ -544,10 +619,11 @@ class _FakeAuthRepository extends AuthRepository {
 }
 
 class _FakeReportRepository extends ReportRepository {
-  _FakeReportRepository(this.report, {this.review});
+  _FakeReportRepository(this.report, {this.review, this.fullResult});
 
   final ReportModel report;
   final V4AssessmentResponseReviewData? review;
+  final V4FullAssessmentResultData? fullResult;
   int refreshCount = 0;
 
   @override
@@ -563,6 +639,11 @@ class _FakeReportRepository extends ReportRepository {
   Future<V4AssessmentResponseReviewData?> fetchLatestV4ResponseReview(
     String userId,
   ) async => review;
+
+  @override
+  Future<V4FullAssessmentResultData?> fetchLatestV4FullAssessmentResult(
+    String userId,
+  ) async => fullResult;
 }
 
 class _FakeActivityRepository extends MentalHealthActivityRepository {

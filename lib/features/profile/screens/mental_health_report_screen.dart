@@ -20,6 +20,7 @@ class _MentalHealthReportScreenState extends State<MentalHealthReportScreen> {
   String? _loadedUserId;
   bool _isRefreshing = false;
   V4AssessmentResponseReviewData? _fullResponseReview;
+  V4FullAssessmentResultData? _fullAssessmentResult;
 
   @override
   void didChangeDependencies() {
@@ -55,6 +56,7 @@ class _MentalHealthReportScreenState extends State<MentalHealthReportScreen> {
                 isLoading: provider?.isLoading ?? false,
                 errorMessage: provider?.errorMessage,
                 fullResponseReview: _fullResponseReview,
+                fullAssessmentResult: _fullAssessmentResult,
               ),
             ),
     );
@@ -70,14 +72,24 @@ class _MentalHealthReportScreenState extends State<MentalHealthReportScreen> {
       // full assessments is reflected immediately.
       await provider.refreshWeeklyReport(userId);
       V4AssessmentResponseReviewData? review;
+      V4FullAssessmentResultData? fullResult;
       try {
         review = await provider.fetchLatestV4ResponseReview(userId);
       } catch (error, stackTrace) {
         debugPrint('Unable to load saved assessment responses: $error');
         debugPrintStack(stackTrace: stackTrace);
       }
+      try {
+        fullResult = await provider.fetchLatestV4FullAssessmentResult(userId);
+      } catch (error, stackTrace) {
+        debugPrint('Unable to load saved full assessment result: $error');
+        debugPrintStack(stackTrace: stackTrace);
+      }
       if (mounted && _loadedUserId == userId) {
-        setState(() => _fullResponseReview = review);
+        setState(() {
+          _fullResponseReview = review;
+          _fullAssessmentResult = fullResult;
+        });
       }
     } finally {
       _isRefreshing = false;
@@ -116,12 +128,14 @@ class _AssessmentSummaryBody extends StatelessWidget {
     required this.isLoading,
     required this.errorMessage,
     required this.fullResponseReview,
+    required this.fullAssessmentResult,
   });
 
   final ReportModel? report;
   final bool isLoading;
   final String? errorMessage;
   final V4AssessmentResponseReviewData? fullResponseReview;
+  final V4FullAssessmentResultData? fullAssessmentResult;
 
   @override
   Widget build(BuildContext context) {
@@ -142,6 +156,7 @@ class _AssessmentSummaryBody extends StatelessWidget {
         value.quickAssessmentStatus != null ||
         value.quickAssessmentSummary != null;
     final hasFull =
+        fullAssessmentResult != null ||
         value.fullAssessmentExplanation != null ||
         value.fullAssessmentStatus != null ||
         value.fullAssessmentSummary != null;
@@ -159,7 +174,9 @@ class _AssessmentSummaryBody extends StatelessWidget {
         const _IntroCard(),
         if (hasFull) ...[
           const SizedBox(height: 14),
-          if (value.fullAssessmentExplanation != null)
+          if (fullAssessmentResult != null)
+            _V4FullAssessmentResultCard(result: fullAssessmentResult!)
+          else if (value.fullAssessmentExplanation != null)
             _AssessmentExplanationCard(
               title: 'Latest Full Well-Being Assessment',
               explanation: value.fullAssessmentExplanation!,
@@ -298,6 +315,233 @@ class _AssessmentResultCard extends StatelessWidget {
           ),
         ],
       ],
+    ),
+  );
+}
+
+/// Renders the saved V4 result on the summary screen. All wording and labels
+/// come from the persisted server payload; this widget performs no scoring.
+class _V4FullAssessmentResultCard extends StatelessWidget {
+  const _V4FullAssessmentResultCard({required this.result});
+
+  final V4FullAssessmentResultData result;
+
+  @override
+  Widget build(BuildContext context) {
+    final payload = result.payload;
+    final calculation = _v4Map(payload['result']);
+    final interpretation = _v4Map(payload['interpretation']);
+    final instrument = _v4Map(payload['instrument']);
+    final domains = _v4Maps(interpretation['domainSummaries']);
+    final strengths = _v4Strings(interpretation['strengthInsights']);
+    final focus = _v4Strings(interpretation['focusInsights']);
+    final actions = _v4Strings(interpretation['suggestedActions']);
+    final role = payload['populationRole']?.toString();
+    final isEmployee = role == 'teaching' || role == 'nonTeaching';
+    final summary =
+        _v4Text(interpretation['userSummary']) ??
+        _v4Text(interpretation['studentSummary']) ??
+        'Your saved full assessment result is available.';
+    final overall =
+        _v4Text(interpretation['overallResponseSummary']) ??
+        'Your responses are considered across five well-being areas.';
+    final quality = _v4Map(calculation['responseQuality']);
+    final answered = _v4Int(quality['answeredCount']);
+    final presented = _v4Int(quality['presentedCount']);
+    final responseReviewAvailable =
+        _v4Maps(payload['itemSnapshot']).isNotEmpty &&
+        _v4Maps(payload['responses']).isNotEmpty &&
+        domains.isNotEmpty;
+
+    return _Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Latest Full Well-Being Assessment',
+            style: _TextStyles.heading,
+          ),
+          const SizedBox(height: 8),
+          _StatusChip(
+            label: _v4ProfileLabel(calculation['profileStatus']?.toString()),
+          ),
+          const SizedBox(height: 14),
+          const Text('Assessment Summary', style: _TextStyles.section),
+          const SizedBox(height: 6),
+          Text(summary, style: _TextStyles.body),
+          const SizedBox(height: 14),
+          const Text(
+            'What Your Responses Suggest Overall',
+            style: _TextStyles.section,
+          ),
+          const SizedBox(height: 6),
+          Text(overall, style: _TextStyles.body),
+          const SizedBox(height: 16),
+          const Text('Well-Being Areas', style: _TextStyles.section),
+          const SizedBox(height: 8),
+          if (domains.isEmpty)
+            const Text(
+              'Detailed area-by-area reflections were not included with this saved result.',
+              style: _TextStyles.muted,
+            )
+          else
+            for (final domain in domains) _V4DomainSummary(domain: domain),
+          _V4ListSection(
+            title: 'Strengths',
+            values: strengths,
+            emptyText:
+                'No specific strengths were included with this saved result.',
+          ),
+          _V4ListSection(
+            title: 'Areas to Explore',
+            values: focus,
+            emptyText:
+                'No specific areas to explore were included with this saved result.',
+          ),
+          _V4ListSection(
+            title: 'Suggested Next Steps',
+            values: actions,
+            emptyText:
+                'Choose one small, supportive step that feels practical this week.',
+          ),
+          const SizedBox(height: 14),
+          const Text('Assessment Responses', style: _TextStyles.section),
+          const SizedBox(height: 8),
+          if (responseReviewAvailable)
+            Material(
+              color: Colors.transparent,
+              child: V4AssessmentResponseReview(
+                itemSnapshot: _v4Maps(payload['itemSnapshot']),
+                responses: _v4Maps(payload['responses']),
+                domainSummaries: domains,
+              ),
+            )
+          else
+            const Text(
+              'Saved assessment responses are unavailable for this result.',
+              style: _TextStyles.muted,
+            ),
+          const SizedBox(height: 14),
+          const Text('Response Completeness', style: _TextStyles.section),
+          const SizedBox(height: 6),
+          Text(
+            presented > 0
+                ? '$answered of $presented answered. ${_v4QualityLabel(quality['confidence']?.toString())}'
+                : 'Response completeness was not recorded for this saved result.',
+            style: _TextStyles.body,
+          ),
+          const SizedBox(height: 14),
+          _V4Transparency(
+            title: 'How This Result Was Created',
+            child: Text(
+              'This V4 assessment uses 50 questions across five well-being areas and a seven-day recall period. The server calculated this saved result deterministically. Generative AI does not determine the Full Assessment result. Instrument: ${_v4Text(instrument['version']) ?? 'not recorded'}; algorithm: ${_v4Text(instrument['algorithmVersion']) ?? _v4Text(payload['algorithmVersion']) ?? 'not recorded'}; record format: ${_v4Text(payload['schemaVersion']) ?? 'not recorded'}.',
+              style: _TextStyles.muted,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const _V4Transparency(
+            title: 'References & Resources',
+            child: Text(
+              'Hefferon, K., & Boniwell, I. (2011). Positive Psychology: Theory, Research and Applications. Open University Press. This is a conceptual and questionnaire-design reference, not validation of MindMate.',
+              style: _TextStyles.muted,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            isEmployee
+                ? '${_v4Text(interpretation['disclaimer']) ?? 'This is a non-clinical well-being reflection, not a diagnosis.'} This result is not a measure of job performance or fitness for work.'
+                : _v4Text(interpretation['disclaimer']) ??
+                      'This is a non-clinical well-being reflection, not a diagnosis.',
+            style: _TextStyles.muted,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _V4DomainSummary extends StatelessWidget {
+  const _V4DomainSummary({required this.domain});
+
+  final Map<String, dynamic> domain;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _v4Text(domain['domainLabel']) ?? 'Well-being area';
+    final summary =
+        _v4Text(domain['summary']) ??
+        'This area is available for reflection based on your saved responses.';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: _TextStyles.bodyStrong),
+          const SizedBox(height: 5),
+          _StatusChip(
+            label: _v4DomainLabel(domain['status']?.toString()),
+            compact: true,
+          ),
+          const SizedBox(height: 6),
+          Text(summary, style: _TextStyles.muted),
+          for (final detail in [
+            ('What to notice', _v4Text(domain['focusInsight'])),
+            ('Supportive pattern', _v4Text(domain['strengthInsight'])),
+            ('A practical next step', _v4Text(domain['suggestedAction'])),
+            ('Reflection prompt', _v4Text(domain['reflectionPrompt'])),
+          ])
+            if (detail.$2 != null) ...[
+              const SizedBox(height: 5),
+              Text(detail.$1, style: _TextStyles.bodyStrong),
+              Text(detail.$2!, style: _TextStyles.muted),
+            ],
+        ],
+      ),
+    );
+  }
+}
+
+class _V4ListSection extends StatelessWidget {
+  const _V4ListSection({
+    required this.title,
+    required this.values,
+    required this.emptyText,
+  });
+
+  final String title;
+  final List<String> values;
+  final String emptyText;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: _TextStyles.section),
+        const SizedBox(height: 6),
+        values.isEmpty
+            ? Text(emptyText, style: _TextStyles.muted)
+            : _BulletList(items: values),
+      ],
+    ),
+  );
+}
+
+class _V4Transparency extends StatelessWidget {
+  const _V4Transparency({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      title: Text(title, style: _TextStyles.section),
+      childrenPadding: const EdgeInsets.only(bottom: 8),
+      children: [Align(alignment: Alignment.centerLeft, child: child)],
     ),
   );
 }
@@ -590,6 +834,52 @@ class _StatusMessage extends StatelessWidget {
     ],
   );
 }
+
+Map<String, dynamic> _v4Map(Object? value) =>
+    value is Map ? Map<String, dynamic>.from(value) : const {};
+
+List<Map<String, dynamic>> _v4Maps(Object? value) => value is List
+    ? value
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(growable: false)
+    : const [];
+
+List<String> _v4Strings(Object? value) => value is List
+    ? value
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false)
+    : const [];
+
+String? _v4Text(Object? value) =>
+    value is String && value.trim().isNotEmpty ? value.trim() : null;
+
+int _v4Int(Object? value) =>
+    value is num ? value.toInt() : int.tryParse(value?.toString() ?? '') ?? 0;
+
+String _v4ProfileLabel(String? value) => switch (value) {
+  'generallySupported' => 'Well-being appears generally supported.',
+  'mostlySupported' => 'Mostly supported, with an area to explore.',
+  'someAreasNeedAttention' => 'Some areas may benefit from attention.',
+  'supportMayHelp' => 'Support may be helpful right now.',
+  _ => 'More responses are needed for a complete profile.',
+};
+
+String _v4DomainLabel(String? value) => switch (value) {
+  'supported' => 'Supported at present',
+  'mostlySupported' => 'Mostly supported',
+  'someStrain' => 'Some strain indicated',
+  'supportMayHelp' => 'Support may be helpful',
+  _ => 'More responses needed',
+};
+
+String _v4QualityLabel(String? value) => switch (value) {
+  'high' => 'High confidence.',
+  'usableWithCaution' => 'Usable with caution.',
+  'limited' => 'Limited response coverage.',
+  _ => 'Response quality was saved with this result.',
+};
 
 String _readable(String value) {
   final spaced = value

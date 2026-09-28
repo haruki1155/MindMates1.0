@@ -2,6 +2,56 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 
 void main() {
+  group('ReportRepository.fetchLatestV4FullAssessmentResult', () {
+    test(
+      'returns the latest saved V4 payload without recomputing it',
+      () async {
+        final dataSource = _FakeReportDataSource(
+          assessments: [
+            {
+              'schemaVersion': 'assessment_record_v4',
+              'createdAt': DateTime(2026, 9, 28, 8),
+              'populationRole': 'teaching',
+              'instrument': {'version': 'teaching_wellbeing_v4'},
+              'result': {'profileStatus': 'mostlySupported'},
+              'interpretation': {
+                'userSummary': 'Saved server summary.',
+                'domainSummaries': [
+                  {
+                    'domainId': 'teachingWorkloadDemands',
+                    'domainLabel': 'Teaching Workload & Role Demands',
+                    'summary': 'Saved domain summary.',
+                  },
+                ],
+              },
+              'itemSnapshot': const [],
+              'responses': const [],
+            },
+            {
+              'schemaVersion': 'assessment_record_v4',
+              'createdAt': DateTime(2026, 9, 27, 8),
+              'result': {'profileStatus': 'supportMayHelp'},
+              'interpretation': {'userSummary': 'Older summary.'},
+            },
+          ],
+        );
+
+        final result = await ReportRepository(
+          dataSource: dataSource,
+        ).fetchLatestV4FullAssessmentResult('user_1');
+
+        expect(result, isNotNull);
+        expect(result!.payload['populationRole'], 'teaching');
+        expect(result.payload['result'], {'profileStatus': 'mostlySupported'});
+        expect(
+          result.payload['interpretation'],
+          containsPair('userSummary', 'Saved server summary.'),
+        );
+        expect(result.payload.containsKey('overallScore'), isFalse);
+      },
+    );
+  });
+
   group('ReportRepository.generateWeeklyReport', () {
     test('builds quick-only report fields and severe status', () async {
       final dataSource = _FakeReportDataSource(
