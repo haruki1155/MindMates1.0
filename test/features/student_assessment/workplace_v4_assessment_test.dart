@@ -30,6 +30,55 @@ void main() {
       );
     });
 
+    test('preserves all 50-item role routing and saved domain IDs', () {
+      final provider = AssessmentProvider(AssessmentRepository());
+      final cases = [
+        (
+          AssessmentRole.faculty,
+          'teaching_v4_workload_demands_01',
+          const [
+            'teachingWorkloadDemands',
+            'teachingSupport',
+            'teachingEngagementMeaning',
+            'sleepRest',
+            'emotionalWellbeing',
+          ],
+        ),
+        (
+          AssessmentRole.staff,
+          'non_teaching_v4_workload_demands_01',
+          const [
+            'nonTeachingWorkloadDemands',
+            'nonTeachingSupport',
+            'nonTeachingEngagementMeaning',
+            'sleepRest',
+            'emotionalWellbeing',
+          ],
+        ),
+      ];
+
+      for (final roleCase in cases) {
+        provider.selectRole(roleCase.$1);
+        provider.startStudentAssessment();
+        expect(provider.studentQuestions, hasLength(50));
+        expect(provider.studentQuestions.first.id, roleCase.$2);
+        expect(
+          provider.studentQuestions
+              .map((question) => question.v4DomainId)
+              .toSet(),
+          roleCase.$3.toSet(),
+        );
+        for (final domainId in roleCase.$3) {
+          expect(
+            provider.studentQuestions.where(
+              (question) => question.v4DomainId == domainId,
+            ),
+            hasLength(10),
+          );
+        }
+      }
+    });
+
     test('Teaching catalog is an immutable 50-item agreement instrument', () {
       final questions = TeachingAssessmentV4Questions.questions;
       expect(

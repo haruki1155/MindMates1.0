@@ -88,3 +88,41 @@ test("workplace V4 emits deterministic role-specific full-result contracts", () 
     assert.deepEqual(first.interpretation, second.interpretation);
   }
 });
+
+test("Teaching and Non-Teaching V4 preserve all profile statuses and safe explanations", () => {
+  const cases = [
+    [calculateTeachingV4, TEACHING_V4_ITEMS, ["Teaching Workload & Role Demands", "Collegial & Organizational Support", "Professional Engagement & Meaning", "Sleep & Rest", "Emotional Well-Being"]],
+    [calculateNonTeachingV4, NON_TEACHING_V4_ITEMS, ["Workload & Role Demands", "Supervisor, Team & Organizational Support", "Work Engagement & Meaning", "Sleep & Rest", "Emotional Well-Being"]],
+  ] as const;
+  for (const [calculate, items, labels] of cases) {
+    const domainIds = [...new Set(items.map((item) => item.domainId))];
+    const incomplete = answersFor(items);
+    for (let index = 0; index < 4; index += 1) {
+      incomplete[index] = {itemId: incomplete[index].itemId, skipped: true};
+    }
+    const statuses: Array<[WorkplaceV4Answer[], string]> = [
+      [answersFor(items), "generallySupported"],
+      [answersFor(items, {[domainIds[0]]: 67}), "mostlySupported"],
+      [answersFor(items, {[domainIds[0]]: 67, [domainIds[1]]: 67}), "someAreasNeedAttention"],
+      [answersFor(items, {[domainIds[0]]: 100}), "supportMayHelp"],
+      [incomplete, "insufficientResponses"],
+    ];
+    for (const [answers, expectedStatus] of statuses) {
+      const first = calculate(answers);
+      const second = calculate(answers);
+      const result = first.result as Record<string, unknown>;
+      const interpretation = first.interpretation as Record<string, unknown>;
+      const domainSummaries = interpretation.domainSummaries as Record<string, unknown>[];
+      assert.equal(result.profileStatus, expectedStatus);
+      assert.equal(domainSummaries.length, 5);
+      assert.deepEqual(domainSummaries.map((domain) => domain.domainLabel), labels);
+      assert.deepEqual(first.interpretation, second.interpretation);
+      const explanationText = [
+        interpretation.userSummary,
+        interpretation.overallResponseSummary,
+        ...domainSummaries.flatMap((domain) => [domain.summary, domain.focusInsight, domain.strengthInsight, domain.suggestedAction]),
+      ].filter((value): value is string => typeof value === "string").join(" ");
+      assert.doesNotMatch(explanationText, /diagnostic|at risk|\/100/i);
+    }
+  }
+});

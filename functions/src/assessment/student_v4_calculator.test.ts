@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {STUDENT_V4_ITEMS} from "./student_v4_catalog";
+import {STUDENT_V4_DOMAIN_LABELS, STUDENT_V4_DOMAIN_ORDER, STUDENT_V4_ITEMS} from "./student_v4_catalog";
 import {calculateStudentV4, StudentV4Answer, validateStudentV4Answers} from "./student_v4_calculator";
 
 const valueFor = (code: StudentV4Answer["responseCode"]): number => ({
@@ -102,4 +102,36 @@ test("Student V4 profile precedence uses high support need before two strain dom
   assert.equal((timely.result as Record<string, unknown>).profileStatus, "supportMayHelp");
   const attention = calculateStudentV4(answersWithDomainConcern({academic: 67, financial: 67}));
   assert.equal((attention.result as Record<string, unknown>).profileStatus, "someAreasNeedAttention");
+});
+
+test("Student V4 preserves every profile status with deterministic, non-diagnostic explanations", () => {
+  const incomplete = answersFor("low");
+  for (let index = 0; index < 4; index += 1) {
+    incomplete[index] = {itemId: incomplete[index].itemId, skipped: true};
+  }
+  const cases: Array<[StudentV4Answer[], string]> = [
+    [answersFor("low"), "generallySupported"],
+    [answersWithDomainConcern({academic: 67}), "mostlySupported"],
+    [answersWithDomainConcern({academic: 67, financial: 67}), "someAreasNeedAttention"],
+    [answersWithDomainConcern({academic: 100}), "supportMayHelp"],
+    [incomplete, "insufficientResponses"],
+  ];
+  const labels = STUDENT_V4_DOMAIN_ORDER.map((domainId) => STUDENT_V4_DOMAIN_LABELS[domainId]);
+  for (const [answers, expectedStatus] of cases) {
+    const first = calculateStudentV4(answers);
+    const second = calculateStudentV4(answers);
+    const result = first.result as Record<string, unknown>;
+    const interpretation = first.interpretation as Record<string, unknown>;
+    const domainSummaries = interpretation.domainSummaries as Record<string, unknown>[];
+    assert.equal(result.profileStatus, expectedStatus);
+    assert.equal(domainSummaries.length, 5);
+    assert.deepEqual(domainSummaries.map((domain) => domain.domainLabel), labels);
+    assert.deepEqual(first.interpretation, second.interpretation);
+    const explanationText = [
+      interpretation.userSummary,
+      interpretation.overallResponseSummary,
+      ...domainSummaries.flatMap((domain) => [domain.summary, domain.focusInsight, domain.strengthInsight, domain.suggestedAction]),
+    ].filter((value): value is string => typeof value === "string").join(" ");
+    assert.doesNotMatch(explanationText, /diagnostic|at risk|\/100/i);
+  }
 });

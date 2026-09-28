@@ -29,7 +29,10 @@ void main() {
           ),
       ];
 
-      expect(StudentAssessmentV4Questions.instrumentVersion, 'student_wellbeing_v4');
+      expect(
+        StudentAssessmentV4Questions.instrumentVersion,
+        'student_wellbeing_v4',
+      );
       expect(answers, hasLength(50));
       for (final answer in answers) {
         expect(answer.toV4Json(), {
@@ -520,7 +523,7 @@ void main() {
       expect(provider.studentQuestions, hasLength(50));
       expect(
         provider.currentStudentQuestion?.section,
-        AssessmentSection.financialConcern,
+        AssessmentSection.financial,
       );
     });
 
@@ -539,7 +542,9 @@ void main() {
       expect(provider.studentQuestionIndex, 1);
       expect(
         provider.studentAnswers
-            .singleWhere((answer) => answer.questionId == 'academic_core_1')
+            .singleWhere(
+              (answer) => answer.questionId == 'student_v4_academic_01',
+            )
             .answer,
         LikertAnswer.rarely,
       );
@@ -550,10 +555,13 @@ void main() {
       provider.selectRole(AssessmentRole.faculty);
       provider.startStudentAssessment();
 
-      expect(provider.activeAssessmentTitle, 'Teaching Assessment');
+      expect(
+        provider.activeAssessmentTitle,
+        'Teaching Work Well-Being Reflection',
+      );
       expect(
         provider.currentStudentQuestion?.section,
-        AssessmentSection.workplaceStressCore,
+        AssessmentSection.professionalWellBeing,
       );
     });
 
@@ -562,10 +570,10 @@ void main() {
       provider.selectRole(AssessmentRole.staff);
       provider.startStudentAssessment();
 
-      expect(provider.activeAssessmentTitle, 'Non-Teaching Assessment');
+      expect(provider.activeAssessmentTitle, 'Work Well-Being Reflection');
       expect(
         provider.currentStudentQuestion?.section,
-        AssessmentSection.workplaceResponsibilityCore,
+        AssessmentSection.workplaceWellBeing,
       );
     });
 
@@ -678,7 +686,7 @@ void main() {
       expect(find.text('Neutral'), findsNothing);
       expect(find.text('Back'), findsOneWidget);
       expect(find.text('Skip'), findsNothing);
-      expect(find.text('Academic Stress'), findsWidgets);
+      expect(find.text('Academic'), findsWidgets);
       expect(find.textContaining('Question 1 of'), findsNothing);
     });
   });
@@ -714,22 +722,16 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(find.text('Set an appointment?'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+
       expect(
-        find.text(
-          'Do you want to set an appointment with PACC to discuss your well-being result?',
-        ),
+        find.text('Your Full Well-Being Assessment Result'),
         findsOneWidget,
       );
-      await tester.tap(find.text('No'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-
-      expect(find.text('Your Well-being Profile'), findsOneWidget);
       expect(find.text('Secondary overall concern index'), findsNothing);
       expect(find.text('/ 100'), findsNothing);
-      expect(find.text('Your well-being areas'), findsOneWidget);
-      expect(find.text('Your personal insights'), findsOneWidget);
+      expect(find.text('Well-Being Areas'), findsOneWidget);
+      expect(find.text('Assessment Summary'), findsOneWidget);
       expect(find.text('Domain interpretation'), findsNothing);
       expect(
         find.textContaining('Functional-impact observation'),
@@ -747,14 +749,51 @@ void main() {
 
 void _completeAssessment(AssessmentProvider provider) {
   var guard = 0;
-  while (provider.studentResult == null && guard < 100) {
+  while (!provider.isLastStudentQuestion && guard < 100) {
     provider.answerCurrentStudentQuestion(LikertAnswer.rarely);
     guard += 1;
+  }
+  if (provider.isLastStudentQuestion) {
+    provider.answerCurrentStudentQuestion(LikertAnswer.rarely);
   }
 }
 
 class _FakeAssessmentRepository extends AssessmentRepository {
   String? savedFullAssessmentUserId;
+
+  @override
+  Future<Map<String, Object>> saveV4FullAssessment({
+    required String userId,
+    required String instrumentVersion,
+    required List<StudentAssessmentAnswer> answers,
+    required String submissionId,
+  }) async {
+    savedFullAssessmentUserId = userId;
+    return {
+      'schemaVersion': 'assessment_record_v4',
+      'populationRole': 'student',
+      'instrument': {
+        'version': instrumentVersion,
+        'algorithmVersion': 'student_profile_v4',
+      },
+      'result': {
+        'profileStatus': 'mostlySupported',
+        'responseQuality': {
+          'answered': 50,
+          'presented': 50,
+          'confidence': 'high',
+        },
+      },
+      'interpretation': {
+        'studentSummary': 'Test V4 result.',
+        'overallResponseSummary': 'Test response pattern.',
+        'domainSummaries': const [],
+        'focusInsights': const [],
+        'strengthInsights': const [],
+        'suggestedActions': const [],
+      },
+    };
+  }
 
   @override
   Future<Map<String, Object>> saveStudentAssessment({
