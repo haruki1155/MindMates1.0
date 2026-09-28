@@ -23,7 +23,7 @@ jobs:
           channel: stable
       - run: flutter pub get
       - run: flutter analyze
-      - run: flutter test
+      - run: flutter test --dart-define=APP_ENV=staging
       - run: flutter clean
       - run: flutter build apk --debug --flavor staging --dart-define=APP_ENV=staging
       - name: Verify staging APK identity and permissions

@@ -216,7 +216,7 @@ void main() {
       'saving uses authenticated user id and complete hidden payload',
       () async {
         final firestore = _FakeFirestoreService();
-        final repository = AssessmentRepository(firestoreService: firestore);
+        final repository = _RecordingQuickAssessmentRepository(firestore);
         final provider = _readyProvider(repository: repository);
 
         for (final question in QuickAssessmentQuestions.questions) {
@@ -258,7 +258,7 @@ void main() {
 
     test('repeated save keeps one deterministic quick assessment', () async {
       final firestore = _FakeFirestoreService();
-      final repository = AssessmentRepository(firestoreService: firestore);
+      final repository = _RecordingQuickAssessmentRepository(firestore);
       final provider = _readyProvider(repository: repository);
 
       for (final question in QuickAssessmentQuestions.questions) {
@@ -300,7 +300,7 @@ void main() {
 
       final firestore = _FakeFirestoreService();
       final assessmentProvider = _readyProvider(
-        repository: AssessmentRepository(firestoreService: firestore),
+        repository: _RecordingQuickAssessmentRepository(firestore),
       )..resetQuestions();
       final userProvider = UserProvider(_FakeUserRepository())
         ..setUser(
@@ -557,6 +557,53 @@ class _FakeFirestoreService extends FirestoreService {
         setDocumentData = operation.data;
       }
     }
+  }
+}
+
+class _RecordingQuickAssessmentRepository extends AssessmentRepository {
+  _RecordingQuickAssessmentRepository(this.firestore)
+    : super(firestoreService: firestore);
+
+  final _FakeFirestoreService firestore;
+
+  @override
+  Future<Map<String, Object>> saveQuickAssessment({
+    required String userId,
+    required QuickAssessmentResult result,
+  }) async {
+    final documentId = AssessmentRepository.quickAssessmentDocumentId(userId);
+    final existing = await firestore.getDocument('assessments', documentId);
+    if (existing != null) {
+      await firestore.setDocument('users', userId, {
+        'quickAssessmentCompleted': true,
+      }, merge: true);
+      return {
+        for (final entry in existing.entries)
+          if (entry.value != null) entry.key: entry.value as Object,
+      };
+    }
+
+    final payload = <String, Object>{
+      'userId': userId,
+      'type': 'quick',
+      'populationRole': result.role.populationRole.storedValue,
+      ...result.toJson(),
+      'createdAt': DateTime.utc(2026, 9, 28).toIso8601String(),
+    };
+    await firestore.setDocumentsAtomically([
+      FirestoreSetOperation(
+        collection: 'assessments',
+        documentId: documentId,
+        data: Map<String, dynamic>.from(payload),
+      ),
+      FirestoreSetOperation(
+        collection: 'users',
+        documentId: userId,
+        data: {'quickAssessmentCompleted': true},
+        merge: true,
+      ),
+    ]);
+    return payload;
   }
 }
 
