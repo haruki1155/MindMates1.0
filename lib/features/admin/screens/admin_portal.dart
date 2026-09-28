@@ -23,6 +23,7 @@ import 'admin_change_password_screen.dart';
 import 'academic_structure_page.dart';
 import 'admin_operations_dashboard.dart';
 import 'staff_operations_dashboard.dart';
+import 'staff_appointments_page.dart';
 import 'counselor_operations_dashboard.dart';
 import 'counselor_workflow_page.dart';
 import '../../../services/inquiry_pdf_service.dart';
@@ -477,11 +478,6 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       return;
     }
     Navigator.of(context).maybePop();
-    if (_repository.currentAccessRole == AccessRole.portalStaff &&
-        page == AdminPortalPage.appointments) {
-      setState(() => _page = AdminPortalPage.dashboard);
-      return;
-    }
     if (mounted) setState(() => _page = page);
   }
 
@@ -510,12 +506,16 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
     ),
     AdminPortalPage.profiling => ProfileManagementPage(repository: _repository),
-    AdminPortalPage.appointments => AdminAppointmentsPage(
-      repository: _repository,
-      onOpenAssessments: _repository.currentAccessRole.canAccessClinicalData
-          ? () => _setPage(AdminPortalPage.assessments)
-          : null,
-    ),
+    AdminPortalPage.appointments =>
+      _repository.currentAccessRole == AccessRole.portalStaff
+          ? StaffAppointmentsPage(repository: _repository)
+          : AdminAppointmentsPage(
+              repository: _repository,
+              onOpenAssessments:
+                  _repository.currentAccessRole.canAccessClinicalData
+                  ? () => _setPage(AdminPortalPage.assessments)
+                  : null,
+            ),
     AdminPortalPage.cases => CounselorWorkflowPage(
       repository: _repository,
       mode: CounselorWorkflowMode.cases,
@@ -574,8 +574,7 @@ class _Nav extends StatelessWidget {
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
     AdminPortalPage.appointments =>
-      accessRole != AccessRole.portalStaff &&
-          (accessRole.canUsePortal || accessRole == AccessRole.admin),
+      accessRole.canUsePortal || accessRole == AccessRole.admin,
     _ => accessRole.canUsePortal || accessRole == AccessRole.admin,
   };
   @override

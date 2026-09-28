@@ -56,7 +56,7 @@ beforeEach(async () => {
 
 after(async () => environment.cleanup());
 
-test("appointment and history reads follow ownership and clinical assignment", async () => {
+test("appointment and history reads allow all clinical staff", async () => {
   const student = environment.authenticatedContext("student").firestore();
   const otherStudent = environment.authenticatedContext("other-student").firestore();
   const counselor = environment.authenticatedContext("counselor").firestore();
@@ -66,10 +66,10 @@ test("appointment and history reads follow ownership and clinical assignment", a
   await assertSucceeds(getDoc(doc(student, "appointments/appointment-1")));
   await assertFails(getDoc(doc(otherStudent, "appointments/appointment-1")));
   await assertSucceeds(getDoc(doc(counselor, "appointments/appointment-1")));
-  await assertFails(getDoc(doc(otherCounselor, "appointments/appointment-1")));
+  await assertSucceeds(getDoc(doc(otherCounselor, "appointments/appointment-1")));
   await assertSucceeds(getDoc(doc(admin, "appointments/appointment-1")));
   await assertSucceeds(getDoc(doc(counselor, "appointments/appointment-1/history/terminal")));
-  await assertFails(getDoc(doc(otherCounselor, "appointments/appointment-1/history/terminal")));
+  await assertSucceeds(getDoc(doc(otherCounselor, "appointments/appointment-1/history/terminal")));
 });
 
 test("portal staff can read only the minimal appointment queue", async () => {
@@ -79,7 +79,7 @@ test("portal staff can read only the minimal appointment queue", async () => {
   await assertSucceeds(getDoc(doc(portalStaff, "appointment_queue/appointment-1")));
 });
 
-test("clinical notes are visible only to the assigned counselor or admin", async () => {
+test("clinical notes are visible to all clinical staff", async () => {
   const student = environment.authenticatedContext("student").firestore();
   const portalStaff = environment.authenticatedContext("portal-staff").firestore();
   const counselor = environment.authenticatedContext("counselor").firestore();
@@ -90,7 +90,7 @@ test("clinical notes are visible only to the assigned counselor or admin", async
   await assertFails(getDoc(doc(student, note)));
   await assertFails(getDoc(doc(portalStaff, note)));
   await assertSucceeds(getDoc(doc(counselor, note)));
-  await assertFails(getDoc(doc(otherCounselor, note)));
+  await assertSucceeds(getDoc(doc(otherCounselor, note)));
   await assertSucceeds(getDoc(doc(admin, note)));
   await assertFails(setDoc(doc(counselor, note), {summary: "Client write"}));
 });

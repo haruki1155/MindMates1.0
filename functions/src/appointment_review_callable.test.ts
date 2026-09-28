@@ -102,7 +102,11 @@ test("terminal, unauthorized, and forged staff actions are denied", async () => 
   const slot = await futureWeekdaySlot(); const terminal = await seedAppointment("terminal", {scheduledAt: slot, status: "completed"});
   await expectCallableFailure(review.run({auth: {uid: counselorId}, data: payload(terminal.id, await futureWeekdaySlot(new Set([slot])))}), "failed-precondition");
   const appointment = await seedAppointment("authority"); const target = await futureWeekdaySlot();
-  await expectCallableFailure(review.run({auth: {uid: studentId}, data: payload(appointment.id, target)}), "permission-denied"); await expectCallableFailure(review.run({auth: {uid: portalStaffId}, data: payload(appointment.id, target)}), "permission-denied"); await expectCallableFailure(review.run({auth: {uid: otherCounselorId}, data: payload(appointment.id, target)}), "permission-denied");
+  await expectCallableFailure(review.run({auth: {uid: studentId}, data: payload(appointment.id, target)}), "permission-denied"); await expectCallableFailure(review.run({auth: {uid: portalStaffId}, data: payload(appointment.id, target)}), "permission-denied");
+  await assert.doesNotReject(review.run({auth: {uid: otherCounselorId}, data: payload(appointment.id, target)}));
+  const updated = (await appointment.get()).data()!;
+  assert.equal(updated.assignedStaffId, counselorId);
+  assert.equal(updated.actionBy, otherCounselorId);
 });
 
 test("a legacy proposal is finalized only by staff and its legacy fields are cleared", async () => {

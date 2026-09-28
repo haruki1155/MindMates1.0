@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/appointment_queue_item.dart';
 import '../../../models/pacc_availability_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../domain/portal_appointment_metrics.dart';
 import '../theme/admin_theme.dart';
 import 'admin_portal.dart';
 
@@ -61,17 +62,10 @@ class _DashboardContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
+    final metrics = PortalAppointmentMetrics.fromQueue(appointments, now);
     final today =
         appointments.where((a) => _sameDay(a.scheduledAt, now)).toList()
           ..sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
-    final upcoming = appointments.where((a) {
-      final day = a.scheduledAt;
-      return day.isAfter(now) && day.isBefore(now.add(const Duration(days: 8)));
-    }).length;
-    final needsAction = appointments.where((a) {
-      final status = a.status.toLowerCase().trim();
-      return status == 'pending' || status == 'reschedule_required';
-    }).length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,8 +94,8 @@ class _DashboardContent extends StatelessWidget {
               children: [
                 _Metric(
                   width: width,
-                  label: "Today's appointments",
-                  value: '${today.length}',
+                  label: 'Today',
+                  value: '${metrics.today}',
                   note:
                       '${today.where((a) => !_closed(a.status)).length} remaining',
                   icon: Icons.calendar_today_outlined,
@@ -109,16 +103,23 @@ class _DashboardContent extends StatelessWidget {
                 _Metric(
                   width: width,
                   label: 'Upcoming',
-                  value: '$upcoming',
-                  note: 'Next 7 days',
+                  value: '${metrics.upcoming}',
+                  note: 'Confirmed future dates',
                   icon: Icons.event_available_outlined,
                 ),
                 _Metric(
                   width: width,
-                  label: 'Needs attention',
-                  value: '$needsAction',
+                  label: 'Needs action',
+                  value: '${metrics.needsAction}',
                   note: 'Requires review',
                   icon: Icons.priority_high_rounded,
+                ),
+                _Metric(
+                  width: width,
+                  label: 'Completed',
+                  value: '${metrics.completed}',
+                  note: 'Completed appointments',
+                  icon: Icons.task_alt_outlined,
                 ),
                 SizedBox(
                   width: width,
@@ -150,7 +151,7 @@ class _DashboardContent extends StatelessWidget {
         _Panel(
           title: "Today's appointments",
           action: TextButton(
-            onPressed: () => onNavigate(AdminPortalPage.dashboard),
+            onPressed: () => onNavigate(AdminPortalPage.appointments),
             child: const Text('View all →'),
           ),
           child: today.isEmpty

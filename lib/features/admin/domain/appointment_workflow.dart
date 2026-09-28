@@ -6,8 +6,7 @@ AppointmentQueue classifyAppointment(
   AppointmentModel appointment,
   DateTime now,
 ) {
-  // Historical records used this outcome before the hardened no_show status.
-  if (appointment.status.trim().toLowerCase() == 'not_attended') {
+  if (appointment.status.trim().toLowerCase() == 'completed') {
     return AppointmentQueue.completed;
   }
   switch (appointment.lifecycleStatus) {
@@ -30,13 +29,16 @@ AppointmentQueue classifyAppointment(
     case AppointmentStatus.noShow:
     case AppointmentStatus.declined:
     case AppointmentStatus.expired:
-      return AppointmentQueue.completed;
+      // Retain legacy terminal values without presenting them as completed
+      // counseling appointments.
+      return AppointmentQueue.needsAction;
     case AppointmentStatus.unknown:
       return AppointmentQueue.needsAction;
   }
 }
 
-/// Completed includes archived finished records; History remains archive-only.
+/// Completed includes archived records whose stored status is exactly completed;
+/// History remains archive-only.
 List<AppointmentModel> appointmentRecordsForView(
   Iterable<AppointmentModel> appointments,
   DateTime now, {

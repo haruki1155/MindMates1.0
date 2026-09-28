@@ -25,17 +25,17 @@ void main() {
     archivedAt: archived ? now : null,
   );
 
-  test('classifies the hardened lifecycle without losing terminal states', () {
+  test('classifies only exact completed status as Completed', () {
     final cases = <String, AppointmentQueue>{
       'requested': AppointmentQueue.needsAction,
       'pending': AppointmentQueue.needsAction,
       'reschedule_proposed': AppointmentQueue.needsAction,
       'completed': AppointmentQueue.completed,
-      'not_attended': AppointmentQueue.completed,
-      'no_show': AppointmentQueue.completed,
-      'cancelled': AppointmentQueue.completed,
-      'declined': AppointmentQueue.completed,
-      'expired': AppointmentQueue.completed,
+      'not_attended': AppointmentQueue.needsAction,
+      'no_show': AppointmentQueue.needsAction,
+      'cancelled': AppointmentQueue.needsAction,
+      'declined': AppointmentQueue.needsAction,
+      'expired': AppointmentQueue.needsAction,
       'unrecognized': AppointmentQueue.needsAction,
     };
     for (final entry in cases.entries) {
@@ -105,7 +105,7 @@ void main() {
     ];
     final counts = appointmentQueueCounts(records, now);
     expect(counts.values.reduce((a, b) => a + b), records.length);
-    expect(counts[AppointmentQueue.completed], 91);
+    expect(counts[AppointmentQueue.completed], 90);
     expect(
       appointmentRecordsForView(records, now, showHistory: false).length,
       5,
@@ -117,7 +117,7 @@ void main() {
         showHistory: false,
         queue: AppointmentQueue.completed,
       ).length,
-      91,
+      90,
     );
     expect(
       appointmentRecordsForView(records, now, showHistory: true).length,
@@ -125,20 +125,28 @@ void main() {
     );
   });
 
-  test('finished statuses retain their stored values', () {
-    for (final status in [
-      'completed',
-      'not_attended',
-      'no_show',
-      'cancelled',
-      'declined',
-      'expired',
-    ]) {
-      final record = appointment(status, now);
-      expect(classifyAppointment(record, now), AppointmentQueue.completed);
-      expect(record.status, status);
-    }
-  });
+  test(
+    'legacy terminal statuses retain their stored values but are not completed',
+    () {
+      for (final status in [
+        'completed',
+        'not_attended',
+        'no_show',
+        'cancelled',
+        'declined',
+        'expired',
+      ]) {
+        final record = appointment(status, now);
+        expect(
+          classifyAppointment(record, now),
+          status == 'completed'
+              ? AppointmentQueue.completed
+              : AppointmentQueue.needsAction,
+        );
+        expect(record.status, status);
+      }
+    },
+  );
 
   test('History contains archived records only', () {
     final active = appointment('completed', now);

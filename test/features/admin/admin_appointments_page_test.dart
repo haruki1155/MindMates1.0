@@ -60,10 +60,10 @@ void main() {
 
     expect(find.text('Appointment category'), findsOneWidget);
     expect(find.text('All active 5'), findsOneWidget);
-    expect(find.text('Needs action 1'), findsOneWidget);
+    expect(find.text('Needs action 2'), findsOneWidget);
     expect(find.text('Today 0'), findsOneWidget);
     expect(find.text('Upcoming 2'), findsOneWidget);
-    expect(find.text('Completed 91'), findsOneWidget);
+    expect(find.text('Completed 90'), findsOneWidget);
     expect(find.text('Finished, including archived'), findsOneWidget);
     expect(find.byType(ChoiceChip), findsNWidgets(5));
     expect(
@@ -75,8 +75,8 @@ void main() {
     );
     expect(find.text('Archived 0'), findsNothing);
 
-    await tester.ensureVisible(find.text('Completed 91'));
-    await tester.tap(find.text('Completed 91'));
+    await tester.ensureVisible(find.text('Completed 90'));
+    await tester.tap(find.text('Completed 90'));
     await tester.pumpAndSettle();
     expect(find.text('Archived 0'), findsWidgets);
     expect(find.text('Finished one'), findsWidgets);
@@ -85,7 +85,7 @@ void main() {
     await tester.ensureVisible(find.byType(Checkbox).first);
     await tester.tap(find.byType(Checkbox).first);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Move to history (2)'), findsOneWidget);
+    expect(find.textContaining('Move to history (1)'), findsOneWidget);
 
     await tester.ensureVisible(find.text('History'));
     await tester.tap(find.text('History'));

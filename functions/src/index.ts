@@ -2032,11 +2032,6 @@ export const reviewAppointment = onCall(async (request) => {
     ]);
     if (!current.exists) throw new HttpsError("not-found", "Appointment not found.");
     const data = current.data()!;
-    // A counselor may claim an unassigned request while reviewing it. Once
-    // assigned, only that counselor (or an administrator) may transition it.
-    if (staff.accessRole === "counselor" && data.assignedStaffId && String(data.assignedStaffId) !== staffId) {
-      throw new HttpsError("permission-denied", "This appointment is not assigned to your caseload.");
-    }
     const before = canonicalAppointmentStatus(data.status);
     const nextStatus = action === "rescheduled" ? "confirmed" : action;
     if (before === "reschedule_proposed" && action !== "rescheduled") {
@@ -2075,8 +2070,10 @@ export const reviewAppointment = onCall(async (request) => {
     }
     const patch: Record<string, unknown> = {
       status: action === "rescheduled" ? "confirmed" : action,
-      assignedStaffId: staffId,
-      counselorName: staffName,
+      // Review activity and case ownership are distinct. A clinician may
+      // manage the organization-wide queue without silently reassigning it.
+      actionBy: staffId,
+      actionByName: staffName,
       staffReply: reply,
       reviewedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
@@ -2194,7 +2191,6 @@ export const archiveAppointments = onCall(async (request) => {
       const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow", "expired"].includes(status);
       if (!archived && !data.archivedAt) throw new HttpsError("failed-precondition", "Only archived appointments can be restored.");
       if (archived && !terminal) throw new HttpsError("failed-precondition", "Only finished appointments can be moved to history.");
-      if (actor.accessRole === "counselor" && String(data.assignedStaffId ?? "") !== actorId) throw new HttpsError("permission-denied", "You can only manage your assigned appointments.");
       transaction.update(snapshot.ref, {archivedAt: archived ? FieldValue.serverTimestamp() : FieldValue.delete(), archivedBy: archived ? actorId : FieldValue.delete(), updatedAt: FieldValue.serverTimestamp()});
       writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole, action: archived ? "APPOINTMENT_MOVED_TO_HISTORY" : "APPOINTMENT_RESTORED_FROM_HISTORY", category: AUDIT_CATEGORIES.appointments, targetType: "appointment", targetId: snapshot.id, metadata: {status, bulk: appointmentIds.length > 1}});
     }

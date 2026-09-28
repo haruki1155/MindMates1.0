@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../../models/appointment_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../domain/portal_appointment_metrics.dart';
 import '../theme/admin_theme.dart';
 import 'admin_portal.dart';
 
-/// Counselor landing page: assigned caseload and today's counseling work only.
+/// Counselor landing page with organization-wide clinical operations and a
+/// separately labelled assigned caseload.
 class CounselorOperationsDashboardPage extends StatelessWidget {
   const CounselorOperationsDashboardPage({
     super.key,
@@ -41,9 +43,21 @@ class _CounselorPage extends StatelessWidget {
               );
             }
             if (!snapshot.hasData) return const _Skeleton();
-            return _Content(
-              appointments: snapshot.data!,
-              onNavigate: onNavigate,
+            return StreamBuilder<List<AppointmentModel>>(
+              stream: repository.watchMyAssignedAppointments(),
+              builder: (context, myCasesSnapshot) {
+                if (myCasesSnapshot.hasError) {
+                  return const _Message(
+                    title: 'Unable to load your assigned caseload',
+                    body: 'Please try again or contact an administrator.',
+                  );
+                }
+                return _Content(
+                  appointments: snapshot.data!,
+                  myAppointments: myCasesSnapshot.data ?? const [],
+                  onNavigate: onNavigate,
+                );
+              },
             );
           },
         ),
@@ -53,31 +67,29 @@ class _CounselorPage extends StatelessWidget {
 }
 
 class _Content extends StatelessWidget {
-  const _Content({required this.appointments, required this.onNavigate});
+  const _Content({
+    required this.appointments,
+    required this.myAppointments,
+    required this.onNavigate,
+  });
   final List<AppointmentModel> appointments;
+  final List<AppointmentModel> myAppointments;
   final ValueChanged<AdminPortalPage> onNavigate;
 
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
+    final metrics = PortalAppointmentMetrics.fromAppointments(
+      appointments,
+      now,
+    );
+    final myMetrics = PortalAppointmentMetrics.fromAppointments(
+      myAppointments,
+      now,
+    );
     final today =
         appointments.where((a) => _sameDay(a.scheduledAt, now)).toList()
           ..sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
-    final upcoming = appointments
-        .where(
-          (a) =>
-              a.scheduledAt.isAfter(now) &&
-              a.scheduledAt.isBefore(now.add(const Duration(days: 8))),
-        )
-        .length;
-    final needsAttention = appointments
-        .where(
-          (a) => const {
-            'reschedule_required',
-            'reschedule_proposed',
-          }.contains(a.status.toLowerCase().trim()),
-        )
-        .length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -87,7 +99,7 @@ class _Content extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Your counseling workspace, appointments, and follow-ups.',
+          'PAACC-wide clinical operations and your assigned caseload.',
           style: TextStyle(color: AdminColors.muted),
         ),
         const SizedBox(height: 24),
@@ -105,8 +117,8 @@ class _Content extends StatelessWidget {
               children: [
                 _Metric(
                   width: width,
-                  title: 'Today',
-                  value: '${today.length}',
+                  title: 'PAACC Today',
+                  value: '${metrics.today}',
                   note:
                       '${today.where((a) => !_closed(a.status)).length} remaining',
                   icon: Icons.today_outlined,
@@ -114,20 +126,34 @@ class _Content extends StatelessWidget {
                 _Metric(
                   width: width,
                   title: 'Upcoming',
-                  value: '$upcoming',
-                  note: 'Next 7 days',
+                  value: '${metrics.upcoming}',
+                  note: 'Confirmed future dates',
                   icon: Icons.event_available_outlined,
                 ),
                 _Metric(
                   width: width,
-                  title: 'Needs attention',
-                  value: '$needsAttention',
+                  title: 'Needs action',
+                  value: '${metrics.needsAction}',
                   note: 'Follow-up required',
                   icon: Icons.priority_high_rounded,
                 ),
               ],
             );
           },
+        ),
+        const SizedBox(height: 20),
+        _Panel(
+          title: 'My Caseload',
+          child: Wrap(
+            spacing: 20,
+            runSpacing: 10,
+            children: [
+              Text('Assigned ${myMetrics.total}'),
+              Text('Today ${myMetrics.today}'),
+              Text('Upcoming ${myMetrics.upcoming}'),
+              Text('Completed ${myMetrics.completed}'),
+            ],
+          ),
         ),
         const SizedBox(height: 24),
         _Panel(

@@ -5,6 +5,7 @@ import '../../../models/admin_inquiry_model.dart';
 import '../../../models/appointment_model.dart';
 import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../domain/portal_appointment_metrics.dart';
 import '../theme/admin_theme.dart';
 import 'admin_portal.dart';
 
@@ -55,6 +56,8 @@ class AdminOperationsDashboardPage extends StatelessWidget {
               final appointments =
                   appointmentsSnapshot.data ?? const <AppointmentModel>[];
               final now = DateTime.now();
+              final appointmentMetrics =
+                  PortalAppointmentMetrics.fromAppointments(appointments, now);
               final today =
                   appointments
                       .where((a) => _sameDay(a.scheduledAt, now))
@@ -76,9 +79,7 @@ class AdminOperationsDashboardPage extends StatelessWidget {
                     ),
                   )
                   .length;
-              final pendingAppointments = appointments
-                  .where((a) => !_closed(a.status))
-                  .length;
+              final pendingAppointments = appointmentMetrics.needsAction;
               final openInquiries = inquiries
                   .where((i) => i.status != InquiryStatus.resolved)
                   .length;
@@ -172,8 +173,9 @@ class AdminOperationsDashboardPage extends StatelessWidget {
                             _Metric(
                               width: width,
                               label: 'Appointments',
-                              value: '$pendingAppointments',
-                              note: 'Today: ${today.length}',
+                              value: '${appointmentMetrics.total}',
+                              note:
+                                  'Today: ${appointmentMetrics.today} · Completed: ${appointmentMetrics.completed}',
                               icon: Icons.calendar_today_outlined,
                               onTap: () =>
                                   onNavigate(AdminPortalPage.appointments),

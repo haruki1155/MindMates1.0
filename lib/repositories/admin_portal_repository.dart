@@ -654,12 +654,7 @@ class AdminPortalRepository {
           );
 
   Stream<List<AppointmentModel>> watchAppointments() => _firestoreService
-      .watchDocuments(
-        FirestoreCollections.appointments,
-        whereEquals: currentAccessRole == AccessRole.counselor
-            ? {'assignedStaffId': currentAuthUser?.uid ?? ''}
-            : const {},
-      )
+      .watchDocuments(FirestoreCollections.appointments)
       .map(
         (items) =>
             items
@@ -672,6 +667,32 @@ class AdminPortalRepository {
                 .toList()
               ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
       );
+
+  /// The counselor's assigned caseload is an explicit secondary scope. The
+  /// primary appointment stream is organization-wide for clinical staff.
+  Stream<List<AppointmentModel>> watchMyAssignedAppointments() {
+    final userId = currentAuthUser?.uid;
+    if (currentAccessRole != AccessRole.counselor || userId == null) {
+      return Stream.value(const <AppointmentModel>[]);
+    }
+    return _firestoreService
+        .watchDocuments(
+          FirestoreCollections.appointments,
+          whereEquals: {'assignedStaffId': userId},
+        )
+        .map(
+          (items) =>
+              items
+                  .map(
+                    (item) => AppointmentModel.fromJson(
+                      item,
+                      id: item['id']?.toString(),
+                    ),
+                  )
+                  .toList()
+                ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
+        );
+  }
 
   Stream<List<AppointmentQueueItem>> watchPortalAppointmentQueue() {
     if (currentAccessRole != AccessRole.portalStaff) {
@@ -693,7 +714,6 @@ class AdminPortalRepository {
                         id: item['id']?.toString(),
                       ),
                     )
-                    .where((item) => !item.isArchived)
                     .toList()
                   ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
           ),
