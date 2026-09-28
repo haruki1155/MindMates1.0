@@ -231,6 +231,77 @@ void main() {
     );
     await _expectTextVisible(tester, 'Well-being area');
   });
+
+  testWidgets('expands V4 methodology and references on a narrow phone', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final assessment = AssessmentProvider(_V4Repository())
+      ..startStudentAssessment();
+    for (var index = 0; index < 50; index += 1) {
+      assessment.answerCurrentStudentQuestion(LikertAnswer.often);
+    }
+    final user = UserProvider(_ActivityRepository())
+      ..setUser(
+        const UserModel(id: 'student_method', email: 'method@example.com'),
+      );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+          ChangeNotifierProvider<UserProvider>.value(value: user),
+          ChangeNotifierProvider<ReportProvider>(
+            create: (_) => ReportProvider(_FailingReportRepository()),
+          ),
+        ],
+        child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    await _expectTextVisible(tester, 'How This Result Was Created');
+    await tester.tap(find.text('How This Result Was Created'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await _expectTextVisible(
+      tester,
+      'The server calculated this result deterministically from your saved responses.',
+    );
+    await _expectTextVisible(
+      tester,
+      'Generative AI does not determine this Full Assessment result.',
+    );
+    await _expectTextVisible(
+      tester,
+      'Instrument version: student_wellbeing_v4',
+    );
+    await _expectTextVisible(tester, 'Algorithm version: student_profile_v4');
+    await _expectTextVisible(tester, 'Record format: assessment_record_v4');
+    await _expectTextVisible(
+      tester,
+      'Reference set: mindmate_wellbeing_refs_v1',
+    );
+
+    await _expectTextVisible(tester, 'References & Resources');
+    await tester.tap(find.text('References & Resources'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await _expectTextVisible(
+      tester,
+      'Hefferon, K., & Boniwell, I. (2011). Positive Psychology: Theory, Research and Applications. Open University Press.',
+    );
+    await _expectTextVisible(
+      tester,
+      'It is a conceptual and questionnaire-design reference, not validation of MindMate.',
+    );
+    expect(find.textContaining('catalogHash'), findsNothing);
+    expect(find.textContaining('responseValue'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 Future<void> _expectTextVisible(WidgetTester tester, String value) async {
@@ -251,7 +322,7 @@ Future<void> _expectTextContainingVisible(
 Future<void> _scrollIntoView(WidgetTester tester, Finder finder) async {
   for (
     var attempt = 0;
-    attempt < 12 && finder.evaluate().isEmpty;
+    attempt < 30 && finder.evaluate().isEmpty;
     attempt += 1
   ) {
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -220));
@@ -284,6 +355,7 @@ class _V4Repository extends AssessmentRepository {
       'version': instrumentVersion,
       'recallPeriodDays': 7,
       'responseScaleId': 'agreement_4_no_neutral_v1',
+      'referenceSetVersion': 'mindmate_wellbeing_refs_v1',
       'algorithmVersion': instrumentVersion == 'student_wellbeing_v4'
           ? 'student_profile_v4'
           : instrumentVersion.startsWith('teaching_')

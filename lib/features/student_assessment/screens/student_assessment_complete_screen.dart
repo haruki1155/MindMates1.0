@@ -405,6 +405,16 @@ class _StudentV4ProfileView extends StatelessWidget {
     final disclaimer =
         _v4NonEmptyText(interpretation['disclaimer']) ??
         'This is a non-clinical well-being reflection, not a diagnosis.';
+    final instrumentVersion =
+        _v4NonEmptyText(instrument['version']) ?? 'Not recorded';
+    final algorithmVersion =
+        _v4NonEmptyText(instrument['algorithmVersion']) ??
+        _v4NonEmptyText(payload['algorithmVersion']) ??
+        'Not recorded';
+    final referenceSetVersion =
+        _v4NonEmptyText(instrument['referenceSetVersion']) ?? 'Not recorded';
+    final schemaVersion =
+        _v4NonEmptyText(payload['schemaVersion']) ?? 'Not recorded';
     return Scaffold(
       backgroundColor: QuickAssessmentPalette.background,
       appBar: AppBar(
@@ -537,6 +547,57 @@ class _StudentV4ProfileView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+            _V4TransparencySection(
+              title: 'How This Result Was Created',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'This V4 assessment includes 50 questions across five well-being areas. It asks about the past seven days using a four-point agreement scale.',
+                    style: TextStyle(height: 1.45),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'The server calculated this result deterministically from your saved responses.',
+                    style: TextStyle(height: 1.45),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Generative AI does not determine this Full Assessment result.',
+                    style: TextStyle(height: 1.45),
+                  ),
+                  const SizedBox(height: 10),
+                  Text('Instrument version: $instrumentVersion'),
+                  Text('Algorithm version: $algorithmVersion'),
+                  Text('Record format: $schemaVersion'),
+                  Text('Reference set: $referenceSetVersion'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const _V4TransparencySection(
+              title: 'References & Resources',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Hefferon, K., & Boniwell, I. (2011). Positive Psychology: Theory, Research and Applications. Open University Press.',
+                    style: TextStyle(height: 1.45),
+                  ),
+                  SizedBox(height: 10),
+                  Text(
+                    'It is a conceptual and questionnaire-design reference, not validation of MindMate.',
+                    style: TextStyle(height: 1.45),
+                  ),
+                  SizedBox(height: 10),
+                  Text(
+                    'MindMate V4 is a custom university well-being reflection and is not clinically validated.',
+                    style: TextStyle(height: 1.45),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             _V4InfoCard(
               title: 'About This Result',
               child: Text(
@@ -573,6 +634,22 @@ class _StudentV4ProfileView extends StatelessWidget {
       ),
     );
   }
+}
+
+class _V4TransparencySection extends StatelessWidget {
+  const _V4TransparencySection({required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: ExpansionTile(
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      children: [child],
+    ),
+  );
 }
 
 class _V4InfoCard extends StatelessWidget {
