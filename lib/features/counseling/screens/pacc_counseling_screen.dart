@@ -1344,8 +1344,7 @@ class _IntakeFormView extends StatelessWidget {
                       width: 80,
                       child: _PaccTextField(
                         controller: middleInitialController,
-                        hint: 'M.I.',
-                        validator: _required,
+                        hint: 'M.I. (optional)',
                       ),
                     ),
                   ],

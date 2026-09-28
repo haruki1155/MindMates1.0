@@ -333,6 +333,31 @@ void main() {
     );
   });
 
+  testWidgets('appointment intake accepts an empty middle initial', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(430, 3200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_paccApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Book Appointment').first);
+    await tester.pumpAndSettle();
+
+    await _fillVisibleForm(tester);
+    await tester.enterText(find.byType(TextFormField).at(2), '');
+    await _chooseVisibleOption(tester, 'Male');
+    await _chooseVisibleOption(tester, 'Fourth Year');
+    await _chooseVisibleOption(tester, 'Email');
+    await _chooseVisibleOption(tester, 'No');
+
+    await tester.ensureVisible(find.text('Continue to Date & Time'));
+    await tester.tap(find.text('Continue to Date & Time'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Appointment Schedule'), findsOneWidget);
+  });
+
   testWidgets('appointment details and MindMate calendar work', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
