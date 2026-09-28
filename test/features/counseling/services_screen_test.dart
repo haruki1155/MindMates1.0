@@ -289,6 +289,22 @@ void main() {
 
     await tester.tap(find.text('Book Appointment').first);
     await tester.pumpAndSettle();
+    expect(find.text('Counseling Details'), findsWidgets);
+
+    await tester.tap(find.text('Continue to Date & Time'));
+    await tester.pump();
+    expect(find.text('Please complete all required fields.'), findsOneWidget);
+
+    await _fillVisibleForm(tester);
+    await _chooseVisibleOption(tester, 'Male');
+    await _chooseVisibleOption(tester, 'Fourth Year');
+    await _chooseVisibleOption(tester, 'Email');
+    await _chooseVisibleOption(tester, 'No');
+
+    await tester.ensureVisible(find.text('Continue to Date & Time'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue to Date & Time'));
+    await tester.pumpAndSettle();
     expect(find.text('Appointment Schedule'), findsOneWidget);
     expect(find.text('April 2026'), findsOneWidget);
 
@@ -299,23 +315,7 @@ void main() {
 
     await tester.tap(find.text('11:00 AM'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue to Details'));
-    await tester.pumpAndSettle();
-    expect(find.text('Counseling Details'), findsWidgets);
-
-    await tester.tap(find.text('Review Appointment'));
-    await tester.pump();
-    expect(find.text('Please complete all required fields.'), findsOneWidget);
-
-    await _fillVisibleForm(tester);
-    await _chooseVisibleOption(tester, 'Male');
-    await _chooseVisibleOption(tester, 'Fourth Year');
-    await _chooseVisibleOption(tester, 'Email');
-    await _chooseVisibleOption(tester, 'No');
-
-    await tester.ensureVisible(find.text('Review Appointment'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Review Appointment'));
+    await tester.tap(find.text('Continue to Confirm'));
     await tester.pumpAndSettle();
     expect(find.text('Confirm Appointment'), findsWidgets);
     await tester.tap(find.text('Confirm Appointment').last);
@@ -365,6 +365,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Book Appointment').first);
     await tester.pumpAndSettle();
+    await _advanceToSchedule(tester);
 
     await tester.tap(find.text('1').last);
     await tester.pumpAndSettle();
@@ -382,6 +383,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Book Appointment').first);
     await tester.pumpAndSettle();
+    await _advanceToSchedule(tester);
     await tester.ensureVisible(find.text('29'));
     await tester.tap(find.text('29'));
     await tester.pumpAndSettle();
@@ -425,25 +427,29 @@ Widget _paccApp({_FakeAppointmentRepository? appointmentRepository}) {
 Future<void> _createAppointment(WidgetTester tester) async {
   await tester.tap(find.text('Book Appointment').first);
   await tester.pumpAndSettle();
+  await _advanceToSchedule(tester);
   await tester.tap(find.text('30'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('11:00 AM'));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Continue to Details'));
+  await tester.tap(find.text('Continue to Confirm'));
   await tester.pumpAndSettle();
+  await tester.tap(find.text('Confirm Appointment').last);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Back to Appointments'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _advanceToSchedule(WidgetTester tester) async {
   await _fillVisibleForm(tester);
   await _chooseVisibleOption(tester, 'Male');
   await _chooseVisibleOption(tester, 'Fourth Year');
   await _chooseVisibleOption(tester, 'Email');
   await _chooseVisibleOption(tester, 'No');
 
-  await tester.ensureVisible(find.text('Review Appointment'));
+  await tester.ensureVisible(find.text('Continue to Date & Time'));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Review Appointment'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Confirm Appointment').last);
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Back to Appointments'));
+  await tester.tap(find.text('Continue to Date & Time'));
   await tester.pumpAndSettle();
 }
 

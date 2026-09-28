@@ -46,7 +46,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   final _bestTimeController = TextEditingController();
 
   late _PaccAppointmentTab _tab;
-  _PaccAppointmentStep _step = _PaccAppointmentStep.calendar;
+  _PaccAppointmentStep _step = _PaccAppointmentStep.intake;
   late DateTime _visibleMonth;
   DateTime? _selectedDate;
   String? _selectedTime;
@@ -204,7 +204,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         visibleMonth: _visibleMonth,
         minimumDate: _today,
         selectedDate: _selectedDate,
-        onBack: () => setState(() => _tab = _PaccAppointmentTab.myAppointments),
+        onBack: () => setState(() => _step = _PaccAppointmentStep.intake),
         onPreviousMonth: () => setState(() {
           _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month - 1);
         }),
@@ -222,7 +222,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         isSaving: (appointmentProvider?.isSaving ?? false) || _loadingTimes,
         onBack: () => setState(() => _step = _PaccAppointmentStep.calendar),
         onTimeSelected: (time) => setState(() => _selectedTime = time),
-        onNext: () => setState(() => _step = _PaccAppointmentStep.intake),
+        onNext: () => setState(() => _step = _PaccAppointmentStep.review),
       ),
       _PaccAppointmentStep.intake => _IntakeFormView(
         key: const ValueKey('intake'),
@@ -251,7 +251,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         onTherapyBeforeChanged: (value) {
           setState(() => _therapyBefore = value);
         },
-        onBack: () => setState(() => _step = _PaccAppointmentStep.time),
+        onBack: () => setState(() => _tab = _PaccAppointmentTab.myAppointments),
         onNext: _validateIntakeForm,
       ),
       _PaccAppointmentStep.review => _BookingReviewView(
@@ -260,7 +260,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         selectedTime: _selectedTime,
         concern: _concernController.text.trim(),
         isSaving: appointmentProvider?.isSaving ?? false,
-        onBack: () => setState(() => _step = _PaccAppointmentStep.intake),
+        onBack: () => setState(() => _step = _PaccAppointmentStep.time),
         onConfirm: _confirmAppointment,
       ),
       _PaccAppointmentStep.confirmation => _ConfirmationView(
@@ -269,7 +269,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         selectedTime: _selectedTime,
         onReturn: () => setState(() {
           _tab = _PaccAppointmentTab.myAppointments;
-          _step = _PaccAppointmentStep.calendar;
+          _step = _PaccAppointmentStep.intake;
         }),
       ),
     };
@@ -333,7 +333,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     final today = _today;
     setState(() {
       _tab = _PaccAppointmentTab.appointNew;
-      _step = _PaccAppointmentStep.calendar;
+      _step = _PaccAppointmentStep.intake;
       _selectedDate = null;
       _selectedTime = null;
       _visibleMonth = DateTime(today.year, today.month);
@@ -372,7 +372,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       return;
     }
 
-    setState(() => _step = _PaccAppointmentStep.review);
+    setState(() => _step = _PaccAppointmentStep.calendar);
   }
 
   Future<void> _confirmAppointment() async {
@@ -1142,7 +1142,7 @@ class _TimeSelectionView extends StatelessWidget {
           child: SizedBox(
             width: 230,
             child: _YellowButton(
-              label: isSaving ? 'Saving...' : 'Continue to Details',
+              label: isSaving ? 'Saving...' : 'Continue to Confirm',
               onTap: onNext,
               enabled: selectedTime != null && !isSaving,
             ),
@@ -1280,7 +1280,7 @@ class _IntakeFormView extends StatelessWidget {
           Row(
             children: [
               IconButton(
-                tooltip: 'Back to date and time',
+                tooltip: 'Back to appointments',
                 onPressed: onBack,
                 icon: const Icon(Icons.arrow_back),
               ),
@@ -1474,7 +1474,7 @@ class _IntakeFormView extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   child: _YellowButton(
-                    label: 'Review Appointment',
+                    label: 'Continue to Date & Time',
                     onTap: onNext,
                   ),
                 ),
@@ -1579,7 +1579,7 @@ class _BookingReviewView extends StatelessWidget {
         Row(
           children: [
             IconButton(
-              tooltip: 'Back to appointment details',
+              tooltip: 'Back to date and time',
               onPressed: isSaving ? null : onBack,
               icon: const Icon(Icons.arrow_back),
             ),
@@ -1643,12 +1643,12 @@ class _BookingStepper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = switch (step) {
-      _PaccAppointmentStep.calendar || _PaccAppointmentStep.time => 0,
-      _PaccAppointmentStep.intake => 1,
+      _PaccAppointmentStep.intake => 0,
+      _PaccAppointmentStep.calendar || _PaccAppointmentStep.time => 1,
       _PaccAppointmentStep.review => 2,
       _PaccAppointmentStep.confirmation => 2,
     };
-    const labels = ['Date & Time', 'Details', 'Confirm'];
+    const labels = ['Details', 'Date & Time', 'Confirm'];
     return Semantics(
       label: 'Booking progress: step ${active + 1} of 3',
       child: Row(
