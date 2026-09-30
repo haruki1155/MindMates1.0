@@ -1,5 +1,6 @@
 import '../../../models/mind_aid_message_model.dart';
 import '../../../models/mind_aid_suggestion_model.dart';
+import 'mind_aid_companion_models.dart';
 import 'mind_aid_context.dart';
 import 'mind_aid_dataset_models.dart';
 import 'mind_aid_integration_models.dart';
@@ -35,6 +36,9 @@ class MindAidChatRequest {
     this.conversationSummary,
     this.preferredSupportStyle,
     this.wellnessSnapshot,
+    this.conversationMode = MindAidConversationMode.supportive,
+    this.explicitListening = false,
+    this.allowsWellnessReference = false,
   });
 
   final String userId;
@@ -47,6 +51,9 @@ class MindAidChatRequest {
   final String? conversationSummary;
   final MindAidSupportStyle? preferredSupportStyle;
   final MindAidWellnessSnapshot? wellnessSnapshot;
+  final MindAidConversationMode conversationMode;
+  final bool explicitListening;
+  final bool allowsWellnessReference;
 }
 
 class MindAidConversationState {

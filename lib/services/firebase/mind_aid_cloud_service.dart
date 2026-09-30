@@ -6,6 +6,7 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 
 import '../../database/firestore_collections.dart';
 import '../../features/mind_aid/domain/mind_aid_integration_models.dart';
+import '../../features/mind_aid/domain/mind_aid_companion_models.dart';
 import 'firebase_callable_router.dart';
 
 class MindAidCloudService {
@@ -90,6 +91,8 @@ class MindAidCloudService {
     required String conversationId,
     required String text,
     required String launchContext,
+    required MindAidConversationMode conversationMode,
+    required bool explicitListening,
   }) async {
     final result = await _functions.routedCallable('sendMindAidMessage').call({
       'requestId': requestId,
@@ -97,6 +100,8 @@ class MindAidCloudService {
       'text': text,
       'locale': 'en',
       'launchContext': launchContext,
+      'conversationMode': conversationMode.name,
+      'explicitListening': explicitListening,
     });
     final data = result.data;
     if (data is! Map) throw const FormatException('Invalid MindAid response.');

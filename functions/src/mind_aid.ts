@@ -18,6 +18,7 @@ const REQUEST_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const CONVERSATION_ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 type SafetyLevel = "safeSupport" | "needsClarification" | "highDistress" | "crisisOrImmediateRisk";
+type ConversationMode = "supportive" | "listening" | "reflective" | "coaching" | "casual" | "navigation";
 
 interface MindAidAction {
   type: string;
@@ -36,6 +37,24 @@ interface MindAidResponse {
   actions: MindAidAction[];
   requiresEscalation: boolean;
   fallbackReason: string;
+  effectiveConversationMode: ConversationMode;
+}
+
+const conversationModes = new Set<ConversationMode>([
+  "supportive", "listening", "reflective", "coaching", "casual", "navigation",
+]);
+
+// Behavioral metadata only. This must not be used for authorization, safety,
+// assessment interpretation, or access-control decisions.
+export function effectiveConversationMode(value: unknown): ConversationMode {
+  const mode = String(value ?? "").trim();
+  return conversationModes.has(mode as ConversationMode)
+    ? mode as ConversationMode
+    : "supportive";
+}
+
+export function dialogflowModeEvent(mode: ConversationMode): string {
+  return `mind_aid_mode_${mode}`;
 }
 
 const crisisPhrases = [
@@ -290,6 +309,7 @@ async function persistTurn(uid: string, requestId: string, conversationId: strin
       status: response.requiresEscalation ? "urgent" : "sent", safetyLevel: response.safetyLevel,
       primaryIntent: response.intent, requiresEscalation: response.requiresEscalation,
       source: response.source, confidence: response.confidence, fallbackReason: response.fallbackReason,
+      effectiveConversationMode: response.effectiveConversationMode,
       actions: response.actions, createdAt: FieldValue.serverTimestamp(),
     });
     transaction.set(day, {
@@ -315,6 +335,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
   const conversationId = String(input.conversationId ?? "").trim();
   const text = String(input.text ?? "").trim();
   const locale = String(input.locale ?? "en").trim().slice(0, 12) || "en";
+  const conversationMode = effectiveConversationMode(input.conversationMode);
   if (!REQUEST_ID.test(requestId) || !CONVERSATION_ID.test(conversationId) || !text || text.length > MAX_MESSAGE_LENGTH) {
     throw new HttpsError("invalid-argument", "A valid request, conversation, and message are required.");
   }
@@ -327,6 +348,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
       confidence: data.confidence ?? 0, safetyLevel: data.safetyLevel ?? "safeSupport",
       source: data.source ?? "dialogflow", suggestions: [], actions: data.actions ?? [],
       requiresEscalation: data.requiresEscalation === true, fallbackReason: data.fallbackReason ?? "",
+      effectiveConversationMode: conversationMode,
     } satisfies MindAidResponse;
   }
 
@@ -338,6 +360,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
   await enforceRateLimit(uid);
   const startedAt = Date.now();
   const safetyLevel = classifyMindAidSafety(text);
+  const explicitListening = input.explicitListening === true;
   const supportContacts = await loadSupportContacts();
   let response: MindAidResponse;
   if (safetyLevel === "highDistress" || safetyLevel === "crisisOrImmediateRisk") {
@@ -346,6 +369,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
       messageId: `${uid}_${requestId}_assistant`, text: controlled.text, intent: "crisis_support",
       confidence: 1, safetyLevel, source: "controlled_safety", suggestions: [], actions: controlled.actions,
       requiresEscalation: true, fallbackReason: "safety_intercept",
+      effectiveConversationMode: "supportive",
     };
   } else {
     const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "";
@@ -359,14 +383,33 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
     const {SessionsClient} = await import("@google-cloud/dialogflow-cx");
     const client = new SessionsClient({apiEndpoint: `${location}-dialogflow.googleapis.com`});
     const session = client.projectLocationAgentSessionPath(projectId, location, agentId, sessionId);
-    const context = personalizationEnabled ? await derivedContext(uid) : {};
+    const asksForWellness = /\b(mood|assessment|score|result|progress|trend)\b/i.test(text);
+    const context = personalizationEnabled && asksForWellness
+      ? await derivedContext(uid)
+      : {};
     const allowedLaunchContexts = new Set(["direct", "home", "mood", "journal", "assessment", "insights", "breathing", "counseling", "appointments"]);
     const requestedLaunchContext = String(input.launchContext ?? "direct");
     const launchContext = allowedLaunchContexts.has(requestedLaunchContext) ? requestedLaunchContext : "direct";
     const [detected] = await client.detectIntent({
       session,
-      queryInput: {text: {text}, languageCode: locale.startsWith("fil") ? "en" : "en"},
-      queryParams: {parameters: toStruct({...context, launchContext, supportContacts})},
+      // CX receives a trusted, server-derived mode event. The original message
+      // is intentionally not forwarded as a CX query: the companion policy has
+      // already selected its behavioral route, while PAACC and safety retain
+      // their independent authorities in this Function.
+      queryInput: {
+        event: {event: dialogflowModeEvent(conversationMode)},
+        languageCode: locale.startsWith("fil") ? "en" : "en",
+      },
+      queryParams: {
+        parameters: toStruct({
+          ...context,
+          launchContext,
+          supportContacts,
+          conversationMode,
+          explicitListening,
+          wellnessReferenceAllowed: asksForWellness,
+        }),
+      },
     });
     const parsed = extractDialogflowResponse(detected);
     if (!isSafeMindAidOutput(parsed.text)) throw new HttpsError("internal", "Dialogflow returned an unusable response.");
@@ -374,6 +417,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
       messageId: `${uid}_${requestId}_assistant`, text: parsed.text, intent: parsed.intent,
       confidence: parsed.confidence, safetyLevel, source: "dialogflow", suggestions: parsed.suggestions,
       actions: parsed.actions, requiresEscalation: false, fallbackReason: "",
+      effectiveConversationMode: conversationMode,
     };
   }
   await persistTurn(uid, requestId, conversationId, text, response, Date.now() - startedAt);

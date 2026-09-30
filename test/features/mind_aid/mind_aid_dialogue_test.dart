@@ -5,6 +5,7 @@ import 'package:mind_mates/models/mind_aid_message_model.dart';
 import 'package:mind_mates/models/mind_aid_suggestion_model.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_chat_models.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_context.dart';
+import 'package:mind_mates/features/mind_aid/domain/mind_aid_companion_models.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_dataset_models.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_dialogue_state.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_integration_models.dart';
@@ -32,6 +33,7 @@ class TestRepository extends MindAidRepository {
   int turn = 0;
   MindAidSafetyLevel safety = MindAidSafetyLevel.safeSupport;
   final history = <MindAidMessageModel>[];
+  final suggestionRecords = <MindAidSuggestionModel>[];
   @override
   Future<MindAidPreferences> loadPreferences(String userId) async =>
       const MindAidPreferences(
@@ -48,8 +50,10 @@ class TestRepository extends MindAidRepository {
     if (historyFails) throw StateError('History unavailable');
     return history;
   }
+
   @override
-  Future<List<MindAidSuggestionModel>> fetchSuggestions() async => [];
+  Future<List<MindAidSuggestionModel>> fetchSuggestions() async =>
+      suggestionRecords;
   @override
   Future<MindAidDialogueState> loadDialogueState(
     String userId,
@@ -128,44 +132,56 @@ class TestRepository extends MindAidRepository {
 void main() {
   test('reopening the same conversation keeps unsynced messages', () async {
     final repository = TestRepository();
-    final provider = MindAidProvider(repository, paaccIntentRouter: TestRouter());
+    final provider = MindAidProvider(
+      repository,
+      paaccIntentRouter: TestRouter(),
+    );
     await provider.loadChat('owner');
     await provider.sendMessage('owner', 'How do I schedule an appointment?');
     expect(provider.messages, hasLength(2));
-    expect(provider.messages.last.text, contains('appointment options'));
+    expect(provider.messages.last.text, 'Original safety-screened response');
+    expect(provider.messages.last.actions, isNotEmpty);
 
     // The backend may not yet contain the locally displayed turn.
     await provider.loadChat('owner');
     expect(provider.messages, hasLength(2));
-    expect(provider.messages.last.text, contains('appointment options'));
+    expect(provider.messages.last.text, 'Original safety-screened response');
     provider.dispose();
   });
 
   test('older partial history cannot replace the current reply', () async {
     final repository = TestRepository();
-    final provider = MindAidProvider(repository, paaccIntentRouter: TestRouter());
+    final provider = MindAidProvider(
+      repository,
+      paaccIntentRouter: TestRouter(),
+    );
     await provider.loadChat('owner');
     await provider.sendMessage('owner', 'How do I schedule an appointment?');
-    repository.history.add(MindAidMessageModel(
-      id: 'older',
-      conversationId: 'conversation',
-      sender: 'assistant',
-      text: 'Earlier greeting',
-      createdAt: DateTime(2026, 1, 1),
-      status: 'sent',
-      safetyLevel: MindAidSafetyLevel.safeSupport.name,
-    ));
+    repository.history.add(
+      MindAidMessageModel(
+        id: 'older',
+        conversationId: 'conversation',
+        sender: 'assistant',
+        text: 'Earlier greeting',
+        createdAt: DateTime(2026, 1, 1),
+        status: 'sent',
+        safetyLevel: MindAidSafetyLevel.safeSupport.name,
+      ),
+    );
 
     await provider.loadChat('owner');
-    expect(provider.messages.last.text, contains('appointment options'));
+    expect(provider.messages.last.text, 'Original safety-screened response');
     provider.dispose();
   });
 
   test('reopening retains a pending choice when backend sync failed', () async {
     final repository = TestRepository()..syncFails = true;
-    final provider = MindAidProvider(repository, paaccIntentRouter: TestRouter());
+    final provider = MindAidProvider(
+      repository,
+      paaccIntentRouter: TestRouter(),
+    );
     await provider.loadChat('owner');
-    await provider.sendMessage('owner', 'appointment');
+    await provider.sendMessage('owner', 'Can I book an appointment?');
     final message = provider.messages.last;
     expect(provider.activeActionMessageId, message.id);
 
@@ -175,18 +191,24 @@ void main() {
     provider.dispose();
   });
 
-  test('history read failure does not erase the displayed conversation', () async {
-    final repository = TestRepository();
-    final provider = MindAidProvider(repository, paaccIntentRouter: TestRouter());
-    await provider.loadChat('owner');
-    await provider.sendMessage('owner', 'How do I schedule an appointment?');
-    repository.historyFails = true;
+  test(
+    'history read failure does not erase the displayed conversation',
+    () async {
+      final repository = TestRepository();
+      final provider = MindAidProvider(
+        repository,
+        paaccIntentRouter: TestRouter(),
+      );
+      await provider.loadChat('owner');
+      await provider.sendMessage('owner', 'How do I schedule an appointment?');
+      repository.historyFails = true;
 
-    await provider.loadChat('owner');
-    expect(provider.messages, hasLength(2));
-    expect(provider.errorMessage, contains('could not load'));
-    provider.dispose();
-  });
+      await provider.loadChat('owner');
+      expect(provider.messages, hasLength(2));
+      expect(provider.errorMessage, contains('could not load'));
+      provider.dispose();
+    },
+  );
 
   test(
     'fresh appointment and service actions work when state sync fails',
@@ -197,7 +219,10 @@ void main() {
         paaccIntentRouter: TestRouter(),
       );
       await provider.loadChat('owner');
-      for (final text in ['appointment', 'PACC services']) {
+      for (final text in [
+        'Can I book an appointment?',
+        'Show me PACC services',
+      ]) {
         await provider.sendMessage('owner', text);
         final message = provider.messages.last;
         expect(provider.dialogueSyncError, isNotNull);
@@ -230,7 +255,7 @@ void main() {
         paaccIntentRouter: TestRouter(),
       );
       await provider.loadChat('owner');
-      await provider.sendMessage('owner', 'assessment');
+      await provider.sendMessage('owner', 'Can I open the assessment?');
       final first = provider.messages.last;
       await provider.sendMessage('owner', 'yes');
       expect(provider.messages.last.text, contains('button'));
@@ -240,13 +265,71 @@ void main() {
       );
       await provider.sendMessage('owner', 'no');
       expect(provider.activeActionMessageId, isNull);
-      await provider.sendMessage('owner', 'appointment');
+      await provider.sendMessage('owner', 'Can I book an appointment?');
       await provider.sendMessage('owner', 'recipe for spaghetti');
-      expect(provider.messages.last.text, contains('make sure I understand'));
+      expect(provider.messages.last.text, 'Original safety-screened response');
       expect(provider.activeActionMessageId, isNull);
       provider.dispose();
     },
   );
+  test('mode and validated actions transition independently', () async {
+    final provider = MindAidProvider(
+      TestRepository(),
+      paaccIntentRouter: TestRouter(),
+    );
+    await provider.loadChat('owner');
+
+    await provider.sendMessage('owner', 'I just want to rant.');
+    expect(provider.companionState.mode, MindAidConversationMode.listening);
+    expect(provider.messages.last.actions, isEmpty);
+    expect(provider.messages.last.supportCards, isEmpty);
+    expect(provider.suggestions, isEmpty);
+
+    await provider.sendMessage('owner', 'Can I book an appointment?');
+    expect(provider.companionState.mode, MindAidConversationMode.navigation);
+    expect(provider.messages.last.actions, isNotEmpty);
+
+    await provider.sendMessage(
+      'owner',
+      'Never mind, I just want to keep talking.',
+    );
+    expect(provider.companionState.mode, MindAidConversationMode.listening);
+    expect(provider.messages.last.actions, isEmpty);
+    provider.dispose();
+  });
+  test('fresh conversations show only the configured starters', () async {
+    final repository = TestRepository()
+      ..suggestionRecords.addAll([
+        MindAidSuggestionModel(
+          id: 'just_talk',
+          label: 'I just want to talk',
+          iconAsset: '',
+        ),
+        MindAidSuggestionModel(
+          id: 'calm_down',
+          label: 'I need to calm down',
+          iconAsset: '',
+        ),
+      ]);
+    final provider = MindAidProvider(
+      repository,
+      paaccIntentRouter: TestRouter(),
+    );
+
+    await provider.loadChat(
+      'owner',
+      launchContext: const MindAidLaunchContext(
+        source: 'home',
+        openingPrompt: 'How can MindAid support me today?',
+      ),
+    );
+
+    expect(
+      provider.suggestions.map((suggestion) => suggestion.label),
+      ['I just want to talk', 'I need to calm down'],
+    );
+    provider.dispose();
+  });
   test(
     'safety clears pending state before PAACC; another device can consume once',
     () async {
@@ -254,7 +337,7 @@ void main() {
       final router = TestRouter();
       final provider = MindAidProvider(repository, paaccIntentRouter: router);
       await provider.loadChat('owner');
-      await provider.sendMessage('owner', 'assessment');
+      await provider.sendMessage('owner', 'Can I open the assessment?');
       final message = provider.messages.last;
       final second = MindAidProvider(
         repository,
@@ -274,7 +357,7 @@ void main() {
         ),
         isFalse,
       );
-      await provider.sendMessage('owner', 'appointment');
+      await provider.sendMessage('owner', 'Can I book an appointment?');
       final before = router.calls;
       for (final safety in [
         MindAidSafetyLevel.highDistress,

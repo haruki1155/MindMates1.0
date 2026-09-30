@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 
 import '/features/counseling/screens/mind_aid_screen.dart';
 import '/features/mind_aid/domain/mind_aid_context.dart';
+import '/features/mind_aid/domain/mind_aid_companion_models.dart';
 import '/features/mind_aid/domain/mind_aid_dialogue_state.dart';
 import '/features/mind_aid/domain/mind_aid_integration_models.dart';
 import '/features/mind_aid/domain/mind_aid_safety.dart';
 import '/features/mind_aid/models/paacc_route_decision.dart';
 import '/features/mind_aid/services/paacc_intent_router.dart';
+import '/features/mind_aid/services/mind_aid_companion_policy.dart';
 import '/features/mind_aid/services/paacc_intent_resolver.dart';
 import '/features/mind_aid/services/paacc_mind_aid_response_composer.dart';
 import '/models/mind_aid_message_model.dart';
@@ -33,6 +35,8 @@ class MindAidProvider extends ChangeNotifier {
   final MindAidRepository repository;
   final PaaccIntentRouter _paaccIntentRouter;
   final PaaccIntentResolver _paaccResolver = const PaaccIntentResolver();
+  final MindAidCompanionPolicy _companionPolicy =
+      const MindAidCompanionPolicy();
 
   MindAidProvider(this.repository, {PaaccIntentRouter? paaccIntentRouter})
     : _paaccIntentRouter = paaccIntentRouter ?? PaaccIntentRouter();
@@ -57,6 +61,7 @@ class MindAidProvider extends ChangeNotifier {
   bool _dialogueStateSynced = false;
   String? dialogueSyncError;
   String? _paaccRoutingError;
+  MindAidCompanionState _companionState = const MindAidCompanionState();
   int _selectedSuggestionCount = 0;
   int _highRiskTriggerCount = 0;
   int _fallbackCount = 0;
@@ -75,6 +80,7 @@ class MindAidProvider extends ChangeNotifier {
   String? get lastFailedText => _lastFailedText;
   PaaccRouteDecision? get lastPaaccRouteDecision => _lastPaaccRouteDecision;
   String? get paaccRoutingError => _paaccRoutingError;
+  MindAidCompanionState get companionState => _companionState;
   List<PaaccRouteDecision> get routingDiagnostics =>
       List.unmodifiable(_routingDiagnostics);
   String? get activeActionMessageId =>
@@ -96,6 +102,7 @@ class MindAidProvider extends ChangeNotifier {
       _dialogueStateSynced = false;
       _dialogueExpiryTimer?.cancel();
       _routingDiagnostics.clear();
+      _companionState = const MindAidCompanionState();
     }
     final effectiveContext = _contextWithSessionMemory(context);
     final previousConversationId = _preferences?.conversationId;
@@ -139,7 +146,8 @@ class MindAidProvider extends ChangeNotifier {
       if (loadRevision != _conversationRevision || _sessionUserId != userId) {
         return;
       }
-      final keepLocalPending = sameConversation &&
+      final keepLocalPending =
+          sameConversation &&
           !previousDialogueStateSynced &&
           previousDialogueState?.isPendingAt(DateTime.now()) == true &&
           !loadedState.isPendingAt(DateTime.now());
@@ -165,15 +173,6 @@ class MindAidProvider extends ChangeNotifier {
             .toList(growable: false),
         effectiveContext,
       );
-      final openingPrompt = _launchContext?.openingPrompt?.trim();
-      if (openingPrompt != null &&
-          openingPrompt.isNotEmpty &&
-          !suggestions.any((item) => item.label == openingPrompt)) {
-        suggestions = [
-          MindAidSuggestion(id: 'launch_context', label: openingPrompt),
-          ...suggestions,
-        ].take(5).toList(growable: false);
-      }
     } catch (e) {
       if (loadRevision != _conversationRevision || _sessionUserId != userId) {
         return;
@@ -197,7 +196,15 @@ class MindAidProvider extends ChangeNotifier {
     if (trimmedText.isEmpty || trimmedText.length > 1200 || isSending) {
       return false;
     }
-    final effectiveContext = _contextWithSessionMemory(context);
+    _companionState = _companionPolicy.resolve(
+      text: trimmedText,
+      current: _companionState,
+    );
+    final effectiveContext = _contextWithSessionMemory(context).copyWith(
+      conversationMode: _companionState.mode,
+      explicitListening: _companionState.explicitListening,
+      allowsWellnessReference: _requestsWellnessReference(trimmedText),
+    );
     _conversationRevision += 1;
     isLoading = false;
     isSending = true;
@@ -246,11 +253,13 @@ class MindAidProvider extends ChangeNotifier {
       );
       final bot = result.message;
       PaaccMindAidResponse? paaccResponse;
+      var usesPaaccResponseOverride = false;
       final isSafety =
           result.chatResponse.requiresEscalation ||
           result.chatResponse.safetyLevel.blocksCloud;
       if (isSafety) {
         await _setDialogueState(userId, null);
+        _companionState = const MindAidCompanionState();
       } else {
         final pending = _dialogueState;
         final normalized = trimmedText
@@ -263,6 +272,7 @@ class MindAidProvider extends ChangeNotifier {
             text:
                 'Okay. We can talk about something else whenever you are ready.',
           );
+          usesPaaccResponseOverride = true;
           await _setDialogueState(userId, null);
         } else if (pending?.isPendingAt(DateTime.now()) == true &&
             normalized == 'yes') {
@@ -270,6 +280,7 @@ class MindAidProvider extends ChangeNotifier {
             text: 'You can use the button below whenever you are ready.',
             actions: [pending!.action!],
           );
+          usesPaaccResponseOverride = true;
           await _setDialogueState(
             userId,
             MindAidDialogueState(
@@ -312,7 +323,7 @@ class MindAidProvider extends ChangeNotifier {
       if (paaccResponse != null) {
         await repository.savePaaccDisplayOverride(
           messageId: bot.id,
-          text: paaccResponse.text,
+          text: usesPaaccResponseOverride ? paaccResponse.text : bot.text,
           actions: paaccResponse.actions,
         );
       }
@@ -320,35 +331,29 @@ class MindAidProvider extends ChangeNotifier {
       final botMessage = MindAidMessage(
         id: bot.id,
         sender: MindAidSender.assistant,
-        text: paaccResponse?.text ?? bot.text,
+        text: usesPaaccResponseOverride ? paaccResponse!.text : bot.text,
         createdAt: bot.createdAt,
         status: bot.status,
-        categoryLabel: paaccResponse == null ? _categoryLabelFor(result) : null,
+        categoryLabel: usesPaaccResponseOverride
+            ? null
+            : _categoryLabelFor(result),
         supportCards:
-            paaccResponse == null ||
-                _lastPaaccRouteDecision?.route == PaaccRouteType.venting ||
-                _lastPaaccRouteDecision?.route == PaaccRouteType.copingHelp ||
-                _lastPaaccRouteDecision?.route == PaaccRouteType.assessmentHelp
-            ? _supportCardsFor(result, context)
+            usesPaaccResponseOverride ||
+                !_allowsSupportCards(_companionState.mode)
+            ? const []
+            : _supportCardsFor(result, effectiveContext),
+        actions: isSafety
+            ? _actionsFor(result)
+            : _allowsPaaccAction(_companionState.mode)
+            ? paaccResponse?.actions ?? const []
             : const [],
-        actions: paaccResponse?.actions ?? _actionsFor(result),
         source: result.chatResponse.source,
       );
 
       _stripInactiveActions();
       messages.add(botMessage);
-      suggestions = _suggestionsWithAssessmentReview(
-        result.suggestions
-            .map(
-              (suggestion) => MindAidSuggestion(
-                id: suggestion.id,
-                label: suggestion.label,
-                iconAsset: suggestion.iconAsset,
-              ),
-            )
-            .toList(growable: false),
-        effectiveContext,
-      );
+      // Starter chips are intentionally limited to an empty conversation.
+      suggestions = const [];
       _trackChatResult(result);
       _lastUserMessagePersisted = result.userMessageSaved;
       _conversationSummary = _summarizeConversation();
@@ -412,6 +417,7 @@ class MindAidProvider extends ChangeNotifier {
     repository.resetSession();
     messages = [];
     _conversationSummary = null;
+    _companionState = const MindAidCompanionState();
     _lastFailedText = null;
     _preferences = await repository.loadPreferences(userId);
     notifyListeners();
@@ -432,6 +438,7 @@ class MindAidProvider extends ChangeNotifier {
     messages = [];
     _dialogueState = MindAidDialogueState(conversationId: nextId);
     _conversationSummary = null;
+    _companionState = const MindAidCompanionState();
     _lastFailedText = null;
     notifyListeners();
   }
@@ -483,18 +490,9 @@ class MindAidProvider extends ChangeNotifier {
     List<MindAidSuggestion> base,
     MindAidContext context,
   ) {
-    if (!context.hasAssessment ||
-        base.any((suggestion) => suggestion.id == 'review_assessment')) {
-      return base;
-    }
-
-    return [
-      const MindAidSuggestion(
-        id: 'review_assessment',
-        label: 'What does my assessment suggest?',
-      ),
-      ...base,
-    ];
+    // Starter chips stay conversational; assessment review remains available
+    // when the user explicitly asks for it.
+    return base;
   }
 
   MindAidContext _contextWithSessionMemory(MindAidContext context) {
@@ -508,6 +506,20 @@ class MindAidProvider extends ChangeNotifier {
           .toList(growable: false),
     );
   }
+
+  bool _requestsWellnessReference(String text) {
+    final input = text.toLowerCase();
+    return RegExp(
+      r'\b(mood|assessment|score|result|progress|trend)\b',
+    ).hasMatch(input);
+  }
+
+  bool _allowsPaaccAction(MindAidConversationMode mode) =>
+      mode == MindAidConversationMode.navigation ||
+      mode == MindAidConversationMode.coaching;
+
+  bool _allowsSupportCards(MindAidConversationMode mode) =>
+      mode == MindAidConversationMode.coaching;
 
   String? _summarizeConversation() {
     final userMessages = messages
@@ -525,6 +537,7 @@ class MindAidProvider extends ChangeNotifier {
     MindAidSendResult result,
     MindAidContext context,
   ) {
+    if (!context.allowsWellnessReference) return const [];
     final cards = <MindAidSupportCard>[];
     final snapshot = context.wellnessSnapshot;
 
@@ -803,51 +816,23 @@ class MindAidProvider extends ChangeNotifier {
     final displayed = <MindAidMessage>[];
     for (var index = 0; index < history.length; index++) {
       final message = history[index];
-      PaaccMindAidResponse? paaccResponse;
-      if (message.sender == 'assistant' &&
-          !message.hasPaaccDisplay &&
-          index > 0 &&
-          history[index - 1].sender == 'user' &&
-          !_historyResponseRequiresSafety(message)) {
-        try {
-          final decision = await _paaccIntentRouter.route(
-            history[index - 1].text,
-          );
-          paaccResponse = const PaaccMindAidResponseComposer().compose(
-            _paaccResolver.resolve(history[index - 1].text, decision),
-          );
-        } catch (_) {
-          // Preserve the recorded response if the optional on-device route
-          // cannot be restored while history is loading.
-        }
-      }
       displayed.add(
         MindAidMessage(
           id: message.id,
           sender: message.sender == 'user'
               ? MindAidSender.user
               : MindAidSender.assistant,
-          text: paaccResponse?.text ?? message.text,
+          text: message.text,
           createdAt: message.createdAt,
           status: message.status,
           categoryLabel: null,
           supportCards: const [],
-          actions: paaccResponse?.actions ?? message.actions,
+          actions: message.actions,
           source: message.source,
         ),
       );
     }
     return displayed;
-  }
-
-  bool _historyResponseRequiresSafety(MindAidMessageModel message) {
-    if (message.requiresEscalation) return true;
-    if (message.safetyLevel == null) return true;
-    final safetyLevel = MindAidSafetyLevel.values.firstWhere(
-      (level) => level.name == message.safetyLevel,
-      orElse: () => MindAidSafetyLevel.highDistress,
-    );
-    return safetyLevel.blocksCloud;
   }
 
   @override

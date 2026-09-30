@@ -202,6 +202,8 @@ class MindAidRepository {
           conversationId: conversationId,
           text: text,
           launchContext: launchContext,
+          conversationMode: context.conversationMode,
+          explicitListening: context.explicitListening,
         );
         final safety = MindAidSafetyLevel.values.firstWhere(
           (item) => item.name == cloud.safetyLevel,
@@ -286,6 +288,9 @@ class MindAidRepository {
         conversationSummary: context.conversationSummary,
         preferredSupportStyle: context.preferredSupportStyle,
         wellnessSnapshot: context.wellnessSnapshot,
+        conversationMode: context.conversationMode,
+        explicitListening: context.explicitListening,
+        allowsWellnessReference: context.allowsWellnessReference,
       ),
       dataset,
     );

@@ -1,4 +1,5 @@
 import '../domain/mind_aid_chat_models.dart';
+import '../domain/mind_aid_companion_models.dart';
 import '../domain/mind_aid_context.dart';
 import '../domain/mind_aid_dataset_models.dart';
 import '../domain/mind_aid_model_provider.dart';
@@ -301,7 +302,7 @@ class MindAidResponseComposer {
     if (state.lastQuestion != null) {
       return 'I want to understand you better. ${state.lastQuestion}';
     }
-    return 'I want to support you well, but I need a little more detail. Is this mostly about school, relationships, stress, anxiety, or something else?';
+    return 'I want to understand what you mean a little better. Tell me a bit more about what happened.';
   }
 
   String _withPersona(
@@ -313,6 +314,20 @@ class MindAidResponseComposer {
   }) {
     final trimmed = base.trim();
     if (trimmed.isEmpty) return trimmed;
+
+    switch (context.conversationMode) {
+      case MindAidConversationMode.listening:
+        return _listeningResponse(normalizedInput, matches);
+      case MindAidConversationMode.coaching:
+        return _coachingResponse(trimmed, matches);
+      case MindAidConversationMode.reflective:
+        return _reflectiveResponse(normalizedInput);
+      case MindAidConversationMode.casual:
+        return _casualResponse(normalizedInput);
+      case MindAidConversationMode.navigation:
+      case MindAidConversationMode.supportive:
+        break;
+    }
 
     final parts = <String>[];
     final empathy = _empathyLine(context, matches);
@@ -327,7 +342,9 @@ class MindAidResponseComposer {
 
     parts.add(trimmed);
 
-    final contextual = _contextualSupportLine(context, matches);
+    final contextual = context.allowsWellnessReference
+        ? _contextualSupportLine(context, matches)
+        : null;
     if (contextual != null && !trimmed.contains(contextual)) {
       parts.add(contextual);
     }
@@ -341,11 +358,50 @@ class MindAidResponseComposer {
     return parts.join('\n\n');
   }
 
+  String _listeningResponse(String input, List<MindAidIntentMatch> matches) {
+    if (input.contains('rant') || input.contains('vent')) {
+      return 'Okay. No advice—go ahead. I am listening.';
+    }
+    final topic = matches.isEmpty
+        ? null
+        : _readable(matches.first.record.intent);
+    return topic == null
+        ? 'That sounds like a lot to carry. What happened?'
+        : 'That sounds difficult, especially with $topic in the mix. What happened?';
+  }
+
+  String _coachingResponse(String base, List<MindAidIntentMatch> matches) {
+    final first = base.split(RegExp(r'(?<=[.!?])\s+')).first.trim();
+    final topic = matches.isEmpty
+        ? 'this'
+        : _readable(matches.first.record.intent);
+    return 'Okay—let us focus on what you can do next. Start by naming the smallest part of $topic you can act on today, then choose one step you can finish. $first';
+  }
+
+  String _reflectiveResponse(String input) {
+    if (input.contains('why')) {
+      return 'It sounds like you are trying to understand the pattern, not rush to fix it. What usually happens right before that feeling starts?';
+    }
+    return 'We can slow down and look at this together. What part feels most important to understand first?';
+  }
+
+  String _casualResponse(String input) {
+    if (input.contains('passed') || input.contains('finally did it')) {
+      return 'Nice—that sounds satisfying. What feels best about it?';
+    }
+    if (input.contains('bored')) {
+      return 'I am here with you. What kind of conversation would feel good right now?';
+    }
+    return 'That sounds like a meaningful moment. Tell me more.';
+  }
+
   String _empathyLine(
     MindAidContext context,
     List<MindAidIntentMatch> matches,
   ) {
-    final snapshot = context.wellnessSnapshot;
+    final snapshot = context.allowsWellnessReference
+        ? context.wellnessSnapshot
+        : null;
     if (snapshot?.hasRecentLowMood == true) {
       return 'I hear that this has been heavy lately, and I want to keep the next step gentle.';
     }
@@ -362,7 +418,9 @@ class MindAidResponseComposer {
     MindAidContext context,
     List<MindAidIntentMatch> matches,
   ) {
-    final snapshot = context.wellnessSnapshot;
+    final snapshot = context.allowsWellnessReference
+        ? context.wellnessSnapshot
+        : null;
     if (snapshot?.hasElevatedAssessment == true) {
       final concern = snapshot?.primaryConcernLabel;
       return 'My take is that this deserves steady support, especially${concern == null ? '' : ' around $concern'}, without treating it like something you have to solve all at once.';
@@ -405,7 +463,9 @@ class MindAidResponseComposer {
     MindAidContext context,
     List<MindAidIntentMatch> matches,
   ) {
-    final concern = context.wellnessSnapshot?.primaryConcernLabel;
+    final concern = context.allowsWellnessReference
+        ? context.wellnessSnapshot?.primaryConcernLabel
+        : null;
     if (concern != null) {
       return 'What feels most connected to $concern right now?';
     }

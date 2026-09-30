@@ -17,7 +17,7 @@ void main() {
       PaaccRouteType.assessmentHelp,
     );
     expect(
-      resolver.resolve('self assessment', null).route,
+      resolver.resolve('Can I take the self assessment?', null).route,
       PaaccRouteType.assessmentHelp,
     );
     expect(
@@ -49,6 +49,23 @@ void main() {
       PaaccRouteType.copingHelp,
     );
   });
+  test(
+    'distress and product nouns without a request do not create actions',
+    () {
+      for (final text in [
+        'I am overwhelmed.',
+        'Maybe I should talk to someone.',
+        'appointment',
+        'PACC counseling',
+      ]) {
+        expect(resolver.resolve(text, coping).route, PaaccRouteType.uncertain);
+      }
+      expect(
+        resolver.resolve('Can we do a breathing exercise?', coping).route,
+        PaaccRouteType.copingHelp,
+      );
+    },
+  );
   test('below-threshold prediction is not accepted', () {
     const low = PaaccRouteDecision(
       route: PaaccRouteType.uncertain,

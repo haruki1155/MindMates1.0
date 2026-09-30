@@ -1,3 +1,5 @@
+import 'mind_aid_companion_models.dart';
+
 class MindAidAssessmentContext {
   const MindAidAssessmentContext({
     required this.userType,
@@ -218,6 +220,9 @@ class MindAidContext {
     this.conversationSummary,
     this.preferredSupportStyle,
     this.wellnessSnapshot,
+    this.conversationMode = MindAidConversationMode.supportive,
+    this.explicitListening = false,
+    this.allowsWellnessReference = false,
   });
 
   final List<String> recentMessages;
@@ -228,6 +233,9 @@ class MindAidContext {
   final String? conversationSummary;
   final MindAidSupportStyle? preferredSupportStyle;
   final MindAidWellnessSnapshot? wellnessSnapshot;
+  final MindAidConversationMode conversationMode;
+  final bool explicitListening;
+  final bool allowsWellnessReference;
 
   int? get effectiveAssessmentScore {
     final fullScore = assessment?.overallScore?.round();
@@ -254,6 +262,9 @@ class MindAidContext {
     String? conversationSummary,
     MindAidSupportStyle? preferredSupportStyle,
     MindAidWellnessSnapshot? wellnessSnapshot,
+    MindAidConversationMode? conversationMode,
+    bool? explicitListening,
+    bool? allowsWellnessReference,
   }) {
     return MindAidContext(
       recentMessages: recentMessages ?? this.recentMessages,
@@ -265,6 +276,10 @@ class MindAidContext {
       preferredSupportStyle:
           preferredSupportStyle ?? this.preferredSupportStyle,
       wellnessSnapshot: wellnessSnapshot ?? this.wellnessSnapshot,
+      conversationMode: conversationMode ?? this.conversationMode,
+      explicitListening: explicitListening ?? this.explicitListening,
+      allowsWellnessReference:
+          allowsWellnessReference ?? this.allowsWellnessReference,
     );
   }
 }

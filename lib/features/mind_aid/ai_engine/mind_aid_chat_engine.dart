@@ -50,6 +50,9 @@ class MindAidChatEngine {
       conversationSummary: request.conversationSummary,
       preferredSupportStyle: request.preferredSupportStyle,
       wellnessSnapshot: request.wellnessSnapshot,
+      conversationMode: request.conversationMode,
+      explicitListening: request.explicitListening,
+      allowsWellnessReference: request.allowsWellnessReference,
     );
 
     final matches = normalizedInput.isEmpty

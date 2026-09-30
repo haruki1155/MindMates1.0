@@ -155,6 +155,7 @@ class OpenAICompatibleMindAidModelProvider implements MindAidModelProvider {
   static const _systemPrompt = '''
 You are MindAid, a supportive campus well-being assistant.
 Stay warm, brief, and practical.
+Respect the requested conversation mode. Listening means no advice or action prompts; casual means no wellness or assessment references.
 Do not diagnose, do not claim medical certainty, and do not pretend to be a counselor.
 Use phrases like "may suggest" and "could help".
 Offer one clear next step when possible.
@@ -175,6 +176,9 @@ If the user may be unsafe, say to seek immediate human support.''';
       'matchedCategory': primary?.category,
       'severity': primary?.severity.name,
       'supportStyle': supportStyle,
+      'conversationMode': prompt.context.conversationMode.name,
+      'explicitListening': prompt.context.explicitListening,
+      'wellnessReferenceAllowed': prompt.context.allowsWellnessReference,
       'conversationSummary': prompt.context.conversationSummary,
       'assessment': assessment == null
           ? {
@@ -199,7 +203,8 @@ If the user may be unsafe, say to seek immediate human support.''';
                       'score': topCategory.value.round(),
                     },
             },
-      'wellnessSnapshot': snapshot == null
+      'wellnessSnapshot':
+          !prompt.context.allowsWellnessReference || snapshot == null
           ? null
           : {
               'latestMoodLevel': snapshot.latestMoodLevel,

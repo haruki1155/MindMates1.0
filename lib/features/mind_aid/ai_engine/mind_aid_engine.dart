@@ -36,6 +36,9 @@ class MindAidEngine {
       conversationSummary: context.conversationSummary,
       preferredSupportStyle: context.preferredSupportStyle,
       wellnessSnapshot: context.wellnessSnapshot,
+      conversationMode: context.conversationMode,
+      explicitListening: context.explicitListening,
+      allowsWellnessReference: context.allowsWellnessReference,
     );
 
     final match = IntentEngine.detectBestMatch(

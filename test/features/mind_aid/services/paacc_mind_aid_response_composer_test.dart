@@ -27,7 +27,7 @@ void main() {
     expect(assessment.actions, hasLength(1));
   });
 
-  test('uncertain route provides clarification instead of an action', () {
+  test('uncertain route does not add a response override or action', () {
     final response = composer.compose(
       const PaaccRouteDecision(
         route: PaaccRouteType.uncertain,
@@ -37,6 +37,6 @@ void main() {
     );
 
     expect(response.actions, isEmpty);
-    expect(response.text, contains('understand'));
+    expect(response.text, isEmpty);
   });
 }

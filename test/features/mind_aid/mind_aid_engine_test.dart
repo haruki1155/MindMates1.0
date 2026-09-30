@@ -113,17 +113,16 @@ void main() {
       final classifier = const MindAidSafetyClassifier();
 
       expect(
-        classifier.classify(
-          normalizedInput: 'i cannot go on anymore',
-          matches: const [],
-        ).level,
+        classifier
+            .classify(
+              normalizedInput: 'i cannot go on anymore',
+              matches: const [],
+            )
+            .level,
         MindAidSafetyLevel.crisisOrImmediateRisk,
       );
       expect(
-        classifier.classify(
-          normalizedInput: 'kms',
-          matches: const [],
-        ).level,
+        classifier.classify(normalizedInput: 'kms', matches: const []).level,
         MindAidSafetyLevel.crisisOrImmediateRisk,
       );
     });
@@ -198,7 +197,7 @@ void main() {
       );
 
       expect(result.primaryIntent, 'general_support');
-      expect(result.text, contains('need a little more detail'));
+      expect(result.text, contains('Tell me a bit more about what happened'));
     });
 
     test('safety override wins over other matched concerns', () async {
@@ -308,30 +307,33 @@ void main() {
       expect(cloud.callCount, 0);
     });
 
-    test('indirect crisis input is escalated even without an intent match', () async {
-      final cloud = _CountingModelProvider('This must not be used.');
-      final engine = MindAidChatEngine(
-        responseComposer: MindAidResponseComposer(
-          modelProvider: HybridMindAidModelProvider(
-            enabled: true,
-            cloudProvider: cloud,
+    test(
+      'indirect crisis input is escalated even without an intent match',
+      () async {
+        final cloud = _CountingModelProvider('This must not be used.');
+        final engine = MindAidChatEngine(
+          responseComposer: MindAidResponseComposer(
+            modelProvider: HybridMindAidModelProvider(
+              enabled: true,
+              cloudProvider: cloud,
+            ),
           ),
-        ),
-      );
+        );
 
-      final result = await engine.respond(
-        const MindAidChatRequest(
-          userId: 'user_1',
-          text: 'I cannot go on anymore',
-        ),
-        dataset,
-      );
+        final result = await engine.respond(
+          const MindAidChatRequest(
+            userId: 'user_1',
+            text: 'I cannot go on anymore',
+          ),
+          dataset,
+        );
 
-      expect(result.requiresEscalation, isTrue);
-      expect(result.severity, MindAidSeverity.crisis);
-      expect(result.safetyLevel, MindAidSafetyLevel.crisisOrImmediateRisk);
-      expect(cloud.callCount, 0);
-    });
+        expect(result.requiresEscalation, isTrue);
+        expect(result.severity, MindAidSeverity.crisis);
+        expect(result.safetyLevel, MindAidSafetyLevel.crisisOrImmediateRisk);
+        expect(cloud.callCount, 0);
+      },
+    );
 
     test('cloud failure falls back to local response', () async {
       final engine = MindAidChatEngine(
@@ -414,27 +416,26 @@ void main() {
       },
     );
 
-    test('low mood snapshot changes tone and suggestions', () async {
-      final result = await MindAidChatEngine().respond(
-        const MindAidChatRequest(
-          userId: 'user_1',
-          text: 'I feel worried',
-          wellnessSnapshot: MindAidWellnessSnapshot(
-            latestMoodLevel: 2,
-            recentMoodAverage: 2.1,
-            moodTrend: MindAidMoodTrend.declining,
+    test(
+      'low mood snapshot remains silent without an explicit wellness request',
+      () async {
+        final result = await MindAidChatEngine().respond(
+          const MindAidChatRequest(
+            userId: 'user_1',
+            text: 'I feel worried',
+            wellnessSnapshot: MindAidWellnessSnapshot(
+              latestMoodLevel: 2,
+              recentMoodAverage: 2.1,
+              moodTrend: MindAidMoodTrend.declining,
+            ),
           ),
-        ),
-        dataset,
-      );
+          dataset,
+        );
 
-      expect(result.text, contains('recent mood looks low'));
-      expect(result.text, contains('My take'));
-      expect(
-        result.suggestions.map((suggestion) => suggestion.label),
-        contains('Help me understand my mood trend'),
-      );
-    });
+        expect(result.text, isNot(contains('recent mood looks low')));
+        expect(result.text, contains('My take'));
+      },
+    );
 
     test(
       'snapshot assessment review works without in-memory assessment',
@@ -605,8 +606,7 @@ class _CapturingFirestoreService extends FirestoreService {
     String documentId,
     Map<String, dynamic> data, {
     bool merge = false,
-  }
-  ) async {
+  }) async {
     createdDocuments.add({
       'collection': collection,
       'documentId': documentId,

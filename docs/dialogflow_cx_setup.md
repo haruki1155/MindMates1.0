@@ -105,10 +105,15 @@ Allowed types are `logMood`, `startBreathing`, `openAssessment`,
 `openInsights`, `openCounselingServices`, `bookAppointment`, and
 `viewAppointments`. CX must never return Flutter route names.
 
-The Function supplies only derived session parameters: mood trend, recent mood
-average, latest mood level, assessment level/score, up to three concern
-categories, streak, last check-in time, launch context, and verified support
-contacts.
+The Function supplies `conversationMode` (`supportive`, `listening`,
+`reflective`, `coaching`, `casual`, or `navigation`) and `explicitListening`
+as behavioral metadata. In the staging agent, the validated mode also selects
+the matching `mind_aid_mode_<mode>` custom event fulfillment. Do not treat
+either field as authorization, safety, or assessment input.
+`effectiveConversationMode` is returned for pilot diagnostics. Derived
+wellness parameters are supplied only when the user explicitly asks about
+mood, assessment, results, progress, or trends; verified support contacts and
+launch context remain available.
 
 ## 5. Firestore and Remote Config
 

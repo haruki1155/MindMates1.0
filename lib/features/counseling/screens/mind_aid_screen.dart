@@ -238,7 +238,7 @@ class _MindAidScreenState extends State<MindAidScreen> {
                 ],
               ),
             ),
-            if (widget.suggestions.isNotEmpty)
+            if (widget.messages.isEmpty && widget.suggestions.isNotEmpty)
               _SuggestionPanel(
                 suggestions: widget.suggestions,
                 onSuggestionSelected: widget.onSuggestionSelected,

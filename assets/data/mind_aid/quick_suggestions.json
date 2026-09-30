@@ -2,48 +2,23 @@
     "version":  1,
     "records":  [
                     {
-                        "id":  "academic_stress",
-                        "label":  "Academic Stress",
+                        "id":  "just_talk",
+                        "label":  "I just want to talk",
                         "iconAsset":  ""
                     },
                     {
-                        "id":  "examination_anxiety",
-                        "label":  "Examination Anxiety",
+                        "id":  "something_on_my_mind",
+                        "label":  "Something's on my mind",
                         "iconAsset":  ""
                     },
                     {
-                        "id":  "burnout",
-                        "label":  "Burnout",
+                        "id":  "think_it_through",
+                        "label":  "Help me think something through",
                         "iconAsset":  ""
                     },
                     {
-                        "id":  "loneliness",
-                        "label":  "Loneliness",
-                        "iconAsset":  ""
-                    },
-                    {
-                        "id":  "self_harm_or_suicide_concern",
-                        "label":  "Self-Harm or Suicide Concern",
-                        "iconAsset":  ""
-                    },
-                    {
-                        "id":  "review_assessment",
-                        "label":  "Review my assessment",
-                        "iconAsset":  ""
-                    },
-                    {
-                        "id":  "two_minute_coping",
-                        "label":  "Give me a 2-minute coping step",
-                        "iconAsset":  ""
-                    },
-                    {
-                        "id":  "make_a_plan",
-                        "label":  "Help me make a plan",
-                        "iconAsset":  ""
-                    },
-                    {
-                        "id":  "talk_to_pacc",
-                        "label":  "Talk to PACC",
+                        "id":  "calm_down",
+                        "label":  "I need to calm down",
                         "iconAsset":  ""
                     }
                 ]
