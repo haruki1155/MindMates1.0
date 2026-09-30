@@ -30,7 +30,7 @@ class AdminReportPdfService {
       title: reportType == AdminReportType.users
           ? 'App User Activity Report'
           : 'Counseling Appointments Report',
-      author: 'MindMate PAACC',
+      author: 'MindMate PACC',
       subject: 'Privacy-preserving aggregate report',
     );
     final data = reportType == AdminReportType.users
@@ -52,7 +52,7 @@ class AdminReportPdfService {
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
                 pw.Text(
-                  'MindMate | PAACC',
+                  'MindMate | PACC',
                   style: pw.TextStyle(
                     fontSize: 11,
                     fontWeight: pw.FontWeight.bold,

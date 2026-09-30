@@ -34,7 +34,7 @@ class PaaccIntentClassifier {
       return classifier;
     } catch (error) {
       if (error is PaaccMlException) rethrow;
-      throw PaaccMlException('Failed to load PAACC model asset: $error');
+      throw PaaccMlException('Failed to load PACC model asset: $error');
     }
   }
 
@@ -45,13 +45,13 @@ class PaaccIntentClassifier {
         input.shape[0] != 1 ||
         input.shape[1] != _config.maxLength ||
         input.type != TensorType.int32) {
-      throw const PaaccMlException('Unexpected PAACC input tensor contract.');
+      throw const PaaccMlException('Unexpected PACC input tensor contract.');
     }
     if (output.shape.length != 2 ||
         output.shape[0] != 1 ||
         output.shape[1] != _config.labels.length ||
         output.type != TensorType.float32) {
-      throw const PaaccMlException('Unexpected PAACC output tensor contract.');
+      throw const PaaccMlException('Unexpected PACC output tensor contract.');
     }
   }
 
@@ -62,7 +62,7 @@ class PaaccIntentClassifier {
     try {
       final tokens = _tokenizer.tokenize(text);
       if (tokens.length != _config.maxLength) {
-        throw const PaaccMlException('Unexpected PAACC input token count.');
+        throw const PaaccMlException('Unexpected PACC input token count.');
       }
       final output = [
         List<double>.filled(_config.labels.length, 0.0, growable: false),
@@ -70,7 +70,7 @@ class PaaccIntentClassifier {
       _interpreter.run([tokens], output);
       final probabilities = List<double>.unmodifiable(output.first);
       if (probabilities.length != _config.labels.length) {
-        throw const PaaccMlException('Unexpected PAACC output tensor shape.');
+        throw const PaaccMlException('Unexpected PACC output tensor shape.');
       }
 
       var bestIndex = 0;
@@ -94,7 +94,7 @@ class PaaccIntentClassifier {
     } on PaaccMlException {
       rethrow;
     } catch (error) {
-      throw PaaccMlException('PAACC inference failed: $error');
+      throw PaaccMlException('PACC inference failed: $error');
     }
   }
 

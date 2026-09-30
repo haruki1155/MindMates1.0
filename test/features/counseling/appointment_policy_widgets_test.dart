@@ -20,7 +20,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Schedule Update Pending'), findsOneWidget);
       expect(find.text('Accept New Schedule'), findsNothing);
-      expect(find.text('PAACC is finalizing your appointment schedule.'),
+      expect(find.text('PACC is finalizing your appointment schedule.'),
           findsOneWidget);
       expect(find.text('Cancel Appointment'), findsNothing);
       expect(find.text('Cancel Request'), findsNothing);

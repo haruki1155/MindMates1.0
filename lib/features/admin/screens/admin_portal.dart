@@ -37,7 +37,7 @@ const _purple = AdminColors.accentSoft;
 String _headerRoleLabel(AccessRole role) => switch (role) {
   AccessRole.admin => 'Administrator',
   AccessRole.counselor => 'Counselor',
-  AccessRole.portalStaff => 'PAACC Staff',
+  AccessRole.portalStaff => 'PACC Staff',
   AccessRole.appUser => 'Portal User',
 };
 
@@ -274,7 +274,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                                   ),
                                 ),
                               ),
-                        child: const Text('Request PAACC Portal Access'),
+                        child: const Text('Request PACC Portal Access'),
                       ),
                     ],
                   ),
@@ -1890,9 +1890,9 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
   Widget build(BuildContext context) => _Page(
     title: widget.repository.currentAccessRole == AccessRole.portalStaff
         ? 'Appointments'
-        : 'PAACC Appointments',
+        : 'PACC Appointments',
     subtitle: widget.repository.currentAccessRole == AccessRole.portalStaff
-        ? 'Manage today’s PAACC appointments and scheduling.'
+        ? 'Manage today’s PACC appointments and scheduling.'
         : 'Review, schedule, and manage counseling appointments.',
     child: StreamBuilder<List<AppointmentModel>>(
       stream: widget.repository.watchAppointments(),
@@ -2351,7 +2351,7 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
   String get _roleLabel =>
       widget.evaluation.requestedRole == AccessRole.counselor
       ? 'Counselor'
-      : 'PAACC Staff';
+      : 'PACC Staff';
 
   ({IconData icon, String title, String body}) get _content => switch (widget
       .evaluation
@@ -2360,13 +2360,13 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
       icon: Icons.mark_email_unread_outlined,
       title: 'Email Verification Required',
       body:
-          'Your password is correct, but your email address must be verified before your PAACC access request can be reviewed.',
+          'Your password is correct, but your email address must be verified before your PACC access request can be reviewed.',
     ),
     PortalAccessState.pendingAdminApproval => (
       icon: Icons.hourglass_top_rounded,
       title: 'Access Request Pending',
       body:
-          'Your email has been verified. Your PAACC portal access request is waiting for administrator approval.',
+          'Your email has been verified. Your PACC portal access request is waiting for administrator approval.',
     ),
     PortalAccessState.moreInformationRequired => (
       icon: Icons.info_outline_rounded,
@@ -2379,36 +2379,36 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
       icon: Icons.pause_circle_outline_rounded,
       title: 'Account Access Suspended',
       body:
-          'Your PAACC portal access is currently suspended. Contact an authorized MindMate administrator if you believe this is an error.',
+          'Your PACC portal access is currently suspended. Contact an authorized MindMate administrator if you believe this is an error.',
     ),
     PortalAccessState.rejected => (
       icon: Icons.cancel_outlined,
       title: 'Access Request Closed',
       body:
-          'This PAACC portal access request was not approved. Contact an authorized MindMate administrator for assistance.',
+          'This PACC portal access request was not approved. Contact an authorized MindMate administrator for assistance.',
     ),
     PortalAccessState.disabled => (
       icon: Icons.block_outlined,
       title: 'Account Access Disabled',
       body:
-          'This account is not currently enabled for PAACC portal access. Contact an authorized MindMate administrator.',
+          'This account is not currently enabled for PACC portal access. Contact an authorized MindMate administrator.',
     ),
     PortalAccessState.accountNotFound => (
       icon: Icons.person_search_outlined,
       title: 'Portal Account Not Found',
       body:
-          'This account does not have a PAACC portal access request. Request access or contact an authorized administrator.',
+          'This account does not have a PACC portal access request. Request access or contact an authorized administrator.',
     ),
     PortalAccessState.noPortalRole => (
       icon: Icons.lock_outline_rounded,
       title: 'Portal Access Not Available',
       body:
-          'This account does not currently have an approved PAACC portal role.',
+          'This account does not currently have an approved PACC portal role.',
     ),
     PortalAccessState.granted => (
       icon: Icons.verified_outlined,
       title: 'Access Approved',
-      body: 'Your PAACC portal account is active.',
+      body: 'Your PACC portal account is active.',
     ),
   };
 
@@ -2994,7 +2994,7 @@ class _AppointmentCard extends StatelessWidget {
                     const Divider(height: 34),
                     const _AppointmentSectionHeader(
                       icon: Icons.fact_check_outlined,
-                      title: 'PAACC decision',
+                      title: 'PACC decision',
                     ),
                     const SizedBox(height: 14),
                     DropdownButtonFormField<String>(
@@ -3344,7 +3344,7 @@ class _AppointmentCard extends StatelessWidget {
   static List<String> _appointmentReasons(String action) => switch (action) {
     'confirmed' => const [
       'Schedule and counselor are available',
-      'Appointment approved by PAACC',
+      'Appointment approved by PACC',
     ],
     'rescheduled' => const [
       'Counselor schedule conflict',
@@ -4275,7 +4275,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
   Widget _legacyBuild(BuildContext context) => Semantics(
     container: true,
     explicitChildNodes: true,
-    label: 'PAACC weekly schedule editor',
+    label: 'PACC weekly schedule editor',
     child: SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4551,7 +4551,7 @@ class _PolishedPaccScheduleLayout extends StatelessWidget {
     return Semantics(
       container: true,
       explicitChildNodes: true,
-      label: 'PAACC weekly schedule editor',
+      label: 'PACC weekly schedule editor',
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -6260,11 +6260,11 @@ class _ProfilePageState extends State<_ProfilePage> {
     final role = _profile['approvedRole'] ?? _profile['accessRole'];
     return switch (role?.toString()) {
       'counselor' => 'Counselor',
-      'portalStaff' || 'staff' => 'PAACC Staff',
+      'portalStaff' || 'staff' => 'PACC Staff',
       'admin' => 'Administrator',
       _ => switch (widget.repository.currentAccessRole) {
         AccessRole.counselor => 'Counselor',
-        AccessRole.portalStaff => 'PAACC Staff',
+        AccessRole.portalStaff => 'PACC Staff',
         AccessRole.admin => 'Administrator',
         AccessRole.appUser => 'Portal User',
       },

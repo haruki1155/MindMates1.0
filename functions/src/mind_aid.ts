@@ -186,13 +186,14 @@ async function loadSupportContacts(): Promise<SupportContacts> {
     const text = String(value ?? "").trim();
     return /^[+0-9() -]{7,24}$/.test(text) ? text : "";
   };
+  const configuredShortName = String(data.shortName ?? "PACC").trim().slice(0, 20);
   return {
     paccName: String(data.displayName ?? data.paccName ?? "Psychological Assessment and Counseling Center").trim().slice(0, 100) || "Psychological Assessment and Counseling Center",
     paccPhone: phone(data.paccPhone),
     campusSecurityPhone: phone(data.campusSecurityPhone),
     emergencyLabel: String(data.emergencyLabel ?? "local emergency services").trim().slice(0, 80) || "local emergency services",
     emergencyPhone: phone(data.emergencyNumber ?? data.emergencyPhone),
-    shortName: String(data.shortName ?? "PAACC").trim().slice(0, 20) || "PAACC",
+    shortName: /^paacc$/i.test(configuredShortName) ? "PACC" : (configuredShortName || "PACC"),
     ncmhLandline: phone(data.ncmhLandline), ncmhGlobe: phone(data.ncmhGlobe), ncmhSmart: phone(data.ncmhSmart), ncmhAlternate: phone(data.ncmhAlternate),
     hopelineTollFree: phone(data.hopelineTollFree), hopelineGlobe: phone(data.hopelineGlobe), hopelineSmart: phone(data.hopelineSmart), hopelinePldt: phone(data.hopelinePldt),
     inTouchLandline: phone(data.inTouchLandline), inTouchSmart: phone(data.inTouchSmart), inTouchGlobe: phone(data.inTouchGlobe),
@@ -521,7 +522,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
         });
       } catch (_) {
         // Keep the user in controlled safety support; never fall through to
-        // Gemini and never claim that PAACC received an alert.
+        // Gemini and never claim that PACC received an alert.
       }
     }
     const controlled = safetyResponse(safetyLevel, supportContacts, emergency?.notified === true);

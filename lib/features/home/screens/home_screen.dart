@@ -58,8 +58,8 @@ class PaccHomeScheduleStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     if (availability == null) {
       return HomeAnnouncementCard(
-        badge: 'PAACC',
-        message: 'PAACC office availability has not been published yet.',
+        badge: 'PACC',
+        message: 'PACC office availability has not been published yet.',
         onViewMore: onViewMore,
         onViewDetail: onViewDetail,
       );
@@ -644,10 +644,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('PAACC office availability'),
+        title: const Text('PACC office availability'),
         content: Text(
           availability == null
-              ? 'The PAACC schedule has not been published yet.'
+              ? 'The PACC schedule has not been published yet.'
               : 'Office status: ${resolved!.isOfficeOpen ? 'Open' : 'Closed'}\n\nAppointments: ${resolved.canBookAppointments ? 'Available' : 'Unavailable'}\nWalk-ins: ${resolved.acceptsWalkIns ? 'Accepted' : 'Unavailable'}\n\n${resolved.closureReason ?? ''}',
         ),
         actions: [

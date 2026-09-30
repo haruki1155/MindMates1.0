@@ -523,7 +523,7 @@ class _EmergencyAlertDialogState extends State<_EmergencyAlertDialog> {
             if (status == 'acknowledged') ...[
               _detail(
                 'Acknowledged by',
-                (widget.alert['acknowledgedByName'] ?? 'PAACC counselor')
+                (widget.alert['acknowledgedByName'] ?? 'PACC counselor')
                     .toString(),
               ),
               const SizedBox(height: 12),

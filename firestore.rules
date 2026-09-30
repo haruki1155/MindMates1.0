@@ -580,7 +580,7 @@ service cloud.firestore {
     }
 
     // This is a server-generated, non-clinical scheduling projection. It is
-    // the only appointment collection general PAACC portal staff can read.
+    // the only appointment collection general PACC portal staff can read.
     match /appointment_queue/{appointmentId} {
       allow read: if currentAccessRole() == 'portalStaff';
       allow write: if false;

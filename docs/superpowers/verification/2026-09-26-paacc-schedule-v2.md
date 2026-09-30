@@ -1,8 +1,8 @@
-# PAACC Schedule V2 Verification
+# PACC Schedule V2 Verification
 
 ## Scope
 
-This record closes the source-level implementation and regression gate for PAACC Schedule V2. It does not represent a deployment, authenticated staging validation, or a data migration.
+This record closes the source-level implementation and regression gate for PACC Schedule V2. It does not represent a deployment, authenticated staging validation, or a data migration.
 
 ## Definition of Done coverage review
 

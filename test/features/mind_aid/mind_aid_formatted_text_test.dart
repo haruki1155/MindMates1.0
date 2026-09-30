@@ -41,7 +41,7 @@ void main() {
               actions: const [
                 MindAidAction(
                   type: MindAidActionType.openCounselingServices,
-                  label: 'View PAACC Support',
+                  label: 'View PACC Support',
                 ),
               ],
             ),
@@ -50,7 +50,7 @@ void main() {
       ),
     );
     expect(find.text('Emergency Support'), findsAtLeastNWidgets(1));
-    expect(find.text('View PAACC Support'), findsOneWidget);
+    expect(find.text('View PACC Support'), findsOneWidget);
     expect(find.text('Not now'), findsNothing);
     expect(tester.takeException(), isNull);
   });

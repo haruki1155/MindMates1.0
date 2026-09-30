@@ -29,7 +29,7 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
   @override
   Widget build(BuildContext context) => _PageFrame(
     title: 'Appointments',
-    subtitle: 'Operational PAACC schedule. Clinical details are not shown.',
+    subtitle: 'Operational PACC schedule. Clinical details are not shown.',
     child: StreamBuilder<List<AppointmentQueueItem>>(
       stream: widget.repository.watchPortalAppointmentQueue(),
       builder: (context, snapshot) {

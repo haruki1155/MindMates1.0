@@ -121,7 +121,7 @@ void main() {
         ),
         isTrue,
       );
-      await send('What services does PAACC provide?');
+      await send('What services does PACC provide?');
       expect(provider.messages.last.text, contains('available services'));
       expect(provider.messages.last.actions, isNotEmpty);
       await tester.scrollUntilVisible(

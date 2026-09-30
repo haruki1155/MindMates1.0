@@ -23,7 +23,7 @@ class PaaccMlConfig {
       final decoded = jsonDecode(raw);
       if (decoded is! Map<String, dynamic>) {
         throw const PaaccMlException(
-          'PAACC config JSON must contain an object.',
+          'PACC config JSON must contain an object.',
         );
       }
 
@@ -35,14 +35,14 @@ class PaaccMlConfig {
           threshold is! num ||
           maxLength is! num ||
           labels is! List) {
-        throw const PaaccMlException('PAACC config is malformed.');
+        throw const PaaccMlException('PACC config is malformed.');
       }
 
       final parsedLabels = labels
           .map((label) {
             if (label is! String || label.isEmpty) {
               throw const PaaccMlException(
-                'PAACC config contains an invalid label.',
+                'PACC config contains an invalid label.',
               );
             }
             return label;
@@ -56,19 +56,19 @@ class PaaccMlConfig {
       );
 
       if (config.labels.length != 7) {
-        throw const PaaccMlException('Expected 7 PAACC labels.');
+        throw const PaaccMlException('Expected 7 PACC labels.');
       }
       if (config.maxLength != 40) {
-        throw const PaaccMlException('Expected PAACC maxLength = 40.');
+        throw const PaaccMlException('Expected PACC maxLength = 40.');
       }
       if (config.threshold <= 0 || config.threshold > 1) {
-        throw const PaaccMlException('Invalid PAACC threshold.');
+        throw const PaaccMlException('Invalid PACC threshold.');
       }
       return config;
     } on PaaccMlException {
       rethrow;
     } catch (error) {
-      throw PaaccMlException('Failed to load PAACC config: $error');
+      throw PaaccMlException('Failed to load PACC config: $error');
     }
   }
 }

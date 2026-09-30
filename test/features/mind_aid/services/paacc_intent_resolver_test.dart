@@ -25,7 +25,7 @@ void main() {
       PaaccRouteType.appointmentHelp,
     );
     expect(
-      resolver.resolve('What services does PAACC provide?', null).route,
+      resolver.resolve('What services does PACC provide?', null).route,
       PaaccRouteType.serviceInformation,
     );
   });

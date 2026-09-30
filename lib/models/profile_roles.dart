@@ -46,7 +46,7 @@ enum AccessRole {
       '',
     );
     // Keep older staff records compatible with the role-specific portal.
-    // Earlier staging data used values such as `staff` and `PAACC Staff`
+    // Earlier staging data used values such as `staff` and `PACC Staff`
     // before `portalStaff` became the canonical value.
     if (normalized == 'portalstaff' ||
         normalized == 'staff' ||

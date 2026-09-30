@@ -278,7 +278,7 @@ async function requestStaffEmailVerificationHandler(request: CallableRequest) {
     getAuth().getUser(userId), db.collection("users").doc(userId).get(),
   ]);
   if (!profile.exists || profile.data()?.staffAccountStatus == null) {
-    throw new HttpsError("not-found", "PAACC access request not found.");
+    throw new HttpsError("not-found", "PACC access request not found.");
   }
   if (authUser.emailVerified) return {alreadyVerified: true};
   const email = authUser.email;
@@ -295,13 +295,13 @@ async function requestStaffEmailVerificationHandler(request: CallableRequest) {
     await accountEmailTransporter().sendMail({
       from: `MindMate <${smtpSender.value().trim()}>`,
       to: email,
-      subject: "Verify your MindMate PAACC Portal email",
+      subject: "Verify your MindMate PACC Portal email",
       text: [
         "MindMate — Verify your email",
         "",
         `Hello ${name || "there"},`,
         "",
-        "You requested access to the MindMate PAACC Portal.",
+        "You requested access to the MindMate PACC Portal.",
         `Verify that ${email} belongs to you using this secure link:`,
         verificationLink,
         "",
@@ -310,7 +310,7 @@ async function requestStaffEmailVerificationHandler(request: CallableRequest) {
       ].join("\n"),
       html: brandedEmailShell({
         heading: "Verify your email address",
-        body: `<p>Hello ${safeName},</p><p>Thanks for requesting access to the MindMate PAACC Portal.</p><p>Please verify that <strong>${safeEmail}</strong> belongs to you before your access request can be reviewed.</p><p>After verification, your request will be sent to a MindMate administrator for review.</p><p>If you did not request access to MindMate, you can safely ignore this email.</p>`,
+        body: `<p>Hello ${safeName},</p><p>Thanks for requesting access to the MindMate PACC Portal.</p><p>Please verify that <strong>${safeEmail}</strong> belongs to you before your access request can be reviewed.</p><p>After verification, your request will be sent to a MindMate administrator for review.</p><p>If you did not request access to MindMate, you can safely ignore this email.</p>`,
         actionLabel: "Verify email address",
         actionUrl: verificationLink,
         footer: "MindMate · Counseling Management System",

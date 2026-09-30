@@ -80,7 +80,7 @@ class ServiceDetailScreen extends StatelessWidget {
                         purpose: 'CONFIDENTIAL COUNSELING',
                         title: 'Schedule a Counseling Session',
                         description:
-                            'Set a preferred date and time to discuss personal, academic, social, or emotional concerns with a PAACC counselor.',
+                            'Set a preferred date and time to discuss personal, academic, social, or emotional concerns with a PACC counselor.',
                         buttonLabel: 'Set Appointment',
                         onTap: () => _openPaccCounseling(context),
                       ),
@@ -117,7 +117,7 @@ class ServiceDetailScreen extends StatelessWidget {
                       const _DetailSectionHeading(
                         title: 'Available Forms',
                         subtitle:
-                            'Select the form that matches your request. Your information will help PAACC review and guide your next steps.',
+                            'Select the form that matches your request. Your information will help PACC review and guide your next steps.',
                       ),
                       const SizedBox(height: 14),
                     ],
@@ -127,7 +127,7 @@ class ServiceDetailScreen extends StatelessWidget {
                         purpose: 'SERVICE EVALUATION',
                         title: 'Guidance Services Student Satisfaction',
                         description:
-                            'Rate your experience with the university guidance services. Your responses help PAACC evaluate service quality and identify areas for improvement.',
+                            'Rate your experience with the university guidance services. Your responses help PACC evaluate service quality and identify areas for improvement.',
                         buttonLabel: 'Open Satisfaction Survey',
                         onTap: () => _openSatisfactionSurvey(context),
                       ),

@@ -40,7 +40,7 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Request PAACC Portal Access')),
+    appBar: AppBar(title: const Text('Request PACC Portal Access')),
     body: Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -55,7 +55,7 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Request PAACC Portal Access',
+                      'Request PACC Portal Access',
                       style: Theme.of(context).textTheme.headlineSmall
                           ?.copyWith(fontWeight: FontWeight.w800),
                     ),
@@ -107,7 +107,7 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
                       },
                       child: Column(
                         children: [
-                          _role(AccessRole.portalStaff, 'PAACC Staff'),
+                          _role(AccessRole.portalStaff, 'PACC Staff'),
                           const SizedBox(height: 10),
                           _role(AccessRole.counselor, 'Counselor'),
                         ],
@@ -276,7 +276,7 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
       if (!mounted) return;
       final roleLabel = requestedRole == AccessRole.counselor
           ? 'Counselor'
-          : 'PAACC Staff';
+          : 'PACC Staff';
       await showDialog<void>(
         context: context,
         builder: (_) => AlertDialog(

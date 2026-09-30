@@ -38,7 +38,7 @@ void main() {
     expect(find.text('Key Features'), findsNothing);
     expect(find.text('Learn More'), findsNothing);
     expect(find.text('Inquire'), findsNothing);
-    expect(find.text('PAACC Support Service'), findsOneWidget);
+    expect(find.text('PACC Support Service'), findsOneWidget);
     expect(find.text('Set Appointment'), findsOneWidget);
     expect(find.text('Take satisfaction survey'), findsNothing);
     expect(find.text('Open client feedback form'), findsNothing);

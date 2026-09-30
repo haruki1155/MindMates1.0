@@ -142,8 +142,8 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
         'resetPassword' =>
           'Your password was changed successfully. You can now sign in.',
         'verifyEmail' => _alreadyVerified
-            ? 'This email address has already been verified. Sign in to view your PAACC access request status.'
-            : 'Your email address has been verified. Sign in to continue your PAACC access request and administrator review.',
+            ? 'This email address has already been verified. Sign in to view your PACC access request status.'
+            : 'Your email address has been verified. Sign in to continue your PACC access request and administrator review.',
         'recoverEmail' => 'Your previous email address has been restored.',
         _ => 'Your request was completed successfully.',
       };

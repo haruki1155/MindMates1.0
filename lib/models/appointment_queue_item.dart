@@ -1,6 +1,6 @@
 import '../core/utils/firestore_mapper.dart';
 
-/// The non-clinical scheduling projection available to PAACC portal staff.
+/// The non-clinical scheduling projection available to PACC portal staff.
 /// It deliberately omits identity, contact, demographic, and care details.
 class AppointmentQueueItem {
   const AppointmentQueueItem({

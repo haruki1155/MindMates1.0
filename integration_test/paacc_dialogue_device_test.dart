@@ -16,7 +16,7 @@ void main() {
       'Hello, good morning!': PaaccRouteType.greeting,
       'How do I schedule an appointment?': PaaccRouteType.appointmentHelp,
       'How does self-assessment work?': PaaccRouteType.assessmentHelp,
-      'What services does PAACC provide?': PaaccRouteType.serviceInformation,
+      'What services does PACC provide?': PaaccRouteType.serviceInformation,
       'I have been stressed with school lately.': PaaccRouteType.venting,
       'Can you help me calm down?': PaaccRouteType.copingHelp,
       "I think I'm done talking now.": PaaccRouteType.goodbye,
@@ -29,7 +29,7 @@ void main() {
         expect(decision.route, entry.value, reason: entry.key);
         // Labels and confidence only; do not log conversation text.
         debugPrint(
-          'PAACC raw=${decision.rawIntent} confidence=${decision.confidence} resolved=${decision.route.name} reason=${decision.reason}',
+          'PACC raw=${decision.rawIntent} confidence=${decision.confidence} resolved=${decision.route.name} reason=${decision.reason}',
         );
       }
     } finally {

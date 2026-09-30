@@ -1918,7 +1918,7 @@ class _PaaccSupportCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'PAACC support services',
+          'PACC support services',
           style: _InsightsText.sectionTitle.copyWith(color: theme.text),
         ),
         const SizedBox(height: 14),
@@ -1972,7 +1972,7 @@ class _PaaccSupportCard extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Text(
-                  "PAACC counseling services are available 24/7 for students and faculty. You're never alone.",
+                  "PACC counseling services are available 24/7 for students and faculty. You're never alone.",
                   style: TextStyle(
                     color: theme.secondaryText,
                     fontSize: 14,

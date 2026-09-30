@@ -68,7 +68,7 @@ void main() {
 
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -900));
     await tester.pumpAndSettle();
-    expect(find.text('PAACC support services'), findsOneWidget);
+    expect(find.text('PACC support services'), findsOneWidget);
   });
 
   testWidgets(
@@ -325,12 +325,12 @@ void main() {
 
       expect(find.byKey(const Key('insights_category_strip')), findsOneWidget);
       await tester.dragUntilVisible(
-        find.text('PAACC support services'),
+        find.text('PACC support services'),
         find.byType(CustomScrollView),
         const Offset(0, -500),
       );
       await tester.pumpAndSettle();
-      expect(find.text('PAACC support services'), findsOneWidget);
+      expect(find.text('PACC support services'), findsOneWidget);
       final sliverPadding = tester.widget<SliverPadding>(
         find.byType(SliverPadding).first,
       );

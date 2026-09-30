@@ -89,7 +89,7 @@ Future<void> showAppointmentDetailsSheet(
     if (appointment.lifecycleStatus == AppointmentStatus.rescheduleProposed)
       (
         icon: Icons.event_repeat_outlined,
-        text: 'PAACC is finalizing the updated appointment schedule.',
+        text: 'PACC is finalizing the updated appointment schedule.',
       ),
     if (contactSummary.isNotEmpty)
       (icon: Icons.contact_phone_outlined, text: contactSummary),

@@ -286,7 +286,7 @@ async function requireStaff(uid: string): Promise<FirebaseFirestore.DocumentData
   if (!["portalStaff", "counselor", "admin"].includes(accessRole)) {
     throw new HttpsError("permission-denied", "Staff access is required.");
   }
-  // New PAACC access requests must pass all three gates.  Older privileged
+  // New PACC access requests must pass all three gates.  Older privileged
   // records remain readable while they are migrated, but no newly registered
   // staff account can reach protected functions until verification is synced.
   if (accessRole !== "admin" && profile.staffAccountStatus != null) {
@@ -294,7 +294,7 @@ async function requireStaff(uid: string): Promise<FirebaseFirestore.DocumentData
     if (profile.staffAccountStatus !== "approved" ||
         profile.accountStatus !== "active" ||
         !authUser.emailVerified) {
-      throw new HttpsError("permission-denied", "Your PAACC portal access is not active.");
+      throw new HttpsError("permission-denied", "Your PACC portal access is not active.");
     }
   }
   return {...profile, accessRole};
@@ -357,7 +357,7 @@ export const registerStaffAccount = onCall(async (request) => {
   const position = requiredText(request.data?.position, "Position", 2, 100);
   const requestedRole = String(request.data?.requestedRole ?? "").trim();
   if (!STAFF_ACCESS_ROLES.includes(requestedRole as typeof STAFF_ACCESS_ROLES[number])) {
-    throw new HttpsError("invalid-argument", "Choose PAACC Staff or Counselor.");
+    throw new HttpsError("invalid-argument", "Choose PACC Staff or Counselor.");
   }
   const userRef = db.collection("users").doc(userId);
   const reservationRef = db.collection("employee_id_reservations").doc(employeeIdKey);
@@ -374,7 +374,7 @@ export const registerStaffAccount = onCall(async (request) => {
     transaction.create(reservationRef, {userId, employeeId, createdAt: FieldValue.serverTimestamp()});
     transaction.create(userRef, {
       id: userId, email, firstName, lastName, name: `${firstName} ${lastName}`,
-      employeeId, employeeIdKey, position, office: "PAACC / Guidance Office",
+      employeeId, employeeIdKey, position, office: "PACC / Guidance Office",
       populationRole: "nonTeaching", declaredRole: "nonTeaching", role: "staff",
       accessRole: "appUser", staffAccountStatus: "pending", verificationStatus: "pending",
       requestedRole, requestedAccessRole: requestedRole, approvedRole: null,
@@ -384,7 +384,7 @@ export const registerStaffAccount = onCall(async (request) => {
     });
     transaction.create(requestRef, {
       requestId: requestRef.id, applicantUserId: userId, firstName, lastName,
-      employeeId, email, position, office: "PAACC / Guidance Office", requestedRole,
+      employeeId, email, position, office: "PACC / Guidance Office", requestedRole,
       registrationStatus: "email_verification_required", submittedAt: FieldValue.serverTimestamp(),
       createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
@@ -405,7 +405,7 @@ export const syncStaffEmailVerification = onCall(async (request) => {
   const target = db.collection("users").doc(userId);
   const profile = await target.get();
   if (!profile.exists || profile.data()?.staffAccountStatus == null) {
-    throw new HttpsError("not-found", "PAACC access request not found.");
+    throw new HttpsError("not-found", "PACC access request not found.");
   }
   if (!authUser.emailVerified) {
     return {emailVerified: false, registrationStatus: "email_verification_required"};
@@ -437,7 +437,7 @@ export const syncStaffEmailVerification = onCall(async (request) => {
           updatedAt: FieldValue.serverTimestamp(),
         }, {merge: true});
       }
-      writeAudit(transaction, db, {actorId: userId, actorNameSnapshot: applicantName || "PAACC applicant",
+      writeAudit(transaction, db, {actorId: userId, actorNameSnapshot: applicantName || "PACC applicant",
         actorRoleSnapshot: "appUser", action: "STAFF_EMAIL_VERIFIED",
         category: AUDIT_CATEGORIES.userManagement, targetType: "staff", targetId: userId,
         metadata: {after: {registrationStatus: "pending_admin_review"}}});
@@ -445,7 +445,7 @@ export const syncStaffEmailVerification = onCall(async (request) => {
   });
   if (notify && requestId) {
     try {
-      await notifyAccessRequestAdmins(requestId, applicantName || "A PAACC applicant", requestedRole);
+      await notifyAccessRequestAdmins(requestId, applicantName || "A PACC applicant", requestedRole);
     } catch (error) {
       console.warn("Email verification was saved but administrator notification delivery failed.", error);
     }
@@ -1434,8 +1434,8 @@ async function notifyAccessRequestAdmins(
         userId: admin.id,
         audience: "portal",
         type: "access_request",
-        title: "New PAACC access request",
-        body: `${applicantName} requested ${requestedRole === "counselor" ? "Counselor" : "PAACC Staff"} access.`,
+        title: "New PACC access request",
+        body: `${applicantName} requested ${requestedRole === "counselor" ? "Counselor" : "PACC Staff"} access.`,
         accessRequestId: requestId,
         createdAt: FieldValue.serverTimestamp(),
         readAt: null,
@@ -1461,15 +1461,15 @@ async function notifyAccessRequestApplicant(
   reason: string,
 ): Promise<void> {
   const requestId = String(profile.accessRequestId ?? userId);
-  const roleLabel = approvedRole === "counselor" ? "Counselor" : "PAACC Staff";
+  const roleLabel = approvedRole === "counselor" ? "Counselor" : "PACC Staff";
   await db.collection("notifications").doc(`access_request_status_${requestId}_${profile.registrationStatus ?? "updated"}`).set({
     userId,
     audience: "portal",
     type: "access_request",
-    title: approved ? "PAACC portal access approved" : "More information is required",
+    title: approved ? "PACC portal access approved" : "More information is required",
     body: approved
-      ? `Your PAACC portal access is active. Approved role: ${roleLabel}.`
-      : `Please review your PAACC access request. ${reason}`,
+      ? `Your PACC portal access is active. Approved role: ${roleLabel}.`
+      : `Please review your PACC access request. ${reason}`,
     accessRequestId: requestId,
     createdAt: FieldValue.serverTimestamp(),
     readAt: null,
@@ -1486,7 +1486,7 @@ export const notifyPortalOfAppointment = onDocumentCreated(
   async (event) => notifyClinicalStaff("appointment", event.params.appointmentId),
 );
 
-// Keep the non-clinical PAACC queue current without granting portal staff a
+// Keep the non-clinical PACC queue current without granting portal staff a
 // direct read of sensitive appointment documents.
 export const syncPortalAppointmentQueue = onDocumentWritten(
   {document: "appointments/{appointmentId}", retry: true},
@@ -1679,7 +1679,7 @@ function createAppointmentEvent(transaction: FirebaseFirestore.Transaction, appo
 }
 
 /**
- * Fields intentionally safe for the general PAACC scheduling queue. Keep this
+ * Fields intentionally safe for the general PACC scheduling queue. Keep this
  * separate from the clinical appointment record: portal staff must never need
  * a concern, contact information, demographics, or counseling history to run
  * the front-desk schedule.
@@ -1705,7 +1705,7 @@ export const refreshPortalAppointmentQueue = onCall(async (request) => {
   const staffId = requireAuthenticatedUser(request);
   const staff = await requireStaff(staffId);
   if (staff.accessRole !== "portalStaff") {
-    throw new HttpsError("permission-denied", "PAACC staff access is required.");
+    throw new HttpsError("permission-denied", "PACC staff access is required.");
   }
 
   const appointments = await db.collection("appointments").get();
@@ -1751,8 +1751,8 @@ export const savePaccAvailability = onCall(async (request) => {
     const stored = before.exists ? before.data() ?? {} : {};
     const storedIsV2 = stored.schemaVersion === 2;
     const currentRevision = Number.isInteger(stored.revision) && Number(stored.revision) >= 0 ? Number(stored.revision) : 0;
-    if (expectedRevision !== currentRevision) throw new HttpsError("failed-precondition", "The PAACC schedule was updated by another user. Reload the latest schedule before saving.");
-    if (storedIsV2 && !incomingIsV2) throw new HttpsError("failed-precondition", "This PAACC schedule is already V2 and cannot be replaced by a legacy client.");
+    if (expectedRevision !== currentRevision) throw new HttpsError("failed-precondition", "The PACC schedule was updated by another user. Reload the latest schedule before saving.");
+    if (storedIsV2 && !incomingIsV2) throw new HttpsError("failed-precondition", "This PACC schedule is already V2 and cannot be replaced by a legacy client.");
     const appointments = await transaction.get(db.collection("appointments").where("status", "in", activeScheduleStatuses));
     const conflicts = previewPaccScheduleConflicts(candidate, appointments.docs.map((snapshot) => ({id: snapshot.id, ...snapshot.data()})));
     if (conflicts.length > 0 && !confirmConflicts) throw new HttpsError("failed-precondition", `${conflicts.length} upcoming appointments conflict with the proposed schedule.`);
@@ -1842,7 +1842,7 @@ export const getAvailableAppointmentSlots = onCall(async (request) => {
   if (slots.length > 0) return {date, slots, availability: {status: "available"}};
   const resolved = resolvePaccSchedule(manilaSlotMillis(date, 12 * 60), availabilitySnapshot.exists ? availabilitySnapshot.data() : null);
   const status = !resolved.enabled ? "office_closed" : resolved.presence !== "in_office" ? "counselor_unavailable" : !resolved.appointmentsEnabled ? "appointments_disabled" : "fully_booked";
-  const message = status === "office_closed" ? "PAACC is closed on this date. Please choose another date." : status === "counselor_unavailable" ? "The counselor is unavailable on this date. Please choose another available date." : status === "appointments_disabled" ? "Appointments are not available on this date." : "No appointment times are available for this date. Please choose another date.";
+  const message = status === "office_closed" ? "PACC is closed on this date. Please choose another date." : status === "counselor_unavailable" ? "The counselor is unavailable on this date. Please choose another available date." : status === "appointments_disabled" ? "Appointments are not available on this date." : "No appointment times are available for this date. Please choose another date.";
   return {date, slots, availability: {status, message}};
 });
 
@@ -1997,7 +1997,7 @@ export const createAppointmentRequest = onCall(async (request) => {
 
 export const respondToAppointment = onCall(async (request) => {
   requireAuthenticatedUser(request);
-  throw new HttpsError("permission-denied", "Appointment schedule changes are finalized by PAACC staff.");
+  throw new HttpsError("permission-denied", "Appointment schedule changes are finalized by PACC staff.");
 });
 
 export const reviewAppointment = onCall(async (request) => {
@@ -2154,7 +2154,7 @@ export const reviewAppointment = onCall(async (request) => {
       appointmentId,
       type: completion?.offerFollowUp === true ? "appointment_follow_up_offer" : action === "rescheduled" ? "appointment_rescheduled" : action === "confirmed" ? "appointment_confirmed" : action === "completed" ? "appointment_completed" : action === "no_show" ? "appointment_did_not_attend" : "appointment_update",
       title: completion?.offerFollowUp === true ? "Follow-up session offered" : title,
-      body: completion?.offerFollowUp === true ? completion.followUpMessage : action === "no_show" ? "Your appointment was marked as Did Not Attend." : action === "rescheduled" ? `PAACC rescheduled your appointment: ${proposal!.scheduledTime}. ${String(input.rescheduleReason)}` : reply,
+      body: completion?.offerFollowUp === true ? completion.followUpMessage : action === "no_show" ? "Your appointment was marked as Did Not Attend." : action === "rescheduled" ? `PACC rescheduled your appointment: ${proposal!.scheduledTime}. ${String(input.rescheduleReason)}` : reply,
       createdAt: FieldValue.serverTimestamp(),
       readAt: null,
     });
@@ -2291,8 +2291,8 @@ export const acknowledgeInquiry = onCall(async (request) => {
       inquiryId,
       type: "inquiry",
       title: "Form received",
-      body: `PAACC received your ${String(data.subject ?? "form")}. Our staff will review it.`,
-      staffName: String(staff.name ?? staff.email ?? "PAACC staff"),
+      body: `PACC received your ${String(data.subject ?? "form")}. Our staff will review it.`,
+      staffName: String(staff.name ?? staff.email ?? "PACC staff"),
       createdAt: FieldValue.serverTimestamp(),
       readAt: null,
     });
@@ -2372,7 +2372,7 @@ export const expireStaleAppointmentRequests = onSchedule(
         const activeLock = await transaction.get(activeAppointmentLock);
         transaction.update(appointment.ref, {
           status: "expired", expiredAt: FieldValue.serverTimestamp(),
-          expiryReason: "Request expired before PAACC review", updatedAt: FieldValue.serverTimestamp(),
+          expiryReason: "Request expired before PACC review", updatedAt: FieldValue.serverTimestamp(),
         });
         if (data.scheduledAt instanceof Timestamp) {
           transaction.delete(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt)));

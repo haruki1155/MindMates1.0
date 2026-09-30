@@ -1489,7 +1489,7 @@ class _PaccCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'PAACC Counseling Office',
+                  'PACC Counseling Office',
                   style: TextStyle(
                     color: _ResultPalette.text,
                     fontSize: 15,

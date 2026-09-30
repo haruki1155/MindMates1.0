@@ -1,10 +1,10 @@
-# PAACC Schedule V2 Design
+# PACC Schedule V2 Design
 
 **Source contract:** `C:\Users\Mj\Downloads\MINDMATE_PAACC_SCHEDULE_EVOLUTION_PLAN.md`
 
 ## Objective
 
-Evolve PAACC availability from one global V1 configuration to a server-authoritative V2 weekly schedule with date overrides, while preserving existing appointments and V1 document readability during rollout.
+Evolve PACC availability from one global V1 configuration to a server-authoritative V2 weekly schedule with date overrides, while preserving existing appointments and V1 document readability during rollout.
 
 ## Non-negotiable rules
 

@@ -374,7 +374,7 @@ void main() {
     provider.dispose();
   });
   test(
-    'safety clears pending state before PAACC; another device can consume once',
+    'safety clears pending state before PACC; another device can consume once',
     () async {
       final repository = TestRepository();
       final router = TestRouter();

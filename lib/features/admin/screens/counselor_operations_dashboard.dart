@@ -99,7 +99,7 @@ class _Content extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         const Text(
-          'PAACC-wide clinical operations and your assigned caseload.',
+          'PACC-wide clinical operations and your assigned caseload.',
           style: TextStyle(color: AdminColors.muted),
         ),
         const SizedBox(height: 24),
@@ -117,7 +117,7 @@ class _Content extends StatelessWidget {
               children: [
                 _Metric(
                   width: width,
-                  title: 'PAACC Today',
+                  title: 'PACC Today',
                   value: '${metrics.today}',
                   note:
                       '${today.where((a) => !_closed(a.status)).length} remaining',

@@ -27,7 +27,7 @@ class AppointmentUiState {
     ),
     AppointmentStatus.rescheduleProposed => const AppointmentUiState(
       'Schedule Update Pending',
-      'PAACC is finalizing your appointment schedule.',
+      'PACC is finalizing your appointment schedule.',
       Icons.event_repeat_outlined,
       Color(0xFFAD6700),
     ),
@@ -450,7 +450,7 @@ class AppointmentCard extends StatelessWidget {
       ),
     ),
   );
-  // Legacy records are view-only while PAACC finalizes their schedule.
+  // Legacy records are view-only while PACC finalizes their schedule.
   // ignore: unused_element
   void _showProposal(BuildContext context) => showModalBottomSheet<void>(
     context: context,
@@ -472,7 +472,7 @@ class AppointmentCard extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'PAACC is finalizing the updated appointment schedule.',
+              'PACC is finalizing the updated appointment schedule.',
             ),
             const SizedBox(height: 20),
             SizedBox(

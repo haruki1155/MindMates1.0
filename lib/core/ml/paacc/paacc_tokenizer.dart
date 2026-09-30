@@ -24,11 +24,11 @@ class PaaccTokenizer {
       final decoded = jsonDecode(raw);
       if (decoded is! List) {
         throw const PaaccMlException(
-          'PAACC vocabulary JSON must contain a list.',
+          'PACC vocabulary JSON must contain a list.',
         );
       }
       if (decoded.length < 2 || decoded.any((item) => item is! String)) {
-        throw const PaaccMlException('PAACC vocabulary is invalid.');
+        throw const PaaccMlException('PACC vocabulary is invalid.');
       }
       return PaaccTokenizer(
         vocabulary: decoded.cast<String>(),
@@ -37,7 +37,7 @@ class PaaccTokenizer {
     } on PaaccMlException {
       rethrow;
     } catch (error) {
-      throw PaaccMlException('Failed to load PAACC vocabulary: $error');
+      throw PaaccMlException('Failed to load PACC vocabulary: $error');
     }
   }
 

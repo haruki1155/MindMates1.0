@@ -806,7 +806,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'PAACC Staff: appointments, schedules, inquiries, and limited administrative information.\nCounselor: authorized counseling profiles, assessment summaries, and counseling workflows.',
+                  'PACC Staff: appointments, schedules, inquiries, and limited administrative information.\nCounselor: authorized counseling profiles, assessment summaries, and counseling workflows.',
                   style: TextStyle(
                     color: AdminColors.muted,
                     fontSize: 12,

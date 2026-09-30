@@ -113,7 +113,7 @@ export async function createOrUpdateMindAidEmergencyAlert({
     return {alertId, notified: true};
   } catch (_) {
     // The alert record remains available for the bounded clinical workflow,
-    // but the caller must not claim PAACC was notified.
+    // but the caller must not claim PACC was notified.
     return {alertId, notified: false};
   }
 }
@@ -148,7 +148,7 @@ export async function acknowledgeMindAidEmergencyAlertHandler(request: CallableR
       status: "acknowledged" satisfies EmergencyAlertStatus,
       acknowledgedAt: FieldValue.serverTimestamp(),
       acknowledgedBy: uid,
-      acknowledgedByName: String(actor.name ?? actor.displayName ?? actor.email ?? "PAACC counselor").slice(0, 120),
+      acknowledgedByName: String(actor.name ?? actor.displayName ?? actor.email ?? "PACC counselor").slice(0, 120),
     });
   });
   return {ok: true};
@@ -173,7 +173,7 @@ export async function resolveMindAidEmergencyAlertHandler(request: CallableReque
       status: "resolved" satisfies EmergencyAlertStatus,
       resolvedAt: FieldValue.serverTimestamp(),
       resolvedBy: uid,
-      resolvedByName: String(actor.name ?? actor.displayName ?? actor.email ?? "PAACC counselor").slice(0, 120),
+      resolvedByName: String(actor.name ?? actor.displayName ?? actor.email ?? "PACC counselor").slice(0, 120),
       resolutionDisposition: disposition,
     });
     transaction.delete(db.collection(ACTIVE_ALERTS).doc(String(data.userId ?? "")));

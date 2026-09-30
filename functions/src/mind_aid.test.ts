@@ -31,15 +31,15 @@ test("rejects diagnostic and prescription-like generated output", () => {
 
 test("controlled crisis response omits missing contacts and never falsely claims notification", () => {
   const contacts = {
-    paccName: "Psychological Assessment and Counseling Center", paccPhone: "", campusSecurityPhone: "", emergencyLabel: "Emergency services", emergencyPhone: "911", shortName: "PAACC",
+    paccName: "Psychological Assessment and Counseling Center", paccPhone: "", campusSecurityPhone: "", emergencyLabel: "Emergency services", emergencyPhone: "911", shortName: "PACC",
     ncmhLandline: "1553", ncmhGlobe: "", ncmhSmart: "", ncmhAlternate: "", hopelineTollFree: "", hopelineGlobe: "", hopelineSmart: "", hopelinePldt: "", inTouchLandline: "", inTouchSmart: "", inTouchGlobe: "", tawagPaglaumSmart: "", tawagPaglaumGlobe: "",
   };
   const failed = controlledCrisisResponse(contacts, false).text;
   assert.match(failed, /1553/);
   assert.doesNotMatch(failed, /HOPELINE|In Touch|Tawag Paglaum/);
-  assert.match(failed, /could not automatically notify PAACC/);
-  assert.doesNotMatch(failed, /PAACC has been notified/);
-  assert.match(controlledCrisisResponse(contacts, true).text, /PAACC has been notified/);
+  assert.match(failed, /could not automatically notify PACC/);
+  assert.doesNotMatch(failed, /PACC has been notified/);
+  assert.match(controlledCrisisResponse(contacts, true).text, /PACC has been notified/);
 });
 
 test("normalizes conversation mode as behavioral metadata", () => {

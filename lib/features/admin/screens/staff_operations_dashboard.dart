@@ -7,7 +7,7 @@ import '../domain/portal_appointment_metrics.dart';
 import '../theme/admin_theme.dart';
 import 'admin_portal.dart';
 
-/// Operational dashboard for PAACC Staff. It deliberately does not query
+/// Operational dashboard for PACC Staff. It deliberately does not query
 /// users, assessments, reports, or counseling notes.
 class StaffOperationsDashboardPage extends StatelessWidget {
   const StaffOperationsDashboardPage({
@@ -76,7 +76,7 @@ class _DashboardContent extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         const Text(
-          "Overview of today's PAACC operations.",
+          "Overview of today's PACC operations.",
           style: TextStyle(color: AdminColors.muted),
         ),
         const SizedBox(height: 24),
@@ -132,7 +132,7 @@ class _DashboardContent extends StatelessWidget {
                               width: width,
                               label: 'Schedule',
                               value: '—',
-                              note: "Today's PAACC schedule",
+                              note: "Today's PACC schedule",
                               icon: Icons.schedule_outlined,
                             )
                           : PaccStaffScheduleMetric(
@@ -224,7 +224,7 @@ class PaccStaffScheduleMetric extends StatelessWidget {
       value: value,
       note: resolved.source == PaccScheduleSource.override
           ? 'Schedule override for ${resolved.date}'
-          : "Today's PAACC schedule",
+          : "Today's PACC schedule",
       icon: Icons.schedule_outlined,
     );
   }

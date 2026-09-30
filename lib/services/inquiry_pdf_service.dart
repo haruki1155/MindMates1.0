@@ -12,7 +12,7 @@ class InquiryPdfService {
   static Future<Uint8List> build(AdminInquiryModel inquiry) async {
     final document = pw.Document(
       title: inquiry.subject,
-      author: 'MindMate PAACC',
+      author: 'MindMate PACC',
     );
     document.addPage(
       pw.MultiPage(
@@ -22,7 +22,7 @@ class InquiryPdfService {
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Text(
-              'MindMate | PAACC',
+              'MindMate | PACC',
               style: pw.TextStyle(fontSize: 11, color: PdfColors.grey700),
             ),
             pw.Divider(),

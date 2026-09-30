@@ -1,8 +1,8 @@
-# PAACC Schedule V2 Implementation Plan
+# PACC Schedule V2 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement task-by-task. Steps use checkbox syntax for tracking.
 
-**Goal:** Deliver a V2 PAACC schedule that governs appointments, office status, and administration through one server-authoritative resolver.
+**Goal:** Deliver a V2 PACC schedule that governs appointments, office status, and administration through one server-authoritative resolver.
 
 **Architecture:** V2 parsing and resolution live in `functions/src/appointment_availability.ts`, with V1 normalization only at the read boundary. Existing appointment transactions invoke the resolver. Flutter gains a lossless V2/V1-compatible model and callable-backed editor; client status views use its Asia/Manila resolver.
 
@@ -48,7 +48,7 @@
 - [ ] Implement strict V2 payload validation (allowed fields, complete weekdays, times, overrides, notice/reason bounds), V1 normalizer, and canonical resolver with closure reason.
 - [ ] Upgrade the Flutter model to deserialize V1/V2, serialize V2 only, and expose a pure effective-status method.
 - [ ] Run: `npm.cmd test` in `functions`; `flutter test test/models/pacc_availability_model_test.dart`. Expected: GREEN.
-- [ ] Commit: `feat: add PAACC schedule V2 resolver`.
+- [ ] Commit: `feat: add PACC schedule V2 resolver`.
 
 ### Task 2: Apply resolver to slots and appointment lifecycle
 
@@ -83,7 +83,7 @@
 - [ ] Run: `npm.cmd test -- --test-name-pattern="schedule conflict|revision|availability save"` in `functions`. Expected: RED.
 - [ ] Implement pure conflict preview and harden `savePaccAvailability` to validate, compare revision, preview before write, atomically write V2/revision, and audit the change.
 - [ ] Run: `npm.cmd test` in `functions`. Expected: GREEN.
-- [ ] Commit: `feat: protect PAACC schedule updates`.
+- [ ] Commit: `feat: protect PACC schedule updates`.
 
 ### Task 4: Preserve and prove schedule access boundaries
 
@@ -100,7 +100,7 @@
 - [ ] Run: `npm.cmd test -- --test-name-pattern="availability.*role|permission|rules"` in `functions`. Expected: RED for uncovered behavior.
 - [ ] Make the smallest callable authorization/rules adjustment that preserves callable-only writes.
 - [ ] Run: `npm.cmd test` in `functions`. Expected: GREEN.
-- [ ] Commit: `test: cover PAACC schedule access boundaries`.
+- [ ] Commit: `test: cover PACC schedule access boundaries`.
 
 ### Task 5: Upgrade Flutter repository and callable protocol
 
@@ -117,7 +117,7 @@
 - [ ] Run: `flutter test test/repositories/pacc_availability_repository_test.dart`. Expected: RED.
 - [ ] Implement typed request/result mapping without direct Firestore writes or relaxed role checks.
 - [ ] Run: `flutter test test/models/pacc_availability_model_test.dart test/repositories/pacc_availability_repository_test.dart`. Expected: GREEN.
-- [ ] Commit: `feat: add V2 PAACC schedule repository support`.
+- [ ] Commit: `feat: add V2 PACC schedule repository support`.
 
 ### Task 6: Replace global editor with weekly and special-date management
 
@@ -133,7 +133,7 @@
 - [ ] Run: `flutter test test/features/admin/pacc_schedule_editor_test.dart`. Expected: RED because the page is global/blackout-date based.
 - [ ] Replace only `_PaccAvailabilityPage` and directly supporting private widgets with a draft-based editor. Use labels with icon/status, scroll-safe dialogs, and a visible narrow-layout Save control.
 - [ ] Run: `flutter test test/features/admin/pacc_schedule_editor_test.dart`. Expected: GREEN.
-- [ ] Commit: `feat: redesign PAACC weekly schedule editor`.
+- [ ] Commit: `feat: redesign PACC weekly schedule editor`.
 
 ### Task 7: Use effective V2 status in student and operations views
 
@@ -151,7 +151,7 @@
 - [ ] Run: `flutter test test/features/home test/features/admin`. Expected: RED where V1 `isOpenAt` disagrees with V2.
 - [ ] Replace legacy global status reconstruction with V2 effective status, without unrelated dashboard changes.
 - [ ] Run: `flutter test test/features/home test/features/admin`. Expected: GREEN.
-- [ ] Commit: `feat: show effective PAACC schedule status`.
+- [ ] Commit: `feat: show effective PACC schedule status`.
 
 ### Task 8: Full regression and explicit migration boundary
 
@@ -164,7 +164,7 @@
 - [ ] Run: `flutter analyze` then `flutter test` in repo root. Expected: clean analyzer and green suite, or exact pre-existing failures recorded.
 - [ ] Run: `git diff --check main...HEAD`. Expected: no whitespace errors.
 - [ ] Record that deployment, authenticated staging validation, and intentional V1 migration are separate follow-up operations.
-- [ ] Commit: `docs: record PAACC schedule V2 verification`.
+- [ ] Commit: `docs: record PACC schedule V2 verification`.
 
 ## Plan self-review
 

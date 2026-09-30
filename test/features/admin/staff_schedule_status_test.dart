@@ -16,6 +16,6 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: PaccStaffScheduleMetric(width: 300, availability: availability, now: now))));
 
     expect(find.text('Open — appointments unavailable'), findsOneWidget);
-    expect(find.text('Today\'s PAACC schedule'), findsOneWidget);
+    expect(find.text('Today\'s PACC schedule'), findsOneWidget);
   });
 }

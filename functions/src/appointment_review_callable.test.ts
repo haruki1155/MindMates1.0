@@ -28,7 +28,7 @@ async function futureWeekdaySlot(excluded = new Set<number>()): Promise<number> 
   throw new Error("No future weekday slot found.");
 }
 function payload(appointmentId: string, proposedAt: number, reason = "Office schedule adjustment") {
-  return {appointmentId, action: "rescheduled", reply: "PAACC has updated your appointment schedule.", proposedScheduledAt: proposedAt, rescheduleReason: reason};
+  return {appointmentId, action: "rescheduled", reply: "PACC has updated your appointment schedule.", proposedScheduledAt: proposedAt, rescheduleReason: reason};
 }
 async function expectCallableFailure(promise: Promise<unknown>, code: string): Promise<void> {
   await assert.rejects(promise, (error: {code?: unknown}) => error?.code === code);
@@ -72,7 +72,7 @@ test("staff re-schedule is atomic, confirmed, audited, and not student-approvabl
   assert.equal(oldSlot.exists, false); assert.equal(newSlot.data()?.appointmentId, appointment.id); assert.equal(lock.data()?.appointmentId, appointment.id);
   const historyEntry = history.docs.find((item) => item.data().status === "rescheduled")?.data();
   assert.equal(historyEntry?.previousScheduledAt.toMillis(), oldAt); assert.equal(historyEntry?.scheduledAt.toMillis(), newAt);
-  assert.equal(notices.docs[0].data().type, "appointment_rescheduled"); assert.match(notices.docs[0].data().body, /PAACC rescheduled/i);
+  assert.equal(notices.docs[0].data().type, "appointment_rescheduled"); assert.match(notices.docs[0].data().body, /PACC rescheduled/i);
   assert.equal(audit.docs.some((item) => item.data().action === "APPOINTMENT_RESCHEDULED" && item.data().actorId === counselorId), true);
   await expectCallableFailure(respond.run({auth: {uid: studentId}, data: {appointmentId: appointment.id, action: "accept_reschedule"}}), "permission-denied");
 });

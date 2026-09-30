@@ -8,7 +8,7 @@ import 'package:mind_mates/core/ml/paacc/paacc_tokenizer.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('reproduces all PAACC V4 tokenizer parity cases', () async {
+  test('reproduces all PACC V4 tokenizer parity cases', () async {
     final config = await PaaccMlConfig.load();
     final tokenizer = await PaaccTokenizer.load(maxLength: config.maxLength);
     final reference =

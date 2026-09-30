@@ -359,7 +359,7 @@ class _SupportServicesCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'PAACC Support Service',
+              'PACC Support Service',
               style: _ServicesText.supportTitle,
             ),
             const SizedBox(height: 12),
