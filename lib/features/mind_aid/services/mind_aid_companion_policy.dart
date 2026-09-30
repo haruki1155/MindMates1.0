@@ -88,8 +88,10 @@ class MindAidCompanionPolicy {
     'need to vent',
     'no advice',
     'dont give me advice',
+    'dont want advice',
     'dont want solutions',
     'dont try to fix',
+    'just need to complain',
     'can i tell you something',
   ];
   static const _coachingPhrases = [

@@ -23,6 +23,14 @@ void main() {
     expect(coaching.explicitListening, isFalse);
   });
 
+  test('an explicit no-advice complaint request enters listening mode', () {
+    final listening = resolve(
+      "I don't want advice yet. I just need to complain.",
+    );
+    expect(listening.mode, MindAidConversationMode.listening);
+    expect(listening.explicitListening, isTrue);
+  });
+
   test(
     'explicit product requests override listening without choosing an action',
     () {
