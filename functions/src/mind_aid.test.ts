@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {classifyMindAidSafety, dialogflowModeEvent, dialogflowSessionId, effectiveConversationMode, eligibleRecentTurns, isSafeMindAidOutput, sanitizeRecentTurns} from "./mind_aid";
+import {classifyMindAidSafety, controlledCrisisResponse, dialogflowModeEvent, dialogflowSessionId, effectiveConversationMode, eligibleRecentTurns, isCurrentFirstPersonRisk, isSafeMindAidOutput, sanitizeRecentTurns} from "./mind_aid";
 import {buildMindAidSystemInstruction, mindAidSystemPrompt} from "./mind_aid_llm/mind_aid_system_prompt";
 
 test("classifies English and Taglish crisis messages before Dialogflow", () => {
@@ -13,10 +13,33 @@ test("classifies English and Taglish crisis messages before Dialogflow", () => {
   assert.equal(classifyMindAidSafety("kms"), "crisisOrImmediateRisk");
 });
 
+test("only routes current first-person self-harm statements into the crisis path", () => {
+  for (const text of ["I want to kill my self", "I WANT TO KILL MYSELF", "I want to die", "I don't want to live anymore", "gusto kong mamatay", "ayoko nang mabuhay", "magpakamatay"]) {
+    assert.equal(classifyMindAidSafety(text), "crisisOrImmediateRisk", text);
+  }
+  for (const text of ["My friend said he wants to kill himself", "I used to want to kill myself", "I don't want to kill myself", "I read a story about someone killing himself"]) {
+    assert.equal(isCurrentFirstPersonRisk(text.toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()), false, text);
+    assert.notEqual(classifyMindAidSafety(text), "crisisOrImmediateRisk", text);
+  }
+});
+
 test("rejects diagnostic and prescription-like generated output", () => {
   assert.equal(isSafeMindAidOutput("You have depression and should isolate."), false);
   assert.equal(isSafeMindAidOutput("Stop taking your medicine today."), false);
   assert.equal(isSafeMindAidOutput("That sounds difficult. A short pause could help."), true);
+});
+
+test("controlled crisis response omits missing contacts and never falsely claims notification", () => {
+  const contacts = {
+    paccName: "Psychological Assessment and Counseling Center", paccPhone: "", campusSecurityPhone: "", emergencyLabel: "Emergency services", emergencyPhone: "911", shortName: "PAACC",
+    ncmhLandline: "1553", ncmhGlobe: "", ncmhSmart: "", ncmhAlternate: "", hopelineTollFree: "", hopelineGlobe: "", hopelineSmart: "", hopelinePldt: "", inTouchLandline: "", inTouchSmart: "", inTouchGlobe: "", tawagPaglaumSmart: "", tawagPaglaumGlobe: "",
+  };
+  const failed = controlledCrisisResponse(contacts, false).text;
+  assert.match(failed, /1553/);
+  assert.doesNotMatch(failed, /HOPELINE|In Touch|Tawag Paglaum/);
+  assert.match(failed, /could not automatically notify PAACC/);
+  assert.doesNotMatch(failed, /PAACC has been notified/);
+  assert.match(controlledCrisisResponse(contacts, true).text, /PAACC has been notified/);
 });
 
 test("normalizes conversation mode as behavioral metadata", () => {

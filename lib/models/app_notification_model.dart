@@ -10,6 +10,7 @@ class AppNotificationModel {
     required this.createdAt,
     this.appointmentId,
     this.inquiryId,
+    this.emergencyAlertId,
     this.audience,
     this.readAt,
     this.resolvedAt,
@@ -26,6 +27,7 @@ class AppNotificationModel {
   final DateTime createdAt;
   final String? appointmentId;
   final String? inquiryId;
+  final String? emergencyAlertId;
   final String? audience;
   final DateTime? readAt;
   final DateTime? resolvedAt;
@@ -47,6 +49,7 @@ class AppNotificationModel {
     type: json['type']?.toString() ?? 'general',
     appointmentId: _text(json['appointmentId']),
     inquiryId: _text(json['inquiryId']),
+    emergencyAlertId: _text(json['emergencyAlertId']),
     audience: _text(json['audience']),
     createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
     readAt: dateTimeFromFirestore(json['readAt']),

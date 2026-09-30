@@ -61,6 +61,10 @@ export {
   sendMindAidMessage,
   sendMindAidMessageDev,
 } from "./mind_aid";
+export {
+  acknowledgeMindAidEmergencyAlert,
+  resolveMindAidEmergencyAlert,
+} from "./mind_aid_emergency";
 export {getReportAnalytics} from "./report_generation";
 export {
   importWalkInAppointments,
@@ -1332,11 +1336,18 @@ export const managePortalNotification = onCall(async (request) => {
   const refs = notificationIds.map((id) => db.collection("notifications").doc(id));
   await db.runTransaction(async (transaction) => {
     const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
-    snapshots.forEach((snapshot, index) => {
+    for (const [index, snapshot] of snapshots.entries()) {
       if (!snapshot.exists) throw new HttpsError("not-found", "A notification no longer exists.");
       const data = snapshot.data() ?? {};
       if (data.userId !== uid || data.audience !== "portal") {
         throw new HttpsError("permission-denied", "You cannot manage this notification.");
+      }
+      if (data.type === "mind_aid_emergency") {
+        const alertId = String(data.emergencyAlertId ?? "");
+        const alert = alertId ? await transaction.get(db.collection("mind_aid_emergency_alerts").doc(alertId)) : null;
+        if (!alert || !alert.exists || alert.data()?.status !== "resolved") {
+          throw new HttpsError("failed-precondition", "Open emergency alerts cannot be archived or deleted.");
+        }
       }
       const ref = refs[index];
       if (action === "restore") {
@@ -1360,7 +1371,7 @@ export const managePortalNotification = onCall(async (request) => {
           });
         }
       }
-    });
+    }
   });
   return {success: true, affected: notificationIds.length};
 });
@@ -2225,7 +2236,8 @@ export const sendAppointmentNotification = onDocumentCreated(
   },
   async (event) => {
     const notification = event.data?.data();
-    if (!notification || !(String(notification.type ?? "") === "inquiry" || String(notification.type ?? "").startsWith("appointment") || String(notification.type ?? "").startsWith("reschedule"))) return;
+    const notificationType = String(notification?.type ?? "");
+    if (!notification || !(notificationType === "inquiry" || notificationType.startsWith("appointment") || notificationType.startsWith("reschedule") || notificationType === "mind_aid_emergency")) return;
     const userId = String(notification.userId ?? "");
     if (!userId) return;
     const tokens = await db.collection("user_devices").doc(userId).collection("tokens").get();
@@ -2233,11 +2245,16 @@ export const sendAppointmentNotification = onDocumentCreated(
     if (!values.length) return;
     const result = await getMessaging().sendEachForMulticast({
       tokens: values,
-      notification: {title: String(notification.title ?? "MindMate"), body: String(notification.body ?? "")},
+      notification: {
+        title: String(notification.title ?? "MindMate"),
+        // Emergency push previews intentionally contain no user-entered text.
+        body: notificationType === "mind_aid_emergency" ? "A MindAid safety alert requires counselor review." : String(notification.body ?? ""),
+      },
       data: {
         type: String(notification.type),
         appointmentId: String(notification.appointmentId ?? ""),
         inquiryId: String(notification.inquiryId ?? ""),
+        emergencyAlertId: String(notification.emergencyAlertId ?? ""),
       },
     });
     const invalid = result.responses

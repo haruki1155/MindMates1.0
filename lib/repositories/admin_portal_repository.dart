@@ -810,6 +810,44 @@ class AdminPortalRepository {
     );
   }
 
+  Future<Map<String, dynamic>> fetchMindAidEmergencyAlert(
+    String alertId,
+  ) async {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    final snapshot = await FirebaseFirestore.instance
+        .collection('mind_aid_emergency_alerts')
+        .doc(alertId)
+        .get();
+    if (!snapshot.exists) throw StateError('Emergency alert is unavailable.');
+    return snapshot.data() ?? const <String, dynamic>{};
+  }
+
+  Future<void> acknowledgeMindAidEmergencyAlert(String alertId) async {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    await FirebaseFunctions.instance
+        .httpsCallable('acknowledgeMindAidEmergencyAlert')
+        .call<void>({'alertId': alertId});
+  }
+
+  Future<void> resolveMindAidEmergencyAlert(
+    String alertId, {
+    required String resolutionDisposition,
+  }) async {
+    if (!currentAccessRole.canAccessClinicalData) {
+      throw StateError('Counselor or administrator access is required.');
+    }
+    await FirebaseFunctions.instance
+        .httpsCallable('resolveMindAidEmergencyAlert')
+        .call<void>({
+          'alertId': alertId,
+          'resolutionDisposition': resolutionDisposition,
+        });
+  }
+
   Future<AdminReportAnalytics> fetchReportAnalytics({
     String userCategory = 'all',
     String appointmentDepartment = 'all',

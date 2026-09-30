@@ -8,6 +8,7 @@ class MindAidSafetyClassifier {
 
   static const _crisisPhrases = [
     'kill myself',
+    'kill my self',
     'end my life',
     'end it all',
     'take my life',
@@ -20,8 +21,10 @@ class MindAidSafetyClassifier {
     'suicide',
     'self harm',
     'hurt myself',
+    'hurt my self',
     'cut myself',
     'i want to die',
+    'i dont want to live',
     'do not want to live',
     'ayoko nang mabuhay',
     'gusto kong mamatay',
@@ -53,7 +56,7 @@ class MindAidSafetyClassifier {
     }
 
     if (matches.any(_isCrisisMatch) ||
-        _containsAny(normalizedInput, _crisisPhrases)) {
+        _isCurrentFirstPersonRisk(normalizedInput)) {
       return const MindAidSafetyResult(
         level: MindAidSafetyLevel.crisisOrImmediateRisk,
         reason: 'crisis_signal',
@@ -107,5 +110,31 @@ class MindAidSafetyClassifier {
       }
     }
     return false;
+  }
+
+  bool _isCurrentFirstPersonRisk(String input) {
+    if (!_containsAny(input, _crisisPhrases)) return false;
+    // Retain the existing immediate shorthand/indirect signals. These are
+    // evaluated only after the phrase list above and before generic context.
+    if (input == 'kms' ||
+        input.startsWith('i cannot go on') ||
+        input.startsWith('i cant go on')) {
+      return true;
+    }
+    if (RegExp(
+          r'\b(i|ako)\s+(do not|dont|did not|didnt|never)\s+(want to )?(kill|hurt|end)\b',
+        ).hasMatch(input) ||
+        RegExp(r'\b(i|ako)\s+(used to|no longer|dati)\b').hasMatch(input) ||
+        RegExp(
+          r'\b(my friend|friend|he|she|they|someone|story|article|nabasa ko)\b',
+        ).hasMatch(input)) {
+      return false;
+    }
+    return RegExp(
+          r'\b(i|im|ive|me|myself|my self|ako|kong|ko)\b',
+        ).hasMatch(input) ||
+        RegExp(
+          r'\b(magpakamatay|gusto kong mamatay|ayoko nang mabuhay)\b',
+        ).hasMatch(input);
   }
 }

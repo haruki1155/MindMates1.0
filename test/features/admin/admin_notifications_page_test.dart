@@ -60,4 +60,47 @@ void main() {
     expect(find.text('New counseling appointment'), findsOneWidget);
     expect(find.text('No notifications match this filter.'), findsNothing);
   });
+
+  testWidgets('prioritizes emergency alerts and exposes the Emergency filter', (
+    tester,
+  ) async {
+    final notifications = StreamController<List<AppNotificationModel>>();
+    addTearDown(notifications.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AdminNotificationsPage(
+            repository: _Repository(notifications.stream),
+            onOpenAppointments: () {},
+            onOpenInquiries: () {},
+          ),
+        ),
+      ),
+    );
+    notifications.add([
+      AppNotificationModel(
+        id: 'normal',
+        userId: 'c',
+        title: 'Appointment',
+        body: 'Normal',
+        type: 'appointment',
+        audience: 'portal',
+        createdAt: DateTime(2026, 9, 10),
+      ),
+      AppNotificationModel(
+        id: 'emergency',
+        userId: 'c',
+        title: 'Emergency Alert',
+        body: 'A MindAid safety alert requires counselor review.',
+        type: 'mind_aid_emergency',
+        emergencyAlertId: 'alert-1',
+        audience: 'portal',
+        createdAt: DateTime(2026, 9, 9),
+      ),
+    ]);
+    await tester.pump();
+    expect(find.text('Emergency'), findsOneWidget);
+    expect(find.text('Emergency Alert'), findsOneWidget);
+    expect(find.byIcon(Icons.warning_amber_rounded), findsAtLeastNWidgets(1));
+  });
 }

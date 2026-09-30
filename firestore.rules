@@ -597,6 +597,17 @@ service cloud.firestore {
       allow create, delete: if false;
     }
 
+    // A minimal, server-created safety incident record. It deliberately has
+    // no chat transcript. General portal staff cannot read emergency alerts.
+    match /mind_aid_emergency_alerts/{alertId} {
+      allow read: if hasClinicalAccess();
+      allow create, update, delete: if false;
+    }
+
+    match /_mind_aid_active_emergency_alerts/{userId} {
+      allow read, write: if false;
+    }
+
     match /user_devices/{userId}/tokens/{tokenId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create, update, delete: if isOwner(userId);

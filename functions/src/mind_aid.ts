@@ -7,6 +7,7 @@ import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 import {GeminiMindAidProvider} from "./mind_aid_llm/gemini_mind_aid_provider";
 import type {MindAidRecentTurn} from "./mind_aid_llm/mind_aid_llm_models";
+import {createOrUpdateMindAidEmergencyAlert} from "./mind_aid_emergency";
 
 if (!getApps().length) initializeApp();
 
@@ -103,10 +104,10 @@ export function dialogflowSessionId(
 }
 
 const crisisPhrases = [
-  "kill myself", "end my life", "end it all", "take my life",
+  "kill myself", "kill my self", "end my life", "end it all", "take my life",
   "no reason to live", "cant go on", "cannot go on", "want to disappear",
-  "unalive myself", "suicide", "self harm", "hurt myself", "cut myself",
-  "i want to die", "do not want to live", "ayoko nang mabuhay",
+  "unalive myself", "suicide", "self harm", "hurt myself", "hurt my self", "cut myself",
+  "i want to die", "i dont want to live", "do not want to live", "ayoko nang mabuhay",
   "gusto kong mamatay", "magpakamatay",
 ];
 
@@ -130,15 +131,26 @@ const allowedActions = new Set([
 ]);
 
 function normalize(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  return value.toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 export function classifyMindAidSafety(text: string): SafetyLevel {
   const value = normalize(text);
   if (!value) return "needsClarification";
-  if (crisisPhrases.some((phrase) => value.includes(phrase)) || /(^|\s)kms(\s|$)/.test(value)) return "crisisOrImmediateRisk";
+  if (isCurrentFirstPersonRisk(value)) return "crisisOrImmediateRisk";
   if (highDistressPhrases.some((phrase) => value.includes(phrase))) return "highDistress";
   return "safeSupport";
+}
+
+export function isCurrentFirstPersonRisk(value: string): boolean {
+  const phraseDetected = crisisPhrases.some((phrase) => value.includes(phrase)) || /(^|\s)kms(\s|$)/.test(value);
+  if (!phraseDetected) return false;
+  if (value === "kms" || value.startsWith("i cannot go on") || value.startsWith("i cant go on")) return true;
+  if (/\b(i|ako)\s+(do not|dont|did not|didnt|never)\s+(want to )?(kill|hurt|end)\b/.test(value) ||
+      /\b(i|ako)\s+(used to|no longer|dati)\b/.test(value) ||
+      /\b(my friend|friend|he|she|they|someone|story|article|nabasa ko)\b/.test(value)) return false;
+  return /\b(i|im|ive|me|myself|my self|ako|kong|ko)\b/.test(value) ||
+    /\b(magpakamatay|gusto kong mamatay|ayoko nang mabuhay)\b/.test(value);
 }
 
 export function isSafeMindAidOutput(text: string): boolean {
@@ -152,6 +164,20 @@ interface SupportContacts {
   campusSecurityPhone: string;
   emergencyLabel: string;
   emergencyPhone: string;
+  shortName: string;
+  ncmhLandline: string;
+  ncmhGlobe: string;
+  ncmhSmart: string;
+  ncmhAlternate: string;
+  hopelineTollFree: string;
+  hopelineGlobe: string;
+  hopelineSmart: string;
+  hopelinePldt: string;
+  inTouchLandline: string;
+  inTouchSmart: string;
+  inTouchGlobe: string;
+  tawagPaglaumSmart: string;
+  tawagPaglaumGlobe: string;
 }
 
 async function loadSupportContacts(): Promise<SupportContacts> {
@@ -161,22 +187,93 @@ async function loadSupportContacts(): Promise<SupportContacts> {
     return /^[+0-9() -]{7,24}$/.test(text) ? text : "";
   };
   return {
-    paccName: String(data.paccName ?? "PACC").trim().slice(0, 80) || "PACC",
+    paccName: String(data.displayName ?? data.paccName ?? "Psychological Assessment and Counseling Center").trim().slice(0, 100) || "Psychological Assessment and Counseling Center",
     paccPhone: phone(data.paccPhone),
     campusSecurityPhone: phone(data.campusSecurityPhone),
     emergencyLabel: String(data.emergencyLabel ?? "local emergency services").trim().slice(0, 80) || "local emergency services",
-    emergencyPhone: phone(data.emergencyPhone),
+    emergencyPhone: phone(data.emergencyNumber ?? data.emergencyPhone),
+    shortName: String(data.shortName ?? "PAACC").trim().slice(0, 20) || "PAACC",
+    ncmhLandline: phone(data.ncmhLandline), ncmhGlobe: phone(data.ncmhGlobe), ncmhSmart: phone(data.ncmhSmart), ncmhAlternate: phone(data.ncmhAlternate),
+    hopelineTollFree: phone(data.hopelineTollFree), hopelineGlobe: phone(data.hopelineGlobe), hopelineSmart: phone(data.hopelineSmart), hopelinePldt: phone(data.hopelinePldt),
+    inTouchLandline: phone(data.inTouchLandline), inTouchSmart: phone(data.inTouchSmart), inTouchGlobe: phone(data.inTouchGlobe),
+    tawagPaglaumSmart: phone(data.tawagPaglaumSmart), tawagPaglaumGlobe: phone(data.tawagPaglaumGlobe),
   };
 }
 
-function safetyResponse(level: SafetyLevel, contacts: SupportContacts): {text: string; actions: MindAidAction[]} {
+export function controlledCrisisResponse(contacts: SupportContacts, emergencyAlertNotified = false): {text: string; actions: MindAidAction[]} {
+  return buildControlledCrisisResponse(contacts, emergencyAlertNotified);
+}
+
+function buildControlledCrisisResponse(contacts: SupportContacts, emergencyAlertNotified: boolean): {text: string; actions: MindAidAction[]} {
+  const section = (heading: string, values: Array<[string, string]>) => {
+    const configured = values.filter(([number]) => number.trim().length > 0);
+    return configured.length
+      ? [heading, ...configured.map(([number, label]) => `- ${number} - ${label}`), ""]
+      : [];
+  };
+  const contactsLines = [
+    ...section("**NCMH Crisis Hotline - National Center for Mental Health**", [[contacts.ncmhLandline, "landline"], [contacts.ncmhGlobe, "Globe / TM"], [contacts.ncmhSmart, "Smart / TNT"], [contacts.ncmhAlternate, "Smart / Sun / TNT"]]),
+    ...section("**HOPELINE - Natasha Goulbourn Foundation**", [[contacts.hopelineTollFree, "Globe / TM toll-free"], [contacts.hopelineGlobe, "Globe"], [contacts.hopelineSmart, "Smart"], [contacts.hopelinePldt, "PLDT"]]),
+    ...section("**In Touch Crisis Line**", [[contacts.inTouchLandline, "landline"], [contacts.inTouchSmart, "Smart"], [contacts.inTouchGlobe, "Globe"]]),
+    ...section("**Tawag Paglaum - Centro Bisaya**\nCebu and Central Visayas", [[contacts.tawagPaglaumSmart, "Smart / Sun / TNT"], [contacts.tawagPaglaumGlobe, "Globe / TM"]]),
+  ];
+  const emergencyInstruction = contacts.emergencyPhone
+    ? `If you may hurt yourself or are in immediate danger, call ${contacts.emergencyPhone} or go to the nearest emergency department.`
+    : "If you may hurt yourself or are in immediate danger, contact local emergency services or go to the nearest emergency department.";
+  const ending = emergencyAlertNotified
+    ? `${contacts.shortName} has been notified so a counselor can follow up.`
+    : `MindAid could not automatically notify ${contacts.shortName}. Please contact ${contacts.shortName}, ${contacts.emergencyPhone || contacts.emergencyLabel}, a trusted person, or one of the crisis-support lines above directly.`;
+  return {
+    text: ["**Emergency Support**", "", "Your safety matters right now.", "", `${emergencyInstruction} Please stay with someone you trust and move away from anything you could use to hurt yourself.`, "", ...(contactsLines.length ? ["**Crisis and Mental Health Support**", "For mental health crises, depression, or suicidal thoughts, these verified crisis-support lines are available:", "", ...contactsLines] : []), ending].join("\n"),
+    actions: [{type: "openCounselingServices", label: `View ${contacts.shortName} Support`}],
+  };
+}
+
+function legacyControlledCrisisResponse(contacts: SupportContacts, emergencyAlertNotified = false): {text: string; actions: MindAidAction[]} {
+  const section = (heading: string, values: Array<[string, string]>) => {
+    const configured = values.filter(([number]) => number.trim().length > 0);
+    return configured.length ? [heading, ...configured.map(([number, label]) => `- ${number} — ${label}`), ""] : [];
+  };
+  const contactsLines = [
+    ...section("**NCMH Crisis Hotline — National Center for Mental Health**", [[contacts.ncmhLandline, "landline"], [contacts.ncmhGlobe, "Globe / TM"], [contacts.ncmhSmart, "Smart / TNT"], [contacts.ncmhAlternate, "Smart / Sun / TNT"]]),
+    ...section("**HOPELINE — Natasha Goulbourn Foundation**", [[contacts.hopelineTollFree, "Globe / TM toll-free"], [contacts.hopelineGlobe, "Globe"], [contacts.hopelineSmart, "Smart"], [contacts.hopelinePldt, "PLDT"]]),
+    ...section("**In Touch Crisis Line**", [[contacts.inTouchLandline, "landline"], [contacts.inTouchSmart, "Smart"], [contacts.inTouchGlobe, "Globe"]]),
+    ...section("**Tawag Paglaum – Centro Bisaya**\nCebu and Central Visayas", [[contacts.tawagPaglaumSmart, "Smart / Sun / TNT"], [contacts.tawagPaglaumGlobe, "Globe / TM"]]),
+  ];
+  const emergencyInstruction = contacts.emergencyPhone
+    ? `If you may hurt yourself or are in immediate danger, call ${contacts.emergencyPhone} or go to the nearest emergency department.`
+    : "If you may hurt yourself or are in immediate danger, contact local emergency services or go to the nearest emergency department.";
+  const ending = emergencyAlertNotified
+    ? `${contacts.shortName} has been notified so a counselor can follow up.`
+    : `MindAid could not automatically notify ${contacts.shortName}. Please contact ${contacts.shortName}, 911, a trusted person, or one of the crisis-support lines above directly.`;
+  return {
+    text: ["**Emergency Support**", "", "Your safety matters right now.", "", `${emergencyInstruction} Please stay with someone you trust and move away from anything you could use to hurt yourself.`, "", ...(contactsLines.length ? ["**Crisis and Mental Health Support**", "For mental health crises, depression, or suicidal thoughts, these verified crisis-support lines are available:", "", ...contactsLines] : []), ending].join("\n"),
+    actions: [{type: "openCounselingServices", label: `View ${contacts.shortName} Support`}],
+  };
+}
+
+function safetyResponse(level: SafetyLevel, contacts: SupportContacts, emergencyAlertNotified = false): {text: string; actions: MindAidAction[]} {
+  if (level === "crisisOrImmediateRisk") return controlledCrisisResponse(contacts, emergencyAlertNotified);
+  if (false) {
+    const lines = [
+      "**Emergency Support**", "", "Your safety matters right now.", "",
+      `If you may hurt yourself or are in immediate danger, call ${contacts.emergencyPhone} or go to the nearest emergency department. Please stay with someone you trust and move away from anything you could use to hurt yourself.`, "",
+      "**Crisis and Mental Health Support**", "For mental health crises, depression, or suicidal thoughts, the following free and confidential crisis-support lines are available:", "",
+      "**NCMH Crisis Hotline — National Center for Mental Health**", `- ${contacts.ncmhLandline} — landline`, `- ${contacts.ncmhGlobe} — Globe / TM`, `- ${contacts.ncmhSmart} — Smart / TNT`, `- ${contacts.ncmhAlternate} — Smart / Sun / TNT`, "",
+      "**HOPELINE — Natasha Goulbourn Foundation**", `- ${contacts.hopelineTollFree} — Globe / TM toll-free`, `- ${contacts.hopelineGlobe} — Globe`, `- ${contacts.hopelineSmart} — Smart`, `- ${contacts.hopelinePldt} — PLDT`, "",
+      "**In Touch Crisis Line**", `- ${contacts.inTouchLandline} — landline`, `- ${contacts.inTouchSmart} — Smart`, `- ${contacts.inTouchGlobe} — Globe`, "",
+      "**Tawag Paglaum – Centro Bisaya**", "Cebu and Central Visayas", `- ${contacts.tawagPaglaumSmart} — Smart / Sun / TNT`, `- ${contacts.tawagPaglaumGlobe} — Globe / TM`, "",
+      emergencyAlertNotified ? `${contacts.shortName} has been notified so a counselor can follow up.` : `MindAid could not automatically notify ${contacts.shortName}. Please contact ${contacts.shortName}, 911, a trusted person, or one of the crisis-support lines above directly.`,
+    ];
+    return {text: lines.join("\n"), actions: [{type: "openCounselingServices", label: `View ${contacts.shortName} Support`}]} ;
+  }
   const verified = [
     contacts.paccPhone ? `${contacts.paccName}: ${contacts.paccPhone}` : "",
     contacts.campusSecurityPhone ? `Campus security: ${contacts.campusSecurityPhone}` : "",
     contacts.emergencyPhone ? `${contacts.emergencyLabel}: ${contacts.emergencyPhone}` : "",
   ].filter(Boolean);
   const contactLine = verified.length ? `\n\nVerified contacts: ${verified.join(" • ")}` : "";
-  if (level === "crisisOrImmediateRisk") {
+  if (false) {
     return {
       text: `I’m really sorry you’re carrying this much pain. MindAid is an automated wellness assistant and cannot provide emergency care. Your safety matters right now. Please move near a trusted person and contact local emergency services, campus security, ${contacts.paccName}, or the nearest emergency room. If you can, tell someone clearly: “I may not be safe alone right now.”${contactLine}`,
       actions: [
@@ -414,7 +511,20 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
   const supportContacts = await loadSupportContacts();
   let response: MindAidResponse;
   if (safetyLevel === "highDistress" || safetyLevel === "crisisOrImmediateRisk") {
-    const controlled = safetyResponse(safetyLevel, supportContacts);
+    let emergency: {alertId: string; notified: boolean} | null = null;
+    if (safetyLevel === "crisisOrImmediateRisk") {
+      try {
+        emergency = await createOrUpdateMindAidEmergencyAlert({
+          userId: uid,
+          conversationId,
+          triggerMessageId: `${uid}_${requestId}_user`,
+        });
+      } catch (_) {
+        // Keep the user in controlled safety support; never fall through to
+        // Gemini and never claim that PAACC received an alert.
+      }
+    }
+    const controlled = safetyResponse(safetyLevel, supportContacts, emergency?.notified === true);
     response = {
       messageId: `${uid}_${requestId}_assistant`, text: controlled.text, intent: "crisis_support",
       confidence: 1, safetyLevel, source: "controlled_safety", suggestions: [], actions: controlled.actions,
@@ -462,7 +572,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
       session,
       // CX receives a trusted, server-derived mode event. The original message
       // is intentionally not forwarded as a CX query: the companion policy has
-      // already selected its behavioral route, while PAACC and safety retain
+      // already selected its behavioral route, while PACC and safety retain
       // their independent authorities in this Function.
       queryInput: {
         event: {event: dialogflowModeEvent(conversationMode)},

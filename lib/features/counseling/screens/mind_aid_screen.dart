@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/constants/app_assets.dart';
 import '../../mind_aid/domain/mind_aid_integration_models.dart';
+import '../../mind_aid/widgets/mind_aid_formatted_text.dart';
 
 typedef MindAidFeedbackCallback = void Function(String messageId, bool helpful);
 typedef MindAidActionCallback =
@@ -529,6 +530,7 @@ class _AssistantMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
+    final emergency = message.status == 'urgent';
 
     return Align(
       alignment: Alignment.centerLeft,
@@ -541,16 +543,26 @@ class _AssistantMessageBubble extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.fromLTRB(14, 11, 14, 10),
               decoration: BoxDecoration(
-                color: _MindAidColors.aiBubble,
+                color: emergency
+                    ? const Color(0xFFFFFBF3)
+                    : _MindAidColors.aiBubble,
                 borderRadius: BorderRadius.circular(15),
+                border: emergency
+                    ? Border.all(color: const Color(0xFFE3A43A))
+                    : null,
                 boxShadow: _MindAidShadows.bubble,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const _AssistantBubbleHeader(),
+                  emergency
+                      ? const _EmergencyBubbleHeader()
+                      : const _AssistantBubbleHeader(),
                   const SizedBox(height: 8),
-                  Text(message.text, style: _MindAidText.message),
+                  MindAidFormattedText(
+                    message.text,
+                    style: _MindAidText.message,
+                  ),
                   if (message.supportCards.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     for (final card in message.supportCards.take(3)) ...[
@@ -560,32 +572,10 @@ class _AssistantMessageBubble extends StatelessWidget {
                   ],
                   if (message.actions.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final action in message.actions)
-                          ActionChip(
-                            avatar: const Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 16,
-                            ),
-                            label: Text(action.label),
-                            onPressed: () =>
-                                onActionSelected?.call(message.id, action),
-                          ),
-                        if (message.status != 'urgent')
-                          TextButton(
-                            onPressed: () => onActionSelected?.call(
-                              message.id,
-                              const MindAidAction(
-                                type: MindAidActionType.dismissPending,
-                                label: 'Not now',
-                              ),
-                            ),
-                            child: const Text('Not now'),
-                          ),
-                      ],
+                    _MindAidActionArea(
+                      message: message,
+                      emergency: emergency,
+                      onActionSelected: onActionSelected,
                     ),
                   ],
                   const SizedBox(height: 8),
@@ -644,6 +634,79 @@ class _AssistantMessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+class _EmergencyBubbleHeader extends StatelessWidget {
+  const _EmergencyBubbleHeader();
+
+  @override
+  Widget build(BuildContext context) => const Row(
+    children: [
+      Icon(Icons.warning_amber_rounded, color: Color(0xFFAD6D00), size: 20),
+      SizedBox(width: 7),
+      Text(
+        'Emergency Support',
+        style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF6B4700)),
+      ),
+    ],
+  );
+}
+
+class _MindAidActionArea extends StatelessWidget {
+  const _MindAidActionArea({
+    required this.message,
+    required this.emergency,
+    required this.onActionSelected,
+  });
+
+  final MindAidMessage message;
+  final bool emergency;
+  final MindAidActionCallback? onActionSelected;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final action in message.actions) ...[
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(46),
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(11),
+            ),
+            side: BorderSide(
+              color: emergency ? const Color(0xFFE3A43A) : _MindAidColors.sun,
+            ),
+          ),
+          onPressed: () => onActionSelected?.call(message.id, action),
+          icon: Icon(
+            emergency
+                ? Icons.support_agent_rounded
+                : Icons.arrow_forward_rounded,
+            size: 18,
+          ),
+          label: Text(action.label, textAlign: TextAlign.left),
+        ),
+        const SizedBox(height: 8),
+      ],
+      if (!emergency)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: () => onActionSelected?.call(
+              message.id,
+              const MindAidAction(
+                type: MindAidActionType.dismissPending,
+                label: 'Not now',
+              ),
+            ),
+            child: const Text('Not now'),
+          ),
+        ),
+    ],
+  );
 }
 
 class _AssistantBubbleMeta extends StatelessWidget {

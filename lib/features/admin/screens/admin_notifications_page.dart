@@ -4,7 +4,7 @@ import '../../../models/app_notification_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../theme/admin_theme.dart';
 
-enum _NotificationFilter { all, appointments, inquiries }
+enum _NotificationFilter { all, emergency, appointments, inquiries }
 
 class AdminNotificationsPage extends StatefulWidget {
   const AdminNotificationsPage({
@@ -83,27 +83,42 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
               stream: _notifications,
               initialData: const <AppNotificationModel>[],
               builder: (context, snapshot) {
-                if (snapshot.hasError) return const _NotificationError();
+                if (snapshot.hasError) {
+                  return const _NotificationError();
+                }
                 final all = snapshot.requireData;
                 final unread = all.where((item) => !item.isRead).toList();
-                final visible = all
-                    .where((item) {
-                      if (!_showArchived && _unreadOnly && item.isRead) return false;
+                final visible =
+                    all.where((item) {
+                      if (!_showArchived && _unreadOnly && item.isRead) {
+                        return false;
+                      }
                       return switch (_filter) {
                         _NotificationFilter.all => true,
+                        _NotificationFilter.emergency =>
+                          item.type == 'mind_aid_emergency',
                         _NotificationFilter.appointments =>
                           item.type == 'appointment',
                         _NotificationFilter.inquiries => item.type == 'inquiry',
                       };
-                    })
-                    .toList(growable: false);
+                    }).toList()..sort((left, right) {
+                      final priority =
+                          (right.type == 'mind_aid_emergency' ? 1 : 0)
+                              .compareTo(
+                                left.type == 'mind_aid_emergency' ? 1 : 0,
+                              );
+                      return priority != 0
+                          ? priority
+                          : right.createdAt.compareTo(left.createdAt);
+                    });
                 _selectedIds.removeWhere(
                   (id) => !visible.any((item) => item.id == id),
                 );
                 final selectable = visible
                     .where((item) => _canBulkManage(item))
                     .toList(growable: false);
-                final allSelected = selectable.isNotEmpty &&
+                final allSelected =
+                    selectable.isNotEmpty &&
                     selectable.every((item) => _selectedIds.contains(item.id));
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -134,6 +149,11 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                               ButtonSegment(
                                 value: _NotificationFilter.all,
                                 label: Text('All'),
+                              ),
+                              ButtonSegment(
+                                value: _NotificationFilter.emergency,
+                                icon: Icon(Icons.warning_amber_rounded),
+                                label: Text('Emergency'),
                               ),
                               ButtonSegment(
                                 value: _NotificationFilter.appointments,
@@ -253,16 +273,25 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
                                 onTap: () => _open(visible[index]),
                                 busy: _busyId == visible[index].id,
                                 actionsEnabled: _busyId == null,
-                                onArchive: visible[index].isRead ||
-                                        visible[index].resolvedAt != null
+                                onArchive:
+                                    visible[index].type == 'mind_aid_emergency'
+                                    ? null
+                                    : visible[index].isRead ||
+                                          visible[index].resolvedAt != null
                                     ? () => _manage(visible[index], 'archive')
                                     : null,
-                                onRestore: () => _manage(visible[index], 'restore'),
-                                onDelete: visible[index].isRead ||
-                                        visible[index].resolvedAt != null
+                                onRestore: () =>
+                                    _manage(visible[index], 'restore'),
+                                onDelete:
+                                    visible[index].type == 'mind_aid_emergency'
+                                    ? null
+                                    : visible[index].isRead ||
+                                          visible[index].resolvedAt != null
                                     ? () => _manage(visible[index], 'delete')
                                     : null,
-                                selected: _selectedIds.contains(visible[index].id),
+                                selected: _selectedIds.contains(
+                                  visible[index].id,
+                                ),
                                 selectable: _canBulkManage(visible[index]),
                                 onSelected: (selected) => setState(() {
                                   if (selected) {
@@ -290,10 +319,47 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
       await widget.repository.markPortalNotificationRead(notification.id);
     }
     if (!mounted) return;
-    if (notification.type == 'appointment') {
+    if (notification.type == 'mind_aid_emergency' &&
+        notification.emergencyAlertId != null) {
+      await _showEmergencyAlert(notification.emergencyAlertId!);
+    } else if (notification.type == 'appointment') {
       widget.onOpenAppointments();
     } else {
       widget.onOpenInquiries();
+    }
+  }
+
+  Future<void> _showEmergencyAlert(String alertId) async {
+    try {
+      final alert = await widget.repository.fetchMindAidEmergencyAlert(alertId);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => _EmergencyAlertDialog(
+          alert: alert,
+          onAcknowledge: () async {
+            await widget.repository.acknowledgeMindAidEmergencyAlert(alertId);
+            if (dialogContext.mounted) {
+              Navigator.pop(dialogContext);
+            }
+          },
+          onResolve: (value) async {
+            await widget.repository.resolveMindAidEmergencyAlert(
+              alertId,
+              resolutionDisposition: value,
+            );
+            if (dialogContext.mounted) Navigator.pop(dialogContext);
+          },
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Emergency alert details are unavailable.'),
+          ),
+        );
+      }
     }
   }
 
@@ -362,7 +428,8 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
   }
 
   bool _canBulkManage(AppNotificationModel notification) =>
-      _showArchived || notification.isRead || notification.resolvedAt != null;
+      notification.type != 'mind_aid_emergency' &&
+      (_showArchived || notification.isRead || notification.resolvedAt != null);
 
   Future<void> _bulkManage(String action) async {
     final ids = _selectedIds.toList(growable: false);
@@ -409,6 +476,132 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
       if (mounted) setState(() => _busyId = null);
     }
   }
+}
+
+class _EmergencyAlertDialog extends StatefulWidget {
+  const _EmergencyAlertDialog({
+    required this.alert,
+    required this.onAcknowledge,
+    required this.onResolve,
+  });
+  final Map<String, dynamic> alert;
+  final Future<void> Function() onAcknowledge;
+  final Future<void> Function(String) onResolve;
+
+  @override
+  State<_EmergencyAlertDialog> createState() => _EmergencyAlertDialogState();
+}
+
+class _EmergencyAlertDialogState extends State<_EmergencyAlertDialog> {
+  bool _busy = false;
+  String _resolution = 'contacted_user';
+
+  @override
+  Widget build(BuildContext context) {
+    final status = (widget.alert['status'] ?? 'open').toString();
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, color: Color(0xFFAD6D00)),
+          SizedBox(width: 8),
+          Text('Emergency Alert'),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _detail('Status', status.toUpperCase()),
+            _detail(
+              'Student',
+              (widget.alert['publicUserId'] ?? 'Protected user').toString(),
+            ),
+            _detail('Source', 'MindAid deterministic safety classifier'),
+            _detail('Trigger count', '${widget.alert['triggerCount'] ?? 1}'),
+            if (status == 'acknowledged') ...[
+              _detail(
+                'Acknowledged by',
+                (widget.alert['acknowledgedByName'] ?? 'PAACC counselor')
+                    .toString(),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _resolution,
+                decoration: const InputDecoration(labelText: 'Resolution'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'contacted_user',
+                    child: Text('Contacted user'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'referred_immediate_support',
+                    child: Text('Referred for immediate support'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'emergency_services_contacted',
+                    child: Text('Emergency services contacted'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'false_positive',
+                    child: Text('False positive'),
+                  ),
+                  DropdownMenuItem(value: 'other', child: Text('Other')),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (value) =>
+                          setState(() => _resolution = value ?? _resolution),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+        if (status == 'open')
+          FilledButton(
+            onPressed: _busy
+                ? null
+                : () async {
+                    setState(() => _busy = true);
+                    await widget.onAcknowledge();
+                  },
+            child: const Text('Acknowledge alert'),
+          ),
+        if (status == 'acknowledged')
+          FilledButton(
+            onPressed: _busy
+                ? null
+                : () async {
+                    setState(() => _busy = true);
+                    await widget.onResolve(_resolution);
+                  },
+            child: const Text('Resolve alert'),
+          ),
+      ],
+    );
+  }
+
+  Widget _detail(String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: RichText(
+      text: TextSpan(
+        style: const TextStyle(color: Colors.black87),
+        children: [
+          TextSpan(
+            text: '$label\n',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          TextSpan(text: value),
+        ],
+      ),
+    ),
+  );
 }
 
 class _NotificationSummary extends StatelessWidget {
@@ -529,13 +722,17 @@ class _NotificationTile extends StatelessWidget {
                   width: 42,
                   height: 42,
                   decoration: BoxDecoration(
-                    color: notification.type == 'appointment'
+                    color: notification.type == 'mind_aid_emergency'
+                        ? const Color(0xFFFFE7B2)
+                        : notification.type == 'appointment'
                         ? AdminColors.accentSoft
                         : AdminColors.surfaceMuted,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
-                    notification.type == 'appointment'
+                    notification.type == 'mind_aid_emergency'
+                        ? Icons.warning_amber_rounded
+                        : notification.type == 'appointment'
                         ? Icons.calendar_month_outlined
                         : Icons.chat_bubble_outline,
                     size: 20,
