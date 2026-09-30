@@ -93,6 +93,8 @@ class MindAidCloudService {
     required String launchContext,
     required MindAidConversationMode conversationMode,
     required bool explicitListening,
+    String? sessionInstanceId,
+    List<Map<String, String>> recentTurns = const [],
   }) async {
     final result = await _functions.routedCallable('sendMindAidMessage').call({
       'requestId': requestId,
@@ -102,6 +104,9 @@ class MindAidCloudService {
       'launchContext': launchContext,
       'conversationMode': conversationMode.name,
       'explicitListening': explicitListening,
+      if (sessionInstanceId?.isNotEmpty == true)
+        'sessionInstanceId': sessionInstanceId,
+      if (recentTurns.isNotEmpty) 'recentTurns': recentTurns,
     });
     final data = result.data;
     if (data is! Map) throw const FormatException('Invalid MindAid response.');

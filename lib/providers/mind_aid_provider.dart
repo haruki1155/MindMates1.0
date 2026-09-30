@@ -8,6 +8,7 @@ import '/features/mind_aid/domain/mind_aid_companion_models.dart';
 import '/features/mind_aid/domain/mind_aid_dialogue_state.dart';
 import '/features/mind_aid/domain/mind_aid_integration_models.dart';
 import '/features/mind_aid/domain/mind_aid_safety.dart';
+import '/features/mind_aid/domain/mind_aid_session_memory.dart';
 import '/features/mind_aid/models/paacc_route_decision.dart';
 import '/features/mind_aid/services/paacc_intent_router.dart';
 import '/features/mind_aid/services/mind_aid_companion_policy.dart';
@@ -47,7 +48,8 @@ class MindAidProvider extends ChangeNotifier {
   bool isLoading = false;
   bool isSending = false;
   String? errorMessage;
-  String? _conversationSummary;
+  MindAidSessionMemory _sessionMemory = const MindAidSessionMemory();
+  String _sessionInstanceId = MindAidSessionMemory.newSessionInstanceId();
   MindAidPreferences? _preferences;
   MindAidLaunchContext? _launchContext;
   String? _lastFailedText;
@@ -81,6 +83,7 @@ class MindAidProvider extends ChangeNotifier {
   PaaccRouteDecision? get lastPaaccRouteDecision => _lastPaaccRouteDecision;
   String? get paaccRoutingError => _paaccRoutingError;
   MindAidCompanionState get companionState => _companionState;
+  MindAidSessionMemory get sessionMemory => _sessionMemory;
   List<PaaccRouteDecision> get routingDiagnostics =>
       List.unmodifiable(_routingDiagnostics);
   String? get activeActionMessageId =>
@@ -103,6 +106,7 @@ class MindAidProvider extends ChangeNotifier {
       _dialogueExpiryTimer?.cancel();
       _routingDiagnostics.clear();
       _companionState = const MindAidCompanionState();
+      _resetEphemeralMemory();
     }
     final effectiveContext = _contextWithSessionMemory(context);
     final previousConversationId = _preferences?.conversationId;
@@ -236,12 +240,17 @@ class MindAidProvider extends ChangeNotifier {
       messages.add(userMessage);
       notifyListeners();
 
-      final recentMessages = messages
-          .map((message) {
-            return message.toModel(
+      final recentMessages = _sessionMemory.liveTurns
+          .map(
+            (turn) => MindAidMessageModel(
+              id: 'session_${turn.role}_${turn.text.hashCode}',
               conversationId: _preferences?.conversationId ?? userId,
-            );
-          })
+              sender: turn.role,
+              text: turn.text,
+              createdAt: DateTime.now(),
+              status: 'sent',
+            ),
+          )
           .toList(growable: false);
       final result = await repository.sendMessage(
         userId: userId,
@@ -250,6 +259,8 @@ class MindAidProvider extends ChangeNotifier {
         context: effectiveContext,
         preferences: _preferences,
         launchContext: _launchContext?.source ?? '',
+        sessionInstanceId: _sessionInstanceId,
+        liveTurns: _sessionMemory.liveTurns,
       );
       final bot = result.message;
       PaaccMindAidResponse? paaccResponse;
@@ -260,6 +271,7 @@ class MindAidProvider extends ChangeNotifier {
       if (isSafety) {
         await _setDialogueState(userId, null);
         _companionState = const MindAidCompanionState();
+        _resetEphemeralMemory();
       } else {
         final pending = _dialogueState;
         final normalized = trimmedText
@@ -356,7 +368,12 @@ class MindAidProvider extends ChangeNotifier {
       suggestions = const [];
       _trackChatResult(result);
       _lastUserMessagePersisted = result.userMessageSaved;
-      _conversationSummary = _summarizeConversation();
+      if (!isSafety) {
+        _sessionMemory = _sessionMemory.commit(
+          userText: trimmedText,
+          assistantText: botMessage.text,
+        );
+      }
       isSending = false;
       notifyListeners();
       return true;
@@ -408,6 +425,7 @@ class MindAidProvider extends ChangeNotifier {
       personalizationEnabled: cloudConsent,
       conversationId: _preferences?.conversationId,
     );
+    if (!cloudConsent) _resetEphemeralMemory();
     notifyListeners();
   }
 
@@ -416,7 +434,7 @@ class MindAidProvider extends ChangeNotifier {
     await repository.clearHistory(userId);
     repository.resetSession();
     messages = [];
-    _conversationSummary = null;
+    _resetEphemeralMemory();
     _companionState = const MindAidCompanionState();
     _lastFailedText = null;
     _preferences = await repository.loadPreferences(userId);
@@ -437,7 +455,7 @@ class MindAidProvider extends ChangeNotifier {
     );
     messages = [];
     _dialogueState = MindAidDialogueState(conversationId: nextId);
-    _conversationSummary = null;
+    _resetEphemeralMemory();
     _companionState = const MindAidCompanionState();
     _lastFailedText = null;
     notifyListeners();
@@ -497,14 +515,15 @@ class MindAidProvider extends ChangeNotifier {
 
   MindAidContext _contextWithSessionMemory(MindAidContext context) {
     return context.copyWith(
-      conversationSummary: context.conversationSummary ?? _conversationSummary,
-      recentMessages: messages.reversed
-          .map((message) => message.text)
-          .take(8)
-          .toList(growable: false)
-          .reversed
+      recentMessages: _sessionMemory.liveTurns
+          .map((turn) => turn.text)
           .toList(growable: false),
     );
+  }
+
+  void _resetEphemeralMemory() {
+    _sessionMemory = const MindAidSessionMemory();
+    _sessionInstanceId = MindAidSessionMemory.newSessionInstanceId();
   }
 
   bool _requestsWellnessReference(String text) {
@@ -520,18 +539,6 @@ class MindAidProvider extends ChangeNotifier {
 
   bool _allowsSupportCards(MindAidConversationMode mode) =>
       mode == MindAidConversationMode.coaching;
-
-  String? _summarizeConversation() {
-    final userMessages = messages
-        .where((message) => message.sender == MindAidSender.user)
-        .map((message) => message.text.trim())
-        .where((text) => text.isNotEmpty)
-        .toList(growable: false);
-    if (userMessages.isEmpty) return null;
-
-    final latest = userMessages.reversed.take(3).toList().reversed.join(' | ');
-    return 'Recent user concerns: $latest';
-  }
 
   List<MindAidSupportCard> _supportCardsFor(
     MindAidSendResult result,
@@ -840,18 +847,5 @@ class MindAidProvider extends ChangeNotifier {
     _dialogueExpiryTimer?.cancel();
     _paaccIntentRouter.dispose();
     super.dispose();
-  }
-}
-
-extension _MindAidMessageModelMapper on MindAidMessage {
-  MindAidMessageModel toModel({required String conversationId}) {
-    return MindAidMessageModel(
-      id: id,
-      conversationId: conversationId,
-      sender: sender == MindAidSender.user ? 'user' : 'assistant',
-      text: text,
-      createdAt: createdAt,
-      status: status ?? '',
-    );
   }
 }

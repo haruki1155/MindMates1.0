@@ -10,6 +10,7 @@ import '../features/mind_aid/domain/mind_aid_chat_models.dart';
 import '../features/mind_aid/domain/mind_aid_context.dart';
 import '../features/mind_aid/domain/mind_aid_engine_result.dart';
 import '../features/mind_aid/domain/mind_aid_integration_models.dart';
+import '../features/mind_aid/domain/mind_aid_session_memory.dart';
 import '../features/mind_aid/domain/mind_aid_dialogue_state.dart';
 import '../features/mind_aid/domain/mind_aid_dataset_models.dart';
 import '../features/mind_aid/domain/mind_aid_safety.dart';
@@ -175,6 +176,8 @@ class MindAidRepository {
     MindAidPreferences? preferences,
     String launchContext = '',
     String? requestId,
+    String? sessionInstanceId,
+    List<MindAidLiveTurn> liveTurns = const [],
   }) async {
     final dataset = await _datasetLoader.load();
     final effectiveRequestId = requestId ?? _requestId();
@@ -204,6 +207,11 @@ class MindAidRepository {
           launchContext: launchContext,
           conversationMode: context.conversationMode,
           explicitListening: context.explicitListening,
+          sessionInstanceId: sessionInstanceId,
+          recentTurns: preferences?.cloudConsent == true &&
+                  preferences?.personalizationEnabled == true
+              ? liveTurns.map((turn) => turn.toMap()).toList(growable: false)
+              : const [],
         );
         final safety = MindAidSafetyLevel.values.firstWhere(
           (item) => item.name == cloud.safetyLevel,

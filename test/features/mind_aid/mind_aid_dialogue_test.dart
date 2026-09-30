@@ -10,6 +10,7 @@ import 'package:mind_mates/features/mind_aid/domain/mind_aid_dataset_models.dart
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_dialogue_state.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_integration_models.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_safety.dart';
+import 'package:mind_mates/features/mind_aid/domain/mind_aid_session_memory.dart';
 import 'package:mind_mates/features/mind_aid/models/paacc_route_decision.dart';
 import 'package:mind_mates/features/mind_aid/services/paacc_intent_router.dart';
 
@@ -55,6 +56,22 @@ class TestRepository extends MindAidRepository {
   Future<List<MindAidSuggestionModel>> fetchSuggestions() async =>
       suggestionRecords;
   @override
+  Future<MindAidPreferences> saveConsent({
+    required String userId,
+    required bool cloudConsent,
+    required bool personalizationEnabled,
+    String? conversationId,
+  }) async => MindAidPreferences(
+    hasDecision: true,
+    cloudConsent: cloudConsent,
+    personalizationEnabled: cloudConsent && personalizationEnabled,
+    conversationId: conversationId ?? 'conversation',
+  );
+  @override
+  Future<void> clearHistory(String userId) async {}
+  @override
+  Future<String> startNewConversation(String userId) async => 'next_conversation';
+  @override
   Future<MindAidDialogueState> loadDialogueState(
     String userId,
     String conversationId,
@@ -98,6 +115,8 @@ class TestRepository extends MindAidRepository {
     MindAidPreferences? preferences,
     String launchContext = '',
     String? requestId,
+    String? sessionInstanceId,
+    List<MindAidLiveTurn> liveTurns = const [],
   }) async {
     final message = MindAidMessageModel(
       id: 'bot${++turn}',
@@ -246,6 +265,30 @@ void main() {
       provider.dispose();
     },
   );
+
+  test('Phase 3 memory resets on all provider-controlled boundaries', () async {
+    final repository = TestRepository();
+    final provider = MindAidProvider(repository, paaccIntentRouter: TestRouter());
+    await provider.loadChat('owner');
+    await provider.sendMessage('owner', 'Help me make a plan.');
+    expect(provider.sessionMemory.liveTurns, isNotEmpty);
+
+    await provider.startNewConversation('owner');
+    expect(provider.sessionMemory.liveTurns, isEmpty);
+    await provider.sendMessage('owner', 'Help me make a plan.');
+    await provider.setConsent(userId: 'owner', cloudConsent: false);
+    expect(provider.sessionMemory.liveTurns, isEmpty);
+
+    await provider.sendMessage('owner', 'Help me make a plan.');
+    await provider.loadChat('another_user');
+    expect(provider.sessionMemory.liveTurns, isEmpty);
+
+    await provider.sendMessage('another_user', 'Help me make a plan.');
+    repository.safety = MindAidSafetyLevel.highDistress;
+    await provider.sendMessage('another_user', 'I am unsafe right now.');
+    expect(provider.sessionMemory.liveTurns, isEmpty);
+    provider.dispose();
+  });
   test(
     'yes remains in chat; no and topic change clear state; stale taps fail',
     () async {

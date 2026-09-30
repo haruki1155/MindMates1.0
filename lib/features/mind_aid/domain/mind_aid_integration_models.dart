@@ -101,6 +101,7 @@ class MindAidCloudResponse {
     required this.requiresEscalation,
     required this.fallbackReason,
     this.effectiveConversationMode = 'supportive',
+    this.model,
   });
 
   final String messageId;
@@ -114,6 +115,7 @@ class MindAidCloudResponse {
   final bool requiresEscalation;
   final String fallbackReason;
   final String effectiveConversationMode;
+  final String? model;
 
   factory MindAidCloudResponse.fromMap(Map<Object?, Object?> map) {
     final rawActions = map['actions'];
@@ -144,6 +146,7 @@ class MindAidCloudResponse {
       fallbackReason: (map['fallbackReason'] ?? '').toString(),
       effectiveConversationMode:
           (map['effectiveConversationMode'] ?? 'supportive').toString(),
+      model: map['model']?.toString(),
     );
   }
 }

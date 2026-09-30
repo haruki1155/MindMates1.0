@@ -5,6 +5,8 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
+import {GeminiMindAidProvider} from "./mind_aid_llm/gemini_mind_aid_provider";
+import type {MindAidRecentTurn} from "./mind_aid_llm/mind_aid_llm_models";
 
 if (!getApps().length) initializeApp();
 
@@ -19,6 +21,7 @@ const CONVERSATION_ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 type SafetyLevel = "safeSupport" | "needsClarification" | "highDistress" | "crisisOrImmediateRisk";
 type ConversationMode = "supportive" | "listening" | "reflective" | "coaching" | "casual" | "navigation";
+type MindAidSource = "dialogflow" | "gemini" | "controlled_safety";
 
 interface MindAidAction {
   type: string;
@@ -32,7 +35,8 @@ interface MindAidResponse {
   intent: string;
   confidence: number;
   safetyLevel: SafetyLevel;
-  source: "dialogflow" | "controlled_safety";
+  source: MindAidSource;
+  model?: "gemini-3.8-flash";
   suggestions: string[];
   actions: MindAidAction[];
   requiresEscalation: boolean;
@@ -55,6 +59,47 @@ export function effectiveConversationMode(value: unknown): ConversationMode {
 
 export function dialogflowModeEvent(mode: ConversationMode): string {
   return `mind_aid_mode_${mode}`;
+}
+
+function aiProvider(): "dialogflow" | "gemini" | "local" {
+  const value = String(process.env.MINDAID_AI_PROVIDER ?? "dialogflow").trim().toLowerCase();
+  return value === "gemini" || value === "local" ? value : "dialogflow";
+}
+
+export function sanitizeRecentTurns(value: unknown): MindAidRecentTurn[] {
+  // This is untrusted callable input. Reject an oversized request rather than
+  // silently accepting a client-controlled context window.
+  if (!Array.isArray(value) || value.length > 8) return [];
+  let totalCharacters = 0;
+  return value.flatMap((item): MindAidRecentTurn[] => {
+    if (!item || typeof item !== "object") return [];
+    const data = item as Record<string, unknown>;
+    const role = data.role === "user" || data.role === "assistant" ? data.role : null;
+    // Never stringify arbitrary client objects into prompt content.
+    if (typeof data.text !== "string") return [];
+    const text = data.text.trim().slice(0, 600);
+    if (!role || !text || totalCharacters + text.length > 4800) return [];
+    totalCharacters += text.length;
+    return [{role, text}];
+  });
+}
+
+export function eligibleRecentTurns(personalizationEnabled: boolean, value: unknown): MindAidRecentTurn[] {
+  return personalizationEnabled ? sanitizeRecentTurns(value) : [];
+}
+
+export function dialogflowSessionId(
+  uid: string,
+  conversationId: string,
+  sessionInstanceId: unknown,
+  requestId: string,
+): string {
+  const session = String(sessionInstanceId ?? "").trim();
+  // Invalid client metadata must not recreate a cross-session CX identity.
+  // requestId is validated before this helper is called, so this fallback is
+  // isolated to one callable request rather than a reusable legacy session.
+  const safeSession = /^[A-Za-z0-9_-]{16,96}$/.test(session) ? session : `request:${requestId}`;
+  return createHash("sha256").update(`${uid}:${conversationId}:${safeSession}`).digest("hex").slice(0, 36);
 }
 
 const crisisPhrases = [
@@ -310,6 +355,7 @@ async function persistTurn(uid: string, requestId: string, conversationId: strin
       primaryIntent: response.intent, requiresEscalation: response.requiresEscalation,
       source: response.source, confidence: response.confidence, fallbackReason: response.fallbackReason,
       effectiveConversationMode: response.effectiveConversationMode,
+      ...(response.model ? {model: response.model} : {}),
       actions: response.actions, createdAt: FieldValue.serverTimestamp(),
     });
     transaction.set(day, {
@@ -349,6 +395,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
       source: data.source ?? "dialogflow", suggestions: [], actions: data.actions ?? [],
       requiresEscalation: data.requiresEscalation === true, fallbackReason: data.fallbackReason ?? "",
       effectiveConversationMode: conversationMode,
+      model: data.model === "gemini-3.8-flash" ? data.model : undefined,
     } satisfies MindAidResponse;
   }
 
@@ -357,6 +404,9 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
     throw new HttpsError("invalid-argument", "The conversation is no longer active.");
   }
   const personalizationEnabled = access.personalizationEnabled;
+  // Raw live turns are optional personalization data. The client gate is not
+  // sufficient: callers cannot cause this server to use them without consent.
+  const recentTurns = eligibleRecentTurns(personalizationEnabled, input.recentTurns);
   await enforceRateLimit(uid);
   const startedAt = Date.now();
   const safetyLevel = classifyMindAidSafety(text);
@@ -373,10 +423,28 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
     };
   } else {
     const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "";
+    const configuredProvider = aiProvider();
+    if (configuredProvider === "gemini" && projectId === "mindmate-staging") {
+      try {
+        const gemini = await new GeminiMindAidProvider(projectId).generate({
+          message: text, conversationMode, explicitListening, recentTurns,
+        });
+        if (!isSafeMindAidOutput(gemini.text)) throw new Error("gemini_unsafe_response");
+        response = {
+          messageId: `${uid}_${requestId}_assistant`, text: gemini.text.slice(0, 1200), intent: "general_support",
+          confidence: 1, safetyLevel, source: "gemini", model: gemini.model, suggestions: [], actions: [],
+          requiresEscalation: false, fallbackReason: "", effectiveConversationMode: conversationMode,
+        };
+      } catch (_) {
+        // Continue into the established Dialogflow/local fallback path.
+      }
+    }
+    if (!response!) {
+      if (configuredProvider === "local") throw new HttpsError("unavailable", "Local MindAid provider requested.");
     const agentId = process.env.DIALOGFLOW_CX_AGENT_ID ?? "";
     const location = process.env.DIALOGFLOW_CX_LOCATION ?? REGION;
     if (!projectId || !agentId) throw new HttpsError("failed-precondition", "Dialogflow CX is not configured.");
-    const sessionId = createHash("sha256").update(`${uid}:${conversationId}`).digest("hex").slice(0, 36);
+    const sessionId = dialogflowSessionId(uid, conversationId, input.sessionInstanceId, requestId);
     // Load the Dialogflow client only when Mind Aid is invoked. Keeping this
     // SDK out of module initialization prevents Firebase's deployment
     // discovery process from timing out while loading all callable exports.
@@ -419,6 +487,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
       actions: parsed.actions, requiresEscalation: false, fallbackReason: "",
       effectiveConversationMode: conversationMode,
     };
+    }
   }
   await persistTurn(uid, requestId, conversationId, text, response, Date.now() - startedAt);
   return response;
