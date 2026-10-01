@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '/providers/mind_aid_provider.dart';
 import '/providers/assessment_provider.dart';
 import '/providers/auth_provider.dart';
+import '/providers/insights_provider.dart';
 import '/providers/report_provider.dart';
 import '/providers/user_provider.dart';
 import '/features/counseling/screens/mind_aid_screen.dart';
@@ -128,6 +129,9 @@ class _MindAidPageState extends State<MindAidPage> {
     try {
       await context.read<UserProvider>().loadProfile(userId);
       await _readProviderOrNull<ReportProvider>()?.refreshWeeklyReport(userId);
+      await _readProviderOrNull<InsightsProvider>()?.refreshLoadedContext(
+        userId,
+      );
     } catch (_) {
       // MindAid chat remains available even if summary refresh is delayed.
     }

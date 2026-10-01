@@ -9,6 +9,7 @@ import '../expression_check_in/expression_check_in_screen.dart';
 import '../expression_check_in/expression_scan_logic.dart';
 import '../expression_check_in/tflite_expression_classifier.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/insights_provider.dart';
 import '../../../providers/mood_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
@@ -289,6 +290,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       await _readProviderOrNull<UserProvider>()?.loadProfile(userId);
       await moodProvider.loadRecentMoods(userId, now: referenceNow);
       await _readProviderOrNull<ReportProvider>()?.refreshWeeklyReport(userId);
+      await _readProviderOrNull<InsightsProvider>()?.refreshLoadedContext(
+        userId,
+      );
     } catch (_) {
       reportRefreshed = false;
     }

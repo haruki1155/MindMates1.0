@@ -18,6 +18,29 @@ class ServicesScreen extends StatelessWidget {
           'This service provides adequate and substantial information related to personal, psychological, social, educational, and vocational fields and benefits new students by helping them acquire the necessary knowledge about the new school, its rules and regulations. Accordingly, this helps students make adjustments and feel a sense of security and belongingness.',
       iconAsset: '📚.png',
       headerColor: Color(0xFFFFCE3C),
+      guides: [
+        ServiceGuideData(
+          title: 'How to Avail This Service',
+          eligibleClients:
+              'Students, faculty, staff, alumni, parents, and walk-in clients',
+          availability: 'Monday-Saturday, 8:00 AM - 5:00 PM',
+          personResponsible: 'Guidance Counselor / Counselor-Associate',
+          fee: 'None',
+          forms: ['General Logsheet'],
+          steps: [
+            ServiceGuideStep(
+              number: 1,
+              title: 'Make an Inquiry',
+              clientAction:
+                  'Visit the PACC office or official Facebook page for your inquiry.',
+              providerAction:
+                  'Provide the necessary information or refer you to the appropriate office.',
+              duration: '2-3 minutes',
+            ),
+          ],
+          completionMessage: 'Transaction Complete',
+        ),
+      ],
     ),
     ServiceDetailData(
       title: 'Individual Inventory Service',
@@ -27,6 +50,58 @@ class ServicesScreen extends StatelessWidget {
           'It involves the collection of reliable and intensive information and records of students to facilitate students\' understanding of their own self and help them use such information in decision-making and placement.',
       iconAsset: '📋.png',
       headerColor: Color(0xFFB9C1D3),
+      guides: [
+        ServiceGuideData(
+          title: 'How to Avail This Service',
+          eligibleClients: 'Freshmen and Transferees',
+          availability: 'Monday-Saturday, 8:00 AM - 5:00 PM',
+          personResponsible: 'Guidance Counselor / Counselor-Associate',
+          fee: 'None',
+          forms: ['Interview Questionnaire', 'Consent to Release Information'],
+          requirements: [
+            '1 original copy of admission requirements',
+            '2 photocopies of admission requirements',
+          ],
+          steps: [
+            ServiceGuideStep(
+              number: 1,
+              title: 'Complete the Required Forms',
+              clientAction:
+                  'Fill out the Interview Questionnaire and Consent to Release Information.',
+              providerAction:
+                  'Provide the Interview Questionnaire and Consent to Release Information.',
+              duration: '5-10 minutes',
+            ),
+            ServiceGuideStep(
+              number: 2,
+              title: 'Submit Your Requirements',
+              clientAction:
+                  'Submit completed forms with the required original and photocopies of admission requirements.',
+              providerAction:
+                  'Check the forms, organize documents, and endorse appropriate copies to the Registrar and College Dean.',
+              duration: '3-5 minutes',
+            ),
+            ServiceGuideStep(
+              number: 3,
+              title: 'Counselor Interview',
+              clientAction:
+                  'Answer interview or follow-up questions from the counselor-in-charge.',
+              providerAction:
+                  'Clarify information on the interview sheet or Consent to Release Information.',
+              duration: '3-5 minutes',
+            ),
+            ServiceGuideStep(
+              number: 4,
+              title: 'Proceed to the Registrar',
+              clientAction:
+                  'Proceed to the Registrar for the next enrollment step.',
+              providerAction: 'Complete document arrangement and endorsement.',
+              duration: '1-2 minutes',
+            ),
+          ],
+          nextOffice: "Registrar's Office",
+        ),
+      ],
     ),
     ServiceDetailData(
       title: 'Testing Service',
@@ -36,6 +111,36 @@ class ServicesScreen extends StatelessWidget {
           'Using psychological tests and non-psychometric devices, this service is designed to secure accurate information about each student\'s abilities, aptitude, interest, and personality in order to assist students in gaining increasing self-knowledge and understanding of their capacity in as many aspects of their life and career as possible.',
       iconData: Icons.fact_check_outlined,
       headerColor: Color(0xFFA9D8B8),
+      guides: [
+        ServiceGuideData(
+          title: 'How to Avail This Service',
+          eligibleClients: 'UCU Employees / Students for OJT',
+          availability: 'Monday-Saturday, 8:00 AM - 5:00 PM',
+          personResponsible: 'Psychometrician-in-charge',
+          fee: 'PHP 250.00',
+          forms: [
+            'Personal Data Sheet',
+            'Informed Consent',
+            'Test Battery',
+            'Test Report',
+          ],
+          requirements: [
+            'Endorsement Letter',
+            'Official receipt of testing fee',
+          ],
+          steps: [
+            ServiceGuideStep(
+              number: 1,
+              title: 'Submit Testing Requirements',
+              clientAction:
+                  'Submit the Endorsement Letter from the appropriate UCU office and official receipt of the testing fee.',
+              providerAction:
+                  'Verify the documents and provide the testing schedule through SMS.',
+              duration: '2-5 minutes',
+            ),
+          ],
+        ),
+      ],
     ),
     ServiceDetailData(
       title: 'Counseling Service',
@@ -55,8 +160,83 @@ class ServicesScreen extends StatelessWidget {
           'This service helps determine the status of students who received assistance and maintains contact with graduates. It also determines the adequacy and sufficiency of the programs and services extended in meeting the needs of its clientele.',
       iconAsset: '🎯-1.png',
       headerColor: Color(0xFFD9AEAA),
-      hasReactivationProcedure: true,
-      hasShiftingProcedure: true,
+      guides: [
+        ServiceGuideData(
+          title: 'Adding, Changing & Dropping Subjects',
+          eligibleClients: 'Officially Enrolled Students',
+          availability: 'Monday-Saturday, 8:00 AM - 5:00 PM',
+          personResponsible: 'Guidance Counselor / Counselor-Associate',
+          fee: 'None',
+          forms: [
+            'Adding, Changing or Dropping Form',
+            'Student Dropping Record Form when applicable',
+          ],
+          steps: [
+            ServiceGuideStep(
+              number: 1,
+              title: 'Present Your Form',
+              clientAction:
+                  'Present the Adding, Changing, or Dropping Form. When dropping all subjects, complete the Student Dropping Record Form.',
+              providerAction:
+                  'Determine the validity of the reasons on the form and sign it.',
+              duration: '1-2 minutes',
+            ),
+            ServiceGuideStep(
+              number: 2,
+              title: 'Submit to the Counselor',
+              clientAction:
+                  'Submit a copy of the form and applicable dropping record to the counselor-in-charge.',
+              providerAction:
+                  'Receive and sign the form and conduct an interview if necessary.',
+              duration: '2-5 minutes',
+            ),
+          ],
+          completionMessage: 'Transaction Complete',
+        ),
+        ServiceGuideData(
+          title: 'Shifting of Course',
+          eligibleClients: 'Students',
+          availability: 'Monday-Saturday, 8:00 AM - 5:00 PM',
+          personResponsible: 'Guidance Counselor / Counselor-Associate',
+          fee: 'None',
+          steps: [
+            ServiceGuideStep(
+              number: 1,
+              title: 'Complete the Shifting Form',
+              clientAction:
+                  'Fill out the Shifting Form and be ready to answer questions from the College Dean and counselor.',
+              providerAction: 'Provide the Shifting Form.',
+              duration: '1-3 minutes',
+            ),
+            ServiceGuideStep(
+              number: 2,
+              title: 'Submit Your Documents',
+              clientAction:
+                  'Submit a copy of the form and applicable dropping record to the counselor-in-charge.',
+              providerAction:
+                  'Direct you to the next signatories, including PACC and Registrar.',
+              duration: '2-5 minutes',
+            ),
+            ServiceGuideStep(
+              number: 3,
+              title: 'Return to PACC',
+              clientAction:
+                  'Return to the counselor-in-charge for the required signature and remarks.',
+              providerAction: 'Sign and return the form.',
+              duration: '1-2 minutes',
+            ),
+            ServiceGuideStep(
+              number: 4,
+              title: 'Complete Document Distribution',
+              clientAction:
+                  'After the Registrar signs the form, submit required copies to PACC, Registrar, and Accounting.',
+              providerAction: 'Receive the PACC copy for proper filing.',
+              duration: '1-2 minutes',
+            ),
+          ],
+          completionMessage: 'Process Complete',
+        ),
+      ],
     ),
     ServiceDetailData(
       title: 'Career Guidance and Placement Service',
@@ -66,6 +246,47 @@ class ServicesScreen extends StatelessWidget {
           'It offers facilitation of students\' movement to the appropriate educational or occupational level or program in pursuit of further education or other employment upon leaving the organization.',
       iconAsset: '🎯.png',
       headerColor: Color(0xFF8FB8DE),
+      guides: [
+        ServiceGuideData(
+          title: 'Signing of Clearance for Graduation',
+          eligibleClients: 'Graduating Students',
+          availability: 'Monday-Saturday, 8:00 AM - 5:00 PM',
+          personResponsible: 'Guidance Counselor / Counselor-Associate',
+          fee: 'None',
+          forms: [
+            'Graduate Profile Form',
+            'Feedback Form',
+            'Student Satisfaction Survey',
+          ],
+          requirements: ['Clearance', 'Resume', 'Application Letter'],
+          steps: [
+            ServiceGuideStep(
+              number: 1,
+              title: 'Submit Requirements',
+              clientAction:
+                  'Present your clearance, resume, and application letter. Complete the Graduate Profile, Feedback Form, and Student Satisfaction Survey through the provided Google Forms.',
+              providerAction:
+                  'Accept documents for filing, verify your record, and provide Google Form access.',
+            ),
+            ServiceGuideStep(
+              number: 2,
+              title: 'Confirm Form Completion',
+              clientAction:
+                  'Inform the counselor-in-charge after completing the Google Forms.',
+              providerAction:
+                  'Verify the forms and facilitate the Graduate Profile interview.',
+            ),
+            ServiceGuideStep(
+              number: 3,
+              title: 'Clearance Signing',
+              clientAction: 'Give the clearance to the counselor for signing.',
+              providerAction:
+                  'Verify OPE and Jobs Fair requirements and sign the clearance when satisfied.',
+            ),
+          ],
+          completionMessage: 'Clearance Process Complete',
+        ),
+      ],
       hasSatisfactionSurvey: true,
       hasClientFeedbackForm: true,
     ),

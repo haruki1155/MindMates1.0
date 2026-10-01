@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../providers/assessment_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/insights_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
@@ -189,6 +190,11 @@ class _QuestionPage extends StatelessWidget {
         if (context.mounted) {
           try {
             await context.read<ReportProvider>().refreshWeeklyReport(userId);
+            if (context.mounted) {
+              await context.read<InsightsProvider>().refreshLoadedContext(
+                userId,
+              );
+            }
           } on ProviderNotFoundException {
             // Lightweight previews and focused tests may omit ReportProvider.
           } catch (error) {

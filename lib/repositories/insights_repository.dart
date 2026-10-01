@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../core/utils/firestore_mapper.dart';
 import '../database/firestore_collections.dart';
 import '../features/insights/models/insights_models.dart';
+import '../models/profile_roles.dart';
 import '../models/report_model.dart';
 import '../services/firebase/firestore_service.dart';
 import 'insights_seed_data.dart';
@@ -82,13 +83,15 @@ class InsightsRepository {
   late final InsightsRepositoryDataSource _dataSource;
   final bool useFallbackContent;
 
-  Future<InsightsDashboardData> fetchInsights(String userId) async {
+  Future<InsightsDashboardData> fetchInsights(
+    InsightRecommendationContext context,
+  ) async {
     final categories = await _safeFetch(_dataSource.fetchCategories);
     final content = await _safeFetch(_dataSource.fetchContent);
     final rules = await _safeFetch(_dataSource.fetchRules);
-    final reportJson = userId.trim().isEmpty
+    final reportJson = context.userId.trim().isEmpty
         ? null
-        : await _safeFetchReport(userId);
+        : await _safeFetchReport(context.userId);
 
     final effectiveCategories = categories.isEmpty && useFallbackContent
         ? insightSeedCategories
@@ -106,6 +109,7 @@ class InsightsRepository {
     final cards = effectiveContent
         .map(_InsightContent.fromJson)
         .where((item) => item.id.isNotEmpty)
+        .where((item) => item.isEligibleFor(context.populationRole))
         .toList(growable: false);
     final activeRules = effectiveRules
         .map(_InsightRule.fromJson)
@@ -128,6 +132,7 @@ class InsightsRepository {
         cards: cards,
         rules: activeRules,
         report: report,
+        populationRole: context.populationRole,
       ),
     );
   }
@@ -185,12 +190,18 @@ class InsightsRepository {
     required List<_InsightContent> cards,
     required List<_InsightRule> rules,
     required ReportModel? report,
+    required PopulationRole? populationRole,
   }) {
     if (cards.isEmpty && report == null) return const [];
 
     final recommended = report == null
         ? const <InsightCardItem>[]
-        : _recommendedCards(cards: cards, rules: rules, report: report);
+        : _recommendedCards(
+            cards: cards,
+            rules: rules,
+            report: report,
+            populationRole: populationRole,
+          );
     final patternCards = [
       if (report != null) ..._reportPatternCards(report),
       ..._sectionCards(cards, 'patterns'),
@@ -249,10 +260,22 @@ class InsightsRepository {
     required List<_InsightContent> cards,
     required List<_InsightRule> rules,
     required ReportModel report,
+    required PopulationRole? populationRole,
   }) {
     final cardsById = {for (final card in cards) card.id: card.card};
     final matched = <InsightCardItem>[];
     final seen = <String>{};
+
+    // Domain relevance is deterministic and takes precedence over generic
+    // rule matches. It uses a centralized exact-label mapping below.
+    final concernDomainIds = _concernDomainIds(report);
+    for (final content in cards) {
+      if (content.domainIds.isEmpty ||
+          !content.domainIds.any(concernDomainIds.contains)) {
+        continue;
+      }
+      if (seen.add(content.id)) matched.add(content.card);
+    }
 
     final sortedRules = [...rules]
       ..sort((left, right) => left.priority.compareTo(right.priority));
@@ -266,11 +289,20 @@ class InsightsRepository {
     }
 
     if (matched.isEmpty) {
-      final defaults = cards
-          .where((item) => item.sectionId == 'recommended')
-          .map((item) => item.card);
-      for (final card in defaults) {
-        if (seen.add(card.id)) matched.add(card);
+      final roleDefaults = cards.where(
+        (item) =>
+            item.sectionId == 'recommended' &&
+            item.isRoleSpecificFor(populationRole),
+      );
+      for (final content in roleDefaults) {
+        if (seen.add(content.id)) matched.add(content.card);
+      }
+
+      final sharedDefaults = cards.where(
+        (item) => item.sectionId == 'recommended' && item.isShared,
+      );
+      for (final content in sharedDefaults) {
+        if (seen.add(content.id)) matched.add(content.card);
       }
     }
 
@@ -295,6 +327,8 @@ class InsightsRepository {
         return _matchesAny(value, [report.mentalStatus]);
       case 'topConcernAreas':
         return _matchesAny(value, report.topConcernAreas);
+      case 'domainIds':
+        return _matchesAny(value, _concernDomainIds(report).toList());
       case 'fullAssessmentStatus':
         return _matchesAny(value, [report.fullAssessmentStatus]);
       case 'quickAssessmentSignal':
@@ -394,24 +428,110 @@ class InsightsRepository {
 
   String _normalize(String value) => value.trim().toLowerCase();
 
+  Set<String> _concernDomainIds(ReportModel report) {
+    final ids = <String>{
+      for (final label in [
+        ...report.topConcernAreas,
+        ...report.fullAssessmentTopConcernAreas,
+      ])
+        if (_domainIdForLabel(label) != null) _domainIdForLabel(label)!,
+    };
+
+    report.fullAssessmentDomainStatuses.forEach((label, status) {
+      if (_isConcernStatus(status)) {
+        final domainId = _domainIdForLabel(label);
+        if (domainId != null) ids.add(domainId);
+      }
+    });
+    return ids;
+  }
+
+  bool _isConcernStatus(String status) {
+    final normalized = _normalize(status);
+    return const {
+      'some strain indicated',
+      'support may be helpful',
+      'needs improvement',
+      'at risk',
+      'high concern',
+      'very high concern',
+      'moderate',
+      'elevated',
+      'watchful',
+    }.contains(normalized);
+  }
+
+  String? _domainIdForLabel(String label) =>
+      _assessmentDomainIds[_normalize(label)];
+
   static const _sectionLimit = 6;
+
+  static const _assessmentDomainIds = <String, String>{
+    'academic stress': 'academicStress',
+    // Student Well-Being V4 reports these shortened labels.
+    'academic': 'academicStress',
+    'financial well-being': 'financialWellbeing',
+    'financial': 'financialWellbeing',
+    'social adjustment': 'socialAdjustment',
+    'workplace stress': 'workplaceStress',
+    'professional support': 'professionalSupport',
+    'professional well-being': 'professionalWellbeing',
+    'workplace responsibilities': 'workplaceResponsibilities',
+    'workplace support': 'workplaceSupport',
+    'workplace well-being': 'workplaceWellbeing',
+    'sleep and rest': 'sleepRest',
+    'emotional well-being': 'emotionalWellbeing',
+  };
 }
 
 class _InsightContent {
-  const _InsightContent({required this.sectionId, required this.card});
+  const _InsightContent({
+    required this.sectionId,
+    required this.card,
+    required this.targetRoles,
+    required this.domainIds,
+  });
 
   factory _InsightContent.fromJson(Map<String, dynamic> json) {
     return _InsightContent(
       sectionId: (json['sectionId'] ?? '').toString(),
       card: InsightCardItem.fromJson(json),
+      targetRoles: _rolesFrom(json['targetRoles']),
+      domainIds: _domainIdsFrom(json['domainIds']),
     );
   }
 
   String get id => card.id;
   DateTime? get publishedAt => card.publishedAt;
+  bool get isShared => targetRoles.contains('all');
+
+  bool isEligibleFor(PopulationRole? role) =>
+      isShared || (role != null && targetRoles.contains(role.storedValue));
+
+  bool isRoleSpecificFor(PopulationRole? role) =>
+      role != null && !isShared && targetRoles.contains(role.storedValue);
 
   final String sectionId;
   final InsightCardItem card;
+  final List<String> targetRoles;
+  final List<String> domainIds;
+
+  static List<String> _rolesFrom(Object? value) {
+    if (value is! List) return const ['all'];
+    final roles = value
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    return roles.isEmpty ? const ['all'] : roles;
+  }
+
+  static List<String> _domainIdsFrom(Object? value) {
+    if (value is! List) return const [];
+    return value
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
 }
 
 class _InsightRule {

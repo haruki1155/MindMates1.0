@@ -72,6 +72,23 @@ void main() {
     expect(find.byType(ServicesScreen), findsOneWidget);
   });
 
+  testWidgets('information service shows its official inquiry guide', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_servicesApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Information Service'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('HOW TO AVAIL THIS SERVICE'), findsOneWidget);
+    expect(find.text('SERVICE INFORMATION'), findsOneWidget);
+    expect(find.text('Make an Inquiry'), findsOneWidget);
+    expect(find.text('Transaction Complete'), findsOneWidget);
+  });
+
   testWidgets('counseling detail screen shows the appointment CTA', (
     tester,
   ) async {
@@ -100,9 +117,7 @@ void main() {
     expect(find.byType(PaccCounselingScreen), findsOneWidget);
   });
 
-  testWidgets('follow-up shows procedure placeholders without removed forms', (
-    tester,
-  ) async {
+  testWidgets('follow-up expands official procedures in place', (tester) async {
     await tester.binding.setSurfaceSize(const Size(320, 700));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -116,30 +131,23 @@ void main() {
     await tester.tap(find.text('Follow-up Service'));
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -700));
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -650));
     await tester.pumpAndSettle();
 
-    expect(find.text('Reactivation of Enrollment'), findsOneWidget);
-    expect(
-      find.textContaining('The reactivation process helps returning students'),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('reactivation-procedure-steps')),
-      findsOneWidget,
-    );
-    expect(find.text('Open Reactivation Form'), findsNothing);
-    expect(find.text('Student Shifting'), findsOneWidget);
-    expect(
-      find.textContaining('The shifting process helps students'),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('shifting-procedure-steps')),
-      findsOneWidget,
-    );
-    expect(find.text('Open Shifting Form'), findsNothing);
-    expect(find.text('Available Forms'), findsNothing);
+    expect(find.text('Adding, Changing & Dropping Subjects'), findsOneWidget);
+    expect(find.text('Shifting of Course'), findsOneWidget);
+    expect(find.byType(ServiceDetailScreen), findsOneWidget);
+
+    await tester.tap(find.text('Adding, Changing & Dropping Subjects'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('if necessary.'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Shifting of Course'));
+    await tester.tap(find.text('Shifting of Course'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('STEP 4 OF 4'));
+    expect(find.text('STEP 4 OF 4'), findsOneWidget);
+    expect(find.byType(ServiceDetailScreen), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

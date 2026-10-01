@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../../providers/assessment_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/insights_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
@@ -252,6 +253,16 @@ class _StudentAssessmentCompleteScreenState
       );
       debugPrintStack(stackTrace: stackTrace);
     }
+    if (!mounted) return;
+    try {
+      await _insightsProviderOrNull()?.refreshLoadedContext(userId);
+    } catch (error, stackTrace) {
+      FirebaseRuntimeDiagnostics.log(
+        event: 'student_v4_insights_refresh_failed',
+        error: error,
+      );
+      debugPrintStack(stackTrace: stackTrace);
+    }
   }
 
   void _saveResultIfNeeded(AssessmentProvider provider) {
@@ -270,6 +281,7 @@ class _StudentAssessmentCompleteScreenState
         await context.read<UserProvider>().markFullAssessment(userId);
         if (!mounted) return;
         await _reportProviderOrNull()?.refreshWeeklyReport(userId);
+        await _insightsProviderOrNull()?.refreshLoadedContext(userId);
       } catch (error) {
         debugPrint('Student assessment sync failed: $error');
       }
@@ -320,6 +332,14 @@ class _StudentAssessmentCompleteScreenState
   ReportProvider? _reportProviderOrNull() {
     try {
       return context.read<ReportProvider>();
+    } on ProviderNotFoundException {
+      return null;
+    }
+  }
+
+  InsightsProvider? _insightsProviderOrNull() {
+    try {
+      return context.read<InsightsProvider>();
     } on ProviderNotFoundException {
       return null;
     }

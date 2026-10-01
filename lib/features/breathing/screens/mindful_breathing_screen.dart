@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
 import '../../../providers/breathing_provider.dart';
+import '../../../providers/insights_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../models/breathing_models.dart';
@@ -254,6 +255,9 @@ class _MindfulBreathingScreenState extends State<MindfulBreathingScreen>
     try {
       await context.read<UserProvider>().loadProfile(userId);
       await _readProviderOrNull<ReportProvider>()?.refreshWeeklyReport(userId);
+      await _readProviderOrNull<InsightsProvider>()?.refreshLoadedContext(
+        userId,
+      );
     } catch (_) {
       // The completed breathing session remains saved even if summary refresh
       // is temporarily unavailable.
