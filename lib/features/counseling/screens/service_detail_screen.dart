@@ -5,6 +5,52 @@ import 'client_feedback_form_screen.dart';
 import 'guidance_satisfaction_survey_screen.dart';
 import 'pacc_counseling_screen.dart';
 
+class ServiceGuideData {
+  const ServiceGuideData({
+    required this.title,
+    required this.eligibleClients,
+    required this.availability,
+    required this.personResponsible,
+    required this.fee,
+    required this.steps,
+    this.description,
+    this.forms = const [],
+    this.requirements = const [],
+    this.completionMessage,
+    this.nextOffice,
+  });
+
+  final String title;
+  final String? description;
+  final String eligibleClients;
+  final String availability;
+  final String personResponsible;
+  final String fee;
+  final List<String> forms;
+  final List<String> requirements;
+  final List<ServiceGuideStep> steps;
+  final String? completionMessage;
+  final String? nextOffice;
+}
+
+class ServiceGuideStep {
+  const ServiceGuideStep({
+    required this.number,
+    required this.title,
+    required this.clientAction,
+    required this.providerAction,
+    this.duration,
+    this.note,
+  });
+
+  final int number;
+  final String title;
+  final String clientAction;
+  final String providerAction;
+  final String? duration;
+  final String? note;
+}
+
 class ServiceDetailData {
   const ServiceDetailData({
     required this.title,
@@ -18,6 +64,7 @@ class ServiceDetailData {
     this.hasShiftingProcedure = false,
     this.hasSatisfactionSurvey = false,
     this.hasClientFeedbackForm = false,
+    this.guides = const [],
   });
 
   final String title;
@@ -31,6 +78,7 @@ class ServiceDetailData {
   final bool hasShiftingProcedure;
   final bool hasSatisfactionSurvey;
   final bool hasClientFeedbackForm;
+  final List<ServiceGuideData> guides;
 }
 
 class ServiceDetailScreen extends StatelessWidget {
@@ -67,6 +115,10 @@ class ServiceDetailScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 18),
                     Text(service.description, style: _DetailText.body),
+                    if (service.guides.isNotEmpty) ...[
+                      const SizedBox(height: 32),
+                      _ServiceGuideSection(guides: service.guides),
+                    ],
                     if (service.isCounseling) ...[
                       const SizedBox(height: 32),
                       const _DetailSectionHeading(
@@ -83,32 +135,6 @@ class ServiceDetailScreen extends StatelessWidget {
                             'Set a preferred date and time to discuss personal, academic, social, or emotional concerns with a PACC counselor.',
                         buttonLabel: 'Set Appointment',
                         onTap: () => _openPaccCounseling(context),
-                      ),
-                    ],
-                    if (service.hasReactivationProcedure) ...[
-                      const SizedBox(height: 32),
-                      const _DetailSectionHeading(
-                        title: 'Reactivation of Enrollment',
-                        subtitle:
-                            'The reactivation process helps returning students resume their enrollment after a leave or period of inactivity. Detailed requirements and procedures will be added here soon.',
-                      ),
-                      const SizedBox(height: 18),
-                      const _ProcedureStepsPlaceholder(
-                        stepsKey: ValueKey('reactivation-procedure-steps'),
-                        semanticLabel: 'Three-step reactivation procedure',
-                      ),
-                    ],
-                    if (service.hasShiftingProcedure) ...[
-                      const SizedBox(height: 32),
-                      const _DetailSectionHeading(
-                        title: 'Student Shifting',
-                        subtitle:
-                            'The shifting process helps students request a transfer from their current academic program to another program. Detailed requirements and procedures will be added here soon.',
-                      ),
-                      const SizedBox(height: 18),
-                      const _ProcedureStepsPlaceholder(
-                        stepsKey: ValueKey('shifting-procedure-steps'),
-                        semanticLabel: 'Three-step shifting procedure',
                       ),
                     ],
                     if (service.hasSatisfactionSurvey ||
@@ -265,66 +291,236 @@ class _DetailSectionHeading extends StatelessWidget {
   }
 }
 
-class _ProcedureStepsPlaceholder extends StatelessWidget {
-  const _ProcedureStepsPlaceholder({
-    required this.stepsKey,
-    required this.semanticLabel,
-  });
+class _ServiceGuideSection extends StatelessWidget {
+  const _ServiceGuideSection({required this.guides});
 
-  final Key stepsKey;
-  final String semanticLabel;
+  final List<ServiceGuideData> guides;
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      key: stepsKey,
-      label: semanticLabel,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
-        decoration: BoxDecoration(
-          color: _DetailColors.sunSoft,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: _DetailColors.cardBorder),
+    final hasChoices = guides.length > 1;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _DetailSectionHeading(
+          title: 'HOW TO AVAIL THIS SERVICE',
+          subtitle:
+              'Follow the steps below before and during your transaction with PACC.',
         ),
-        child: Row(
-          children: [
-            for (var step = 1; step <= 3; step++) ...[
-              _ProcedureStepNumber(step: step),
-              if (step < 3)
-                const Expanded(
-                  child: Divider(
-                    color: _DetailColors.sun,
-                    thickness: 2,
-                    height: 2,
-                  ),
-                ),
-            ],
-          ],
-        ),
+        const SizedBox(height: 14),
+        for (final guide in guides) ...[
+          if (hasChoices)
+            _ExpandableServiceGuide(guide: guide)
+          else
+            _GuideContent(guide: guide),
+          const SizedBox(height: 16),
+        ],
+      ],
+    );
+  }
+}
+
+class _ExpandableServiceGuide extends StatelessWidget {
+  const _ExpandableServiceGuide({required this.guide});
+
+  final ServiceGuideData guide;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        title: Text(guide.title, style: _DetailText.actionTitle),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        children: [_GuideContent(guide: guide)],
       ),
     );
   }
 }
 
-class _ProcedureStepNumber extends StatelessWidget {
-  const _ProcedureStepNumber({required this.step});
+class _GuideContent extends StatelessWidget {
+  const _GuideContent({required this.guide});
 
-  final int step;
+  final ServiceGuideData guide;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 42,
-      height: 42,
-      alignment: Alignment.center,
-      decoration: const BoxDecoration(
-        color: _DetailColors.sun,
-        shape: BoxShape.circle,
-      ),
-      child: Text('$step', style: _DetailText.stepNumber),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (guide.description != null) ...[
+          Text(guide.description!, style: _DetailText.sectionSubtitle),
+          const SizedBox(height: 12),
+        ],
+        _ServiceInformationCard(guide: guide),
+        if (guide.forms.isNotEmpty || guide.requirements.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _ServiceRequirementsCard(guide: guide),
+        ],
+        for (final step in guide.steps) ...[
+          const SizedBox(height: 12),
+          _ServiceGuideStepCard(step: step, totalSteps: guide.steps.length),
+        ],
+        if (guide.completionMessage != null || guide.nextOffice != null) ...[
+          const SizedBox(height: 12),
+          _ServiceGuideCompletionCard(guide: guide),
+        ],
+      ],
     );
   }
+}
+
+class _ServiceInformationCard extends StatelessWidget {
+  const _ServiceInformationCard({required this.guide});
+  final ServiceGuideData guide;
+
+  @override
+  Widget build(BuildContext context) => _GuideCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('SERVICE INFORMATION', style: _DetailText.purposeLabel),
+        const SizedBox(height: 10),
+        _GuideField(label: 'Who may avail', value: guide.eligibleClients),
+        _GuideField(label: 'Availability', value: guide.availability),
+        _GuideField(
+          label: 'Person Responsible',
+          value: guide.personResponsible,
+        ),
+        _GuideField(label: 'Fee', value: guide.fee),
+      ],
+    ),
+  );
+}
+
+class _ServiceRequirementsCard extends StatelessWidget {
+  const _ServiceRequirementsCard({required this.guide});
+  final ServiceGuideData guide;
+
+  @override
+  Widget build(BuildContext context) => _GuideCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('BEFORE YOU START', style: _DetailText.purposeLabel),
+        if (guide.forms.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          const Text('Required Forms', style: _DetailText.guideLabel),
+          ...guide.forms.map((item) => _GuideBullet(text: item)),
+        ],
+        if (guide.requirements.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          const Text('Required Documents', style: _DetailText.guideLabel),
+          ...guide.requirements.map((item) => _GuideBullet(text: item)),
+        ],
+      ],
+    ),
+  );
+}
+
+class _ServiceGuideStepCard extends StatelessWidget {
+  const _ServiceGuideStepCard({required this.step, required this.totalSteps});
+  final ServiceGuideStep step;
+  final int totalSteps;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label:
+        'Step ${step.number} of $totalSteps. ${step.title}.${step.duration == null ? '' : ' Estimated time ${step.duration}.'}',
+    child: _GuideCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'STEP ${step.number} OF $totalSteps',
+            style: _DetailText.purposeLabel,
+          ),
+          const SizedBox(height: 5),
+          Text(step.title, style: _DetailText.actionTitle),
+          const SizedBox(height: 12),
+          const Text('WHAT YOU NEED TO DO', style: _DetailText.guideLabel),
+          Text(step.clientAction, style: _DetailText.actionDescription),
+          const SizedBox(height: 10),
+          const Text('WHAT PACC WILL DO', style: _DetailText.guideLabel),
+          Text(step.providerAction, style: _DetailText.actionDescription),
+          if (step.duration != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Estimated time: ${step.duration}',
+              style: _DetailText.guideLabel,
+            ),
+          ],
+          if (step.note != null)
+            Text(step.note!, style: _DetailText.actionDescription),
+        ],
+      ),
+    ),
+  );
+}
+
+class _ServiceGuideCompletionCard extends StatelessWidget {
+  const _ServiceGuideCompletionCard({required this.guide});
+  final ServiceGuideData guide;
+
+  @override
+  Widget build(BuildContext context) => _GuideCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (guide.completionMessage != null)
+          Text(guide.completionMessage!, style: _DetailText.actionTitle),
+        if (guide.nextOffice != null) ...[
+          const SizedBox(height: 8),
+          const Text('NEXT OFFICE', style: _DetailText.purposeLabel),
+          Text(guide.nextOffice!, style: _DetailText.actionDescription),
+        ],
+      ],
+    ),
+  );
+}
+
+class _GuideCard extends StatelessWidget {
+  const _GuideCard({required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: _DetailColors.cardBorder),
+    ),
+    child: child,
+  );
+}
+
+class _GuideField extends StatelessWidget {
+  const _GuideField({required this.label, required this.value});
+  final String label;
+  final String value;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: _DetailText.guideLabel),
+        Text(value, style: _DetailText.actionDescription),
+      ],
+    ),
+  );
+}
+
+class _GuideBullet extends StatelessWidget {
+  const _GuideBullet({required this.text});
+  final String text;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 3),
+    child: Text('• $text', style: _DetailText.actionDescription),
+  );
 }
 
 class _ServiceActionCard extends StatelessWidget {
@@ -485,6 +681,12 @@ class _DetailText {
     fontWeight: FontWeight.w800,
   );
 
+  static const guideLabel = TextStyle(
+    color: _DetailColors.text,
+    fontSize: 12,
+    fontWeight: FontWeight.w800,
+  );
+
   static const actionTitle = TextStyle(
     color: _DetailColors.text,
     fontSize: 16,
@@ -497,12 +699,6 @@ class _DetailText {
     fontSize: 13,
     height: 1.45,
     fontWeight: FontWeight.w500,
-  );
-
-  static const stepNumber = TextStyle(
-    color: _DetailColors.text,
-    fontSize: 16,
-    fontWeight: FontWeight.w900,
   );
 
   static const actionButton = TextStyle(
