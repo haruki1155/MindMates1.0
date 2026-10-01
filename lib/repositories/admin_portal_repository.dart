@@ -453,6 +453,20 @@ class AdminPortalRepository {
     await FirebaseAuth.instance.signOut();
   }
 
+  Future<void> cancelPendingRegistration() async {
+    await FirebaseFunctions.instance
+        .routedCallable('cancelPendingRegistration')
+        .call<void>();
+    _currentAccessRole = AccessRole.appUser;
+    _isSuperAdmin = false;
+    _mustChangePassword = false;
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {
+      // Server cancellation already succeeded; local session cleanup is best effort.
+    }
+  }
+
   Future<void> _tryRecordAudit({
     required String action,
     required String category,

@@ -48,3 +48,30 @@ test("student IDs follow the supplied five-year allowlist structure", async () =
   assert.throws(() => canonicalStudentId("20210001"), /approved list/);
   assert.throws(() => canonicalStudentId("2026-0001"), /approved list/);
 });
+
+test("pending cancellation eligibility uses Auth-flow fields, not Firestore verificationStatus", async () => {
+  const {cancellationRegistrationType} = await import("./account_integrity");
+  assert.equal(cancellationRegistrationType({
+    accessRole: "appUser", populationRole: "student", profileSetupCompleted: false,
+    quickAssessmentCompleted: false, verificationStatus: "verified",
+  }), "standard");
+  assert.equal(cancellationRegistrationType({
+    accessRole: "appUser", populationRole: "student", profileSetupCompleted: true,
+    quickAssessmentCompleted: false,
+  }), null);
+  assert.equal(cancellationRegistrationType({
+    accessRole: "appUser", populationRole: "nonTeaching", staffAccountStatus: "pending",
+    registrationStatus: "email_verification_required",
+  }), "staff");
+});
+
+test("cancellation retry markers must be server-shaped for the same user", async () => {
+  const {isCancellationRetryMarker} = await import("./account_integrity");
+  assert.equal(isCancellationRetryMarker({
+    uid: "user_1", reason: "wrong_email_registration_cancellation",
+  }, "user_1"), true);
+  assert.equal(isCancellationRetryMarker({
+    uid: "other_user", reason: "wrong_email_registration_cancellation",
+  }, "user_1"), false);
+  assert.equal(isCancellationRetryMarker({uid: "user_1", reason: "other"}, "user_1"), false);
+});

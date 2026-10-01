@@ -40,6 +40,9 @@ class AuthRepository {
 
   Future<void> reloadCurrentUser() => _authService.reloadCurrentUser();
   Future<void> sendEmailVerification() => _authService.sendEmailVerification();
+  Future<void> cancelPendingRegistration() async {
+    await _functions.routedCallable('cancelPendingRegistration').call<void>();
+  }
 
   static const _authEmailDomain = 'mindmate.local';
   static const institutionalEmailDomain = 'ucu.edu.ph';

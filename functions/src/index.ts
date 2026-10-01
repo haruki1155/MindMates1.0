@@ -15,6 +15,8 @@ export {
 export {
   provisionAppUserProfile,
   provisionAppUserProfileDev,
+  cancelPendingRegistration,
+  cancelPendingRegistrationDev,
   getAssessmentStatus,
   getAssessmentStatusDev,
 } from "./account_integrity";

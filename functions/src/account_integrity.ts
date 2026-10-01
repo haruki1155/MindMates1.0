@@ -136,6 +136,137 @@ function profileIsReady(profile: FirebaseFirestore.DocumentData): boolean {
   return present(profile.employeeId) && present(profile.sector) && present(profile.position);
 }
 
+const CANCELLATION_REASON = "wrong_email_registration_cancellation";
+
+function cancellationError(message: string): HttpsError {
+  return new HttpsError("failed-precondition", message);
+}
+
+function pendingStandardRegistration(profile: FirebaseFirestore.DocumentData): boolean {
+  return profile.accessRole === "appUser" &&
+    profile.staffAccountStatus == null &&
+    profile.profileSetupCompleted === false &&
+    profile.quickAssessmentCompleted === false &&
+    (profile.populationRole === "student" || profile.populationRole === "teaching");
+}
+
+function pendingStaffRegistration(profile: FirebaseFirestore.DocumentData): boolean {
+  return profile.accessRole === "appUser" &&
+    profile.staffAccountStatus === "pending" &&
+    profile.registrationStatus === "email_verification_required" &&
+    profile.populationRole === "nonTeaching";
+}
+
+export function cancellationRegistrationType(
+  profile: FirebaseFirestore.DocumentData,
+): "standard" | "staff" | null {
+  if (pendingStandardRegistration(profile)) return "standard";
+  if (pendingStaffRegistration(profile)) return "staff";
+  return null;
+}
+
+export function isCancellationRetryMarker(
+  marker: FirebaseFirestore.DocumentData | undefined,
+  uid: string,
+): boolean {
+  return marker?.uid === uid && marker?.reason === CANCELLATION_REASON;
+}
+
+async function cancelPendingRegistrationHandler(request: CallableRequest) {
+  const uid = requireUid(request);
+  const auth = getAuth();
+  let authUser;
+  try {
+    authUser = await auth.getUser(uid);
+  } catch (error) {
+    console.warn("pending_registration_cancel_auth_lookup_failed", {uid, code: safeErrorCode(error)});
+    throw cancellationError("This pending registration can no longer be cancelled automatically.");
+  }
+  if (authUser.disabled || authUser.emailVerified) {
+    throw cancellationError("Only unfinished, unverified registrations can be cancelled.");
+  }
+
+  const profileRef = db.collection("users").doc(uid);
+  const markerRef = db.collection("pending_registration_cancellations").doc(uid);
+  const profile = await profileRef.get();
+  const marker = await markerRef.get();
+
+  if (profile.exists) {
+    const profileData = profile.data() ?? {};
+    const registrationType = cancellationRegistrationType(profileData);
+    if (registrationType == null) {
+      throw cancellationError("This account has progressed and cannot be cancelled automatically.");
+    }
+
+    const reservationRef = registrationType === "staff" || profileData.populationRole === "teaching"
+      ? db.collection("employee_id_reservations").doc(canonicalEmployeeId(String(profileData.employeeId ?? "")))
+      : db.collection("student_id_reservations").doc(canonicalStudentId(String(profileData.schoolId ?? "")));
+    const accessRequestId = registrationType === "staff" ? String(profileData.accessRequestId ?? "").trim() : "";
+    if (registrationType === "staff" && !accessRequestId) {
+      throw cancellationError("This access request is incomplete and cannot be cancelled automatically.");
+    }
+    const requestRef = accessRequestId ? db.collection("staffAccessRequests").doc(accessRequestId) : null;
+
+    await db.runTransaction(async (transaction) => {
+      const currentProfile = await transaction.get(profileRef);
+      if (!currentProfile.exists) {
+        throw cancellationError("Registration state changed. Please try again.");
+      }
+      const currentData = currentProfile.data() ?? {};
+      if (cancellationRegistrationType(currentData) !== registrationType) {
+        throw cancellationError("This account has progressed and cannot be cancelled automatically.");
+      }
+      const reservation = await transaction.get(reservationRef);
+      if (!reservation.exists || reservation.data()?.userId !== uid) {
+        throw cancellationError("Registration ownership could not be verified.");
+      }
+      if (requestRef) {
+        const accessRequest = await transaction.get(requestRef);
+        if (!accessRequest.exists || accessRequest.data()?.applicantUserId !== uid) {
+          throw cancellationError("Access-request ownership could not be verified.");
+        }
+        transaction.delete(requestRef);
+      }
+      transaction.delete(reservationRef);
+      transaction.delete(profileRef);
+      transaction.set(markerRef, {
+        uid,
+        reason: CANCELLATION_REASON,
+        registrationType,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+  } else {
+    // A missing profile can also be an interrupted signup. Only a marker that
+    // this callable created authorizes the remaining Auth deletion step.
+    if (!marker.exists || !isCancellationRetryMarker(marker.data(), uid)) {
+      throw cancellationError("This incomplete signup must be recovered instead of cancelled. Please sign in and retry profile setup.");
+    }
+  }
+
+  try {
+    await auth.deleteUser(uid);
+  } catch (error) {
+    console.error("pending_registration_cancel_auth_delete_failed", {uid, code: safeErrorCode(error)});
+    throw new HttpsError("unavailable", "Pending registration cleanup is incomplete. Please try again.");
+  }
+  try {
+    await markerRef.delete();
+  } catch (error) {
+    console.warn("pending_registration_cancel_marker_delete_failed", {uid, code: safeErrorCode(error)});
+  }
+  return {ok: true};
+}
+
+export const cancelPendingRegistration = onCall(
+  {enforceAppCheck: true},
+  cancelPendingRegistrationHandler,
+);
+export const cancelPendingRegistrationDev = onCall(
+  {enforceAppCheck: false},
+  cancelPendingRegistrationHandler,
+);
+
 async function provisionAppUserProfileHandler(request: CallableRequest) {
   const correlationId = randomUUID();
   const uid = requireUid(request);

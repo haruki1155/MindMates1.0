@@ -117,6 +117,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Recovery markers are internal Cloud Functions state. Clients must never
+    // create one to authorize an otherwise ambiguous account deletion retry.
+    match /pending_registration_cancellations/{userId} {
+      allow read, write: if false;
+    }
+
     match /admin_audit_logs/{auditId} {
       allow read: if isSystemAdmin();
       allow write: if false;

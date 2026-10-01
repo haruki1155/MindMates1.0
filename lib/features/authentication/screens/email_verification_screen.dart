@@ -20,13 +20,14 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   static const _resendDelay = 60;
   bool _checking = false;
   bool _sending = false;
+  bool _cancelling = false;
   int _resendSeconds = 0;
   Timer? _resendTimer;
   String? _message;
   bool _messageIsError = false;
   bool _emailSent = false;
 
-  bool get _busy => _checking || _sending;
+  bool get _busy => _checking || _sending || _cancelling;
 
   @override
   void initState() {
@@ -118,6 +119,54 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     });
   }
 
+  Future<void> _useAnotherEmail() async {
+    final email =
+        context.read<AuthProvider>().currentUserEmail ?? 'this email address';
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Use another email?'),
+            content: Text(
+              'This removes the unfinished registration for $email, including its reserved ID. You can then register again with the correct email.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Keep this email'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Use another email'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+    setState(() {
+      _cancelling = true;
+      _message = null;
+    });
+    try {
+      await context.read<AuthProvider>().cancelPendingRegistration();
+      if (!mounted) return;
+      Navigator.of(
+        context,
+      ).pushNamedAndRemoveUntil(RouteNames.signup, (route) => false);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _messageIsError = true;
+        _message =
+            context.read<AuthProvider>().errorMessage ??
+            'Unable to cancel this pending registration. Please try again.';
+      });
+    } finally {
+      if (mounted) setState(() => _cancelling = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final email =
@@ -167,6 +216,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                             messageIsError: _messageIsError,
                             onCheck: _checkVerification,
                             onResend: _resend,
+                            onUseAnotherEmail: _useAnotherEmail,
                           ),
                           const SizedBox(height: 18),
                           const Row(
@@ -253,6 +303,7 @@ class _VerificationCard extends StatelessWidget {
     required this.messageIsError,
     required this.onCheck,
     required this.onResend,
+    required this.onUseAnotherEmail,
   });
 
   final String email;
@@ -265,6 +316,7 @@ class _VerificationCard extends StatelessWidget {
   final bool messageIsError;
   final VoidCallback onCheck;
   final VoidCallback onResend;
+  final VoidCallback onUseAnotherEmail;
 
   @override
   Widget build(BuildContext context) {
@@ -388,6 +440,10 @@ class _VerificationCard extends StatelessWidget {
                 fontWeight: FontWeight.w800,
               ),
             ),
+          ),
+          TextButton(
+            onPressed: busy ? null : onUseAnotherEmail,
+            child: const Text('Wrong email? Use another email'),
           ),
           const Text(
             'Can’t find it? Check your Spam or Promotions folder.',

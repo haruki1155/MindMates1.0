@@ -198,7 +198,6 @@ class _SignupBodyState extends State<_SignupBody> {
 
     final authProvider = context.read<AuthProvider>();
     final userProvider = context.read<UserProvider>();
-    authProvider.setRegistrationEmail(_emailController.text);
     final role = _registrationRole;
     final birthDate = _dateOfBirth;
     if (birthDate == null) {
@@ -206,6 +205,13 @@ class _SignupBodyState extends State<_SignupBody> {
         const SnackBar(content: Text('Date of birth is required.')),
       );
       return;
+    }
+    if (!_isGoogleProfileSetup) {
+      final normalizedEmail = _emailController.text.trim().toLowerCase();
+      final confirmed = await _confirmRegistrationEmail(normalizedEmail);
+      if (!confirmed || !mounted) return;
+      _emailController.text = normalizedEmail;
+      authProvider.setRegistrationEmail(normalizedEmail);
     }
     final userId = _isGoogleProfileSetup
         ? await authProvider.completeGoogleProfile(
@@ -283,6 +289,33 @@ class _SignupBodyState extends State<_SignupBody> {
     Navigator.of(
       context,
     ).pushNamedAndRemoveUntil(destination, (route) => false);
+  }
+
+  Future<bool> _confirmRegistrationEmail(String normalizedEmail) async {
+    final roleLabel =
+        AuthRepository.isInstitutionalEmployeeEmail(normalizedEmail)
+        ? 'This email identifies your account as Teaching Personnel.'
+        : 'This email identifies your account as a Student account.';
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Confirm your email'),
+            content: Text(
+              'Verification will be sent to:\n\n$normalizedEmail\n\n$roleLabel',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Edit Email'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Confirm & Continue'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   UserModel _localProfileFromRegistration({

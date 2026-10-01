@@ -57,6 +57,41 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> reloadCurrentUser() => _repository.reloadCurrentUser();
   Future<void> sendEmailVerification() => _repository.sendEmailVerification();
+  Future<void> cancelPendingRegistration() async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await _repository.cancelPendingRegistration();
+      try {
+        await _repository.signOut();
+      } catch (error, stackTrace) {
+        FirebaseErrorMessage.log(
+          error,
+          stackTrace,
+          area:
+              'Local sign-out after pending registration cancellation failed.',
+        );
+      }
+      _clearSession(notify: false);
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'Pending registration cancellation failed.',
+      );
+      _errorMessage = FirebaseErrorMessage.describe(
+        error,
+        fallback:
+            'Unable to cancel this pending registration. Please try again.',
+      );
+      rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> sendPasswordResetForSchoolId(String schoolId) async {
     _isLoading = true;
     _errorMessage = null;

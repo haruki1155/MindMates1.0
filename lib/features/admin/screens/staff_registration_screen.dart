@@ -261,10 +261,20 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
   );
   Future<void> submit() async {
     if (!(formKey.currentState?.validate() ?? false)) return;
+    final normalizedEmail = email.text.trim().toLowerCase();
+    final roleLabel = requestedRole == AccessRole.counselor
+        ? 'Counselor'
+        : 'PACC Staff';
+    final confirmed = await _confirmRegistrationEmail(
+      normalizedEmail: normalizedEmail,
+      roleLabel: roleLabel,
+    );
+    if (!confirmed || !mounted) return;
+    email.text = normalizedEmail;
     setState(() => busy = true);
     try {
       final submission = await widget.repository.registerStaff(
-        email: email.text,
+        email: normalizedEmail,
         password: password.text,
         firstName: first.text,
         lastName: last.text,
@@ -272,32 +282,109 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
         position: position.text,
         requestedRole: requestedRole,
       );
-      await widget.repository.signOut();
       if (!mounted) return;
-      final roleLabel = requestedRole == AccessRole.counselor
-          ? 'Counselor'
-          : 'PACC Staff';
-      await showDialog<void>(
+      var cancellingPendingRegistration = false;
+      final outcome = await showDialog<bool>(
         context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Verify Your Email'),
-          content: Text(
-            'Your $roleLabel access request has been created.\n\n'
-            '${submission.verificationSent ? 'We sent a verification email to' : 'The request was saved, but a verification email could not be sent to'} '
-            '${email.text.trim()}.\n\n'
-            'Verify your email address before your request can be reviewed by an administrator.\n\n'
-            'Reference: ${submission.reference ?? 'Pending'}\n'
-            'After verification, sign in again to view the status of your request.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Return to Sign In'),
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('Verify Your Email'),
+            content: Text(
+              'Your $roleLabel access request has been created.\n\n'
+              '${submission.verificationSent ? 'We sent a verification email to' : 'The request was saved, but a verification email could not be sent to'} '
+              '${email.text.trim()}.\n\n'
+              'After verification, sign in again to view the status of your request.\n\n'
+              'Reference: ${submission.reference ?? 'Pending'}\n'
+              'Verify your email address before your request can be reviewed by an administrator.',
             ),
-          ],
+            actions: [
+              TextButton(
+                onPressed: cancellingPendingRegistration
+                    ? null
+                    : () async {
+                        await widget.repository.signOut();
+                        if (dialogContext.mounted) {
+                          Navigator.pop(dialogContext, false);
+                        }
+                      },
+                child: const Text('Return to Sign In'),
+              ),
+              FilledButton(
+                onPressed: cancellingPendingRegistration
+                    ? null
+                    : () async {
+                        final confirmed =
+                            await showDialog<bool>(
+                              context: dialogContext,
+                              builder: (confirmationContext) => AlertDialog(
+                                title: const Text('Use another email?'),
+                                content: const Text(
+                                  'This removes the unfinished access request and releases its employee ID reservation.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(
+                                      confirmationContext,
+                                      false,
+                                    ),
+                                    child: const Text('Keep this email'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () => Navigator.pop(
+                                      confirmationContext,
+                                      true,
+                                    ),
+                                    child: const Text('Use another email'),
+                                  ),
+                                ],
+                              ),
+                            ) ??
+                            false;
+                        if (!confirmed) return;
+                        setDialogState(
+                          () => cancellingPendingRegistration = true,
+                        );
+                        try {
+                          await widget.repository.cancelPendingRegistration();
+                          if (dialogContext.mounted) {
+                            Navigator.pop(dialogContext, true);
+                          }
+                        } catch (error) {
+                          if (dialogContext.mounted) {
+                            setDialogState(
+                              () => cancellingPendingRegistration = false,
+                            );
+                          }
+                          if (!mounted || !dialogContext.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                FirebaseErrorMessage.describe(
+                                  error,
+                                  fallback:
+                                      'Unable to cancel this pending registration. Please try again.',
+                                ),
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                child: Text(
+                  cancellingPendingRegistration
+                      ? 'Cancelling...'
+                      : 'Use Another Email',
+                ),
+              ),
+            ],
+          ),
         ),
       );
-      if (mounted) Navigator.pop(context);
+      if (!mounted) return;
+      if (outcome == true) {
+        _clearForm();
+      } else if (outcome == false) {
+        Navigator.pop(context);
+      }
     } catch (error) {
       if (!mounted) return;
       final message = FirebaseErrorMessage.describe(
@@ -321,5 +408,46 @@ class _StaffRegistrationScreenState extends State<StaffRegistrationScreen> {
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  Future<bool> _confirmRegistrationEmail({
+    required String normalizedEmail,
+    required String roleLabel,
+  }) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Confirm your email'),
+            content: Text(
+              'A verification link will be sent to:\n\n$normalizedEmail\n\nYou are requesting $roleLabel access.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Edit Email'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Confirm & Continue'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  void _clearForm() {
+    for (final controller in [
+      first,
+      last,
+      employee,
+      email,
+      position,
+      password,
+      confirm,
+    ]) {
+      controller.clear();
+    }
+    setState(() => requestedRole = AccessRole.portalStaff);
   }
 }

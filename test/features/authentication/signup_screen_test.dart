@@ -120,6 +120,8 @@ void main() {
 
     await tester.tap(find.text('Sign Up'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm & Continue'));
+    await tester.pumpAndSettle();
 
     expect(authProvider.signupCalls, 1);
     expect(
@@ -212,6 +214,8 @@ void main() {
       );
       await _acceptTerms(tester);
       await tester.tap(find.text('Sign Up'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm & Continue'));
       await tester.pumpAndSettle();
 
       expect(authProvider.signupCalls, 1);

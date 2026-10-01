@@ -7,6 +7,7 @@ class FirebaseCallableRouter {
 
   static const _stagingAliases = <String>{
     'provisionAppUserProfile',
+    'cancelPendingRegistration',
     'resolveSchoolIdAuthEmail',
     'requestAdminPasswordReset',
     'requestStaffEmailVerification',
