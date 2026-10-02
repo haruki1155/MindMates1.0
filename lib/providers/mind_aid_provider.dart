@@ -360,6 +360,7 @@ class MindAidProvider extends ChangeNotifier {
             ? paaccResponse?.actions ?? const []
             : const [],
         source: result.chatResponse.source,
+        model: result.chatResponse.model,
       );
 
       _stripInactiveActions();
@@ -813,6 +814,7 @@ class MindAidProvider extends ChangeNotifier {
         categoryLabel: message.categoryLabel,
         supportCards: message.supportCards,
         source: message.source,
+        model: message.model,
       );
     }).toList();
   }
@@ -836,6 +838,7 @@ class MindAidProvider extends ChangeNotifier {
           supportCards: const [],
           actions: message.actions,
           source: message.source,
+          model: message.model,
         ),
       );
     }

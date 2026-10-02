@@ -14,6 +14,7 @@ class MindAidMessageModel {
   final String source;
   final double confidence;
   final String fallbackReason;
+  final String? model;
   final List<MindAidAction> actions;
   final bool hasPaaccDisplay;
 
@@ -30,6 +31,7 @@ class MindAidMessageModel {
     this.source = 'local',
     this.confidence = 0,
     this.fallbackReason = '',
+    this.model,
     this.actions = const [],
     this.hasPaaccDisplay = false,
   });
@@ -48,6 +50,7 @@ class MindAidMessageModel {
       source: (map['source'] ?? 'local').toString(),
       confidence: (map['confidence'] as num?)?.toDouble() ?? 0,
       fallbackReason: (map['fallbackReason'] ?? '').toString(),
+      model: map['model']?.toString(),
       actions: _actionsFrom(map['actions']),
       hasPaaccDisplay: map['hasPaaccDisplay'] == true,
     );
@@ -67,6 +70,7 @@ class MindAidMessageModel {
       'source': source,
       'confidence': confidence,
       'fallbackReason': fallbackReason,
+      if (model != null) 'model': model,
       'actions': actions
           .map(
             (action) => {

@@ -160,6 +160,7 @@ class MindAidChatResponse {
     this.source = 'local',
     this.confidence = 0,
     this.fallbackReason = '',
+    this.model,
     this.actions = const [],
   });
 
@@ -177,6 +178,7 @@ class MindAidChatResponse {
   final String source;
   final double confidence;
   final String fallbackReason;
+  final String? model;
   final List<MindAidAction> actions;
 
   String get primaryIntent => intentOverride?.trim().isNotEmpty == true

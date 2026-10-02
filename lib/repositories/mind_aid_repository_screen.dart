@@ -243,6 +243,7 @@ class MindAidRepository {
           source: cloud.source,
           confidence: cloud.confidence,
           fallbackReason: cloud.fallbackReason,
+          model: cloud.model,
           actions: cloud.actions,
         );
         final message = MindAidMessageModel(
@@ -258,6 +259,7 @@ class MindAidRepository {
           source: cloud.source,
           confidence: cloud.confidence,
           fallbackReason: cloud.fallbackReason,
+          model: cloud.model,
           actions: cloud.actions,
         );
         return MindAidSendResult(

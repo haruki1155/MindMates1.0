@@ -4,6 +4,7 @@ import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/constants/app_assets.dart';
+import '../../../core/config/app_environment.dart';
 import '../../mind_aid/domain/mind_aid_integration_models.dart';
 import '../../mind_aid/widgets/mind_aid_formatted_text.dart';
 
@@ -24,6 +25,7 @@ class MindAidMessage {
     this.supportCards = const [],
     this.actions = const [],
     this.source = 'local',
+    this.model,
   });
 
   final String id;
@@ -35,6 +37,7 @@ class MindAidMessage {
   final List<MindAidSupportCard> supportCards;
   final List<MindAidAction> actions;
   final String source;
+  final String? model;
 }
 
 class MindAidSupportCard {
@@ -733,6 +736,8 @@ class _AssistantBubbleMeta extends StatelessWidget {
         ),
         if (message.source == 'dialogflow')
           const Text('Dialogflow assisted', style: _MindAidText.status),
+        if (AppEnvironmentConfig.isStaging && message.source == 'gemini')
+          const Text('Gemini assisted', style: _MindAidText.status),
       ],
     );
   }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {classifyMindAidSafety, controlledCrisisResponse, dialogflowModeEvent, dialogflowSessionId, effectiveConversationMode, eligibleRecentTurns, isCurrentFirstPersonRisk, isSafeMindAidOutput, sanitizeRecentTurns} from "./mind_aid";
+import {aiProvider, attemptGemini, classifyMindAidSafety, controlledCrisisResponse, dialogflowModeEvent, dialogflowSessionId, effectiveConversationMode, eligibleRecentTurns, geminiFallbackReason, isCurrentFirstPersonRisk, isSafeMindAidOutput, sanitizeRecentTurns} from "./mind_aid";
 import {buildMindAidSystemInstruction, mindAidSystemPrompt} from "./mind_aid_llm/mind_aid_system_prompt";
 
 test("classifies English and Taglish crisis messages before Dialogflow", () => {
@@ -88,4 +88,38 @@ test("Gemini instructions preserve mode and explicit-listening authority", () =>
     assert.match(instruction, new RegExp(`CURRENT CONVERSATION MODE: ${mode.toUpperCase()}`));
   }
   assert.match(buildMindAidSystemInstruction({conversationMode: "listening", explicitListening: true}), /EXPLICIT LISTENING REQUEST: TRUE/);
+});
+
+test("selects Gemini only when the configured staging provider is Gemini", () => {
+  assert.equal(aiProvider("gemini"), "gemini");
+  assert.equal(aiProvider("unexpected"), "dialogflow");
+  assert.equal(aiProvider(undefined), "dialogflow");
+});
+
+test("returns Gemini source and model when the staging provider succeeds", async () => {
+  const result = await attemptGemini("mindmate-staging", "gemini", async () => ({
+    text: "A safe response.", provider: "gemini" as const, model: "gemini-3.8-flash" as const,
+  }));
+  assert.equal(result.attempted, true);
+  assert.equal(result.response?.provider, "gemini");
+  assert.equal(result.response?.model, "gemini-3.8-flash");
+  assert.equal(result.fallbackReason, "");
+});
+
+test("makes Gemini failure an explicit Dialogflow fallback reason", async () => {
+  const result = await attemptGemini("mindmate-staging", "gemini", async () => {
+    throw Object.assign(new Error("permission denied"), {code: "PERMISSION_DENIED"});
+  });
+  assert.equal(result.attempted, true);
+  assert.equal(result.response, undefined);
+  assert.equal(result.fallbackReason, "gemini_permission_denied");
+  assert.equal(geminiFallbackReason(new Error("gemini_timeout")), "gemini_timeout");
+});
+
+test("does not attempt Gemini outside the protected staging route", async () => {
+  const result = await attemptGemini("mind-mates-cd2cf", "gemini", async () => {
+    throw new Error("must not execute");
+  });
+  assert.equal(result.attempted, false);
+  assert.equal(result.fallbackReason, "");
 });

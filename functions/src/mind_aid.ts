@@ -5,8 +5,10 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
+import {logger} from "firebase-functions";
 import {GeminiMindAidProvider} from "./mind_aid_llm/gemini_mind_aid_provider";
-import type {MindAidRecentTurn} from "./mind_aid_llm/mind_aid_llm_models";
+import type {MindAidLlmResponse, MindAidRecentTurn} from "./mind_aid_llm/mind_aid_llm_models";
+import {GEMINI_MINDAID_MODEL} from "./mind_aid_llm/gemini_mind_aid_provider";
 import {createOrUpdateMindAidEmergencyAlert} from "./mind_aid_emergency";
 
 if (!getApps().length) initializeApp();
@@ -62,9 +64,54 @@ export function dialogflowModeEvent(mode: ConversationMode): string {
   return `mind_aid_mode_${mode}`;
 }
 
-function aiProvider(): "dialogflow" | "gemini" | "local" {
-  const value = String(process.env.MINDAID_AI_PROVIDER ?? "dialogflow").trim().toLowerCase();
-  return value === "gemini" || value === "local" ? value : "dialogflow";
+type AiProvider = "dialogflow" | "gemini" | "local";
+
+export function aiProvider(value = process.env.MINDAID_AI_PROVIDER): AiProvider {
+  const configured = String(value ?? "").trim().toLowerCase();
+  return configured === "gemini" || configured === "local" || configured === "dialogflow"
+    ? configured
+    : "dialogflow";
+}
+
+export function geminiFallbackReason(error: unknown): string {
+  const code = String((error as {code?: unknown})?.code ?? "").toLowerCase();
+  const message = String((error as {message?: unknown})?.message ?? "").toLowerCase();
+  const detail = `${code} ${message}`;
+  if (detail.includes("gemini_timeout") || detail.includes("deadline") || detail.includes("timeout")) return "gemini_timeout";
+  if (detail.includes("permission_denied") || detail.includes("permission denied")) return "gemini_permission_denied";
+  if (detail.includes("unauthenticated") || detail.includes("authentication") || detail.includes("credentials")) return "gemini_auth_error";
+  if (detail.includes("unavailable") || detail.includes("vertex ai api") || detail.includes("api disabled")) return "gemini_api_unavailable";
+  if (detail.includes("model") || detail.includes("not found") || detail.includes("invalid argument")) return "gemini_model_error";
+  if (detail.includes("gemini_empty_response")) return "gemini_empty_response";
+  if (detail.includes("gemini_unsafe_response")) return "gemini_unsafe_response";
+  return "gemini_unknown_error";
+}
+
+export function geminiErrorDiagnostic(error: unknown): {code: string; message: string} {
+  const code = String((error as {code?: unknown})?.code ?? "unknown")
+    .replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80) || "unknown";
+  const message = String((error as {message?: unknown})?.message ?? "unknown error")
+    .replace(/[\r\n\t]+/g, " ").replace(/[^A-Za-z0-9 .,:/_'()=-]/g, "_")
+    .slice(0, 180) || "unknown error";
+  return {code, message};
+}
+
+export async function attemptGemini<T extends MindAidLlmResponse>(
+  projectId: string,
+  configuredProvider: AiProvider,
+  generate: () => Promise<T>,
+): Promise<{attempted: boolean; response?: T; fallbackReason: string; error?: {code: string; message: string}}> {
+  if (configuredProvider !== "gemini" || projectId !== "mindmate-staging") {
+    return {attempted: false, fallbackReason: ""};
+  }
+  try {
+    return {attempted: true, response: await generate(), fallbackReason: ""};
+  } catch (error) {
+    return {
+      attempted: true, fallbackReason: geminiFallbackReason(error),
+      error: geminiErrorDiagnostic(error),
+    };
+  }
 }
 
 export function sanitizeRecentTurns(value: unknown): MindAidRecentTurn[] {
@@ -535,20 +582,40 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
   } else {
     const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "";
     const configuredProvider = aiProvider();
-    if (configuredProvider === "gemini" && projectId === "mindmate-staging") {
-      try {
-        const gemini = await new GeminiMindAidProvider(projectId).generate({
+    const rawProvider = String(process.env.MINDAID_AI_PROVIDER ?? "").trim().toLowerCase();
+    const providerConfigured = rawProvider === "dialogflow" || rawProvider === "gemini" || rawProvider === "local";
+    const functionRevision = String(process.env.K_REVISION ?? "").slice(0, 120);
+    logger.info("mindaid_provider_route", {
+      projectId, configuredProvider, attemptedProvider: configuredProvider,
+      functionRevision: functionRevision || undefined,
+    });
+    let fallbackReason = providerConfigured ? "" : "provider_not_configured";
+    const geminiAttempt = await attemptGemini(projectId, configuredProvider, async () => {
+      const gemini = await new GeminiMindAidProvider(projectId).generate({
           message: text, conversationMode, explicitListening, recentTurns,
-        });
-        if (!isSafeMindAidOutput(gemini.text)) throw new Error("gemini_unsafe_response");
-        response = {
-          messageId: `${uid}_${requestId}_assistant`, text: gemini.text.slice(0, 1200), intent: "general_support",
-          confidence: 1, safetyLevel, source: "gemini", model: gemini.model, suggestions: [], actions: [],
-          requiresEscalation: false, fallbackReason: "", effectiveConversationMode: conversationMode,
-        };
-      } catch (_) {
-        // Continue into the established Dialogflow/local fallback path.
-      }
+      });
+      if (!isSafeMindAidOutput(gemini.text)) throw new Error("gemini_unsafe_response");
+      return gemini;
+    });
+    if (geminiAttempt.response) {
+      logger.info("mindaid_gemini_success", {
+        projectId, provider: "gemini", model: GEMINI_MINDAID_MODEL,
+        functionRevision: functionRevision || undefined,
+      });
+      const gemini = geminiAttempt.response;
+      response = {
+        messageId: `${uid}_${requestId}_assistant`, text: gemini.text.slice(0, 1200), intent: "general_support",
+        confidence: 1, safetyLevel, source: "gemini", model: gemini.model, suggestions: [], actions: [],
+        requiresEscalation: false, fallbackReason: "", effectiveConversationMode: conversationMode,
+      };
+    } else if (geminiAttempt.attempted) {
+      fallbackReason = geminiAttempt.fallbackReason;
+      logger.error("mindaid_gemini_failed", {
+        projectId, provider: configuredProvider, model: GEMINI_MINDAID_MODEL,
+        errorCode: geminiAttempt.error?.code ?? fallbackReason,
+        errorMessage: geminiAttempt.error?.message ?? fallbackReason,
+        functionRevision: functionRevision || undefined,
+      });
     }
     if (!response!) {
       if (configuredProvider === "local") throw new HttpsError("unavailable", "Local MindAid provider requested.");
@@ -595,7 +662,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
     response = {
       messageId: `${uid}_${requestId}_assistant`, text: parsed.text, intent: parsed.intent,
       confidence: parsed.confidence, safetyLevel, source: "dialogflow", suggestions: parsed.suggestions,
-      actions: parsed.actions, requiresEscalation: false, fallbackReason: "",
+      actions: parsed.actions, requiresEscalation: false, fallbackReason,
       effectiveConversationMode: conversationMode,
     };
     }
