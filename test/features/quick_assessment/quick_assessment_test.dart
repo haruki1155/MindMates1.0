@@ -385,7 +385,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Take Student Assessment'));
+      await tester.tap(find.text('Take Full Assessment'));
       await tester.pumpAndSettle();
 
       expect(find.text('Assessment limit reached'), findsOneWidget);
@@ -429,7 +429,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text('Take Student Assessment'));
+      await tester.tap(find.text('Take Full Assessment'));
       await tester.pumpAndSettle();
 
       expect(

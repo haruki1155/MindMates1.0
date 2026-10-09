@@ -51,6 +51,7 @@ class AssessmentProvider extends ChangeNotifier {
   InterventionType? _pendingIntervention;
   int _interventionAttempt = 0;
   final Set<String> _v4AppointmentPromptedSubmissionIds = {};
+  final Set<String> _quickAppointmentPromptedResultIds = {};
 
   AssessmentRole? get selectedRole => _selectedRole;
   String get name => _name;
@@ -197,6 +198,7 @@ class AssessmentProvider extends ChangeNotifier {
     _currentQuestionIndex = 0;
     _selectedOptions.clear();
     _quickResult = null;
+    _quickAppointmentPromptedResultIds.clear();
     notifyListeners();
   }
 
@@ -510,6 +512,11 @@ class AssessmentProvider extends ChangeNotifier {
   /// cannot show the PACC offer repeatedly.
   bool claimV4AppointmentPrompt(String submissionId) =>
       _v4AppointmentPromptedSubmissionIds.add(submissionId);
+
+  /// Returns true once for each completed Quick Assessment result in the
+  /// current assessment session.
+  bool claimQuickAppointmentPrompt(String resultId) =>
+      _quickAppointmentPromptedResultIds.add(resultId);
 
   void _invalidatePreviewFor(String? domainId) {
     if (domainId == null || _pendingDomainId != domainId) return;
