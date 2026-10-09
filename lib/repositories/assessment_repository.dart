@@ -202,6 +202,30 @@ class AssessmentRepository {
     return _objectMap(response.data);
   }
 
+  /// Provides a server-calculated, non-persistent V4 domain result for the
+  /// in-progress assessment flow. The UI integration follows in Phase 3.
+  Future<Map<String, Object>> previewV4AssessmentDomain({
+    required String instrumentVersion,
+    required String domainId,
+    required List<StudentAssessmentAnswer> answers,
+  }) async {
+    if (!AppEnvironmentConfig.isStaging) {
+      throw StateError('V4 assessment previews are enabled for staging only.');
+    }
+    final response = await _stagingFunctions
+        .routedCallable('previewAssessmentDomain')
+        .call({
+          'instrumentVersion': instrumentVersion,
+          'domainId': domainId,
+          'answers': [for (final answer in answers) answer.toV4Json()],
+        });
+    FirebaseRuntimeDiagnostics.log(
+      event: 'v4_assessment_domain_previewed',
+      correlationId: _correlationId(response.data),
+    );
+    return _objectMap(response.data);
+  }
+
   Future<void> saveAssessmentClarityFeedback({
     required String clarity,
     required String algorithmVersion,

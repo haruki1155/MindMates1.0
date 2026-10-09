@@ -5,6 +5,7 @@ import '../../../providers/assessment_provider.dart';
 import '../../../routes/route_names.dart';
 import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
 import '../models/student_assessment_models.dart';
+import 'assessment_domain_review_screen.dart';
 
 /// Main assessment screen: presents one question at a time with a clear
 /// progress header, a focused question card, and a secure footer.
@@ -22,7 +23,7 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<AssessmentProvider>().startStudentAssessment();
+      context.read<AssessmentProvider>().ensureStudentAssessmentStarted();
     });
   }
 
@@ -82,10 +83,29 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
                       question: question,
                       selectedAnswer: provider.currentStudentAnswer,
                       canGoBack: provider.canGoBackStudentQuestion,
-                      onAnswer: (answer) {
-                        final wasLast = provider.isLastStudentQuestion;
-                        provider.answerCurrentStudentQuestion(answer);
-                        if (wasLast && context.mounted) {
+                      onAnswer: (answer) async {
+                        await provider.answerCurrentStudentQuestion(answer);
+                        if (!context.mounted) return;
+                        if (provider.flowStage == AssessmentFlowStage.domainReview ||
+                            provider.flowStage == AssessmentFlowStage.recoverableError) {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => AssessmentDomainReviewScreen(
+                                preview: provider.domainPreview,
+                                error: provider.domainPreviewError,
+                                onRetry: () => provider.retryDomainPreview(),
+                                previewAfterRetry: () => provider.domainPreview,
+                                errorAfterRetry: () => provider.domainPreviewError,
+                                onBack: provider.returnToAnsweringFromDomainReview,
+                                onContinue: () {
+                                  provider.continueAfterDomainReview();
+                                  Navigator.of(context).pop();
+                                },
+                              ),
+                            ),
+                          );
+                        }
+                        if (provider.flowStage == AssessmentFlowStage.submitting && context.mounted) {
                           Navigator.of(context).pushReplacementNamed(
                             RouteNames.studentAssessmentComplete,
                           );

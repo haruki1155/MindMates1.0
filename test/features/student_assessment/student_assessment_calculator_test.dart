@@ -508,13 +508,14 @@ void main() {
   });
 
   group('AssessmentProvider student assessment flow', () {
-    test('keeps a fixed 50-question assessment after elevated answers', () {
-      final provider = AssessmentProvider(AssessmentRepository());
+    test('keeps a fixed 50-question assessment after elevated answers', () async {
+      final provider = AssessmentProvider(_PreviewAssessmentRepository());
       provider.startStudentAssessment();
 
       for (var index = 0; index < 10; index += 1) {
-        provider.answerCurrentStudentQuestion(LikertAnswer.always);
+        await provider.answerCurrentStudentQuestion(LikertAnswer.always);
       }
+      provider.continueAfterDomainReview();
 
       expect(
         provider.studentQuestions.any((question) => question.isConditional),
@@ -886,4 +887,25 @@ class _FakeReportRepository extends ReportRepository {
 
   @override
   Future<ReportModel?> fetchLatestReport(String userId) async => latest;
+}
+
+class _PreviewAssessmentRepository extends AssessmentRepository {
+  @override
+  Future<Map<String, Object>> previewV4AssessmentDomain({
+    required String instrumentVersion,
+    required String domainId,
+    required List<StudentAssessmentAnswer> answers,
+  }) async => {
+    'domainId': domainId,
+    'domainLabel': domainId,
+    'status': 'mostlySupported',
+    'isScorable': true,
+    'answeredCount': answers.length,
+    'presentedCount': 10,
+    'summary': 'Preview result.',
+    'suggestedAction': 'Continue.',
+    'reflectionPrompt': 'Reflect.',
+    'interventionEligible': false,
+    'policyVersion': 'assessment_intervention_v1',
+  };
 }

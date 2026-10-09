@@ -11,6 +11,15 @@ import '../features/student_assessment/models/student_assessment_models.dart';
 import '../features/student_assessment/services/student_assessment_calculator.dart';
 import '../repositories/assessment_repository.dart';
 
+enum AssessmentFlowStage {
+  answering,
+  previewLoading,
+  domainReview,
+  resuming,
+  submitting,
+  recoverableError,
+}
+
 class AssessmentProvider extends ChangeNotifier {
   AssessmentProvider(this._repository);
 
@@ -27,6 +36,13 @@ class AssessmentProvider extends ChangeNotifier {
   StudentAssessmentResult? _studentResult;
   String? _v4SubmissionId;
   bool _isSavingQuickAssessment = false;
+  AssessmentFlowStage _flowStage = AssessmentFlowStage.answering;
+  Map<String, Object>? _domainPreview;
+  Object? _domainPreviewError;
+  String? _pendingDomainId;
+  int _previewGeneration = 0;
+  bool _isRecordingStudentAnswer = false;
+  bool _isSavingStudentAssessment = false;
 
   AssessmentRole? get selectedRole => _selectedRole;
   String get name => _name;
@@ -38,6 +54,12 @@ class AssessmentProvider extends ChangeNotifier {
       List.unmodifiable(_studentAnswers);
   StudentAssessmentResult? get studentResult => _studentResult;
   bool get isSavingQuickAssessment => _isSavingQuickAssessment;
+  AssessmentFlowStage get flowStage => _flowStage;
+  Map<String, Object>? get domainPreview => _domainPreview;
+  Object? get domainPreviewError => _domainPreviewError;
+  String? get pendingDomainId => _pendingDomainId;
+  String? get v4SubmissionId => _v4SubmissionId;
+  bool get isSavingStudentAssessment => _isSavingStudentAssessment;
   bool get isStudentAssessmentV4 =>
       AppEnvironmentConfig.isStaging &&
       activeAssessmentUserType == AssessmentUserType.student;
@@ -260,40 +282,93 @@ class AssessmentProvider extends ChangeNotifier {
     _studentQuestions = _questionsForActiveRole()
         .where((question) => !question.isConditional)
         .toList();
+    _flowStage = AssessmentFlowStage.answering;
+    _domainPreview = null;
+    _domainPreviewError = null;
+    _pendingDomainId = null;
+    _previewGeneration += 1;
     notifyListeners();
   }
 
-  void answerCurrentStudentQuestion(
+  /// Used by the assessment screen after reconstruction. Starting a new
+  /// assessment remains explicit through [startStudentAssessment].
+  void ensureStudentAssessmentStarted() {
+    if (hasStudentAssessmentStarted) return;
+    startStudentAssessment();
+  }
+
+  Future<void> answerCurrentStudentQuestion(
     LikertAnswer answer, {
     bool isSkipped = false,
-  }) {
+  }) async {
+    if (_isRecordingStudentAnswer || _flowStage != AssessmentFlowStage.answering) {
+      return;
+    }
     final question = currentStudentQuestion;
     if (question == null) return;
+    _isRecordingStudentAnswer = true;
 
-    _studentAnswers.removeWhere(
-      (existing) => existing.questionId == question.id,
-    );
-    _studentAnswers.add(
-      StudentAssessmentAnswer(
-        questionId: question.id,
-        answer: answer,
-        isSkipped: isSkipped,
-      ),
-    );
+    try {
+      _studentAnswers.removeWhere(
+        (existing) => existing.questionId == question.id,
+      );
+      _studentAnswers.add(
+        StudentAssessmentAnswer(
+          questionId: question.id,
+          answer: answer,
+          isSkipped: isSkipped,
+        ),
+      );
+      _invalidatePreviewFor(question.v4DomainId);
 
-    if (isLastStudentQuestion) {
-      if (!isV4FullAssessment) {
+      if (isV4FullAssessment && question.v4DomainId != null && _isDomainComplete(question.v4DomainId!)) {
+        _pendingDomainId = question.v4DomainId;
+        await _requestPendingDomainPreview();
+        return;
+      }
+
+      if (isLastStudentQuestion) {
         _studentResult = StudentAssessmentCalculator.calculate(
           questions: _studentQuestions,
           answers: _studentAnswers,
           userType: activeAssessmentUserType,
         );
+        notifyListeners();
+        return;
       }
+
+      _studentQuestionIndex += 1;
       notifyListeners();
+    } finally {
+      _isRecordingStudentAnswer = false;
+    }
+  }
+
+  Future<void> retryDomainPreview() => _requestPendingDomainPreview();
+
+  void continueAfterDomainReview() {
+    if (_flowStage != AssessmentFlowStage.domainReview &&
+        _flowStage != AssessmentFlowStage.recoverableError) {
       return;
     }
+    _flowStage = AssessmentFlowStage.resuming;
+    _domainPreviewError = null;
+    _pendingDomainId = null;
+    if (isLastStudentQuestion) {
+      _flowStage = AssessmentFlowStage.submitting;
+    } else {
+      _studentQuestionIndex += 1;
+      _flowStage = AssessmentFlowStage.answering;
+    }
+    notifyListeners();
+  }
 
-    _studentQuestionIndex += 1;
+  void returnToAnsweringFromDomainReview() {
+    if (_flowStage != AssessmentFlowStage.domainReview &&
+        _flowStage != AssessmentFlowStage.recoverableError) {
+      return;
+    }
+    _flowStage = AssessmentFlowStage.answering;
     notifyListeners();
   }
 
@@ -301,12 +376,16 @@ class AssessmentProvider extends ChangeNotifier {
     if (!canGoBackStudentQuestion) return;
     _studentResult = null;
     _studentQuestionIndex -= 1;
+    _flowStage = AssessmentFlowStage.answering;
     notifyListeners();
   }
 
-  Future<Map<String, Object>?> saveStudentAssessmentForUser(String userId) {
+  Future<Map<String, Object>?> saveStudentAssessmentForUser(String userId) async {
+    if (_isSavingStudentAssessment) return null;
+    _isSavingStudentAssessment = true;
+    try {
     if (isV4FullAssessment) {
-      return _repository.saveV4FullAssessment(
+      return await _repository.saveV4FullAssessment(
         userId: userId,
         instrumentVersion: _v4InstrumentVersion,
         answers: _studentAnswers,
@@ -316,13 +395,65 @@ class AssessmentProvider extends ChangeNotifier {
       );
     }
     final result = _studentResult;
-    if (result == null) return Future.value();
+    if (result == null) return null;
 
-    return _repository.saveStudentAssessment(
+    return await _repository.saveStudentAssessment(
       userId: userId,
       result: result,
       answers: _studentAnswers,
     );
+    } finally {
+      _isSavingStudentAssessment = false;
+    }
+  }
+
+  bool _isDomainComplete(String domainId) {
+    final questions = _studentQuestions
+        .where((question) => question.v4DomainId == domainId)
+        .toList();
+    return questions.length == 10 && questions.every(
+      (question) => _studentAnswers.any((answer) => answer.questionId == question.id),
+    );
+  }
+
+  List<StudentAssessmentAnswer> _answersForDomain(String domainId) => [
+    for (final question in _studentQuestions)
+      if (question.v4DomainId == domainId)
+        _studentAnswers.firstWhere((answer) => answer.questionId == question.id),
+  ];
+
+  Future<void> _requestPendingDomainPreview() async {
+    final domainId = _pendingDomainId;
+    if (!isV4FullAssessment || domainId == null || _flowStage == AssessmentFlowStage.previewLoading) return;
+    final generation = ++_previewGeneration;
+    _flowStage = AssessmentFlowStage.previewLoading;
+    _domainPreview = null;
+    _domainPreviewError = null;
+    notifyListeners();
+    try {
+      final preview = await _repository.previewV4AssessmentDomain(
+        instrumentVersion: _v4InstrumentVersion,
+        domainId: domainId,
+        answers: _answersForDomain(domainId),
+      );
+      if (generation != _previewGeneration || _pendingDomainId != domainId) return;
+      _domainPreview = preview;
+      _flowStage = AssessmentFlowStage.domainReview;
+    } catch (error) {
+      if (generation != _previewGeneration || _pendingDomainId != domainId) return;
+      _domainPreviewError = error;
+      _flowStage = AssessmentFlowStage.recoverableError;
+    }
+    notifyListeners();
+  }
+
+  void _invalidatePreviewFor(String? domainId) {
+    if (domainId == null || _pendingDomainId != domainId) return;
+    _previewGeneration += 1;
+    _domainPreview = null;
+    _domainPreviewError = null;
+    _pendingDomainId = null;
+    _flowStage = AssessmentFlowStage.answering;
   }
 
   Future<void> saveAssessmentClarityFeedback(String clarity) {

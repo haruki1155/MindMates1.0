@@ -14,6 +14,7 @@ class FirebaseCallableRouter {
     'getAssessmentStatus',
     'submitQuickAssessment',
     'submitFullAssessment',
+    'previewAssessmentDomain',
     'sendMindAidMessage',
   };
 

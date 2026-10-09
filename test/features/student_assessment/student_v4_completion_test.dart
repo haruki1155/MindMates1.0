@@ -18,9 +18,7 @@ void main() {
     (tester) async {
       final assessment = AssessmentProvider(_V4Repository())
         ..startStudentAssessment();
-      for (var index = 0; index < 50; index += 1) {
-        assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-      }
+      await _completeV4Assessment(assessment);
       final user = UserProvider(_ActivityRepository())
         ..setUser(
           const UserModel(id: 'student_1', email: 'student@example.com'),
@@ -80,9 +78,7 @@ void main() {
       final assessment = AssessmentProvider(_V4Repository())
         ..selectRole(AssessmentRole.faculty)
         ..startStudentAssessment();
-      for (var index = 0; index < 50; index += 1) {
-        assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-      }
+      await _completeV4Assessment(assessment);
       final user = UserProvider(_ActivityRepository())
         ..setUser(
           const UserModel(id: 'teaching_1', email: 'teaching@example.com'),
@@ -118,9 +114,7 @@ void main() {
     final assessment = AssessmentProvider(_V4Repository())
       ..selectRole(AssessmentRole.staff)
       ..startStudentAssessment();
-    for (var index = 0; index < 50; index += 1) {
-      assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-    }
+    await _completeV4Assessment(assessment);
     final user = UserProvider(_ActivityRepository())
       ..setUser(
         const UserModel(
@@ -159,9 +153,7 @@ void main() {
   ) async {
     final assessment = AssessmentProvider(_LegacyV4Repository())
       ..startStudentAssessment();
-    for (var index = 0; index < 50; index += 1) {
-      assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-    }
+    await _completeV4Assessment(assessment);
     final user = UserProvider(_ActivityRepository())
       ..setUser(
         const UserModel(id: 'student_legacy', email: 'legacy@example.com'),
@@ -200,9 +192,7 @@ void main() {
   ) async {
     final assessment = AssessmentProvider(_MalformedV4Repository())
       ..startStudentAssessment();
-    for (var index = 0; index < 50; index += 1) {
-      assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-    }
+    await _completeV4Assessment(assessment);
     final user = UserProvider(_ActivityRepository())
       ..setUser(
         const UserModel(id: 'student_malformed', email: 'bad@example.com'),
@@ -246,9 +236,7 @@ void main() {
 
     final assessment = AssessmentProvider(_V4Repository())
       ..startStudentAssessment();
-    for (var index = 0; index < 50; index += 1) {
-      assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-    }
+    await _completeV4Assessment(assessment);
     final user = UserProvider(_ActivityRepository())
       ..setUser(
         const UserModel(id: 'student_method', email: 'method@example.com'),
@@ -334,7 +322,38 @@ Future<void> _scrollIntoView(WidgetTester tester, Finder finder) async {
   }
 }
 
-class _V4Repository extends AssessmentRepository {
+Future<void> _completeV4Assessment(AssessmentProvider assessment) async {
+  for (var index = 0; index < 50; index += 1) {
+    await assessment.answerCurrentStudentQuestion(LikertAnswer.often);
+    if (assessment.flowStage == AssessmentFlowStage.domainReview ||
+        assessment.flowStage == AssessmentFlowStage.recoverableError) {
+      assessment.continueAfterDomainReview();
+    }
+  }
+}
+
+mixin _PreviewingV4Repository on AssessmentRepository {
+  @override
+  Future<Map<String, Object>> previewV4AssessmentDomain({
+    required String instrumentVersion,
+    required String domainId,
+    required List<StudentAssessmentAnswer> answers,
+  }) async => {
+    'domainId': domainId,
+    'domainLabel': domainId,
+    'status': 'mostlySupported',
+    'isScorable': true,
+    'answeredCount': answers.length,
+    'presentedCount': 10,
+    'summary': 'Preview result.',
+    'suggestedAction': 'Continue.',
+    'reflectionPrompt': 'Reflect.',
+    'interventionEligible': false,
+    'policyVersion': 'assessment_intervention_v1',
+  };
+}
+
+class _V4Repository extends AssessmentRepository with _PreviewingV4Repository {
   @override
   Future<Map<String, Object>> saveV4FullAssessment({
     required String userId,
@@ -393,7 +412,7 @@ class _V4Repository extends AssessmentRepository {
   };
 }
 
-class _LegacyV4Repository extends AssessmentRepository {
+class _LegacyV4Repository extends AssessmentRepository with _PreviewingV4Repository {
   @override
   Future<Map<String, Object>> saveV4FullAssessment({
     required String userId,
@@ -412,7 +431,7 @@ class _LegacyV4Repository extends AssessmentRepository {
   };
 }
 
-class _MalformedV4Repository extends AssessmentRepository {
+class _MalformedV4Repository extends AssessmentRepository with _PreviewingV4Repository {
   @override
   Future<Map<String, Object>> saveV4FullAssessment({
     required String userId,
