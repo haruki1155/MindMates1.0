@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/intervention_models.dart';
 
 /// Renders one server-authoritative V4 category preview. It intentionally does
 /// not interpret answers or calculate a local category status.
@@ -8,6 +9,8 @@ class AssessmentDomainReviewScreen extends StatefulWidget {
     required this.onContinue,
     required this.onRetry,
     required this.onBack,
+    this.intervention,
+    this.onTryActivity,
     this.previewAfterRetry,
     this.errorAfterRetry,
     this.error,
@@ -17,6 +20,8 @@ class AssessmentDomainReviewScreen extends StatefulWidget {
   final Map<String, Object>? preview;
   final VoidCallback onContinue;
   final VoidCallback onBack;
+  final InterventionType? intervention;
+  final VoidCallback? onTryActivity;
   final Future<void> Function() onRetry;
   final Map<String, Object>? Function()? previewAfterRetry;
   final Object? Function()? errorAfterRetry;
@@ -71,7 +76,8 @@ class _AssessmentDomainReviewScreenState
               _section('Reflection', _text('reflectionPrompt')),
               if (eligible) ...[
                 const SizedBox(height: 16),
-                const Text('A supportive activity can be offered in a later step. You can continue your assessment now.'),
+                Text('Suggested activity: ${widget.intervention?.name ?? 'wellness activity'}'),
+                if (widget.onTryActivity != null) FilledButton.tonal(onPressed: widget.onTryActivity, child: const Text('Try Suggested Activity')),
               ],
             ] else ...[
               const SizedBox(height: 20),

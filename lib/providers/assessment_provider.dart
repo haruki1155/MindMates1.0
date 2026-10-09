@@ -10,11 +10,14 @@ import '../features/student_assessment/data/workplace_assessment_v4_questions.da
 import '../features/student_assessment/models/student_assessment_models.dart';
 import '../features/student_assessment/services/student_assessment_calculator.dart';
 import '../repositories/assessment_repository.dart';
+import '../features/student_assessment/models/intervention_models.dart';
+import '../features/student_assessment/services/intervention_rotation_policy.dart';
 
 enum AssessmentFlowStage {
   answering,
   previewLoading,
   domainReview,
+  interventionActive,
   resuming,
   submitting,
   recoverableError,
@@ -43,6 +46,9 @@ class AssessmentProvider extends ChangeNotifier {
   int _previewGeneration = 0;
   bool _isRecordingStudentAnswer = false;
   bool _isSavingStudentAssessment = false;
+  InterventionRotationPolicy _interventionRotation = InterventionRotationPolicy();
+  InterventionType? _pendingIntervention;
+  int _interventionAttempt = 0;
 
   AssessmentRole? get selectedRole => _selectedRole;
   String get name => _name;
@@ -60,6 +66,7 @@ class AssessmentProvider extends ChangeNotifier {
   String? get pendingDomainId => _pendingDomainId;
   String? get v4SubmissionId => _v4SubmissionId;
   bool get isSavingStudentAssessment => _isSavingStudentAssessment;
+  InterventionType? get pendingIntervention => _pendingIntervention;
   bool get isStudentAssessmentV4 =>
       AppEnvironmentConfig.isStaging &&
       activeAssessmentUserType == AssessmentUserType.student;
@@ -287,6 +294,8 @@ class AssessmentProvider extends ChangeNotifier {
     _domainPreviewError = null;
     _pendingDomainId = null;
     _previewGeneration += 1;
+    _interventionRotation = InterventionRotationPolicy();
+    _pendingIntervention = null;
     notifyListeners();
   }
 
@@ -438,6 +447,9 @@ class AssessmentProvider extends ChangeNotifier {
       );
       if (generation != _previewGeneration || _pendingDomainId != domainId) return;
       _domainPreview = preview;
+      _pendingIntervention = preview['interventionEligible'] == true
+          ? _interventionRotation.select(domainId)
+          : null;
       _flowStage = AssessmentFlowStage.domainReview;
     } catch (error) {
       if (generation != _previewGeneration || _pendingDomainId != domainId) return;
@@ -445,6 +457,25 @@ class AssessmentProvider extends ChangeNotifier {
       _flowStage = AssessmentFlowStage.recoverableError;
     }
     notifyListeners();
+  }
+
+  int beginInterventionAttempt() {
+    if (_flowStage != AssessmentFlowStage.domainReview || _pendingIntervention == null) return 0;
+    _flowStage = AssessmentFlowStage.interventionActive;
+    _interventionAttempt += 1;
+    notifyListeners();
+    return _interventionAttempt;
+  }
+
+  void handleInterventionOutcome(int attempt, InterventionOutcome outcome) {
+    if (attempt == 0 || attempt != _interventionAttempt || _flowStage != AssessmentFlowStage.interventionActive) return;
+    if (outcome == InterventionOutcome.cancelled || outcome == InterventionOutcome.failed) {
+      _flowStage = AssessmentFlowStage.domainReview;
+      notifyListeners();
+      return;
+    }
+    _flowStage = AssessmentFlowStage.domainReview;
+    continueAfterDomainReview();
   }
 
   void _invalidatePreviewFor(String? domainId) {

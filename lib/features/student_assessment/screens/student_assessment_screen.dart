@@ -6,6 +6,10 @@ import '../../../routes/route_names.dart';
 import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
 import '../models/student_assessment_models.dart';
 import 'assessment_domain_review_screen.dart';
+import 'intervention_breathing_screen.dart';
+import 'intervention_grounding_screen.dart';
+import 'intervention_walking_screen.dart';
+import '../models/intervention_models.dart';
 
 /// Main assessment screen: presents one question at a time with a clear
 /// progress header, a focused question card, and a secure footer.
@@ -97,6 +101,20 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
                                 previewAfterRetry: () => provider.domainPreview,
                                 errorAfterRetry: () => provider.domainPreviewError,
                                 onBack: provider.returnToAnsweringFromDomainReview,
+                                intervention: provider.pendingIntervention,
+                                onTryActivity: () async {
+                                  final attempt = provider.beginInterventionAttempt();
+                                  final outcome = await Navigator.of(context).push<InterventionOutcome>(
+                                    MaterialPageRoute(builder: (_) => switch (provider.pendingIntervention!) {
+                                      InterventionType.breathing => const InterventionBreathingScreen(),
+                                      InterventionType.grounding => const InterventionGroundingScreen(),
+                                      InterventionType.walking => const InterventionWalkingScreen(),
+                                      InterventionType.appointment => const InterventionGroundingScreen(),
+                                    }),
+                                  );
+                                  provider.handleInterventionOutcome(attempt, outcome ?? InterventionOutcome.cancelled);
+                                  if (provider.flowStage != AssessmentFlowStage.domainReview && context.mounted) Navigator.of(context).pop();
+                                },
                                 onContinue: () {
                                   provider.continueAfterDomainReview();
                                   Navigator.of(context).pop();
