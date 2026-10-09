@@ -46,9 +46,11 @@ class AssessmentProvider extends ChangeNotifier {
   int _previewGeneration = 0;
   bool _isRecordingStudentAnswer = false;
   bool _isSavingStudentAssessment = false;
-  InterventionRotationPolicy _interventionRotation = InterventionRotationPolicy();
+  InterventionRotationPolicy _interventionRotation =
+      InterventionRotationPolicy();
   InterventionType? _pendingIntervention;
   int _interventionAttempt = 0;
+  final Set<String> _v4AppointmentPromptedSubmissionIds = {};
 
   AssessmentRole? get selectedRole => _selectedRole;
   String get name => _name;
@@ -296,6 +298,7 @@ class AssessmentProvider extends ChangeNotifier {
     _previewGeneration += 1;
     _interventionRotation = InterventionRotationPolicy();
     _pendingIntervention = null;
+    _v4AppointmentPromptedSubmissionIds.clear();
     notifyListeners();
   }
 
@@ -310,7 +313,8 @@ class AssessmentProvider extends ChangeNotifier {
     LikertAnswer answer, {
     bool isSkipped = false,
   }) async {
-    if (_isRecordingStudentAnswer || _flowStage != AssessmentFlowStage.answering) {
+    if (_isRecordingStudentAnswer ||
+        _flowStage != AssessmentFlowStage.answering) {
       return;
     }
     final question = currentStudentQuestion;
@@ -330,7 +334,9 @@ class AssessmentProvider extends ChangeNotifier {
       );
       _invalidatePreviewFor(question.v4DomainId);
 
-      if (isV4FullAssessment && question.v4DomainId != null && _isDomainComplete(question.v4DomainId!)) {
+      if (isV4FullAssessment &&
+          question.v4DomainId != null &&
+          _isDomainComplete(question.v4DomainId!)) {
         _pendingDomainId = question.v4DomainId;
         await _requestPendingDomainPreview();
         return;
@@ -389,28 +395,30 @@ class AssessmentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Map<String, Object>?> saveStudentAssessmentForUser(String userId) async {
+  Future<Map<String, Object>?> saveStudentAssessmentForUser(
+    String userId,
+  ) async {
     if (_isSavingStudentAssessment) return null;
     _isSavingStudentAssessment = true;
     try {
-    if (isV4FullAssessment) {
-      return await _repository.saveV4FullAssessment(
-        userId: userId,
-        instrumentVersion: _v4InstrumentVersion,
-        answers: _studentAnswers,
-        submissionId:
-            _v4SubmissionId ??
-            'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
-      );
-    }
-    final result = _studentResult;
-    if (result == null) return null;
+      if (isV4FullAssessment) {
+        return await _repository.saveV4FullAssessment(
+          userId: userId,
+          instrumentVersion: _v4InstrumentVersion,
+          answers: _studentAnswers,
+          submissionId:
+              _v4SubmissionId ??
+              'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
+        );
+      }
+      final result = _studentResult;
+      if (result == null) return null;
 
-    return await _repository.saveStudentAssessment(
-      userId: userId,
-      result: result,
-      answers: _studentAnswers,
-    );
+      return await _repository.saveStudentAssessment(
+        userId: userId,
+        result: result,
+        answers: _studentAnswers,
+      );
     } finally {
       _isSavingStudentAssessment = false;
     }
@@ -420,20 +428,28 @@ class AssessmentProvider extends ChangeNotifier {
     final questions = _studentQuestions
         .where((question) => question.v4DomainId == domainId)
         .toList();
-    return questions.length == 10 && questions.every(
-      (question) => _studentAnswers.any((answer) => answer.questionId == question.id),
-    );
+    return questions.length == 10 &&
+        questions.every(
+          (question) =>
+              _studentAnswers.any((answer) => answer.questionId == question.id),
+        );
   }
 
   List<StudentAssessmentAnswer> _answersForDomain(String domainId) => [
     for (final question in _studentQuestions)
       if (question.v4DomainId == domainId)
-        _studentAnswers.firstWhere((answer) => answer.questionId == question.id),
+        _studentAnswers.firstWhere(
+          (answer) => answer.questionId == question.id,
+        ),
   ];
 
   Future<void> _requestPendingDomainPreview() async {
     final domainId = _pendingDomainId;
-    if (!isV4FullAssessment || domainId == null || _flowStage == AssessmentFlowStage.previewLoading) return;
+    if (!isV4FullAssessment ||
+        domainId == null ||
+        _flowStage == AssessmentFlowStage.previewLoading) {
+      return;
+    }
     final generation = ++_previewGeneration;
     _flowStage = AssessmentFlowStage.previewLoading;
     _domainPreview = null;
@@ -445,14 +461,18 @@ class AssessmentProvider extends ChangeNotifier {
         domainId: domainId,
         answers: _answersForDomain(domainId),
       );
-      if (generation != _previewGeneration || _pendingDomainId != domainId) return;
+      if (generation != _previewGeneration || _pendingDomainId != domainId) {
+        return;
+      }
       _domainPreview = preview;
       _pendingIntervention = preview['interventionEligible'] == true
           ? _interventionRotation.select(domainId)
           : null;
       _flowStage = AssessmentFlowStage.domainReview;
     } catch (error) {
-      if (generation != _previewGeneration || _pendingDomainId != domainId) return;
+      if (generation != _previewGeneration || _pendingDomainId != domainId) {
+        return;
+      }
       _domainPreviewError = error;
       _flowStage = AssessmentFlowStage.recoverableError;
     }
@@ -460,7 +480,10 @@ class AssessmentProvider extends ChangeNotifier {
   }
 
   int beginInterventionAttempt() {
-    if (_flowStage != AssessmentFlowStage.domainReview || _pendingIntervention == null) return 0;
+    if (_flowStage != AssessmentFlowStage.domainReview ||
+        _pendingIntervention == null) {
+      return 0;
+    }
     _flowStage = AssessmentFlowStage.interventionActive;
     _interventionAttempt += 1;
     notifyListeners();
@@ -468,8 +491,13 @@ class AssessmentProvider extends ChangeNotifier {
   }
 
   void handleInterventionOutcome(int attempt, InterventionOutcome outcome) {
-    if (attempt == 0 || attempt != _interventionAttempt || _flowStage != AssessmentFlowStage.interventionActive) return;
-    if (outcome == InterventionOutcome.cancelled || outcome == InterventionOutcome.failed) {
+    if (attempt == 0 ||
+        attempt != _interventionAttempt ||
+        _flowStage != AssessmentFlowStage.interventionActive) {
+      return;
+    }
+    if (outcome == InterventionOutcome.cancelled ||
+        outcome == InterventionOutcome.failed) {
       _flowStage = AssessmentFlowStage.domainReview;
       notifyListeners();
       return;
@@ -477,6 +505,11 @@ class AssessmentProvider extends ChangeNotifier {
     _flowStage = AssessmentFlowStage.domainReview;
     continueAfterDomainReview();
   }
+
+  /// Returns true once per in-progress V4 submission so result-screen rebuilds
+  /// cannot show the PACC offer repeatedly.
+  bool claimV4AppointmentPrompt(String submissionId) =>
+      _v4AppointmentPromptedSubmissionIds.add(submissionId);
 
   void _invalidatePreviewFor(String? domainId) {
     if (domainId == null || _pendingDomainId != domainId) return;

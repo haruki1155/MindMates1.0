@@ -225,8 +225,54 @@ class _StudentAssessmentCompleteScreenState
     }
     final payload = await provider.saveStudentAssessmentForUser(userId);
     if (payload == null) return null;
+    _queueV4AppointmentPrompt(provider, payload);
     unawaited(_runPostV4SaveWork(userId));
     return payload;
+  }
+
+  void _queueV4AppointmentPrompt(
+    AssessmentProvider provider,
+    Map<String, Object> payload,
+  ) {
+    final result = payload['result'];
+    if (result is! Map || result['profileStatus'] != 'supportMayHelp') {
+      return;
+    }
+    final submissionId = payload['submissionId']?.toString().trim();
+    final promptId = (submissionId != null && submissionId.isNotEmpty)
+        ? submissionId
+        : provider.v4SubmissionId;
+    if (promptId == null || promptId.isEmpty) return;
+    if (!provider.claimV4AppointmentPrompt(promptId)) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final wantsAppointment = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Would you like to talk with a PACC counselor?'),
+          content: const Text(
+            'Your responses suggest that additional support may be helpful. Would you like to request a confidential counseling appointment with PACC?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('No, Continue'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Yes, Book Appointment'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || wantsAppointment != true) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const PaccCounselingScreen(startBooking: true),
+        ),
+      );
+    });
   }
 
   Future<void> _runPostV4SaveWork(String userId) async {

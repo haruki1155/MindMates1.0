@@ -3,16 +3,238 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/student_assessment/screens/student_assessment_complete_screen.dart';
 import 'package:mind_mates/features/student_assessment/models/student_assessment_models.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
+import 'package:mind_mates/models/appointment_model.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
+import 'package:mind_mates/providers/appointment_provider.dart';
 import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
+import 'package:mind_mates/repositories/appointment_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets(
+    'shows the PACC prompt only after a saved supportMayHelp V4 result',
+    (tester) async {
+      final assessment = AssessmentProvider(
+        _V4Repository(profileStatus: 'supportMayHelp'),
+      )..startStudentAssessment();
+      await _completeV4Assessment(assessment);
+      final user = UserProvider(_ActivityRepository())
+        ..setUser(
+          const UserModel(id: 'support_1', email: 'support@example.com'),
+        );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+            ChangeNotifierProvider<UserProvider>.value(value: user),
+            ChangeNotifierProvider<ReportProvider>(
+              create: (_) => ReportProvider(_FailingReportRepository()),
+            ),
+          ],
+          child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(
+        find.text('Would you like to talk with a PACC counselor?'),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Your responses suggest that additional support may be helpful. Would you like to request a confidential counseling appointment with PACC?',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('No, Continue'), findsOneWidget);
+      expect(find.text('Yes, Book Appointment'), findsOneWidget);
+    },
+  );
+
+  testWidgets('does not prompt for lower V4 statuses in any population role', (
+    tester,
+  ) async {
+    for (final role in [
+      AssessmentRole.student,
+      AssessmentRole.faculty,
+      AssessmentRole.staff,
+    ]) {
+      for (final status in [
+        'generallySupported',
+        'mostlySupported',
+        'someAreasNeedAttention',
+        'insufficientResponses',
+      ]) {
+        final assessment =
+            AssessmentProvider(_V4Repository(profileStatus: status))
+              ..selectRole(role)
+              ..startStudentAssessment();
+        await _completeV4Assessment(assessment);
+        final user = UserProvider(_ActivityRepository())
+          ..setUser(const UserModel(id: 'lower_1', email: 'lower@example.com'));
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AssessmentProvider>.value(
+                value: assessment,
+              ),
+              ChangeNotifierProvider<UserProvider>.value(value: user),
+              ChangeNotifierProvider<ReportProvider>(
+                create: (_) => ReportProvider(_FailingReportRepository()),
+              ),
+            ],
+            child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        expect(
+          find.text('Would you like to talk with a PACC counselor?'),
+          findsNothing,
+        );
+      }
+    }
+  });
+
+  testWidgets(
+    'declining a V4 prompt keeps the result visible without re-prompting on rebuild',
+    (tester) async {
+      final assessment = AssessmentProvider(
+        _V4Repository(profileStatus: 'supportMayHelp'),
+      )..startStudentAssessment();
+      await _completeV4Assessment(assessment);
+      final user = UserProvider(_ActivityRepository())
+        ..setUser(
+          const UserModel(id: 'decline_1', email: 'decline@example.com'),
+        );
+
+      Widget app() => MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+          ChangeNotifierProvider<UserProvider>.value(value: user),
+          ChangeNotifierProvider<ReportProvider>(
+            create: (_) => ReportProvider(_FailingReportRepository()),
+          ),
+        ],
+        child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+      );
+
+      await tester.pumpWidget(app());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.text('No, Continue'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.text('Your Full Well-Being Assessment Result'),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(app());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+        find.text('Would you like to talk with a PACC counselor?'),
+        findsNothing,
+      );
+      expect(
+        find.text('Your Full Well-Being Assessment Result'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'accepting a V4 prompt opens PACC without creating an appointment',
+    (tester) async {
+      final assessment = AssessmentProvider(
+        _V4Repository(profileStatus: 'supportMayHelp'),
+      )..startStudentAssessment();
+      await _completeV4Assessment(assessment);
+      final user = UserProvider(_ActivityRepository())
+        ..setUser(const UserModel(id: 'accept_1', email: 'accept@example.com'));
+      final appointments = _NoopAppointmentRepository();
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+            ChangeNotifierProvider<UserProvider>.value(value: user),
+            ChangeNotifierProvider<ReportProvider>(
+              create: (_) => ReportProvider(_FailingReportRepository()),
+            ),
+            ChangeNotifierProvider(
+              create: (_) => AppointmentProvider(appointments),
+            ),
+          ],
+          child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.text('Yes, Book Appointment'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Appointment Details'), findsOneWidget);
+      expect(appointments.createCalls, 0);
+      await tester.binding.handlePopRoute();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.text('Your Full Well-Being Assessment Result'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('a failed V4 save does not prompt before its successful retry', (
+    tester,
+  ) async {
+    final repository = _FailsThenSavesV4Repository();
+    final assessment = AssessmentProvider(repository)..startStudentAssessment();
+    await _completeV4Assessment(assessment);
+    final user = UserProvider(_ActivityRepository())
+      ..setUser(const UserModel(id: 'retry_1', email: 'retry@example.com'));
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+          ChangeNotifierProvider<UserProvider>.value(value: user),
+          ChangeNotifierProvider<ReportProvider>(
+            create: (_) => ReportProvider(_FailingReportRepository()),
+          ),
+        ],
+        child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Try again'), findsOneWidget);
+    expect(
+      find.text('Would you like to talk with a PACC counselor?'),
+      findsNothing,
+    );
+
+    await tester.tap(find.text('Try again'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(repository.saveCalls, 2);
+    expect(
+      find.text('Would you like to talk with a PACC counselor?'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets(
     'keeps the verified V4 profile visible when report refresh fails',
     (tester) async {
@@ -354,6 +576,10 @@ mixin _PreviewingV4Repository on AssessmentRepository {
 }
 
 class _V4Repository extends AssessmentRepository with _PreviewingV4Repository {
+  _V4Repository({this.profileStatus = 'mostlySupported'});
+
+  final String profileStatus;
+
   @override
   Future<Map<String, Object>> saveV4FullAssessment({
     required String userId,
@@ -388,7 +614,7 @@ class _V4Repository extends AssessmentRepository with _PreviewingV4Repository {
     'itemSnapshot': _itemSnapshot(),
     'responses': _savedResponses(),
     'result': {
-      'profileStatus': 'mostlySupported',
+      'profileStatus': profileStatus,
       'responseQuality': {
         'answered': 50,
         'presented': 50,
@@ -412,7 +638,8 @@ class _V4Repository extends AssessmentRepository with _PreviewingV4Repository {
   };
 }
 
-class _LegacyV4Repository extends AssessmentRepository with _PreviewingV4Repository {
+class _LegacyV4Repository extends AssessmentRepository
+    with _PreviewingV4Repository {
   @override
   Future<Map<String, Object>> saveV4FullAssessment({
     required String userId,
@@ -431,7 +658,31 @@ class _LegacyV4Repository extends AssessmentRepository with _PreviewingV4Reposit
   };
 }
 
-class _MalformedV4Repository extends AssessmentRepository with _PreviewingV4Repository {
+class _FailsThenSavesV4Repository extends _V4Repository {
+  _FailsThenSavesV4Repository() : super(profileStatus: 'supportMayHelp');
+
+  int saveCalls = 0;
+
+  @override
+  Future<Map<String, Object>> saveV4FullAssessment({
+    required String userId,
+    required String instrumentVersion,
+    required List<StudentAssessmentAnswer> answers,
+    required String submissionId,
+  }) async {
+    saveCalls += 1;
+    if (saveCalls == 1) throw StateError('save failed');
+    return super.saveV4FullAssessment(
+      userId: userId,
+      instrumentVersion: instrumentVersion,
+      answers: answers,
+      submissionId: submissionId,
+    );
+  }
+}
+
+class _MalformedV4Repository extends AssessmentRepository
+    with _PreviewingV4Repository {
   @override
   Future<Map<String, Object>> saveV4FullAssessment({
     required String userId,
@@ -534,5 +785,26 @@ class _FailingReportRepository extends ReportRepository {
   @override
   Future<String> generateWeeklyReport(String userId, {DateTime? now}) async {
     throw StateError('report refresh unavailable');
+  }
+}
+
+class _NoopAppointmentRepository extends AppointmentRepository {
+  int createCalls = 0;
+
+  @override
+  Future<List<AppointmentModel>> fetchAppointments(String userId) async =>
+      const [];
+
+  @override
+  Stream<List<AppointmentModel>> watchAppointments(String userId) =>
+      Stream.value(const []);
+
+  @override
+  Future<AppointmentModel> createAppointment(
+    AppointmentModel appointment, {
+    String? requestId,
+  }) async {
+    createCalls += 1;
+    return appointment.copyWith(id: 'created_1');
   }
 }

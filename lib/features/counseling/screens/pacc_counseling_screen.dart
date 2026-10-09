@@ -59,6 +59,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   String? _prefilledUserId;
   String? _loadedUserId;
   bool _initialDetailsHandled = false;
+  bool _initialBookingHandled = false;
   List<String> _availableTimes = const [];
   bool _loadingTimes = false;
   String? _parentAppointmentId;
@@ -69,9 +70,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   @override
   void initState() {
     super.initState();
-    _tab = widget.startBooking
-        ? _PaccAppointmentTab.appointNew
-        : _PaccAppointmentTab.myAppointments;
+    _tab = _PaccAppointmentTab.myAppointments;
     final today = _today;
     _visibleMonth = DateTime(today.year, today.month);
   }
@@ -104,8 +103,11 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     final provider = _readProviderOrNull<AppointmentProvider>();
     if (userId == null || provider == null || _loadedUserId == userId) return;
     _loadedUserId = userId;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) provider.loadAppointments(userId);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await provider.loadAppointments(userId);
+      if (!mounted || !widget.startBooking || _initialBookingHandled) return;
+      _initialBookingHandled = true;
+      _startNewAppointment();
     });
   }
 
