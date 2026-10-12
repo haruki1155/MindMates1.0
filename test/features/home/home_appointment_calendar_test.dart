@@ -89,9 +89,7 @@ void main() {
     expect(find.text('My Appointments'), findsOneWidget);
   });
 
-  testWidgets('empty Home preview opens PACC booking intake', (
-    tester,
-  ) async {
+  testWidgets('empty Home preview opens PACC booking intake', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final provider = AppointmentProvider(_FakeAppointmentRepository(const []));
@@ -99,6 +97,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Appoint a Session'));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 
     expect(find.byType(PaccCounselingScreen), findsOneWidget);
@@ -262,7 +263,7 @@ class _FakeAppointmentRepository extends AppointmentRepository {
 
   @override
   Stream<List<AppointmentModel>> watchAppointments(String userId) =>
-      Stream.value(items.where((item) => item.userId == userId).toList());
+      const Stream<List<AppointmentModel>>.empty();
 }
 
 class _FakeUserRepository extends UserRepository {}
