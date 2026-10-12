@@ -13,6 +13,7 @@ import 'package:mind_mates/repositories/assessment_repository.dart';
 import 'package:mind_mates/repositories/appointment_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
+import 'package:mind_mates/routes/route_names.dart';
 import 'package:provider/provider.dart';
 
 void main() {
@@ -291,6 +292,78 @@ void main() {
         findsNothing,
       );
       expect(find.textContaining('50 of 50 answered'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'renders each saved role result once, survives rebuild, and continues home',
+    (tester) async {
+      final expectedDomainLabels = {
+        AssessmentRole.student: 'Academic Stress',
+        AssessmentRole.faculty: 'Teaching Workload & Role Demands',
+        AssessmentRole.staff: 'Workload & Role Demands',
+      };
+
+      for (final role in expectedDomainLabels.keys) {
+        final repository = _CountingV4Repository();
+        final assessment = AssessmentProvider(repository)
+          ..selectRole(role)
+          ..startStudentAssessment();
+        await _completeV4Assessment(assessment);
+        final user = UserProvider(_ActivityRepository())
+          ..setUser(
+            UserModel(
+              id: 'render_${role.name}',
+              email: 'render_${role.name}@example.com',
+            ),
+          );
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AssessmentProvider>.value(
+                value: assessment,
+              ),
+              ChangeNotifierProvider<UserProvider>.value(value: user),
+              ChangeNotifierProvider<ReportProvider>(
+                create: (_) => ReportProvider(_FailingReportRepository()),
+              ),
+            ],
+            child: MaterialApp(
+              key: ValueKey('completion_${role.name}'),
+              home: const StudentAssessmentCompleteScreen(),
+              routes: {
+                RouteNames.home: (_) => const Scaffold(
+                  body: Text('Home destination'),
+                ),
+              },
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        expect(
+          find.text('Your Full Well-Being Assessment Result'),
+          findsOneWidget,
+        );
+        await _expectTextVisible(tester, 'Overall Well-Being Status');
+        await _expectTextVisible(tester, expectedDomainLabels[role]!);
+        expect(repository.saveCalls, 1);
+
+        // A provider notification rebuilds the completion screen, but its
+        // cached save future must not submit the completed session again.
+        assessment.updateName('rebuild_${role.name}');
+        await tester.pump();
+        expect(repository.saveCalls, 1);
+        expect(assessment.studentAnswers, hasLength(50));
+
+        await _expectTextVisible(tester, 'Continue');
+        await tester.tap(find.text('Continue'));
+        await tester.pumpAndSettle();
+        expect(find.text('Home destination'), findsOneWidget);
+        expect(assessment.studentAnswers, hasLength(50));
+      }
     },
   );
 
@@ -672,6 +745,26 @@ class _FailsThenSavesV4Repository extends _V4Repository {
   }) async {
     saveCalls += 1;
     if (saveCalls == 1) throw StateError('save failed');
+    return super.saveV4FullAssessment(
+      userId: userId,
+      instrumentVersion: instrumentVersion,
+      answers: answers,
+      submissionId: submissionId,
+    );
+  }
+}
+
+class _CountingV4Repository extends _V4Repository {
+  int saveCalls = 0;
+
+  @override
+  Future<Map<String, Object>> saveV4FullAssessment({
+    required String userId,
+    required String instrumentVersion,
+    required List<StudentAssessmentAnswer> answers,
+    required String submissionId,
+  }) async {
+    saveCalls += 1;
     return super.saveV4FullAssessment(
       userId: userId,
       instrumentVersion: instrumentVersion,
