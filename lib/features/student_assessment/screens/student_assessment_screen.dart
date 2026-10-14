@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../providers/assessment_provider.dart';
+import '../../../providers/auth_provider.dart';
 import '../../../routes/route_names.dart';
 import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
 import '../models/student_assessment_models.dart';
@@ -27,7 +28,18 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<AssessmentProvider>().ensureStudentAssessmentStarted();
+      String? userId;
+      try {
+        userId = context.read<AuthProvider>().authenticatedUserId;
+      } on ProviderNotFoundException {
+        // Assessment entry is authentication-bound. Isolated widget tests may
+        // provide pre-initialized AssessmentProvider state, but must not cause
+        // this screen to create an unauthenticated session.
+        return;
+      }
+      context.read<AssessmentProvider>().ensureStudentAssessmentStarted(
+        userId: userId,
+      );
     });
   }
 
@@ -90,8 +102,10 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
                       onAnswer: (answer) async {
                         await provider.answerCurrentStudentQuestion(answer);
                         if (!context.mounted) return;
-                        if (provider.flowStage == AssessmentFlowStage.domainReview ||
-                            provider.flowStage == AssessmentFlowStage.recoverableError) {
+                        if (provider.flowStage ==
+                                AssessmentFlowStage.domainReview ||
+                            provider.flowStage ==
+                                AssessmentFlowStage.recoverableError) {
                           await Navigator.of(context).push(
                             MaterialPageRoute<void>(
                               builder: (_) => AssessmentDomainReviewScreen(
@@ -99,21 +113,39 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
                                 error: provider.domainPreviewError,
                                 onRetry: () => provider.retryDomainPreview(),
                                 previewAfterRetry: () => provider.domainPreview,
-                                errorAfterRetry: () => provider.domainPreviewError,
-                                onBack: provider.returnToAnsweringFromDomainReview,
+                                errorAfterRetry: () =>
+                                    provider.domainPreviewError,
+                                onBack:
+                                    provider.returnToAnsweringFromDomainReview,
                                 intervention: provider.pendingIntervention,
                                 onTryActivity: () async {
-                                  final attempt = provider.beginInterventionAttempt();
-                                  final outcome = await Navigator.of(context).push<InterventionOutcome>(
-                                    MaterialPageRoute(builder: (_) => switch (provider.pendingIntervention!) {
-                                      InterventionType.breathing => const InterventionBreathingScreen(),
-                                      InterventionType.grounding => const InterventionGroundingScreen(),
-                                      InterventionType.walking => const InterventionWalkingScreen(),
-                                      InterventionType.appointment => const InterventionGroundingScreen(),
-                                    }),
+                                  final attempt = provider
+                                      .beginInterventionAttempt();
+                                  final outcome = await Navigator.of(context)
+                                      .push<InterventionOutcome>(
+                                        MaterialPageRoute(
+                                          builder: (_) => switch (provider
+                                              .pendingIntervention!) {
+                                            InterventionType.breathing =>
+                                              const InterventionBreathingScreen(),
+                                            InterventionType.grounding =>
+                                              const InterventionGroundingScreen(),
+                                            InterventionType.walking =>
+                                              const InterventionWalkingScreen(),
+                                            InterventionType.appointment =>
+                                              const InterventionGroundingScreen(),
+                                          },
+                                        ),
+                                      );
+                                  provider.handleInterventionOutcome(
+                                    attempt,
+                                    outcome ?? InterventionOutcome.cancelled,
                                   );
-                                  provider.handleInterventionOutcome(attempt, outcome ?? InterventionOutcome.cancelled);
-                                  if (provider.flowStage != AssessmentFlowStage.domainReview && context.mounted) Navigator.of(context).pop();
+                                  if (provider.flowStage !=
+                                          AssessmentFlowStage.domainReview &&
+                                      context.mounted) {
+                                    Navigator.of(context).pop();
+                                  }
                                 },
                                 onContinue: () {
                                   provider.continueAfterDomainReview();
@@ -123,7 +155,9 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
                             ),
                           );
                         }
-                        if (provider.flowStage == AssessmentFlowStage.submitting && context.mounted) {
+                        if (provider.flowStage ==
+                                AssessmentFlowStage.submitting &&
+                            context.mounted) {
                           Navigator.of(context).pushReplacementNamed(
                             RouteNames.studentAssessmentComplete,
                           );

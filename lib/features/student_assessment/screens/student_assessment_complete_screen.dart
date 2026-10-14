@@ -394,7 +394,8 @@ class _StudentAssessmentCompleteScreenState
   String? _currentUserId() {
     try {
       final authProvider = context.read<AuthProvider>();
-      final userId = authProvider.userId ?? authProvider.hydrateCurrentUser();
+      final userId =
+          authProvider.authenticatedUserId ?? authProvider.hydrateCurrentUser();
       if (userId != null && userId.isNotEmpty) return userId;
     } on ProviderNotFoundException {
       // Tests and preview surfaces may provide only UserProvider.

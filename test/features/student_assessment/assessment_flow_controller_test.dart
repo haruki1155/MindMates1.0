@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
 import 'package:mind_mates/features/student_assessment/models/student_assessment_models.dart';
 import 'package:mind_mates/features/student_assessment/models/intervention_models.dart';
+import 'package:mind_mates/features/student_assessment/services/student_assessment_calculator.dart';
 import 'package:mind_mates/features/student_assessment/screens/assessment_domain_review_screen.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
@@ -103,6 +106,81 @@ void main() {
     },
   );
 
+  test('auth switch clears the previous account assessment before render', () {
+    final provider = AssessmentProvider(_PreviewRepository())
+      ..bindAuthenticatedUser('user-a')
+      ..selectRole(AssessmentRole.faculty)
+      ..startStudentAssessment(userId: 'user-a');
+    provider.answerCurrentStudentQuestion(LikertAnswer.often);
+
+    provider.bindAuthenticatedUser(null);
+    provider.bindAuthenticatedUser('user-b');
+    provider.ensureStudentAssessmentStarted(userId: 'user-b');
+
+    expect(provider.assessmentSessionOwnerId, 'user-b');
+    expect(provider.studentQuestionIndex, 0);
+    expect(provider.studentAnswers, isEmpty);
+    expect(provider.domainPreview, isNull);
+    expect(provider.studentResult, isNull);
+    expect(provider.activeAssessmentUserType, AssessmentUserType.student);
+    expect(provider.currentStudentQuestion?.v4DomainId, 'academic');
+  });
+
+  test(
+    'a different authenticated user cannot save a previous V4 session',
+    () async {
+      final repository = _EligiblePreviewRepository();
+      final provider = AssessmentProvider(repository)
+        ..bindAuthenticatedUser('user-a')
+        ..startStudentAssessment(userId: 'user-a');
+
+      provider.bindAuthenticatedUser('user-b');
+      final saved = await provider.saveStudentAssessmentForUser('user-b');
+
+      expect(saved, isNull);
+      expect(repository.savedSubmissionIds, isEmpty);
+    },
+  );
+
+  test(
+    'a proxy-bound signed-out provider cannot start or save a session',
+    () async {
+      final repository = _EligiblePreviewRepository();
+      final provider = AssessmentProvider(repository)
+        ..bindAuthenticatedUser(null);
+
+      provider.ensureStudentAssessmentStarted();
+      final saved = await provider.saveStudentAssessmentForUser('user-a');
+
+      expect(provider.studentQuestions, isEmpty);
+      expect(saved, isNull);
+      expect(repository.savedSubmissionIds, isEmpty);
+    },
+  );
+
+  test('a delayed preview from a logged-out account is discarded', () async {
+    final repository = _DelayedPreviewRepository();
+    final provider = AssessmentProvider(repository)
+      ..bindAuthenticatedUser('user-a')
+      ..startStudentAssessment(userId: 'user-a');
+    for (var index = 0; index < 9; index += 1) {
+      await provider.answerCurrentStudentQuestion(LikertAnswer.often);
+    }
+    final lastAnswer = provider.answerCurrentStudentQuestion(
+      LikertAnswer.often,
+    );
+    await repository.requested.future;
+
+    provider.bindAuthenticatedUser(null);
+    repository.complete();
+    await lastAnswer;
+
+    expect(provider.domainPreview, isNull);
+    expect(provider.pendingDomainId, isNull);
+    expect(provider.studentAnswers, isEmpty);
+    expect(provider.flowStage, AssessmentFlowStage.answering);
+  });
+
   testWidgets('domain review renders only the authoritative preview response', (
     tester,
   ) async {
@@ -202,4 +280,32 @@ class _EligiblePreviewRepository extends _PreviewRepository {
     savedSubmissionIds.add(submissionId);
     return {'submissionId': submissionId};
   }
+}
+
+class _DelayedPreviewRepository extends AssessmentRepository {
+  final requested = Completer<void>();
+  final response = Completer<Map<String, Object>>();
+
+  @override
+  Future<Map<String, Object>> previewV4AssessmentDomain({
+    required String instrumentVersion,
+    required String domainId,
+    required List<StudentAssessmentAnswer> answers,
+  }) {
+    requested.complete();
+    return response.future;
+  }
+
+  void complete() => response.complete({
+    'domainId': 'academic',
+    'domainLabel': 'Academic',
+    'status': 'mostlySupported',
+    'isScorable': true,
+    'answeredCount': 10,
+    'presentedCount': 10,
+    'summary': 'Server result.',
+    'suggestedAction': 'Continue.',
+    'reflectionPrompt': 'Reflect.',
+    'interventionEligible': false,
+  });
 }

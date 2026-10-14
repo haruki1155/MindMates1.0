@@ -668,6 +668,24 @@ void main() {
   });
 
   group('StudentAssessmentScreen UI', () {
+    testWidgets('does not start an assessment without AuthProvider', (
+      tester,
+    ) async {
+      final provider = AssessmentProvider(AssessmentRepository());
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AssessmentProvider>.value(
+          value: provider,
+          child: const MaterialApp(home: StudentAssessmentScreen()),
+        ),
+      );
+      await tester.pump();
+
+      expect(provider.studentQuestions, isEmpty);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('Strongly Disagree'), findsNothing);
+    });
+
     testWidgets('offers four choices without a neutral option', (tester) async {
       final provider = AssessmentProvider(AssessmentRepository())
         ..startStudentAssessment();

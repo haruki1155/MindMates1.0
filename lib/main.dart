@@ -85,8 +85,10 @@ Widget _mobileApp() => MultiProvider(
     ChangeNotifierProvider(
       create: (_) => SecretChatProvider(SecretChatRepository()),
     ),
-    ChangeNotifierProvider(
+    ChangeNotifierProxyProvider<AuthProvider, AssessmentProvider>(
       create: (_) => AssessmentProvider(AssessmentRepository()),
+      update: (_, auth, assessment) =>
+          assessment!..bindAuthenticatedUser(auth.authenticatedUserId),
     ),
     ChangeNotifierProvider(
       create: (_) => BreathingProvider(BreathingRepository()),

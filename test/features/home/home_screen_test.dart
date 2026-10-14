@@ -10,18 +10,21 @@ import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
+import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/providers/breathing_provider.dart';
 import 'package:mind_mates/providers/insights_provider.dart';
 import 'package:mind_mates/providers/mood_provider.dart';
 import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
+import 'package:mind_mates/repositories/auth_repository.dart';
 import 'package:mind_mates/repositories/breathing_repository.dart';
 import 'package:mind_mates/repositories/insights_repository.dart';
 import 'package:mind_mates/repositories/mood_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:mind_mates/routes/app_pages.dart';
+import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
@@ -692,6 +695,9 @@ void main() {
       await tester.pumpWidget(
         MultiProvider(
           providers: [
+            ChangeNotifierProvider<AuthProvider>.value(
+              value: _FakeAuthProvider('teaching_user'),
+            ),
             ChangeNotifierProvider<UserProvider>.value(value: userProvider),
             ChangeNotifierProvider<MoodProvider>(
               create: (_) => MoodProvider(_FakeMoodRepository()),
@@ -799,6 +805,19 @@ Finder _dashboardAsset(String assetName) {
 }
 
 class _FakeUserRepository extends UserRepository {}
+
+class _FakeAuthProvider extends AuthProvider {
+  _FakeAuthProvider(String userId) : super(_FakeAuthRepository(userId));
+}
+
+class _FakeAuthRepository extends AuthRepository {
+  _FakeAuthRepository(this._currentUserId) : super(AuthService());
+
+  final String _currentUserId;
+
+  @override
+  String? get currentUserId => _currentUserId;
+}
 
 class _FakeMoodRepository extends MoodRepository {
   @override
