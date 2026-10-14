@@ -7,19 +7,34 @@ import '../services/auth/auth_service.dart';
 import '../services/firebase/firestore_service.dart';
 import '../services/firebase/firebase_app_check_service.dart';
 import '../services/firebase/firebase_callable_router.dart';
+import '../services/firebase/callable_request_timeout.dart';
 import '../services/firebase/firebase_runtime_diagnostics.dart';
+
+typedef SchoolIdEmailResolver = Future<String> Function(String schoolId);
+typedef EmailPasswordSignIn = Future<UserCredential> Function({
+  required String email,
+  required String password,
+});
 
 class AuthRepository {
   AuthRepository(
     this._authService, {
     FirestoreService? firestoreService,
     FirebaseFunctions? functions,
+    this.schoolIdEmailResolver,
+    this.resolverTimeout = const Duration(seconds: 30),
+    this.emailSignIn,
+    this.signInTimeout = const Duration(seconds: 30),
   }) : _firestoreService = firestoreService ?? FirestoreService(),
        _providedFunctions = functions;
 
   final AuthService _authService;
   final FirestoreService _firestoreService;
   final FirebaseFunctions? _providedFunctions;
+  final SchoolIdEmailResolver? schoolIdEmailResolver;
+  final Duration resolverTimeout;
+  final EmailPasswordSignIn? emailSignIn;
+  final Duration signInTimeout;
   FirebaseFunctions get _functions =>
       _providedFunctions ??
       FirebaseFunctions.instanceFor(region: 'us-central1');
@@ -76,7 +91,16 @@ class AuthRepository {
     required String password,
   }) async {
     final email = await resolveAuthEmailForSchoolId(schoolId);
-    return _authService.signIn(email: email, password: password);
+    return runBoundedCallable<UserCredential>(
+      operation: 'firebase_auth_sign_in',
+      timeout: signInTimeout,
+      request: () {
+        final signIn = emailSignIn;
+        return signIn != null
+            ? signIn(email: email, password: password)
+            : _authService.signIn(email: email, password: password);
+      },
+    );
   }
 
   Future<String> resolveAuthEmailForSchoolId(String schoolId) async {
@@ -84,15 +108,26 @@ class AuthRepository {
     if (identifier.isEmpty || identifier.contains('@')) {
       throw FirebaseAuthException(code: 'invalid-credential');
     }
-    final response = await _functions
-        .routedCallable('resolveSchoolIdAuthEmail')
-        .call({'schoolId': identifier});
-    final data = response.data;
-    final email = data is Map ? data['email']?.toString().trim() : null;
-    if (email == null || email.isEmpty) {
-      throw FirebaseAuthException(code: 'invalid-credential');
-    }
-    return email;
+    return runBoundedCallable<String>(
+      operation: 'school_id_resolver',
+      timeout: resolverTimeout,
+      request: () async {
+        final resolver = schoolIdEmailResolver;
+        if (resolver != null) return resolver(identifier);
+        final response = await _functions
+            .routedCallable(
+              'resolveSchoolIdAuthEmail',
+              options: HttpsCallableOptions(timeout: resolverTimeout),
+            )
+            .call({'schoolId': identifier});
+        final data = response.data;
+        final email = data is Map ? data['email']?.toString().trim() : null;
+        if (email == null || email.isEmpty) {
+          throw FirebaseAuthException(code: 'invalid-credential');
+        }
+        return email;
+      },
+    );
   }
 
   Future<void> sendPasswordResetForSchoolId(String schoolId) async {

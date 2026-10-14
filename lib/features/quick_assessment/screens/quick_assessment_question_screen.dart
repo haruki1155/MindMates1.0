@@ -7,6 +7,7 @@ import '../../../providers/insights_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
+import '../../../services/firebase/firebase_error_message.dart';
 import '../models/quick_assessment_models.dart';
 import '../widgets/quick_assessment_widgets.dart';
 
@@ -212,9 +213,12 @@ class _QuestionPage extends StatelessWidget {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Unable to save your quick assessment. Please try again.',
+              FirebaseErrorMessage.describe(
+                error,
+                fallback: 'Unable to save your quick assessment. Please try again.',
+              ),
             ),
           ),
         );

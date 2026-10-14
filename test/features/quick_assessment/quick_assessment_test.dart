@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/quick_assessment/data/quick_assessment_questions.dart';
@@ -15,6 +17,7 @@ import 'package:mind_mates/repositories/auth_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:mind_mates/routes/route_names.dart';
 import 'package:mind_mates/services/auth/auth_service.dart';
+import 'package:mind_mates/services/firebase/callable_request_timeout.dart';
 import 'package:mind_mates/services/firebase/firestore_service.dart';
 import 'package:provider/provider.dart';
 
@@ -288,6 +291,102 @@ void main() {
 
       expect(completed, isTrue);
       expect(firestore.setDocumentData?['quickAssessmentCompleted'], isTrue);
+    });
+
+    test('quick submission timeout ends loading without a duplicate call',
+        () async {
+      final pending = Completer<Map<String, Object>>();
+      var submitCalls = 0;
+      final repository = AssessmentRepository(
+        stagingQuickAssessmentSubmitter: ({
+          required userId,
+          required result,
+        }) {
+          submitCalls += 1;
+          return pending.future;
+        },
+        quickAssessmentCompletionChecker: (_) async => false,
+        callableTimeout: const Duration(milliseconds: 1),
+      );
+      final provider = _readyProvider(repository: repository);
+
+      for (final question in QuickAssessmentQuestions.questions) {
+        provider.selectAnswer(question.options.first);
+        provider.moveToNextQuestion();
+      }
+
+      await expectLater(
+        provider.saveQuickAssessmentForUser('user_1'),
+        throwsA(isA<CallableRequestTimeoutException>()),
+      );
+      expect(provider.isSavingQuickAssessment, isFalse);
+
+      await expectLater(
+        provider.saveQuickAssessmentForUser('user_1'),
+        throwsA(isA<QuickAssessmentSubmissionPendingException>()),
+      );
+      expect(submitCalls, 1);
+      pending.complete(<String, Object>{'saved': true});
+    });
+
+    test('reconciles server completion after an uncertain quick timeout',
+        () async {
+      final pending = Completer<Map<String, Object>>();
+      var completionChecks = 0;
+      final repository = AssessmentRepository(
+        stagingQuickAssessmentSubmitter: ({
+          required userId,
+          required result,
+        }) => pending.future,
+        quickAssessmentCompletionChecker: (_) async {
+          completionChecks += 1;
+          return completionChecks >= 2;
+        },
+        callableTimeout: const Duration(milliseconds: 1),
+      );
+      final provider = _readyProvider(repository: repository);
+
+      for (final question in QuickAssessmentQuestions.questions) {
+        provider.selectAnswer(question.options.first);
+        provider.moveToNextQuestion();
+      }
+
+      await expectLater(
+        provider.saveQuickAssessmentForUser('user_1'),
+        throwsA(isA<CallableRequestTimeoutException>()),
+      );
+
+      final recovered = await provider.saveQuickAssessmentForUser('user_1');
+      expect(recovered, <String, Object>{'reconciled': true});
+      pending.complete(<String, Object>{'saved': true});
+    });
+
+    test('late quick submission cannot update a different authenticated session',
+        () async {
+      final pending = Completer<Map<String, Object>>();
+      final repository = AssessmentRepository(
+        stagingQuickAssessmentSubmitter: ({
+          required userId,
+          required result,
+        }) => pending.future,
+        callableTimeout: const Duration(seconds: 1),
+      );
+      final provider = AssessmentProvider(repository)
+        ..bindAuthenticatedUser('student_a')
+        ..selectRole(AssessmentRole.student)
+        ..updateName('Leo');
+
+      for (final question in QuickAssessmentQuestions.questions) {
+        provider.selectAnswer(question.options.first);
+        provider.moveToNextQuestion();
+      }
+
+      final saving = provider.saveQuickAssessmentForUser('student_a');
+      provider.bindAuthenticatedUser('student_b');
+      pending.complete(<String, Object>{'saved': true});
+
+      expect(await saving, isNull);
+      expect(provider.isSavingQuickAssessment, isFalse);
     });
   });
 
