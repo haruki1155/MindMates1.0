@@ -49,51 +49,59 @@ class _AssessmentDomainReviewScreenState
   Widget build(BuildContext context) {
     final hasPreview = _preview != null;
     final domainLabel = _text('domainLabel') ?? 'Category review';
-    final status = _text('status');
     final eligible = _preview?['interventionEligible'] == true;
     return PopScope(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) widget.onBack();
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('Category Review')),
+        appBar: AppBar(title: const Text('Suggested activity')),
         body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            Text(domainLabel, style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 8),
-            const Text('Category completed'),
-            if (status != null) ...[
-              const SizedBox(height: 16),
-              Text(_statusLabel(status), style: Theme.of(context).textTheme.titleMedium),
-            ],
-            if (hasPreview) ...[
-              _section('Summary', _text('summary')),
-              _section('Focus', _text('focusInsight')),
-              _section('Strength', _text('strengthInsight')),
-              _section('Suggested next step', _text('suggestedAction')),
-              _section('Reflection', _text('reflectionPrompt')),
-              if (eligible) ...[
-                const SizedBox(height: 16),
-                Text('Suggested activity: ${widget.intervention?.name ?? 'wellness activity'}'),
-                if (widget.onTryActivity != null) FilledButton.tonal(onPressed: widget.onTryActivity, child: const Text('Try Suggested Activity')),
+          child: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              Text(
+                domainLabel,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 8),
+              const Text('You have completed this part of your assessment.'),
+              if (hasPreview) ...[
+                if (eligible) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    'A short ${widget.intervention?.name ?? 'wellness'} activity is available if you would like a pause before continuing.',
+                  ),
+                  const SizedBox(height: 12),
+                  if (widget.onTryActivity != null)
+                    FilledButton.tonal(
+                      onPressed: widget.onTryActivity,
+                      child: const Text('Try Activity'),
+                    ),
+                ],
+              ] else ...[
+                const SizedBox(height: 20),
+                const Text(
+                  'This category result could not be retrieved. Your answers are still saved in this assessment session.',
+                ),
+                if (_error != null) const SizedBox(height: 8),
+                if (_error != null)
+                  const Text(
+                    'You can retry or continue without a category preview.',
+                  ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: _retrying ? null : _retry,
+                  child: const Text('Retry Preview'),
+                ),
               ],
-            ] else ...[
-              const SizedBox(height: 20),
-              const Text('This category result could not be retrieved. Your answers are still saved in this assessment session.'),
-              if (_error != null) const SizedBox(height: 8),
-              if (_error != null) const Text('You can retry or continue without a category preview.'),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: _retrying ? null : _retry,
-                child: const Text('Retry Preview'),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: widget.onContinue,
+                child: const Text('Not now, continue assessment'),
               ),
             ],
-            const SizedBox(height: 24),
-            FilledButton(onPressed: widget.onContinue, child: const Text('Continue Assessment')),
-          ],
-        ),
+          ),
         ),
       ),
     );
@@ -104,30 +112,6 @@ class _AssessmentDomainReviewScreenState
     if (value is! String || value.trim().isEmpty) return null;
     return value;
   }
-
-  Widget _section(String title, String? text) {
-    if (text == null) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 4),
-          Text(text),
-        ],
-      ),
-    );
-  }
-
-  String _statusLabel(String status) => switch (status) {
-    'supported' => 'Generally supported',
-    'mostlySupported' => 'Mostly supported',
-    'someStrain' => 'Some strain',
-    'supportMayHelp' => 'Support may be helpful',
-    'insufficientResponses' => 'More responses are needed',
-    _ => 'Category result available',
-  };
 
   Future<void> _retry() async {
     setState(() => _retrying = true);

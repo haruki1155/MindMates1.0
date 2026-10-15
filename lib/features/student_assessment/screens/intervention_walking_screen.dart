@@ -7,18 +7,27 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../models/intervention_models.dart';
 
+enum WalkingTrackingState {
+  initializing,
+  delayedReading,
+  tracking,
+  unavailable,
+  manualFallback,
+}
+
 class InterventionWalkingScreen extends StatefulWidget {
   const InterventionWalkingScreen({
     super.key,
     this.stepCountStream,
     this.requestActivityRecognitionPermission,
+    this.initialReadingDelay = const Duration(seconds: 5),
     this.noReadingTimeout = const Duration(seconds: 15),
   });
 
-  /// Allows deterministic sensor simulations without changing production input.
   final Stream<int>? stepCountStream;
   final Future<PermissionStatus> Function()?
   requestActivityRecognitionPermission;
+  final Duration initialReadingDelay;
   final Duration noReadingTimeout;
 
   @override
@@ -28,14 +37,16 @@ class InterventionWalkingScreen extends StatefulWidget {
 
 class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
   int? _baseline;
+  int? _lastSensorTotal;
   int _steps = 0;
   bool _paused = false;
-  bool _fallback = false;
   bool _completed = false;
   bool _rebaseOnNextReading = false;
   String? _fallbackMessage;
+  WalkingTrackingState _state = WalkingTrackingState.initializing;
   StreamSubscription<int>? _stepSubscription;
-  Timer? _noReadingTimer;
+  Timer? _delayedReadingTimer;
+  Timer? _watchdog;
 
   @override
   void initState() {
@@ -44,16 +55,14 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
   }
 
   Future<void> _startStepCounting() async {
-    // Injected streams are test-only sensor simulations and deliberately avoid
-    // platform permission APIs.
     if (widget.stepCountStream == null) {
-      final status = await _permissionStatus();
+      final permission = await _permissionStatus();
       if (!mounted) return;
-      if (!status.isGranted) {
-        _showFallback(
-          status.isPermanentlyDenied
-              ? 'Activity-recognition permission is permanently denied. You may self-report completion or skip.'
-              : 'Activity-recognition permission was not granted. You may self-report completion or skip.',
+      if (!permission.isGranted) {
+        _offerFallback(
+          permission.isPermanentlyDenied
+              ? 'Activity-recognition permission is permanently denied.'
+              : 'Activity-recognition permission was not granted.',
         );
         return;
       }
@@ -64,17 +73,11 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
         Pedometer.stepCountStream.map((event) => event.steps);
     _stepSubscription = stream.listen(
       _onStepCount,
-      onError: (_) => _showFallback(
-        'Automatic step counting is unavailable. You may self-report completion or skip.',
+      onError: (_) => _offerFallback(
+        'Automatic step counting is unavailable on this device.',
       ),
     );
-    _noReadingTimer = Timer(widget.noReadingTimeout, () {
-      if (_baseline == null) {
-        _showFallback(
-          'Automatic step counting is unavailable. You may self-report completion or skip.',
-        );
-      }
-    });
+    _armInitialTimers();
   }
 
   Future<PermissionStatus> _permissionStatus() {
@@ -86,88 +89,184 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
     return Permission.activityRecognition.request();
   }
 
-  void _showFallback(String message) {
-    if (!mounted || _completed) return;
-    _noReadingTimer?.cancel();
+  void _armInitialTimers() {
+    _delayedReadingTimer?.cancel();
+    _watchdog?.cancel();
+    _delayedReadingTimer = Timer(widget.initialReadingDelay, () {
+      if (!mounted || _baseline != null || _completed || _paused) return;
+      setState(() => _state = WalkingTrackingState.delayedReading);
+    });
+    _watchdog = Timer(widget.noReadingTimeout, () {
+      if (_baseline == null) {
+        _offerFallback('No step reading arrived from your phone.');
+      }
+    });
+  }
+
+  void _armStallWatchdog() {
+    _watchdog?.cancel();
+    _watchdog = Timer(widget.noReadingTimeout, () {
+      if (_paused || _completed || _state != WalkingTrackingState.tracking) {
+        return;
+      }
+      _offerFallback('Step readings stopped arriving from your phone.');
+    });
+  }
+
+  void _offerFallback(String reason) {
+    if (!mounted ||
+        _completed ||
+        _state == WalkingTrackingState.unavailable ||
+        _state == WalkingTrackingState.manualFallback) {
+      return;
+    }
+    _delayedReadingTimer?.cancel();
+    _watchdog?.cancel();
+    unawaited(_stepSubscription?.cancel() ?? Future<void>.value());
     setState(() {
-      _fallback = true;
-      _fallbackMessage = message;
+      _state = WalkingTrackingState.unavailable;
+      _fallbackMessage =
+          '$reason You can use a timed-walk alternative or skip this activity.';
     });
   }
 
   void _onStepCount(int totalSteps) {
-    if (_completed || !mounted) return;
-    _noReadingTimer?.cancel();
+    if (_completed ||
+        !mounted ||
+        _state == WalkingTrackingState.unavailable ||
+        _state == WalkingTrackingState.manualFallback) {
+      return;
+    }
+    if (totalSteps < 0) return;
+    _delayedReadingTimer?.cancel();
+    final previousTotal = _lastSensorTotal;
+    _lastSensorTotal = totalSteps;
     if (_paused) return;
-    if (_baseline == null || _rebaseOnNextReading) {
+    if (_baseline == null ||
+        _rebaseOnNextReading ||
+        (previousTotal != null && totalSteps < previousTotal)) {
+      // Rebase after a resumed session or an Android pedometer reset, while
+      // retaining already-earned progress and never inventing steps.
       _baseline = totalSteps - _steps;
       _rebaseOnNextReading = false;
     }
     final next = totalSteps - _baseline!;
-    if (next >= _steps) setState(() => _steps = next);
-    if (next >= 500) _complete();
+    if (next >= _steps) {
+      setState(() {
+        _steps = next;
+        _state = WalkingTrackingState.tracking;
+      });
+    }
+    _armStallWatchdog();
+    if (next >= 500) _completeAutomatically();
   }
 
   void _togglePaused() {
+    if (_state == WalkingTrackingState.unavailable ||
+        _state == WalkingTrackingState.manualFallback) {
+      return;
+    }
     setState(() {
       _paused = !_paused;
       if (!_paused) _rebaseOnNextReading = true;
     });
+    if (_paused) {
+      _watchdog?.cancel();
+    } else {
+      _armStallWatchdog();
+    }
   }
 
-  void _complete() {
+  void _completeAutomatically() {
     if (_completed || !mounted) return;
     _completed = true;
-    _noReadingTimer?.cancel();
-    unawaited(_stepSubscription?.cancel() ?? Future<void>.value());
+    _cancelTracking();
     Navigator.of(context).pop(InterventionOutcome.completed);
+  }
+
+  void _recordSelfReportedCompletion() {
+    if (_completed || !mounted) return;
+    _completed = true;
+    _cancelTracking();
+    Navigator.of(context).pop(InterventionOutcome.selfReportedCompleted);
+  }
+
+  void _beginManualFallback() {
+    setState(() => _state = WalkingTrackingState.manualFallback);
+  }
+
+  void _cancelTracking() {
+    _delayedReadingTimer?.cancel();
+    _watchdog?.cancel();
+    unawaited(_stepSubscription?.cancel() ?? Future<void>.value());
   }
 
   @override
   void dispose() {
-    _noReadingTimer?.cancel();
-    _stepSubscription?.cancel();
+    _cancelTracking();
     super.dispose();
   }
+
+  String get _stateMessage => switch (_state) {
+    WalkingTrackingState.initializing =>
+      'Preparing automatic step tracking. Some phones may report the first reading after a short delay.',
+    WalkingTrackingState.delayedReading =>
+      'Still waiting for your phone’s step sensor. Keep the app open while we wait.',
+    WalkingTrackingState.tracking =>
+      'Automatic tracking is active. Step updates can arrive in batches on some phones.',
+    WalkingTrackingState.unavailable =>
+      _fallbackMessage ?? 'Automatic step tracking is unavailable.',
+    WalkingTrackingState.manualFallback =>
+      _fallbackMessage ?? 'Automatic step tracking is unavailable.',
+  };
 
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Walk 500 steps')),
-    body: Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          Text(
-            '$_steps / 500 steps',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          LinearProgressIndicator(value: (_steps / 500).clamp(0, 1)),
-          if (_fallback)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(_fallbackMessage!),
+    body: SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Text(
+              '$_steps / 500 steps',
+              style: Theme.of(context).textTheme.headlineMedium,
             ),
-          const Spacer(),
-          Wrap(
-            spacing: 12,
-            children: [
-              OutlinedButton(
-                onPressed: () =>
-                    Navigator.of(context).pop(InterventionOutcome.skipped),
-                child: const Text('Skip'),
-              ),
-              FilledButton(
-                onPressed: _togglePaused,
-                child: Text(_paused ? 'Resume' : 'Pause'),
-              ),
-              if (_fallback)
-                FilledButton(
-                  onPressed: _complete,
-                  child: const Text('I completed my walk'),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: (_steps / 500).clamp(0, 1)),
+            const SizedBox(height: 16),
+            Text(_stateMessage, textAlign: TextAlign.center),
+            const Spacer(),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(InterventionOutcome.skipped),
+                  child: const Text('Skip'),
                 ),
-            ],
-          ),
-        ],
+                if (_state != WalkingTrackingState.unavailable &&
+                    _state != WalkingTrackingState.manualFallback)
+                  FilledButton(
+                    onPressed: _togglePaused,
+                    child: Text(_paused ? 'Resume' : 'Pause'),
+                  ),
+                if (_state == WalkingTrackingState.unavailable)
+                  FilledButton(
+                    onPressed: _beginManualFallback,
+                    child: const Text('Use timed-walk option'),
+                  ),
+                if (_state == WalkingTrackingState.manualFallback)
+                  FilledButton(
+                    onPressed: _recordSelfReportedCompletion,
+                    child: const Text('Record self-reported walk'),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     ),
   );

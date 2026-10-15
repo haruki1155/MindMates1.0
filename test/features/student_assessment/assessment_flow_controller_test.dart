@@ -12,7 +12,7 @@ import 'package:mind_mates/repositories/assessment_repository.dart';
 
 void main() {
   test(
-    'V4 pauses at each role-specific domain boundary with its ten answers',
+    'non-eligible V4 previews advance each role-specific domain without review',
     () async {
       for (final role in [
         AssessmentRole.student,
@@ -26,14 +26,14 @@ void main() {
           await provider.answerCurrentStudentQuestion(LikertAnswer.often);
         }
 
-        expect(provider.flowStage, AssessmentFlowStage.domainReview);
+        expect(provider.flowStage, AssessmentFlowStage.answering);
         expect(repository.previewRequests, hasLength(1));
         expect(repository.previewRequests.single.answers, hasLength(10));
         expect(
           repository.previewRequests.single.domainId,
           provider.studentQuestions.first.v4DomainId,
         );
-        expect(provider.studentQuestionIndex, 9);
+        expect(provider.studentQuestionIndex, 10);
       }
     },
   );
@@ -50,8 +50,7 @@ void main() {
 
       expect(provider.flowStage, AssessmentFlowStage.recoverableError);
       await provider.retryDomainPreview();
-      expect(provider.flowStage, AssessmentFlowStage.domainReview);
-      provider.continueAfterDomainReview();
+      expect(provider.flowStage, AssessmentFlowStage.answering);
       expect(provider.studentQuestionIndex, 10);
       expect(provider.studentAnswers, hasLength(10));
       expect(provider.v4SubmissionId, submissionId);
@@ -59,7 +58,7 @@ void main() {
   );
 
   test('editing a reviewed domain requests a replacement preview', () async {
-    final repository = _PreviewRepository();
+    final repository = _EligiblePreviewRepository();
     final provider = AssessmentProvider(repository)..startStudentAssessment();
     for (var index = 0; index < 10; index += 1) {
       await provider.answerCurrentStudentQuestion(LikertAnswer.often);
@@ -98,11 +97,74 @@ void main() {
         }
         expect(provider.studentAnswers, hasLength(50));
         expect(provider.v4SubmissionId, session);
+        expect(provider.flowStage, AssessmentFlowStage.submissionReview);
+
+        // The fifth-domain review must not save until the user explicitly
+        // confirms the final submission boundary.
+        expect(repository.savedSubmissionIds, isEmpty);
+        provider.confirmV4Submission();
+        provider.confirmV4Submission();
         expect(provider.flowStage, AssessmentFlowStage.submitting);
 
-        await provider.saveStudentAssessmentForUser('test-user');
+        final first = await provider.saveStudentAssessmentForUser('test-user');
+        final second = await provider.saveStudentAssessmentForUser('test-user');
+        expect(second, first);
         expect(repository.savedSubmissionIds, [session]);
       }
+    },
+  );
+
+  test(
+    'declining or skipping a final intervention never submits by itself',
+    () async {
+      for (final outcome in [
+        InterventionOutcome.skipped,
+        InterventionOutcome.selfReportedCompleted,
+      ]) {
+        final repository = _EligiblePreviewRepository();
+        final provider = AssessmentProvider(repository)
+          ..startStudentAssessment();
+        for (var index = 0; index < 50; index += 1) {
+          await provider.answerCurrentStudentQuestion(LikertAnswer.often);
+          if (provider.flowStage == AssessmentFlowStage.domainReview) {
+            if (index == 49) {
+              final attempt = provider.beginInterventionAttempt();
+              provider.handleInterventionOutcome(attempt, outcome);
+            } else {
+              provider.continueAfterDomainReview();
+            }
+          }
+        }
+        expect(provider.flowStage, AssessmentFlowStage.submissionReview);
+        expect(repository.savedSubmissionIds, isEmpty);
+      }
+    },
+  );
+
+  test(
+    'feedback is session-local, optional, and recorded once per attempt',
+    () async {
+      final provider = AssessmentProvider(_EligiblePreviewRepository())
+        ..startStudentAssessment();
+      for (var index = 0; index < 10; index += 1) {
+        await provider.answerCurrentStudentQuestion(LikertAnswer.often);
+      }
+      final attempt = provider.beginInterventionAttempt();
+      provider.recordInterventionFeedback(
+        attempt,
+        const InterventionFeedback(choice: InterventionFeedbackChoice.neutral),
+      );
+      provider.recordInterventionFeedback(
+        attempt,
+        const InterventionFeedback(choice: InterventionFeedbackChoice.helped),
+      );
+
+      expect(
+        provider.interventionFeedback[attempt]?.choice,
+        InterventionFeedbackChoice.neutral,
+      );
+      provider.bindAuthenticatedUser(null);
+      expect(provider.interventionFeedback, isEmpty);
     },
   );
 
@@ -204,8 +266,8 @@ void main() {
     );
 
     expect(find.text('Academic'), findsOneWidget);
-    expect(find.text('Server-calculated category summary.'), findsOneWidget);
-    expect(find.text('Continue Assessment'), findsOneWidget);
+    expect(find.text('Server-calculated category summary.'), findsNothing);
+    expect(find.text('Not now, continue assessment'), findsOneWidget);
     expect(find.textContaining('diagnos'), findsNothing);
   });
 }
@@ -256,19 +318,22 @@ class _EligiblePreviewRepository extends _PreviewRepository {
     required String instrumentVersion,
     required String domainId,
     required List<StudentAssessmentAnswer> answers,
-  }) async => {
-    'domainId': domainId,
-    'domainLabel': domainId,
-    'status': 'supportMayHelp',
-    'isScorable': true,
-    'answeredCount': 10,
-    'presentedCount': 10,
-    'summary': 'Server result.',
-    'suggestedAction': 'Continue.',
-    'reflectionPrompt': 'Reflect.',
-    'interventionEligible': true,
-    'policyVersion': 'assessment_intervention_v1',
-  };
+  }) async {
+    previewRequests.add(_PreviewRequest(instrumentVersion, domainId, answers));
+    return {
+      'domainId': domainId,
+      'domainLabel': domainId,
+      'status': 'supportMayHelp',
+      'isScorable': true,
+      'answeredCount': 10,
+      'presentedCount': 10,
+      'summary': 'Server result.',
+      'suggestedAction': 'Continue.',
+      'reflectionPrompt': 'Reflect.',
+      'interventionEligible': true,
+      'policyVersion': 'assessment_intervention_v1',
+    };
+  }
 
   @override
   Future<Map<String, Object>> saveV4FullAssessment({

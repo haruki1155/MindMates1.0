@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:mind_mates/features/student_assessment/models/intervention_models.dart';
 import 'package:mind_mates/features/student_assessment/screens/intervention_breathing_screen.dart';
+import 'package:mind_mates/features/student_assessment/screens/intervention_feedback_screen.dart';
 import 'package:mind_mates/features/student_assessment/screens/intervention_grounding_screen.dart';
 import 'package:mind_mates/features/student_assessment/screens/intervention_walking_screen.dart';
 
@@ -79,7 +80,7 @@ void main() {
         find.textContaining('Automatic step counting is unavailable'),
         findsOneWidget,
       );
-      expect(find.text('I completed my walk'), findsOneWidget);
+      expect(find.text('Use timed-walk option'), findsOneWidget);
     },
   );
 
@@ -128,11 +129,8 @@ void main() {
 
     await tester.pump(const Duration(seconds: 15));
 
-    expect(
-      find.textContaining('Automatic step counting is unavailable'),
-      findsOneWidget,
-    );
-    expect(find.text('I completed my walk'), findsOneWidget);
+    expect(find.textContaining('No step reading arrived'), findsOneWidget);
+    expect(find.text('Use timed-walk option'), findsOneWidget);
   });
 
   testWidgets('walking offers safe recovery when permission is denied', (
@@ -149,7 +147,7 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('permission was not granted'), findsOneWidget);
-    expect(find.text('I completed my walk'), findsOneWidget);
+    expect(find.text('Use timed-walk option'), findsOneWidget);
   });
 
   testWidgets('walking does not count sensor steps received while paused', (
@@ -176,5 +174,81 @@ void main() {
     steps.add(1210);
     await tester.pump();
     expect(find.text('10 / 500 steps'), findsOneWidget);
+  });
+
+  testWidgets(
+    'walking reports a delayed reading and recovers after counter reset',
+    (tester) async {
+      final steps = StreamController<int>.broadcast(sync: true);
+      addTearDown(steps.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: InterventionWalkingScreen(
+            stepCountStream: steps.stream,
+            initialReadingDelay: const Duration(seconds: 1),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.textContaining('Still waiting'), findsOneWidget);
+      steps
+        ..add(1000)
+        ..add(1010)
+        ..add(4)
+        ..add(14);
+      await tester.pump();
+      expect(find.text('20 / 500 steps'), findsOneWidget);
+    },
+  );
+
+  testWidgets('feedback permits a neutral choice with no reflection', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: InterventionFeedbackScreen()),
+    );
+    await tester.tap(find.text('Neutral / Not sure'));
+    await tester.pump();
+    expect(find.text('Continue'), findsOneWidget);
+    expect(find.text('Yes, it helped'), findsOneWidget);
+    expect(find.text("No, it didn't help"), findsOneWidget);
+    expect(find.textContaining('optional'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('walking ignores invalid negative counter readings', (
+    tester,
+  ) async {
+    final steps = StreamController<int>.broadcast(sync: true);
+    addTearDown(steps.close);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: InterventionWalkingScreen(stepCountStream: steps.stream),
+      ),
+    );
+    steps
+      ..add(100)
+      ..add(-1)
+      ..add(105);
+    await tester.pump();
+    expect(find.text('5 / 500 steps'), findsOneWidget);
+  });
+
+  testWidgets('manual fallback is explicitly selected before self-reporting', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: InterventionWalkingScreen(
+          requestActivityRecognitionPermission: () async =>
+              PermissionStatus.denied,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Record self-reported walk'), findsNothing);
+    await tester.tap(find.text('Use timed-walk option'));
+    await tester.pump();
+    expect(find.text('Record self-reported walk'), findsOneWidget);
   });
 }

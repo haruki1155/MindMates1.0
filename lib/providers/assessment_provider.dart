@@ -18,6 +18,7 @@ enum AssessmentFlowStage {
   previewLoading,
   domainReview,
   interventionActive,
+  submissionReview,
   resuming,
   submitting,
   recoverableError,
@@ -38,6 +39,7 @@ class AssessmentProvider extends ChangeNotifier {
   final List<StudentAssessmentAnswer> _studentAnswers = [];
   StudentAssessmentResult? _studentResult;
   String? _v4SubmissionId;
+  Map<String, Object>? _savedV4Payload;
   bool _isSavingQuickAssessment = false;
   AssessmentFlowStage _flowStage = AssessmentFlowStage.answering;
   Map<String, Object>? _domainPreview;
@@ -50,6 +52,8 @@ class AssessmentProvider extends ChangeNotifier {
       InterventionRotationPolicy();
   InterventionType? _pendingIntervention;
   int _interventionAttempt = 0;
+  final Map<int, InterventionFeedback> _interventionFeedback = {};
+  final Map<String, Map<String, Object>> _domainPreviews = {};
   final Set<String> _v4AppointmentPromptedSubmissionIds = {};
   final Set<String> _quickAppointmentPromptedResultIds = {};
   String? _authenticatedUserId;
@@ -74,6 +78,10 @@ class AssessmentProvider extends ChangeNotifier {
   String? get v4SubmissionId => _v4SubmissionId;
   bool get isSavingStudentAssessment => _isSavingStudentAssessment;
   InterventionType? get pendingIntervention => _pendingIntervention;
+  Map<String, Map<String, Object>> get domainPreviews =>
+      Map.unmodifiable(_domainPreviews);
+  Map<int, InterventionFeedback> get interventionFeedback =>
+      Map.unmodifiable(_interventionFeedback);
   String? get assessmentSessionOwnerId => _assessmentSessionOwnerId;
 
   /// Binds volatile assessment state to the live Firebase Auth identity.
@@ -119,6 +127,7 @@ class AssessmentProvider extends ChangeNotifier {
     _studentAnswers.clear();
     _studentResult = null;
     _v4SubmissionId = null;
+    _savedV4Payload = null;
     _flowStage = AssessmentFlowStage.answering;
     _domainPreview = null;
     _domainPreviewError = null;
@@ -129,6 +138,8 @@ class AssessmentProvider extends ChangeNotifier {
     _interventionRotation = InterventionRotationPolicy();
     _pendingIntervention = null;
     _interventionAttempt += 1;
+    _interventionFeedback.clear();
+    _domainPreviews.clear();
     _v4AppointmentPromptedSubmissionIds.clear();
     _assessmentSessionOwnerId = null;
   }
@@ -371,6 +382,7 @@ class AssessmentProvider extends ChangeNotifier {
     _v4SubmissionId = isV4FullAssessment
         ? 'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
         : null;
+    _savedV4Payload = null;
     _studentQuestions = _questionsForActiveRole()
         .where((question) => !question.isConditional)
         .toList();
@@ -381,6 +393,8 @@ class AssessmentProvider extends ChangeNotifier {
     _previewGeneration += 1;
     _interventionRotation = InterventionRotationPolicy();
     _pendingIntervention = null;
+    _interventionFeedback.clear();
+    _domainPreviews.clear();
     _v4AppointmentPromptedSubmissionIds.clear();
     notifyListeners();
   }
@@ -472,7 +486,9 @@ class AssessmentProvider extends ChangeNotifier {
     _domainPreviewError = null;
     _pendingDomainId = null;
     if (isLastStudentQuestion) {
-      _flowStage = AssessmentFlowStage.submitting;
+      _flowStage = isV4FullAssessment
+          ? AssessmentFlowStage.submissionReview
+          : AssessmentFlowStage.submitting;
     } else {
       _studentQuestionIndex += 1;
       _flowStage = AssessmentFlowStage.answering;
@@ -501,6 +517,9 @@ class AssessmentProvider extends ChangeNotifier {
     String userId,
   ) async {
     if (_isSavingStudentAssessment || !_ownsSession(userId)) return null;
+    if (isV4FullAssessment && _savedV4Payload != null) {
+      return _savedV4Payload;
+    }
     final generation = _sessionGeneration;
     final owner = _assessmentSessionOwnerId;
     _isSavingStudentAssessment = true;
@@ -514,7 +533,9 @@ class AssessmentProvider extends ChangeNotifier {
               _v4SubmissionId ??
               'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
         );
-        return _isCurrentSession(generation, owner) ? payload : null;
+        if (!_isCurrentSession(generation, owner)) return null;
+        _savedV4Payload = payload;
+        return payload;
       }
       final result = _studentResult;
       if (result == null) return null;
@@ -579,10 +600,22 @@ class AssessmentProvider extends ChangeNotifier {
         return;
       }
       _domainPreview = preview;
+      _domainPreviews[domainId] = preview;
       _pendingIntervention = preview['interventionEligible'] == true
           ? _interventionRotation.select(domainId)
           : null;
-      _flowStage = AssessmentFlowStage.domainReview;
+      if (_pendingIntervention == null) {
+        _domainPreview = null;
+        _pendingDomainId = null;
+        if (isLastStudentQuestion) {
+          _flowStage = AssessmentFlowStage.submissionReview;
+        } else {
+          _studentQuestionIndex += 1;
+          _flowStage = AssessmentFlowStage.answering;
+        }
+      } else {
+        _flowStage = AssessmentFlowStage.domainReview;
+      }
     } catch (error) {
       if (!_isCurrentSession(expectedSessionGeneration, expectedOwner) ||
           generation != _previewGeneration ||
@@ -620,6 +653,24 @@ class AssessmentProvider extends ChangeNotifier {
     }
     _flowStage = AssessmentFlowStage.domainReview;
     continueAfterDomainReview();
+  }
+
+  void recordInterventionFeedback(int attempt, InterventionFeedback feedback) {
+    if (attempt == 0 || attempt != _interventionAttempt) return;
+    _interventionFeedback.putIfAbsent(attempt, () => feedback);
+    notifyListeners();
+  }
+
+  void confirmV4Submission() {
+    if (_flowStage != AssessmentFlowStage.submissionReview) return;
+    _flowStage = AssessmentFlowStage.submitting;
+    notifyListeners();
+  }
+
+  void returnToAnsweringFromSubmissionReview() {
+    if (_flowStage != AssessmentFlowStage.submissionReview) return;
+    _flowStage = AssessmentFlowStage.answering;
+    notifyListeners();
   }
 
   /// Returns true once per in-progress V4 submission so result-screen rebuilds

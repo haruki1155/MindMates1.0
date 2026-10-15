@@ -7,7 +7,9 @@ import '../../../routes/route_names.dart';
 import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
 import '../models/student_assessment_models.dart';
 import 'assessment_domain_review_screen.dart';
+import 'assessment_submission_review_screen.dart';
 import 'intervention_breathing_screen.dart';
+import 'intervention_feedback_screen.dart';
 import 'intervention_grounding_screen.dart';
 import 'intervention_walking_screen.dart';
 import '../models/intervention_models.dart';
@@ -41,6 +43,86 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
         userId: userId,
       );
     });
+  }
+
+  Future<void> _presentPostAnswerFlow(AssessmentProvider provider) async {
+    if (provider.flowStage == AssessmentFlowStage.domainReview ||
+        provider.flowStage == AssessmentFlowStage.recoverableError) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => AssessmentDomainReviewScreen(
+            preview: provider.domainPreview,
+            error: provider.domainPreviewError,
+            onRetry: () => provider.retryDomainPreview(),
+            previewAfterRetry: () => provider.domainPreview,
+            errorAfterRetry: () => provider.domainPreviewError,
+            onBack: provider.returnToAnsweringFromDomainReview,
+            intervention: provider.pendingIntervention,
+            onTryActivity: () async {
+              final attempt = provider.beginInterventionAttempt();
+              final outcome = await Navigator.of(context)
+                  .push<InterventionOutcome>(
+                    MaterialPageRoute(
+                      builder: (_) => switch (provider.pendingIntervention!) {
+                        InterventionType.breathing =>
+                          const InterventionBreathingScreen(),
+                        InterventionType.grounding =>
+                          const InterventionGroundingScreen(),
+                        InterventionType.walking =>
+                          const InterventionWalkingScreen(),
+                        InterventionType.appointment =>
+                          const InterventionGroundingScreen(),
+                      },
+                    ),
+                  );
+              if (!mounted) return;
+              final resolved = outcome ?? InterventionOutcome.cancelled;
+              if (resolved == InterventionOutcome.completed) {
+                final feedback = await Navigator.of(context)
+                    .push<InterventionFeedback>(
+                      MaterialPageRoute(
+                        builder: (_) => const InterventionFeedbackScreen(),
+                      ),
+                    );
+                if (!mounted) return;
+                if (feedback != null) {
+                  provider.recordInterventionFeedback(attempt, feedback);
+                }
+              }
+              provider.handleInterventionOutcome(attempt, resolved);
+              if (provider.flowStage != AssessmentFlowStage.domainReview &&
+                  context.mounted) {
+                Navigator.of(context).pop();
+              }
+            },
+            onContinue: () {
+              provider.continueAfterDomainReview();
+              Navigator.of(context).pop();
+            },
+          ),
+        ),
+      );
+    }
+    if (!mounted) return;
+    if (provider.flowStage == AssessmentFlowStage.submissionReview) {
+      final confirmed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => const AssessmentSubmissionReviewScreen(),
+        ),
+      );
+      if (!mounted) return;
+      if (confirmed == true) {
+        provider.confirmV4Submission();
+      } else {
+        provider.returnToAnsweringFromSubmissionReview();
+        return;
+      }
+    }
+    if (provider.flowStage == AssessmentFlowStage.submitting && mounted) {
+      Navigator.of(
+        context,
+      ).pushReplacementNamed(RouteNames.studentAssessmentComplete);
+    }
   }
 
   @override
@@ -102,66 +184,7 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
                       onAnswer: (answer) async {
                         await provider.answerCurrentStudentQuestion(answer);
                         if (!context.mounted) return;
-                        if (provider.flowStage ==
-                                AssessmentFlowStage.domainReview ||
-                            provider.flowStage ==
-                                AssessmentFlowStage.recoverableError) {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => AssessmentDomainReviewScreen(
-                                preview: provider.domainPreview,
-                                error: provider.domainPreviewError,
-                                onRetry: () => provider.retryDomainPreview(),
-                                previewAfterRetry: () => provider.domainPreview,
-                                errorAfterRetry: () =>
-                                    provider.domainPreviewError,
-                                onBack:
-                                    provider.returnToAnsweringFromDomainReview,
-                                intervention: provider.pendingIntervention,
-                                onTryActivity: () async {
-                                  final attempt = provider
-                                      .beginInterventionAttempt();
-                                  final outcome = await Navigator.of(context)
-                                      .push<InterventionOutcome>(
-                                        MaterialPageRoute(
-                                          builder: (_) => switch (provider
-                                              .pendingIntervention!) {
-                                            InterventionType.breathing =>
-                                              const InterventionBreathingScreen(),
-                                            InterventionType.grounding =>
-                                              const InterventionGroundingScreen(),
-                                            InterventionType.walking =>
-                                              const InterventionWalkingScreen(),
-                                            InterventionType.appointment =>
-                                              const InterventionGroundingScreen(),
-                                          },
-                                        ),
-                                      );
-                                  provider.handleInterventionOutcome(
-                                    attempt,
-                                    outcome ?? InterventionOutcome.cancelled,
-                                  );
-                                  if (provider.flowStage !=
-                                          AssessmentFlowStage.domainReview &&
-                                      context.mounted) {
-                                    Navigator.of(context).pop();
-                                  }
-                                },
-                                onContinue: () {
-                                  provider.continueAfterDomainReview();
-                                  Navigator.of(context).pop();
-                                },
-                              ),
-                            ),
-                          );
-                        }
-                        if (provider.flowStage ==
-                                AssessmentFlowStage.submitting &&
-                            context.mounted) {
-                          Navigator.of(context).pushReplacementNamed(
-                            RouteNames.studentAssessmentComplete,
-                          );
-                        }
+                        await _presentPostAnswerFlow(provider);
                       },
                       onBack: provider.goBackStudentQuestion,
                     ),
