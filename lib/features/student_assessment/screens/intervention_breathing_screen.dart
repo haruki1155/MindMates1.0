@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -96,40 +97,80 @@ class _InterventionBreathingScreenState
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Breathing exercise')),
-    body: Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          ScaleTransition(
-            scale: Tween<double>(begin: .7, end: 1.15).animate(_animation),
-            child: CircleAvatar(
-              radius: 90,
-              child: Text('$_seconds', style: const TextStyle(fontSize: 48)),
+    body: SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxHeight < 500;
+          final radius = compact ? 56.0 : 90.0;
+          final animationDiameter = radius * 2 * 1.15;
+          final spacing = compact ? 12.0 : 24.0;
+          final padding = EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: compact ? 8 : 24,
+          );
+
+          return SingleChildScrollView(
+            padding: padding,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: math.max(
+                  0,
+                  constraints.maxHeight - padding.vertical,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    height: animationDiameter,
+                    width: animationDiameter,
+                    child: Center(
+                      child: ScaleTransition(
+                        scale: Tween<double>(
+                          begin: .7,
+                          end: 1.15,
+                        ).animate(_animation),
+                        child: CircleAvatar(
+                          radius: radius,
+                          child: Text(
+                            '$_seconds',
+                            style: const TextStyle(fontSize: 48),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: spacing),
+                  Text('$_label · Cycle ${_cycles + 1} of 5'),
+                  SwitchListTile(
+                    title: const Text('Include comfortable hold'),
+                    value: _hold,
+                    onChanged: _setHold,
+                  ),
+                  Wrap(
+                    spacing: 12,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () => Navigator.of(
+                          context,
+                        ).pop(InterventionOutcome.skipped),
+                        child: const Text('Skip'),
+                      ),
+                      FilledButton(
+                        onPressed: () => setState(() => _paused = !_paused),
+                        child: Text(_paused ? 'Resume' : 'Pause'),
+                      ),
+                      TextButton(
+                        onPressed: _restart,
+                        child: const Text('Restart'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          Text('$_label · Cycle ${_cycles + 1} of 5'),
-          SwitchListTile(
-            title: const Text('Include comfortable hold'),
-            value: _hold,
-            onChanged: _setHold,
-          ),
-          Wrap(
-            spacing: 12,
-            children: [
-              OutlinedButton(
-                onPressed: () =>
-                    Navigator.of(context).pop(InterventionOutcome.skipped),
-                child: const Text('Skip'),
-              ),
-              FilledButton(
-                onPressed: () => setState(() => _paused = !_paused),
-                child: Text(_paused ? 'Resume' : 'Pause'),
-              ),
-              TextButton(onPressed: _restart, child: const Text('Restart')),
-            ],
-          ),
-        ],
+          );
+        },
       ),
     ),
   );

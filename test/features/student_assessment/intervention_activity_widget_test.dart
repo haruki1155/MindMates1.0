@@ -10,6 +10,61 @@ import 'package:mind_mates/features/student_assessment/screens/intervention_grou
 import 'package:mind_mates/features/student_assessment/screens/intervention_walking_screen.dart';
 
 void main() {
+  testWidgets(
+    'breathing keeps every control reachable without overflow in short landscape',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 360));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        const MaterialApp(home: InterventionBreathingScreen()),
+      );
+
+      expect(find.textContaining('Inhale'), findsOneWidget);
+      expect(find.byType(Switch), findsOneWidget);
+      expect(find.text('Skip'), findsOneWidget);
+      expect(find.text('Pause'), findsOneWidget);
+      expect(find.text('Restart'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('breathing retains progress and controls after a layout resize', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      const MaterialApp(home: InterventionBreathingScreen()),
+    );
+
+    await tester.tap(find.byType(Switch));
+    await tester.tap(find.text('Pause'));
+    await tester.pump();
+    expect(find.text('Resume'), findsOneWidget);
+
+    await tester.binding.setSurfaceSize(const Size(800, 360));
+    await tester.pump();
+
+    expect(find.text('Resume'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('breathing renders all controls in portrait', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      const MaterialApp(home: InterventionBreathingScreen()),
+    );
+
+    expect(find.byType(Switch), findsOneWidget);
+    expect(find.text('Skip'), findsOneWidget);
+    expect(find.text('Pause'), findsOneWidget);
+    expect(find.text('Restart'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('breathing exercise pauses, resumes, and restarts', (
     tester,
   ) async {
