@@ -493,6 +493,9 @@ class _StudentV4ProfileView extends StatelessWidget {
       backgroundColor: QuickAssessmentPalette.background,
       appBar: AppBar(
         title: const Text('Your Full Well-Being Assessment Result'),
+        backgroundColor: AssessmentPresentation.softAccent(context),
+        foregroundColor: AssessmentPresentation.onSoftAccent(context),
+        surfaceTintColor: Colors.transparent,
       ),
       body: SafeArea(
         child: ListView(

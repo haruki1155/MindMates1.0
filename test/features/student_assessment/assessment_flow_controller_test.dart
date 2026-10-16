@@ -7,6 +7,8 @@ import 'package:mind_mates/features/student_assessment/models/student_assessment
 import 'package:mind_mates/features/student_assessment/models/intervention_models.dart';
 import 'package:mind_mates/features/student_assessment/services/student_assessment_calculator.dart';
 import 'package:mind_mates/features/student_assessment/screens/assessment_domain_review_screen.dart';
+import 'package:mind_mates/features/student_assessment/screens/assessment_submission_review_screen.dart';
+import 'package:mind_mates/features/student_assessment/widgets/assessment_presentation.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
 
@@ -270,6 +272,69 @@ void main() {
     expect(find.text('Not now, continue assessment'), findsOneWidget);
     expect(find.textContaining('diagnos'), findsNothing);
   });
+
+  testWidgets(
+    'domain review presents an eligible server preview in the Assessment card while preserving both choices',
+    (tester) async {
+      var triedActivity = false;
+      var continued = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AssessmentDomainReviewScreen(
+            preview: const {
+              'domainLabel': 'Academic',
+              'status': 'supportMayHelp',
+              'interventionEligible': true,
+            },
+            intervention: InterventionType.breathing,
+            onTryActivity: () => triedActivity = true,
+            onContinue: () => continued = true,
+            onRetry: () async {},
+            onBack: () {},
+          ),
+        ),
+      );
+
+      expect(find.byType(AssessmentSurfaceCard), findsOneWidget);
+      expect(find.byType(AssessmentStatusPill), findsOneWidget);
+      await tester.tap(find.text('Try Activity'));
+      expect(triedActivity, isTrue);
+      await tester.tap(find.text('Not now, continue assessment'));
+      expect(continued, isTrue);
+    },
+  );
+
+  testWidgets(
+    'submission review keeps the explicit confirmation boundary inside the Assessment presentation',
+    (tester) async {
+      bool? result;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => FilledButton(
+              onPressed: () async {
+                result = await Navigator.of(context).push<bool>(
+                  MaterialPageRoute(
+                    builder: (_) => const AssessmentSubmissionReviewScreen(),
+                  ),
+                );
+              },
+              child: const Text('Open review'),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open review'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AssessmentSurfaceCard), findsOneWidget);
+      expect(find.byType(AssessmentStatusPill), findsOneWidget);
+      await tester.ensureVisible(find.text('Submit assessment'));
+      await tester.tap(find.text('Submit assessment'));
+      await tester.pumpAndSettle();
+      expect(result, isTrue);
+    },
+  );
 }
 
 class _PreviewRequest {
