@@ -6,6 +6,7 @@ import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../models/intervention_models.dart';
+import '../widgets/assessment_presentation.dart';
 
 enum WalkingTrackingState {
   initializing,
@@ -221,53 +222,113 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
   };
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Walk 500 steps')),
-    body: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            Text(
-              '$_steps / 500 steps',
-              style: Theme.of(context).textTheme.headlineMedium,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final unavailable =
+        _state == WalkingTrackingState.unavailable ||
+        _state == WalkingTrackingState.manualFallback;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Walking activity')),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: (constraints.maxHeight - 40)
+                    .clamp(0, double.infinity)
+                    .toDouble(),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'A short walking break',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      const AssessmentStatusPill(label: '500-step goal'),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  AssessmentSurfaceCard(
+                    color: AssessmentPresentation.softPrimary(context),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.directions_walk_rounded,
+                              color: scheme.primary,
+                              size: 30,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              '$_steps / 500 steps',
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        LinearProgressIndicator(
+                          value: (_steps / 500).clamp(0, 1),
+                          minHeight: 9,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          _stateMessage,
+                          style: TextStyle(
+                            color: AssessmentPresentation.muted(context),
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  if (!unavailable)
+                    FilledButton.icon(
+                      onPressed: _togglePaused,
+                      icon: Icon(
+                        _paused
+                            ? Icons.play_arrow_rounded
+                            : Icons.pause_rounded,
+                      ),
+                      label: Text(
+                        _paused ? 'Resume tracking' : 'Pause tracking',
+                      ),
+                    ),
+                  if (_state == WalkingTrackingState.unavailable)
+                    FilledButton.icon(
+                      onPressed: _beginManualFallback,
+                      icon: const Icon(Icons.timer_outlined),
+                      label: const Text('Use timed-walk option'),
+                    ),
+                  if (_state == WalkingTrackingState.manualFallback)
+                    FilledButton.icon(
+                      onPressed: _recordSelfReportedCompletion,
+                      icon: const Icon(Icons.check_rounded),
+                      label: const Text('Record self-reported walk'),
+                    ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () =>
+                        Navigator.of(context).pop(InterventionOutcome.skipped),
+                    child: const Text('Skip activity'),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(value: (_steps / 500).clamp(0, 1)),
-            const SizedBox(height: 16),
-            Text(_stateMessage, textAlign: TextAlign.center),
-            const Spacer(),
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                OutlinedButton(
-                  onPressed: () =>
-                      Navigator.of(context).pop(InterventionOutcome.skipped),
-                  child: const Text('Skip'),
-                ),
-                if (_state != WalkingTrackingState.unavailable &&
-                    _state != WalkingTrackingState.manualFallback)
-                  FilledButton(
-                    onPressed: _togglePaused,
-                    child: Text(_paused ? 'Resume' : 'Pause'),
-                  ),
-                if (_state == WalkingTrackingState.unavailable)
-                  FilledButton(
-                    onPressed: _beginManualFallback,
-                    child: const Text('Use timed-walk option'),
-                  ),
-                if (_state == WalkingTrackingState.manualFallback)
-                  FilledButton(
-                    onPressed: _recordSelfReportedCompletion,
-                    child: const Text('Record self-reported walk'),
-                  ),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }

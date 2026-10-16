@@ -22,8 +22,8 @@ void main() {
 
       expect(find.textContaining('Inhale'), findsOneWidget);
       expect(find.byType(Switch), findsOneWidget);
-      expect(find.text('Skip'), findsOneWidget);
-      expect(find.text('Pause'), findsOneWidget);
+      expect(find.text('Skip activity'), findsOneWidget);
+      expect(find.text('Pause exercise'), findsOneWidget);
       expect(find.text('Restart'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
@@ -39,14 +39,14 @@ void main() {
     );
 
     await tester.tap(find.byType(Switch));
-    await tester.tap(find.text('Pause'));
+    await tester.tap(find.text('Pause exercise'));
     await tester.pump();
-    expect(find.text('Resume'), findsOneWidget);
+    expect(find.text('Resume exercise'), findsOneWidget);
 
     await tester.binding.setSurfaceSize(const Size(800, 360));
     await tester.pump();
 
-    expect(find.text('Resume'), findsOneWidget);
+    expect(find.text('Resume exercise'), findsOneWidget);
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
     expect(tester.takeException(), isNull);
   });
@@ -59,8 +59,8 @@ void main() {
     );
 
     expect(find.byType(Switch), findsOneWidget);
-    expect(find.text('Skip'), findsOneWidget);
-    expect(find.text('Pause'), findsOneWidget);
+    expect(find.text('Skip activity'), findsOneWidget);
+    expect(find.text('Pause exercise'), findsOneWidget);
     expect(find.text('Restart'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -73,9 +73,9 @@ void main() {
     );
 
     expect(find.textContaining('Inhale'), findsOneWidget);
-    await tester.tap(find.text('Pause'));
+    await tester.tap(find.text('Pause exercise'));
     await tester.pump();
-    expect(find.text('Resume'), findsOneWidget);
+    expect(find.text('Resume exercise'), findsOneWidget);
     await tester.tap(find.text('Restart'));
     await tester.pump();
     expect(find.textContaining('Inhale'), findsOneWidget);
@@ -219,12 +219,12 @@ void main() {
       ..add(1000)
       ..add(1010);
     await tester.pump();
-    await tester.tap(find.text('Pause'));
+    await tester.tap(find.text('Pause tracking'));
     await tester.pump();
     steps.add(1200);
     await tester.pump();
     expect(find.text('10 / 500 steps'), findsOneWidget);
-    await tester.tap(find.text('Resume'));
+    await tester.tap(find.text('Resume tracking'));
     await tester.pump();
     steps.add(1210);
     await tester.pump();
@@ -264,7 +264,7 @@ void main() {
     );
     await tester.tap(find.text('Neutral / Not sure'));
     await tester.pump();
-    expect(find.text('Continue'), findsOneWidget);
+    expect(find.text('Continue assessment'), findsOneWidget);
     expect(find.text('Yes, it helped'), findsOneWidget);
     expect(find.text("No, it didn't help"), findsOneWidget);
     expect(find.textContaining('optional'), findsOneWidget);

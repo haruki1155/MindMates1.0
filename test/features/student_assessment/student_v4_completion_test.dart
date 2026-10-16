@@ -44,18 +44,15 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
 
-      expect(
-        find.text('Would you like to talk with a PACC counselor?'),
-        findsOneWidget,
-      );
+      expect(find.text('PACC support is available'), findsOneWidget);
       expect(
         find.text(
-          'Your responses suggest that additional support may be helpful. Would you like to request a confidential counseling appointment with PACC?',
+          'Your saved result suggests that speaking with a counselor may be helpful. You can continue to PACC whenever you feel ready.',
         ),
         findsOneWidget,
       );
-      expect(find.text('No, Continue'), findsOneWidget);
-      expect(find.text('Yes, Book Appointment'), findsOneWidget);
+      expect(find.text('Not now'), findsOneWidget);
+      expect(find.text('Continue to PACC'), findsOneWidget);
     },
   );
 
@@ -98,10 +95,7 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(seconds: 1));
 
-        expect(
-          find.text('Would you like to talk with a PACC counselor?'),
-          findsNothing,
-        );
+        expect(find.text('PACC support is available'), findsNothing);
       }
     }
   });
@@ -132,7 +126,7 @@ void main() {
       await tester.pumpWidget(app());
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
-      await tester.tap(find.text('No, Continue'));
+      await tester.tap(find.text('Not now'));
       await tester.pump(const Duration(milliseconds: 300));
       expect(
         find.text('Your Full Well-Being Assessment Result'),
@@ -143,10 +137,7 @@ void main() {
       await tester.pumpWidget(app());
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
-      expect(
-        find.text('Would you like to talk with a PACC counselor?'),
-        findsNothing,
-      );
+      expect(find.text('PACC support is available'), findsNothing);
       expect(
         find.text('Your Full Well-Being Assessment Result'),
         findsOneWidget,
@@ -182,7 +173,7 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(seconds: 1));
-      await tester.tap(find.text('Yes, Book Appointment'));
+      await tester.tap(find.text('Continue to PACC'));
       await tester.pumpAndSettle();
 
       expect(find.text('Appointment Details'), findsOneWidget);
@@ -220,20 +211,14 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('Try again'), findsOneWidget);
-    expect(
-      find.text('Would you like to talk with a PACC counselor?'),
-      findsNothing,
-    );
+    expect(find.text('PACC support is available'), findsNothing);
 
     await tester.tap(find.text('Try again'));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     expect(repository.saveCalls, 2);
-    expect(
-      find.text('Would you like to talk with a PACC counselor?'),
-      findsOneWidget,
-    );
+    expect(find.text('PACC support is available'), findsOneWidget);
   });
 
   testWidgets(
@@ -269,13 +254,20 @@ void main() {
       await _expectTextVisible(tester, 'Overall Well-Being Status');
       await _expectTextVisible(tester, 'Assessment Summary');
       await _expectTextVisible(tester, 'What Your Responses Suggest Overall');
+      await _expectTextVisible(tester, 'Strengths & Focus Areas');
+      await _expectTextVisible(tester, 'Strengths');
+      await _expectTextVisible(tester, 'Focus Areas');
       await _expectTextVisible(tester, 'Well-Being Areas');
+      expect(find.text('Mostly supported'), findsNWidgets(5));
+      expect(find.text('What to notice'), findsNothing);
+      final domainCard = find.byKey(const ValueKey('v4-domain-domain_0'));
+      await _scrollIntoView(tester, domainCard);
+      await tester.tap(domainCard);
+      await tester.pump(const Duration(milliseconds: 300));
       await _expectTextVisible(tester, 'What to notice');
       await _expectTextVisible(tester, 'Supportive pattern');
       await _expectTextVisible(tester, 'A practical next step');
       await _expectTextVisible(tester, 'Reflection prompt');
-      await _expectTextVisible(tester, 'Strengths');
-      await _expectTextVisible(tester, 'Areas to Explore');
       await _expectTextVisible(tester, 'Suggested Next Steps');
       await _expectTextVisible(tester, 'Assessment Responses');
       final responseGroup = find.byKey(
@@ -285,13 +277,14 @@ void main() {
       await tester.tap(responseGroup);
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('1. Saved review question 1.'), findsOneWidget);
-      await _expectTextVisible(tester, 'Response Completeness');
+      expect(find.text('Response Completeness'), findsNothing);
+      expect(find.text('How This Result Was Created'), findsNothing);
       await _expectTextVisible(tester, 'About This Result');
       expect(
         find.textContaining('couldn\'t save your assessment'),
         findsNothing,
       );
-      expect(find.textContaining('50 of 50 answered'), findsOneWidget);
+      expect(find.textContaining('50 of 50 answered'), findsNothing);
     },
   );
 
@@ -333,9 +326,8 @@ void main() {
               key: ValueKey('completion_${role.name}'),
               home: const StudentAssessmentCompleteScreen(),
               routes: {
-                RouteNames.home: (_) => const Scaffold(
-                  body: Text('Home destination'),
-                ),
+                RouteNames.home: (_) =>
+                    const Scaffold(body: Text('Home destination')),
               },
             ),
           ),
@@ -470,11 +462,7 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('Legacy student V4 result.'), findsOneWidget);
-    await _expectTextVisible(tester, 'Response Completeness');
-    await _expectTextVisible(
-      tester,
-      'More responses are needed for a complete result.',
-    );
+    expect(find.text('Response Completeness'), findsNothing);
     await _expectTextVisible(tester, 'Assessment Responses');
     await _expectTextVisible(
       tester,
@@ -514,14 +502,11 @@ void main() {
       ),
       findsOneWidget,
     );
-    await _expectTextVisible(
-      tester,
-      'Response completeness details are unavailable for this saved result.',
-    );
+    expect(find.text('Response Completeness'), findsNothing);
     await _expectTextVisible(tester, 'Well-being area');
   });
 
-  testWidgets('expands V4 methodology and references on a narrow phone', (
+  testWidgets('keeps V4 areas and responses collapsed on a narrow phone', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(320, 640);
@@ -552,27 +537,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    await _expectTextVisible(tester, 'How This Result Was Created');
-    await tester.tap(find.text('How This Result Was Created'));
+    final domainCard = find.byKey(const ValueKey('v4-domain-domain_0'));
+    await _scrollIntoView(tester, domainCard);
+    expect(find.text('What to notice'), findsNothing);
+    await tester.tap(domainCard);
     await tester.pump(const Duration(milliseconds: 300));
-    await _expectTextVisible(
-      tester,
-      'The server calculated this result deterministically from your saved responses.',
-    );
-    await _expectTextVisible(
-      tester,
-      'Generative AI does not determine this Full Assessment result.',
-    );
-    await _expectTextVisible(
-      tester,
-      'Instrument version: student_wellbeing_v4',
-    );
-    await _expectTextVisible(tester, 'Algorithm version: student_profile_v4');
-    await _expectTextVisible(tester, 'Record format: assessment_record_v4');
-    await _expectTextVisible(
-      tester,
-      'Reference set: mindmate_wellbeing_refs_v1',
-    );
+    await _expectTextVisible(tester, 'A practical next step');
 
     await _expectTextVisible(tester, 'References & Resources');
     await tester.tap(find.text('References & Resources'));
@@ -613,6 +583,10 @@ Future<void> _scrollIntoView(WidgetTester tester, Finder finder) async {
     attempt += 1
   ) {
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -220));
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  if (finder.evaluate().isNotEmpty) {
+    await tester.ensureVisible(finder);
     await tester.pump(const Duration(milliseconds: 100));
   }
 }

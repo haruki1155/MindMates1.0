@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../models/intervention_models.dart';
+import '../widgets/assessment_presentation.dart';
 
 class InterventionBreathingScreen extends StatefulWidget {
   const InterventionBreathingScreen({super.key});
@@ -103,10 +104,9 @@ class _InterventionBreathingScreenState
           final compact = constraints.maxHeight < 500;
           final radius = compact ? 56.0 : 90.0;
           final animationDiameter = radius * 2 * 1.15;
-          final spacing = compact ? 12.0 : 24.0;
           final padding = EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: compact ? 8 : 24,
+            horizontal: 20,
+            vertical: compact ? 8 : 20,
           );
 
           return SingleChildScrollView(
@@ -119,50 +119,106 @@ class _InterventionBreathingScreenState
                 ),
               ),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  SizedBox(
-                    height: animationDiameter,
-                    width: animationDiameter,
-                    child: Center(
-                      child: ScaleTransition(
-                        scale: Tween<double>(
-                          begin: .7,
-                          end: 1.15,
-                        ).animate(_animation),
-                        child: CircleAvatar(
-                          radius: radius,
-                          child: Text(
-                            '$_seconds',
-                            style: const TextStyle(fontSize: 48),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Guided breathing',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      AssessmentStatusPill(label: 'Cycle ${_cycles + 1} of 5'),
+                    ],
+                  ),
+                  SizedBox(height: compact ? 8 : 16),
+                  Center(
+                    child: SizedBox(
+                      height: animationDiameter,
+                      width: animationDiameter,
+                      child: AssessmentSurfaceCard(
+                        padding: EdgeInsets.zero,
+                        color: AssessmentPresentation.softPrimary(context),
+                        child: Center(
+                          child: ScaleTransition(
+                            scale: Tween<double>(
+                              begin: .7,
+                              end: 1.15,
+                            ).animate(_animation),
+                            child: CircleAvatar(
+                              radius: radius,
+                              backgroundColor: Theme.of(
+                                context,
+                              ).colorScheme.primaryContainer,
+                              child: Text(
+                                '$_seconds',
+                                style: TextStyle(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onPrimaryContainer,
+                                  fontSize: compact ? 36 : 48,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                  SizedBox(height: spacing),
-                  Text('$_label · Cycle ${_cycles + 1} of 5'),
-                  SwitchListTile(
-                    title: const Text('Include comfortable hold'),
-                    value: _hold,
-                    onChanged: _setHold,
+                  SizedBox(height: compact ? 8 : 16),
+                  Text(
+                    '$_label for $_seconds seconds',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                  Wrap(
-                    spacing: 12,
+                  SizedBox(height: compact ? 8 : 16),
+                  AssessmentSurfaceCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    child: SwitchListTile(
+                      title: const Text('Include comfortable hold'),
+                      subtitle: Text(
+                        'Turn this off for a simpler inhale and exhale rhythm.',
+                        style: TextStyle(
+                          color: AssessmentPresentation.muted(context),
+                        ),
+                      ),
+                      value: _hold,
+                      onChanged: _setHold,
+                    ),
+                  ),
+                  SizedBox(height: compact ? 8 : 16),
+                  FilledButton.icon(
+                    onPressed: () => setState(() => _paused = !_paused),
+                    icon: Icon(
+                      _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                    ),
+                    label: Text(_paused ? 'Resume exercise' : 'Pause exercise'),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
                     children: [
-                      OutlinedButton(
-                        onPressed: () => Navigator.of(
-                          context,
-                        ).pop(InterventionOutcome.skipped),
-                        child: const Text('Skip'),
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _restart,
+                          child: const Text('Restart'),
+                        ),
                       ),
-                      FilledButton(
-                        onPressed: () => setState(() => _paused = !_paused),
-                        child: Text(_paused ? 'Resume' : 'Pause'),
-                      ),
-                      TextButton(
-                        onPressed: _restart,
-                        child: const Text('Restart'),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.of(
+                            context,
+                          ).pop(InterventionOutcome.skipped),
+                          child: const Text('Skip activity'),
+                        ),
                       ),
                     ],
                   ),
