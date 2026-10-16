@@ -70,7 +70,7 @@ class _InterventionGroundingScreenState
                       children: [
                         Icon(
                           Icons.spa_outlined,
-                          color: AssessmentPresentation.accent,
+                          color: AssessmentPresentation.onSoftAccent(context),
                           size: 30,
                         ),
                         const SizedBox(height: 18),

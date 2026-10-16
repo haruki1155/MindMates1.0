@@ -3,13 +3,113 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:mind_mates/core/constants/app_colors.dart';
+import 'package:mind_mates/core/theme/app_theme.dart';
 import 'package:mind_mates/features/student_assessment/models/intervention_models.dart';
 import 'package:mind_mates/features/student_assessment/screens/intervention_breathing_screen.dart';
 import 'package:mind_mates/features/student_assessment/screens/intervention_feedback_screen.dart';
 import 'package:mind_mates/features/student_assessment/screens/intervention_grounding_screen.dart';
 import 'package:mind_mates/features/student_assessment/screens/intervention_walking_screen.dart';
+import 'package:mind_mates/features/student_assessment/widgets/assessment_presentation.dart';
+
+double _contrastRatio(Color first, Color second) {
+  final lighter = first.computeLuminance() > second.computeLuminance()
+      ? first
+      : second;
+  final darker = identical(lighter, first) ? second : first;
+  return (lighter.computeLuminance() + 0.05) /
+      (darker.computeLuminance() + 0.05);
+}
 
 void main() {
+  testWidgets('assessment gold presentation keeps AA contrast in light mode', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Builder(
+          builder: (context) {
+            final surface = Theme.of(context).colorScheme.surface;
+            final softSurface = Color.alphaBlend(
+              AssessmentPresentation.softAccent(context),
+              surface,
+            );
+            expect(
+              _contrastRatio(
+                AssessmentPresentation.onAccent,
+                AssessmentPresentation.accent,
+              ),
+              greaterThanOrEqualTo(4.5),
+            );
+            expect(
+              _contrastRatio(
+                AssessmentPresentation.onSoftAccent(context),
+                softSurface,
+              ),
+              greaterThanOrEqualTo(4.5),
+            );
+            expect(AppColors.error, isNot(AssessmentPresentation.accent));
+            return const AssessmentStatusPill(label: 'Support may be helpful');
+          },
+        ),
+      ),
+    );
+
+    expect(find.text('Support may be helpful'), findsOneWidget);
+  });
+
+  testWidgets('assessment gold presentation keeps AA contrast in dark mode', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark,
+        home: Builder(
+          builder: (context) {
+            final surface = Theme.of(context).colorScheme.surface;
+            final softSurface = Color.alphaBlend(
+              AssessmentPresentation.softAccent(context),
+              surface,
+            );
+            expect(
+              _contrastRatio(
+                AssessmentPresentation.onSoftAccent(context),
+                softSurface,
+              ),
+              greaterThanOrEqualTo(4.5),
+            );
+            expect(
+              _contrastRatio(
+                AssessmentPresentation.actionForeground(context),
+                surface,
+              ),
+              greaterThanOrEqualTo(4.5),
+            );
+            return Column(
+              children: [
+                const AssessmentStatusPill(label: 'Support may be helpful'),
+                OutlinedButton(
+                  style: AssessmentPresentation.outlinedButtonStyle(context),
+                  onPressed: () {},
+                  child: const Text('Restart'),
+                ),
+                TextButton(
+                  style: AssessmentPresentation.textButtonStyle(context),
+                  onPressed: () {},
+                  child: const Text('Skip activity'),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+
+    expect(find.text('Restart'), findsOneWidget);
+    expect(find.text('Skip activity'), findsOneWidget);
+  });
+
   testWidgets(
     'breathing keeps every control reachable without overflow in short landscape',
     (tester) async {

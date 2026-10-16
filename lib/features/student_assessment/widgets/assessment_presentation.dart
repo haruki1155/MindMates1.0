@@ -17,6 +17,16 @@ class AssessmentPresentation {
   static const accent = AppColors.secondary;
   static const onAccent = AppColors.textPrimary;
 
+  /// Content placed on the translucent gold surface needs a light foreground
+  /// in dark mode. Regular actions retain the gold foreground there instead.
+  static Color onSoftAccent(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? AppColors.darkTextPrimary
+      : onAccent;
+
+  static Color actionForeground(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? accent : onAccent;
+
   static Color softAccent(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark
       ? accent.withValues(alpha: 0.22)
@@ -30,12 +40,12 @@ class AssessmentPresentation {
 
   static ButtonStyle outlinedButtonStyle(BuildContext context) =>
       OutlinedButton.styleFrom(
-        foregroundColor: onAccent,
+        foregroundColor: actionForeground(context),
         side: const BorderSide(color: accent),
       );
 
   static ButtonStyle textButtonStyle(BuildContext context) =>
-      TextButton.styleFrom(foregroundColor: onAccent);
+      TextButton.styleFrom(foregroundColor: actionForeground(context));
 }
 
 class AssessmentSurfaceCard extends StatelessWidget {
@@ -92,7 +102,7 @@ class AssessmentStatusPill extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(
-          color: AssessmentPresentation.onAccent,
+          color: AssessmentPresentation.onSoftAccent(context),
           fontSize: 12,
           fontWeight: FontWeight.w800,
         ),

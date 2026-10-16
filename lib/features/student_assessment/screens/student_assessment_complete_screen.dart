@@ -438,7 +438,7 @@ class _V4PaccSupportDialog extends StatelessWidget {
       icon: CircleAvatar(
         radius: 24,
         backgroundColor: AssessmentPresentation.softAccent(context),
-        foregroundColor: AssessmentPresentation.accent,
+        foregroundColor: AssessmentPresentation.onSoftAccent(context),
         child: const Icon(Icons.support_agent_rounded),
       ),
       title: const Text('PACC support is available'),

@@ -263,7 +263,9 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
                           children: [
                             Icon(
                               Icons.directions_walk_rounded,
-                              color: AssessmentPresentation.accent,
+                              color: AssessmentPresentation.onSoftAccent(
+                                context,
+                              ),
                               size: 30,
                             ),
                             const SizedBox(width: 12),
@@ -279,7 +281,7 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
                           value: (_steps / 500).clamp(0, 1),
                           minHeight: 9,
                           borderRadius: BorderRadius.circular(999),
-                          color: AssessmentPresentation.accent,
+                          color: AssessmentPresentation.onSoftAccent(context),
                           backgroundColor: AssessmentPresentation.softAccent(
                             context,
                           ),

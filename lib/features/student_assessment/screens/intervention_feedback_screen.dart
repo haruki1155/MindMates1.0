@@ -65,7 +65,7 @@ class _InterventionFeedbackScreenState
                     children: [
                       Icon(
                         Icons.favorite_outline_rounded,
-                        color: AssessmentPresentation.accent,
+                        color: AssessmentPresentation.onSoftAccent(context),
                         size: 30,
                       ),
                       const SizedBox(height: 14),
@@ -163,7 +163,7 @@ class _FeedbackChoiceTile extends StatelessWidget {
               borderRadius: AssessmentPresentation.cardRadius,
               border: Border.all(
                 color: selected
-                    ? AssessmentPresentation.accent
+                    ? AssessmentPresentation.onSoftAccent(context)
                     : scheme.outlineVariant,
                 width: selected ? 2 : 1,
               ),
@@ -177,9 +177,9 @@ class _FeedbackChoiceTile extends StatelessWidget {
                   ),
                 ),
                 if (selected)
-                  const Icon(
+                  Icon(
                     Icons.check_circle_rounded,
-                    color: AssessmentPresentation.accent,
+                    color: AssessmentPresentation.onSoftAccent(context),
                   ),
               ],
             ),
