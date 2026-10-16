@@ -140,7 +140,7 @@ class _InterventionBreathingScreenState
                       width: animationDiameter,
                       child: AssessmentSurfaceCard(
                         padding: EdgeInsets.zero,
-                        color: AssessmentPresentation.softPrimary(context),
+                        color: AssessmentPresentation.softAccent(context),
                         child: Center(
                           child: ScaleTransition(
                             scale: Tween<double>(
@@ -151,13 +151,13 @@ class _InterventionBreathingScreenState
                               radius: radius,
                               backgroundColor: Theme.of(
                                 context,
-                              ).colorScheme.primaryContainer,
+                              ).colorScheme.surface,
                               child: Text(
                                 '$_seconds',
                                 style: TextStyle(
                                   color: Theme.of(
                                     context,
-                                  ).colorScheme.onPrimaryContainer,
+                                  ).colorScheme.onSurface,
                                   fontSize: compact ? 36 : 48,
                                   fontWeight: FontWeight.w800,
                                 ),
@@ -196,6 +196,7 @@ class _InterventionBreathingScreenState
                   ),
                   SizedBox(height: compact ? 8 : 16),
                   FilledButton.icon(
+                    style: AssessmentPresentation.filledButtonStyle(context),
                     onPressed: () => setState(() => _paused = !_paused),
                     icon: Icon(
                       _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
@@ -207,6 +208,9 @@ class _InterventionBreathingScreenState
                     children: [
                       Expanded(
                         child: OutlinedButton(
+                          style: AssessmentPresentation.outlinedButtonStyle(
+                            context,
+                          ),
                           onPressed: _restart,
                           child: const Text('Restart'),
                         ),
@@ -214,6 +218,9 @@ class _InterventionBreathingScreenState
                       const SizedBox(width: 12),
                       Expanded(
                         child: TextButton(
+                          style: AssessmentPresentation.textButtonStyle(
+                            context,
+                          ),
                           onPressed: () => Navigator.of(
                             context,
                           ).pop(InterventionOutcome.skipped),

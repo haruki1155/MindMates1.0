@@ -223,7 +223,6 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final unavailable =
         _state == WalkingTrackingState.unavailable ||
         _state == WalkingTrackingState.manualFallback;
@@ -256,7 +255,7 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
                   ),
                   const SizedBox(height: 20),
                   AssessmentSurfaceCard(
-                    color: AssessmentPresentation.softPrimary(context),
+                    color: AssessmentPresentation.softAccent(context),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -264,7 +263,7 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
                           children: [
                             Icon(
                               Icons.directions_walk_rounded,
-                              color: scheme.primary,
+                              color: AssessmentPresentation.accent,
                               size: 30,
                             ),
                             const SizedBox(width: 12),
@@ -280,6 +279,10 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
                           value: (_steps / 500).clamp(0, 1),
                           minHeight: 9,
                           borderRadius: BorderRadius.circular(999),
+                          color: AssessmentPresentation.accent,
+                          backgroundColor: AssessmentPresentation.softAccent(
+                            context,
+                          ),
                         ),
                         const SizedBox(height: 16),
                         Text(
@@ -295,6 +298,7 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
                   const SizedBox(height: 24),
                   if (!unavailable)
                     FilledButton.icon(
+                      style: AssessmentPresentation.filledButtonStyle(context),
                       onPressed: _togglePaused,
                       icon: Icon(
                         _paused
@@ -307,18 +311,21 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
                     ),
                   if (_state == WalkingTrackingState.unavailable)
                     FilledButton.icon(
+                      style: AssessmentPresentation.filledButtonStyle(context),
                       onPressed: _beginManualFallback,
                       icon: const Icon(Icons.timer_outlined),
                       label: const Text('Use timed-walk option'),
                     ),
                   if (_state == WalkingTrackingState.manualFallback)
                     FilledButton.icon(
+                      style: AssessmentPresentation.filledButtonStyle(context),
                       onPressed: _recordSelfReportedCompletion,
                       icon: const Icon(Icons.check_rounded),
                       label: const Text('Record self-reported walk'),
                     ),
                   const SizedBox(height: 8),
                   TextButton(
+                    style: AssessmentPresentation.textButtonStyle(context),
                     onPressed: () =>
                         Navigator.of(context).pop(InterventionOutcome.skipped),
                     child: const Text('Skip activity'),

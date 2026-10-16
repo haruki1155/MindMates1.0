@@ -14,11 +14,28 @@ class AssessmentPresentation {
       ? AppColors.darkTextSecondary
       : AppColors.textMuted;
 
-  static Color softPrimary(BuildContext context) =>
-      Theme.of(context).colorScheme.primaryContainer;
+  static const accent = AppColors.secondary;
+  static const onAccent = AppColors.textPrimary;
 
-  static Color softSecondary(BuildContext context) =>
-      Theme.of(context).colorScheme.secondaryContainer;
+  static Color softAccent(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? accent.withValues(alpha: 0.22)
+      : const Color(0xFFFFF4D6);
+
+  static ButtonStyle filledButtonStyle(BuildContext context) =>
+      FilledButton.styleFrom(
+        backgroundColor: accent,
+        foregroundColor: onAccent,
+      );
+
+  static ButtonStyle outlinedButtonStyle(BuildContext context) =>
+      OutlinedButton.styleFrom(
+        foregroundColor: onAccent,
+        side: const BorderSide(color: accent),
+      );
+
+  static ButtonStyle textButtonStyle(BuildContext context) =>
+      TextButton.styleFrom(foregroundColor: onAccent);
 }
 
 class AssessmentSurfaceCard extends StatelessWidget {
@@ -66,17 +83,16 @@ class AssessmentStatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: scheme.secondaryContainer,
+        color: AssessmentPresentation.softAccent(context),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: scheme.onSecondaryContainer,
+          color: AssessmentPresentation.onAccent,
           fontSize: 12,
           fontWeight: FontWeight.w800,
         ),

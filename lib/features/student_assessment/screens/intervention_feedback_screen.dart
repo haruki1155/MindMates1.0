@@ -59,13 +59,13 @@ class _InterventionFeedbackScreenState
                 ),
                 const SizedBox(height: 16),
                 AssessmentSurfaceCard(
-                  color: AssessmentPresentation.softPrimary(context),
+                  color: AssessmentPresentation.softAccent(context),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(
                         Icons.favorite_outline_rounded,
-                        color: Theme.of(context).colorScheme.primary,
+                        color: AssessmentPresentation.accent,
                         size: 30,
                       ),
                       const SizedBox(height: 14),
@@ -113,11 +113,13 @@ class _InterventionFeedbackScreenState
                 ),
                 const SizedBox(height: 18),
                 FilledButton(
+                  style: AssessmentPresentation.filledButtonStyle(context),
                   onPressed: _choice == null ? null : _submit,
                   child: const Text('Continue assessment'),
                 ),
                 const SizedBox(height: 6),
                 TextButton(
+                  style: AssessmentPresentation.textButtonStyle(context),
                   onPressed: () => Navigator.of(context).pop(),
                   child: const Text('Skip feedback'),
                 ),
@@ -148,7 +150,9 @@ class _FeedbackChoiceTile extends StatelessWidget {
       button: true,
       selected: selected,
       child: Material(
-        color: selected ? scheme.primaryContainer : scheme.surface,
+        color: selected
+            ? AssessmentPresentation.softAccent(context)
+            : scheme.surface,
         borderRadius: AssessmentPresentation.cardRadius,
         child: InkWell(
           onTap: onTap,
@@ -158,7 +162,9 @@ class _FeedbackChoiceTile extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: AssessmentPresentation.cardRadius,
               border: Border.all(
-                color: selected ? scheme.primary : scheme.outlineVariant,
+                color: selected
+                    ? AssessmentPresentation.accent
+                    : scheme.outlineVariant,
                 width: selected ? 2 : 1,
               ),
             ),
@@ -171,7 +177,10 @@ class _FeedbackChoiceTile extends StatelessWidget {
                   ),
                 ),
                 if (selected)
-                  Icon(Icons.check_circle_rounded, color: scheme.primary),
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    color: AssessmentPresentation.accent,
+                  ),
               ],
             ),
           ),

@@ -434,12 +434,11 @@ class _V4PaccSupportDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return AlertDialog(
       icon: CircleAvatar(
         radius: 24,
-        backgroundColor: scheme.primaryContainer,
-        foregroundColor: scheme.primary,
+        backgroundColor: AssessmentPresentation.softAccent(context),
+        foregroundColor: AssessmentPresentation.accent,
         child: const Icon(Icons.support_agent_rounded),
       ),
       title: const Text('PACC support is available'),
@@ -448,10 +447,12 @@ class _V4PaccSupportDialog extends StatelessWidget {
       ),
       actions: [
         TextButton(
+          style: AssessmentPresentation.textButtonStyle(context),
           onPressed: () => Navigator.pop(context, false),
           child: const Text('Not now'),
         ),
         FilledButton(
+          style: AssessmentPresentation.filledButtonStyle(context),
           onPressed: () => Navigator.pop(context, true),
           child: const Text('Continue to PACC'),
         ),
@@ -637,6 +638,7 @@ class _StudentV4ProfileView extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             OutlinedButton.icon(
+              style: AssessmentPresentation.outlinedButtonStyle(context),
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) =>
@@ -648,6 +650,7 @@ class _StudentV4ProfileView extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             FilledButton(
+              style: AssessmentPresentation.filledButtonStyle(context),
               onPressed: () => Navigator.of(
                 context,
               ).pushNamedAndRemoveUntil(RouteNames.home, (route) => false),

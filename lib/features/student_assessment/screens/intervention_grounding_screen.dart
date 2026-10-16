@@ -27,7 +27,6 @@ class _InterventionGroundingScreenState
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('Grounding exercise')),
       body: SafeArea(
@@ -60,16 +59,18 @@ class _InterventionGroundingScreenState
                     value: (_index + 1) / _steps.length,
                     minHeight: 7,
                     borderRadius: BorderRadius.circular(999),
+                    color: AssessmentPresentation.accent,
+                    backgroundColor: AssessmentPresentation.softAccent(context),
                   ),
                   const SizedBox(height: 24),
                   AssessmentSurfaceCard(
-                    color: AssessmentPresentation.softPrimary(context),
+                    color: AssessmentPresentation.softAccent(context),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Icon(
                           Icons.spa_outlined,
-                          color: scheme.primary,
+                          color: AssessmentPresentation.accent,
                           size: 30,
                         ),
                         const SizedBox(height: 18),
@@ -99,6 +100,9 @@ class _InterventionGroundingScreenState
                     spacing: 12,
                     children: [
                       OutlinedButton.icon(
+                        style: AssessmentPresentation.outlinedButtonStyle(
+                          context,
+                        ),
                         onPressed: _index == 0
                             ? null
                             : () => setState(() => _index--),
@@ -106,6 +110,9 @@ class _InterventionGroundingScreenState
                         label: const Text('Previous'),
                       ),
                       FilledButton.icon(
+                        style: AssessmentPresentation.filledButtonStyle(
+                          context,
+                        ),
                         onPressed: () => _index == _steps.length - 1
                             ? _finish(InterventionOutcome.completed)
                             : setState(() => _index++),
@@ -122,6 +129,7 @@ class _InterventionGroundingScreenState
                   ),
                   const SizedBox(height: 8),
                   TextButton(
+                    style: AssessmentPresentation.textButtonStyle(context),
                     onPressed: () => _finish(InterventionOutcome.skipped),
                     child: const Text('Skip activity'),
                   ),
