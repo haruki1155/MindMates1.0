@@ -13,6 +13,7 @@ import 'intervention_feedback_screen.dart';
 import 'intervention_grounding_screen.dart';
 import 'intervention_walking_screen.dart';
 import '../models/intervention_models.dart';
+import '../widgets/domain_preview_loading_view.dart';
 
 /// Main assessment screen: presents one question at a time with a clear
 /// progress header, a focused question card, and a secure footer.
@@ -136,6 +137,26 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
             body: Center(
               child: CircularProgressIndicator(color: _StudentPalette.primary),
             ),
+          );
+        }
+        if (provider.flowStage == AssessmentFlowStage.previewLoading) {
+          final domains = provider.studentQuestions
+              .map((item) => item.v4DomainId)
+              .whereType<String>()
+              .toSet()
+              .toList(growable: false);
+          final pendingDomain = provider.pendingDomainId;
+          final domainQuestions = provider.studentQuestions
+              .where((item) => item.v4DomainId == pendingDomain)
+              .toList(growable: false);
+          return DomainPreviewLoadingView(
+            domainLabel: domainQuestions.isEmpty
+                ? 'this area'
+                : _questionDomainLabel(domainQuestions.first),
+            domainNumber: pendingDomain == null
+                ? 1
+                : domains.indexOf(pendingDomain) + 1,
+            domainCount: domains.length,
           );
         }
         final domainProgress = _domainProgressFor(

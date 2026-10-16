@@ -7,12 +7,34 @@ import 'package:mind_mates/features/student_assessment/models/student_assessment
 import 'package:mind_mates/features/student_assessment/models/intervention_models.dart';
 import 'package:mind_mates/features/student_assessment/services/student_assessment_calculator.dart';
 import 'package:mind_mates/features/student_assessment/screens/assessment_domain_review_screen.dart';
+import 'package:mind_mates/features/student_assessment/widgets/domain_preview_loading_view.dart';
 import 'package:mind_mates/features/student_assessment/screens/assessment_submission_review_screen.dart';
 import 'package:mind_mates/features/student_assessment/widgets/assessment_presentation.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
 
 void main() {
+  testWidgets(
+    'domain preview loading identifies the current domain without a fabricated result',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: DomainPreviewLoadingView(
+            domainLabel: 'Financial',
+            domainNumber: 2,
+            domainCount: 5,
+          ),
+        ),
+      );
+
+      expect(find.text('Reviewing Financial'), findsOneWidget);
+      expect(find.text('Domain 2 of 5'), findsOneWidget);
+      expect(find.textContaining('reviewing your answers'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.textContaining('supportMayHelp'), findsNothing);
+    },
+  );
+
   test(
     'non-eligible V4 previews advance each role-specific domain without review',
     () async {
@@ -295,7 +317,7 @@ void main() {
         ),
       );
 
-      expect(find.byType(AssessmentSurfaceCard), findsOneWidget);
+      expect(find.byType(AssessmentSurfaceCard), findsWidgets);
       expect(find.byType(AssessmentStatusPill), findsOneWidget);
       await tester.tap(find.text('Try Activity'));
       expect(triedActivity, isTrue);
@@ -327,8 +349,10 @@ void main() {
 
       await tester.tap(find.text('Open review'));
       await tester.pumpAndSettle();
-      expect(find.byType(AssessmentSurfaceCard), findsOneWidget);
+      expect(find.byType(AssessmentSurfaceCard), findsWidgets);
       expect(find.byType(AssessmentStatusPill), findsOneWidget);
+      expect(find.text('Completion summary'), findsOneWidget);
+      expect(find.text('About this assessment'), findsOneWidget);
       await tester.ensureVisible(find.text('Submit assessment'));
       await tester.tap(find.text('Submit assessment'));
       await tester.pumpAndSettle();
