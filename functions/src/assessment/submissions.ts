@@ -34,6 +34,7 @@ import {
 } from "./workplace_v4_catalog";
 import {toHttpsError} from "./errors";
 import {quickProfileRoleDecision, submissionHashesMatch} from "./submission_policy";
+import {previewAssessmentDomainHandler} from "./preview_assessment_domain";
 
 if (!getApps().length) initializeApp();
 
@@ -315,3 +316,5 @@ async function submitFullAssessmentHandler(request: CallableRequest) {
 
 export const submitFullAssessment = onCall({enforceAppCheck: true}, submitFullAssessmentHandler);
 export const submitFullAssessmentDev = onCall({enforceAppCheck: false}, submitFullAssessmentHandler);
+export const previewAssessmentDomain = onCall({enforceAppCheck: true}, (request) => previewAssessmentDomainHandler(request));
+export const previewAssessmentDomainDev = onCall({enforceAppCheck: false}, (request) => previewAssessmentDomainHandler(request));

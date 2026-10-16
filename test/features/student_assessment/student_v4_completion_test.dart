@@ -3,24 +3,230 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/student_assessment/screens/student_assessment_complete_screen.dart';
 import 'package:mind_mates/features/student_assessment/models/student_assessment_models.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
+import 'package:mind_mates/models/appointment_model.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
+import 'package:mind_mates/providers/appointment_provider.dart';
 import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
+import 'package:mind_mates/repositories/appointment_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
+import 'package:mind_mates/routes/route_names.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets(
+    'shows the PACC prompt only after a saved supportMayHelp V4 result',
+    (tester) async {
+      final assessment = AssessmentProvider(
+        _V4Repository(profileStatus: 'supportMayHelp'),
+      )..startStudentAssessment();
+      await _completeV4Assessment(assessment);
+      final user = UserProvider(_ActivityRepository())
+        ..setUser(
+          const UserModel(id: 'support_1', email: 'support@example.com'),
+        );
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+            ChangeNotifierProvider<UserProvider>.value(value: user),
+            ChangeNotifierProvider<ReportProvider>(
+              create: (_) => ReportProvider(_FailingReportRepository()),
+            ),
+          ],
+          child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(find.text('PACC support is available'), findsOneWidget);
+      expect(
+        find.text(
+          'Your saved result suggests that speaking with a counselor may be helpful. You can continue to PACC whenever you feel ready.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Not now'), findsOneWidget);
+      expect(find.text('Continue to PACC'), findsOneWidget);
+    },
+  );
+
+  testWidgets('does not prompt for lower V4 statuses in any population role', (
+    tester,
+  ) async {
+    for (final role in [
+      AssessmentRole.student,
+      AssessmentRole.faculty,
+      AssessmentRole.staff,
+    ]) {
+      for (final status in [
+        'generallySupported',
+        'mostlySupported',
+        'someAreasNeedAttention',
+        'insufficientResponses',
+      ]) {
+        final assessment =
+            AssessmentProvider(_V4Repository(profileStatus: status))
+              ..selectRole(role)
+              ..startStudentAssessment();
+        await _completeV4Assessment(assessment);
+        final user = UserProvider(_ActivityRepository())
+          ..setUser(const UserModel(id: 'lower_1', email: 'lower@example.com'));
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AssessmentProvider>.value(
+                value: assessment,
+              ),
+              ChangeNotifierProvider<UserProvider>.value(value: user),
+              ChangeNotifierProvider<ReportProvider>(
+                create: (_) => ReportProvider(_FailingReportRepository()),
+              ),
+            ],
+            child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        expect(find.text('PACC support is available'), findsNothing);
+      }
+    }
+  });
+
+  testWidgets(
+    'declining a V4 prompt keeps the result visible without re-prompting on rebuild',
+    (tester) async {
+      final assessment = AssessmentProvider(
+        _V4Repository(profileStatus: 'supportMayHelp'),
+      )..startStudentAssessment();
+      await _completeV4Assessment(assessment);
+      final user = UserProvider(_ActivityRepository())
+        ..setUser(
+          const UserModel(id: 'decline_1', email: 'decline@example.com'),
+        );
+
+      Widget app() => MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+          ChangeNotifierProvider<UserProvider>.value(value: user),
+          ChangeNotifierProvider<ReportProvider>(
+            create: (_) => ReportProvider(_FailingReportRepository()),
+          ),
+        ],
+        child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+      );
+
+      await tester.pumpWidget(app());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.text('Not now'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.text('Your Full Well-Being Assessment Result'),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(app());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('PACC support is available'), findsNothing);
+      expect(
+        find.text('Your Full Well-Being Assessment Result'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'accepting a V4 prompt opens PACC without creating an appointment',
+    (tester) async {
+      final assessment = AssessmentProvider(
+        _V4Repository(profileStatus: 'supportMayHelp'),
+      )..startStudentAssessment();
+      await _completeV4Assessment(assessment);
+      final user = UserProvider(_ActivityRepository())
+        ..setUser(const UserModel(id: 'accept_1', email: 'accept@example.com'));
+      final appointments = _NoopAppointmentRepository();
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+            ChangeNotifierProvider<UserProvider>.value(value: user),
+            ChangeNotifierProvider<ReportProvider>(
+              create: (_) => ReportProvider(_FailingReportRepository()),
+            ),
+            ChangeNotifierProvider(
+              create: (_) => AppointmentProvider(appointments),
+            ),
+          ],
+          child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.tap(find.text('Continue to PACC'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Appointment Details'), findsOneWidget);
+      expect(appointments.createCalls, 0);
+      await tester.binding.handlePopRoute();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.text('Your Full Well-Being Assessment Result'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('a failed V4 save does not prompt before its successful retry', (
+    tester,
+  ) async {
+    final repository = _FailsThenSavesV4Repository();
+    final assessment = AssessmentProvider(repository)..startStudentAssessment();
+    await _completeV4Assessment(assessment);
+    final user = UserProvider(_ActivityRepository())
+      ..setUser(const UserModel(id: 'retry_1', email: 'retry@example.com'));
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+          ChangeNotifierProvider<UserProvider>.value(value: user),
+          ChangeNotifierProvider<ReportProvider>(
+            create: (_) => ReportProvider(_FailingReportRepository()),
+          ),
+        ],
+        child: const MaterialApp(home: StudentAssessmentCompleteScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Try again'), findsOneWidget);
+    expect(find.text('PACC support is available'), findsNothing);
+
+    await tester.tap(find.text('Try again'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(repository.saveCalls, 2);
+    expect(find.text('PACC support is available'), findsOneWidget);
+  });
+
   testWidgets(
     'keeps the verified V4 profile visible when report refresh fails',
     (tester) async {
       final assessment = AssessmentProvider(_V4Repository())
         ..startStudentAssessment();
-      for (var index = 0; index < 50; index += 1) {
-        assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-      }
+      await _completeV4Assessment(assessment);
       final user = UserProvider(_ActivityRepository())
         ..setUser(
           const UserModel(id: 'student_1', email: 'student@example.com'),
@@ -48,13 +254,20 @@ void main() {
       await _expectTextVisible(tester, 'Overall Well-Being Status');
       await _expectTextVisible(tester, 'Assessment Summary');
       await _expectTextVisible(tester, 'What Your Responses Suggest Overall');
+      await _expectTextVisible(tester, 'Strengths & Focus Areas');
+      await _expectTextVisible(tester, 'Strengths');
+      await _expectTextVisible(tester, 'Focus Areas');
       await _expectTextVisible(tester, 'Well-Being Areas');
+      expect(find.text('Mostly supported'), findsNWidgets(5));
+      expect(find.text('What to notice'), findsNothing);
+      final domainCard = find.byKey(const ValueKey('v4-domain-domain_0'));
+      await _scrollIntoView(tester, domainCard);
+      await tester.tap(domainCard);
+      await tester.pump(const Duration(milliseconds: 300));
       await _expectTextVisible(tester, 'What to notice');
       await _expectTextVisible(tester, 'Supportive pattern');
       await _expectTextVisible(tester, 'A practical next step');
       await _expectTextVisible(tester, 'Reflection prompt');
-      await _expectTextVisible(tester, 'Strengths');
-      await _expectTextVisible(tester, 'Areas to Explore');
       await _expectTextVisible(tester, 'Suggested Next Steps');
       await _expectTextVisible(tester, 'Assessment Responses');
       final responseGroup = find.byKey(
@@ -64,13 +277,85 @@ void main() {
       await tester.tap(responseGroup);
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('1. Saved review question 1.'), findsOneWidget);
-      await _expectTextVisible(tester, 'Response Completeness');
+      expect(find.text('Response Completeness'), findsNothing);
+      expect(find.text('How This Result Was Created'), findsNothing);
       await _expectTextVisible(tester, 'About This Result');
       expect(
         find.textContaining('couldn\'t save your assessment'),
         findsNothing,
       );
-      expect(find.textContaining('50 of 50 answered'), findsOneWidget);
+      expect(find.textContaining('50 of 50 answered'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'renders each saved role result once, survives rebuild, and continues home',
+    (tester) async {
+      final expectedDomainLabels = {
+        AssessmentRole.student: 'Academic Stress',
+        AssessmentRole.faculty: 'Teaching Workload & Role Demands',
+        AssessmentRole.staff: 'Workload & Role Demands',
+      };
+
+      for (final role in expectedDomainLabels.keys) {
+        final repository = _CountingV4Repository();
+        final assessment = AssessmentProvider(repository)
+          ..selectRole(role)
+          ..startStudentAssessment();
+        await _completeV4Assessment(assessment);
+        final user = UserProvider(_ActivityRepository())
+          ..setUser(
+            UserModel(
+              id: 'render_${role.name}',
+              email: 'render_${role.name}@example.com',
+            ),
+          );
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AssessmentProvider>.value(
+                value: assessment,
+              ),
+              ChangeNotifierProvider<UserProvider>.value(value: user),
+              ChangeNotifierProvider<ReportProvider>(
+                create: (_) => ReportProvider(_FailingReportRepository()),
+              ),
+            ],
+            child: MaterialApp(
+              key: ValueKey('completion_${role.name}'),
+              home: const StudentAssessmentCompleteScreen(),
+              routes: {
+                RouteNames.home: (_) =>
+                    const Scaffold(body: Text('Home destination')),
+              },
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        expect(
+          find.text('Your Full Well-Being Assessment Result'),
+          findsOneWidget,
+        );
+        await _expectTextVisible(tester, 'Overall Well-Being Status');
+        await _expectTextVisible(tester, expectedDomainLabels[role]!);
+        expect(repository.saveCalls, 1);
+
+        // A provider notification rebuilds the completion screen, but its
+        // cached save future must not submit the completed session again.
+        assessment.updateName('rebuild_${role.name}');
+        await tester.pump();
+        expect(repository.saveCalls, 1);
+        expect(assessment.studentAnswers, hasLength(50));
+
+        await _expectTextVisible(tester, 'Continue');
+        await tester.tap(find.text('Continue'));
+        await tester.pumpAndSettle();
+        expect(find.text('Home destination'), findsOneWidget);
+        expect(assessment.studentAnswers, hasLength(50));
+      }
     },
   );
 
@@ -80,9 +365,7 @@ void main() {
       final assessment = AssessmentProvider(_V4Repository())
         ..selectRole(AssessmentRole.faculty)
         ..startStudentAssessment();
-      for (var index = 0; index < 50; index += 1) {
-        assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-      }
+      await _completeV4Assessment(assessment);
       final user = UserProvider(_ActivityRepository())
         ..setUser(
           const UserModel(id: 'teaching_1', email: 'teaching@example.com'),
@@ -118,9 +401,7 @@ void main() {
     final assessment = AssessmentProvider(_V4Repository())
       ..selectRole(AssessmentRole.staff)
       ..startStudentAssessment();
-    for (var index = 0; index < 50; index += 1) {
-      assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-    }
+    await _completeV4Assessment(assessment);
     final user = UserProvider(_ActivityRepository())
       ..setUser(
         const UserModel(
@@ -159,9 +440,7 @@ void main() {
   ) async {
     final assessment = AssessmentProvider(_LegacyV4Repository())
       ..startStudentAssessment();
-    for (var index = 0; index < 50; index += 1) {
-      assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-    }
+    await _completeV4Assessment(assessment);
     final user = UserProvider(_ActivityRepository())
       ..setUser(
         const UserModel(id: 'student_legacy', email: 'legacy@example.com'),
@@ -183,11 +462,7 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('Legacy student V4 result.'), findsOneWidget);
-    await _expectTextVisible(tester, 'Response Completeness');
-    await _expectTextVisible(
-      tester,
-      'More responses are needed for a complete result.',
-    );
+    expect(find.text('Response Completeness'), findsNothing);
     await _expectTextVisible(tester, 'Assessment Responses');
     await _expectTextVisible(
       tester,
@@ -200,9 +475,7 @@ void main() {
   ) async {
     final assessment = AssessmentProvider(_MalformedV4Repository())
       ..startStudentAssessment();
-    for (var index = 0; index < 50; index += 1) {
-      assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-    }
+    await _completeV4Assessment(assessment);
     final user = UserProvider(_ActivityRepository())
       ..setUser(
         const UserModel(id: 'student_malformed', email: 'bad@example.com'),
@@ -229,14 +502,11 @@ void main() {
       ),
       findsOneWidget,
     );
-    await _expectTextVisible(
-      tester,
-      'Response completeness details are unavailable for this saved result.',
-    );
+    expect(find.text('Response Completeness'), findsNothing);
     await _expectTextVisible(tester, 'Well-being area');
   });
 
-  testWidgets('expands V4 methodology and references on a narrow phone', (
+  testWidgets('keeps V4 areas and responses collapsed on a narrow phone', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(320, 640);
@@ -246,9 +516,7 @@ void main() {
 
     final assessment = AssessmentProvider(_V4Repository())
       ..startStudentAssessment();
-    for (var index = 0; index < 50; index += 1) {
-      assessment.answerCurrentStudentQuestion(LikertAnswer.often);
-    }
+    await _completeV4Assessment(assessment);
     final user = UserProvider(_ActivityRepository())
       ..setUser(
         const UserModel(id: 'student_method', email: 'method@example.com'),
@@ -269,27 +537,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    await _expectTextVisible(tester, 'How This Result Was Created');
-    await tester.tap(find.text('How This Result Was Created'));
+    final domainCard = find.byKey(const ValueKey('v4-domain-domain_0'));
+    await _scrollIntoView(tester, domainCard);
+    expect(find.text('What to notice'), findsNothing);
+    await tester.tap(domainCard);
     await tester.pump(const Duration(milliseconds: 300));
-    await _expectTextVisible(
-      tester,
-      'The server calculated this result deterministically from your saved responses.',
-    );
-    await _expectTextVisible(
-      tester,
-      'Generative AI does not determine this Full Assessment result.',
-    );
-    await _expectTextVisible(
-      tester,
-      'Instrument version: student_wellbeing_v4',
-    );
-    await _expectTextVisible(tester, 'Algorithm version: student_profile_v4');
-    await _expectTextVisible(tester, 'Record format: assessment_record_v4');
-    await _expectTextVisible(
-      tester,
-      'Reference set: mindmate_wellbeing_refs_v1',
-    );
+    await _expectTextVisible(tester, 'A practical next step');
 
     await _expectTextVisible(tester, 'References & Resources');
     await tester.tap(find.text('References & Resources'));
@@ -332,9 +585,48 @@ Future<void> _scrollIntoView(WidgetTester tester, Finder finder) async {
     await tester.drag(find.byType(Scrollable).first, const Offset(0, -220));
     await tester.pump(const Duration(milliseconds: 100));
   }
+  if (finder.evaluate().isNotEmpty) {
+    await tester.ensureVisible(finder);
+    await tester.pump(const Duration(milliseconds: 100));
+  }
 }
 
-class _V4Repository extends AssessmentRepository {
+Future<void> _completeV4Assessment(AssessmentProvider assessment) async {
+  for (var index = 0; index < 50; index += 1) {
+    await assessment.answerCurrentStudentQuestion(LikertAnswer.often);
+    if (assessment.flowStage == AssessmentFlowStage.domainReview ||
+        assessment.flowStage == AssessmentFlowStage.recoverableError) {
+      assessment.continueAfterDomainReview();
+    }
+  }
+}
+
+mixin _PreviewingV4Repository on AssessmentRepository {
+  @override
+  Future<Map<String, Object>> previewV4AssessmentDomain({
+    required String instrumentVersion,
+    required String domainId,
+    required List<StudentAssessmentAnswer> answers,
+  }) async => {
+    'domainId': domainId,
+    'domainLabel': domainId,
+    'status': 'mostlySupported',
+    'isScorable': true,
+    'answeredCount': answers.length,
+    'presentedCount': 10,
+    'summary': 'Preview result.',
+    'suggestedAction': 'Continue.',
+    'reflectionPrompt': 'Reflect.',
+    'interventionEligible': false,
+    'policyVersion': 'assessment_intervention_v1',
+  };
+}
+
+class _V4Repository extends AssessmentRepository with _PreviewingV4Repository {
+  _V4Repository({this.profileStatus = 'mostlySupported'});
+
+  final String profileStatus;
+
   @override
   Future<Map<String, Object>> saveV4FullAssessment({
     required String userId,
@@ -369,7 +661,7 @@ class _V4Repository extends AssessmentRepository {
     'itemSnapshot': _itemSnapshot(),
     'responses': _savedResponses(),
     'result': {
-      'profileStatus': 'mostlySupported',
+      'profileStatus': profileStatus,
       'responseQuality': {
         'answered': 50,
         'presented': 50,
@@ -393,7 +685,8 @@ class _V4Repository extends AssessmentRepository {
   };
 }
 
-class _LegacyV4Repository extends AssessmentRepository {
+class _LegacyV4Repository extends AssessmentRepository
+    with _PreviewingV4Repository {
   @override
   Future<Map<String, Object>> saveV4FullAssessment({
     required String userId,
@@ -412,7 +705,51 @@ class _LegacyV4Repository extends AssessmentRepository {
   };
 }
 
-class _MalformedV4Repository extends AssessmentRepository {
+class _FailsThenSavesV4Repository extends _V4Repository {
+  _FailsThenSavesV4Repository() : super(profileStatus: 'supportMayHelp');
+
+  int saveCalls = 0;
+
+  @override
+  Future<Map<String, Object>> saveV4FullAssessment({
+    required String userId,
+    required String instrumentVersion,
+    required List<StudentAssessmentAnswer> answers,
+    required String submissionId,
+  }) async {
+    saveCalls += 1;
+    if (saveCalls == 1) throw StateError('save failed');
+    return super.saveV4FullAssessment(
+      userId: userId,
+      instrumentVersion: instrumentVersion,
+      answers: answers,
+      submissionId: submissionId,
+    );
+  }
+}
+
+class _CountingV4Repository extends _V4Repository {
+  int saveCalls = 0;
+
+  @override
+  Future<Map<String, Object>> saveV4FullAssessment({
+    required String userId,
+    required String instrumentVersion,
+    required List<StudentAssessmentAnswer> answers,
+    required String submissionId,
+  }) async {
+    saveCalls += 1;
+    return super.saveV4FullAssessment(
+      userId: userId,
+      instrumentVersion: instrumentVersion,
+      answers: answers,
+      submissionId: submissionId,
+    );
+  }
+}
+
+class _MalformedV4Repository extends AssessmentRepository
+    with _PreviewingV4Repository {
   @override
   Future<Map<String, Object>> saveV4FullAssessment({
     required String userId,
@@ -515,5 +852,26 @@ class _FailingReportRepository extends ReportRepository {
   @override
   Future<String> generateWeeklyReport(String userId, {DateTime? now}) async {
     throw StateError('report refresh unavailable');
+  }
+}
+
+class _NoopAppointmentRepository extends AppointmentRepository {
+  int createCalls = 0;
+
+  @override
+  Future<List<AppointmentModel>> fetchAppointments(String userId) async =>
+      const [];
+
+  @override
+  Stream<List<AppointmentModel>> watchAppointments(String userId) =>
+      Stream.value(const []);
+
+  @override
+  Future<AppointmentModel> createAppointment(
+    AppointmentModel appointment, {
+    String? requestId,
+  }) async {
+    createCalls += 1;
+    return appointment.copyWith(id: 'created_1');
   }
 }

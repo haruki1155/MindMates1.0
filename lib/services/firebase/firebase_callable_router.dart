@@ -14,6 +14,7 @@ class FirebaseCallableRouter {
     'getAssessmentStatus',
     'submitQuickAssessment',
     'submitFullAssessment',
+    'previewAssessmentDomain',
     'sendMindAidMessage',
   };
 
@@ -27,6 +28,8 @@ class FirebaseCallableRouter {
 }
 
 extension FirebaseFunctionsRouting on FirebaseFunctions {
-  HttpsCallable routedCallable(String protectedName) =>
-      httpsCallable(FirebaseCallableRouter.name(protectedName));
+  HttpsCallable routedCallable(
+    String protectedName, {
+    HttpsCallableOptions? options,
+  }) => httpsCallable(FirebaseCallableRouter.name(protectedName), options: options);
 }

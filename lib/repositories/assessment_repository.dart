@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
@@ -8,28 +10,56 @@ import '../features/student_assessment/models/student_assessment_models.dart';
 import '../features/student_assessment/data/student_assessment_questions.dart';
 import '../features/student_assessment/data/student_assessment_v4_questions.dart';
 import '../services/firebase/firebase_callable_router.dart';
-import '../services/firebase/firebase_runtime_diagnostics.dart';
+import '../services/firebase/callable_request_timeout.dart';
 import '../services/firebase/firestore_service.dart';
+import '../services/firebase/firebase_runtime_diagnostics.dart';
+
+typedef StagingQuickAssessmentSubmitter = Future<Map<String, Object>> Function({
+  required String userId,
+  required QuickAssessmentResult result,
+});
+
+typedef QuickAssessmentCompletionChecker = Future<bool> Function(String userId);
+
+class QuickAssessmentSubmissionPendingException implements Exception {
+  const QuickAssessmentSubmissionPendingException();
+}
 
 class AssessmentRepository {
-  AssessmentRepository({FirestoreService? firestoreService})
-    : _firestoreService = firestoreService ?? FirestoreService();
+  AssessmentRepository({
+    FirestoreService? firestoreService,
+    this.stagingQuickAssessmentSubmitter,
+    this.quickAssessmentCompletionChecker,
+    this.callableTimeout = const Duration(seconds: 30),
+  }) : _firestoreService = firestoreService ?? FirestoreService();
 
   static const fullAssessmentLimit = 2;
   static const fullAssessmentWindow = Duration(days: 7);
   static const fullAssessmentMinimumInterval = Duration(days: 2);
 
   final FirestoreService _firestoreService;
+  final StagingQuickAssessmentSubmitter? stagingQuickAssessmentSubmitter;
+  final QuickAssessmentCompletionChecker? quickAssessmentCompletionChecker;
+  final Duration callableTimeout;
+  final Set<String> _uncertainQuickSubmissionUserIds = <String>{};
 
   Future<Map<String, Object>> saveQuickAssessment({
     required String userId,
     required QuickAssessmentResult result,
   }) async {
     if (AppEnvironmentConfig.isStaging) {
-      return _saveQuickAssessmentThroughStagingFunction(
-        userId: userId,
-        result: result,
-      );
+      if (_uncertainQuickSubmissionUserIds.contains(userId)) {
+        return _reconcileUncertainQuickSubmission(userId);
+      }
+      try {
+        return await _saveQuickAssessmentThroughStagingFunction(
+          userId: userId,
+          result: result,
+        );
+      } on CallableRequestTimeoutException catch (error) {
+        _uncertainQuickSubmissionUserIds.add(userId);
+        return _reconcileTimedOutQuickSubmission(userId, error);
+      }
     }
 
     final documentId = quickAssessmentDocumentId(userId);
@@ -74,6 +104,8 @@ class AssessmentRepository {
   static String quickAssessmentDocumentId(String userId) => 'quick_$userId';
 
   Future<bool> ensureQuickAssessmentCompletion(String userId) async {
+    final checker = quickAssessmentCompletionChecker;
+    if (checker != null) return checker(userId);
     final user = await _firestoreService.getDocument(
       FirestoreCollections.users,
       userId,
@@ -202,6 +234,30 @@ class AssessmentRepository {
     return _objectMap(response.data);
   }
 
+  /// Provides a server-calculated, non-persistent V4 domain result for the
+  /// in-progress assessment flow. The UI integration follows in Phase 3.
+  Future<Map<String, Object>> previewV4AssessmentDomain({
+    required String instrumentVersion,
+    required String domainId,
+    required List<StudentAssessmentAnswer> answers,
+  }) async {
+    if (!AppEnvironmentConfig.isStaging) {
+      throw StateError('V4 assessment previews are enabled for staging only.');
+    }
+    final response = await _stagingFunctions
+        .routedCallable('previewAssessmentDomain')
+        .call({
+          'instrumentVersion': instrumentVersion,
+          'domainId': domainId,
+          'answers': [for (final answer in answers) answer.toV4Json()],
+        });
+    FirebaseRuntimeDiagnostics.log(
+      event: 'v4_assessment_domain_previewed',
+      correlationId: _correlationId(response.data),
+    );
+    return _objectMap(response.data);
+  }
+
   Future<void> saveAssessmentClarityFeedback({
     required String clarity,
     required String algorithmVersion,
@@ -220,26 +276,82 @@ class AssessmentRepository {
     required String userId,
     required QuickAssessmentResult result,
   }) async {
-    final response = await _stagingFunctions
-        .routedCallable('submitQuickAssessment')
-        .call({
-          'submissionId': 'quick_${_safeSubmissionPart(userId)}',
-          'role': result.role.populationRole.storedValue,
-          'name': result.name,
-          'responses': [
-            for (final answer in result.responses)
-              {
-                'questionId': answer.questionId,
-                'optionId': answer.optionId,
-                'value': answer.value,
-              },
-          ],
-        });
+    final submitter = stagingQuickAssessmentSubmitter;
+    if (submitter != null) {
+      return runBoundedCallable<Map<String, Object>>(
+        operation: 'quick_assessment_submission',
+        timeout: callableTimeout,
+        request: () => submitter(userId: userId, result: result),
+      );
+    }
+    final response = await runBoundedCallable(
+      operation: 'quick_assessment_submission',
+      timeout: callableTimeout,
+      request: () => _stagingFunctions
+          .routedCallable(
+            'submitQuickAssessment',
+            options: HttpsCallableOptions(timeout: callableTimeout),
+          )
+          .call({
+            'submissionId': 'quick_${_safeSubmissionPart(userId)}',
+            'role': result.role.populationRole.storedValue,
+            'name': result.name,
+            'responses': [
+              for (final answer in result.responses)
+                {
+                  'questionId': answer.questionId,
+                  'optionId': answer.optionId,
+                  'value': answer.value,
+                },
+            ],
+          }),
+    );
     FirebaseRuntimeDiagnostics.log(
       event: 'staging_quick_assessment_submitted',
       correlationId: _correlationId(response.data),
     );
     return _objectMap(response.data);
+  }
+
+  Future<Map<String, Object>> _reconcileTimedOutQuickSubmission(
+    String userId,
+    CallableRequestTimeoutException timeoutError,
+  ) async {
+    try {
+      final completed = await runBoundedCallable<bool>(
+        operation: 'quick_assessment_completion_reconciliation',
+        timeout: callableTimeout,
+        request: () => ensureQuickAssessmentCompletion(userId),
+      );
+      if (completed) {
+        _uncertainQuickSubmissionUserIds.remove(userId);
+        FirebaseRuntimeDiagnostics.log(
+          event: 'quick_assessment_submission_reconciled',
+        );
+        return <String, Object>{'reconciled': true};
+      }
+    } on Object {
+      // The original timeout remains the actionable error for this attempt.
+    }
+    throw timeoutError;
+  }
+
+  Future<Map<String, Object>> _reconcileUncertainQuickSubmission(
+    String userId,
+  ) async {
+    final completed = await runBoundedCallable<bool>(
+      operation: 'quick_assessment_completion_reconciliation',
+      timeout: callableTimeout,
+      request: () => ensureQuickAssessmentCompletion(userId),
+    );
+    if (completed) {
+      _uncertainQuickSubmissionUserIds.remove(userId);
+      FirebaseRuntimeDiagnostics.log(
+        event: 'quick_assessment_submission_reconciled',
+      );
+      return <String, Object>{'reconciled': true};
+    }
+    throw const QuickAssessmentSubmissionPendingException();
   }
 
   Future<Map<String, Object>> _saveStudentAssessmentThroughStagingFunction({

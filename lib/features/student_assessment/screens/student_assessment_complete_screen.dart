@@ -16,6 +16,7 @@ import '../../counseling/screens/pacc_counseling_screen.dart';
 import '../models/student_assessment_models.dart';
 import '../models/assessment_interpretation_models.dart';
 import '../widgets/v4_assessment_response_review.dart';
+import '../widgets/assessment_presentation.dart';
 
 class StudentAssessmentCompleteScreen extends StatefulWidget {
   const StudentAssessmentCompleteScreen({super.key});
@@ -225,8 +226,39 @@ class _StudentAssessmentCompleteScreenState
     }
     final payload = await provider.saveStudentAssessmentForUser(userId);
     if (payload == null) return null;
+    _queueV4AppointmentPrompt(provider, payload);
     unawaited(_runPostV4SaveWork(userId));
     return payload;
+  }
+
+  void _queueV4AppointmentPrompt(
+    AssessmentProvider provider,
+    Map<String, Object> payload,
+  ) {
+    final result = payload['result'];
+    if (result is! Map || result['profileStatus'] != 'supportMayHelp') {
+      return;
+    }
+    final submissionId = payload['submissionId']?.toString().trim();
+    final promptId = (submissionId != null && submissionId.isNotEmpty)
+        ? submissionId
+        : provider.v4SubmissionId;
+    if (promptId == null || promptId.isEmpty) return;
+    if (!provider.claimV4AppointmentPrompt(promptId)) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final wantsAppointment = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => const _V4PaccSupportDialog(),
+      );
+      if (!mounted || wantsAppointment != true) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const PaccCounselingScreen(startBooking: true),
+        ),
+      );
+    });
   }
 
   Future<void> _runPostV4SaveWork(String userId) async {
@@ -348,7 +380,8 @@ class _StudentAssessmentCompleteScreenState
   String? _currentUserId() {
     try {
       final authProvider = context.read<AuthProvider>();
-      final userId = authProvider.userId ?? authProvider.hydrateCurrentUser();
+      final userId =
+          authProvider.authenticatedUserId ?? authProvider.hydrateCurrentUser();
       if (userId != null && userId.isNotEmpty) return userId;
     } on ProviderNotFoundException {
       // Tests and preview surfaces may provide only UserProvider.
@@ -396,6 +429,38 @@ class _StudentV4SaveFailure {
   }
 }
 
+class _V4PaccSupportDialog extends StatelessWidget {
+  const _V4PaccSupportDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      icon: CircleAvatar(
+        radius: 24,
+        backgroundColor: AssessmentPresentation.softAccent(context),
+        foregroundColor: AssessmentPresentation.onSoftAccent(context),
+        child: const Icon(Icons.support_agent_rounded),
+      ),
+      title: const Text('PACC support is available'),
+      content: const Text(
+        'Your saved result suggests that speaking with a counselor may be helpful. You can continue to PACC whenever you feel ready.',
+      ),
+      actions: [
+        TextButton(
+          style: AssessmentPresentation.textButtonStyle(context),
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Not now'),
+        ),
+        FilledButton(
+          style: AssessmentPresentation.filledButtonStyle(context),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Continue to PACC'),
+        ),
+      ],
+    );
+  }
+}
+
 class _StudentV4ProfileView extends StatelessWidget {
   const _StudentV4ProfileView({required this.payload});
 
@@ -406,7 +471,6 @@ class _StudentV4ProfileView extends StatelessWidget {
     final result = _map(payload['result']);
     final interpretation = _map(payload['interpretation']);
     final instrument = _map(payload['instrument']);
-    final quality = _map(result['responseQuality']);
     final domainSummaries = _maps(interpretation['domainSummaries']);
     final focus = _strings(interpretation['focusInsights']);
     final strengths = _strings(interpretation['strengthInsights']);
@@ -425,20 +489,13 @@ class _StudentV4ProfileView extends StatelessWidget {
     final disclaimer =
         _v4NonEmptyText(interpretation['disclaimer']) ??
         'This is a non-clinical well-being reflection, not a diagnosis.';
-    final instrumentVersion =
-        _v4NonEmptyText(instrument['version']) ?? 'Not recorded';
-    final algorithmVersion =
-        _v4NonEmptyText(instrument['algorithmVersion']) ??
-        _v4NonEmptyText(payload['algorithmVersion']) ??
-        'Not recorded';
-    final referenceSetVersion =
-        _v4NonEmptyText(instrument['referenceSetVersion']) ?? 'Not recorded';
-    final schemaVersion =
-        _v4NonEmptyText(payload['schemaVersion']) ?? 'Not recorded';
     return Scaffold(
       backgroundColor: QuickAssessmentPalette.background,
       appBar: AppBar(
         title: const Text('Your Full Well-Being Assessment Result'),
+        backgroundColor: AssessmentPresentation.softAccent(context),
+        foregroundColor: AssessmentPresentation.onSoftAccent(context),
+        surfaceTintColor: Colors.transparent,
       ),
       body: SafeArea(
         child: ListView(
@@ -471,17 +528,35 @@ class _StudentV4ProfileView extends StatelessWidget {
             const SizedBox(height: 12),
             _V4InfoCard(
               title: 'What Your Responses Suggest Overall',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    overallResponseSummary,
-                    style: const TextStyle(height: 1.5),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(_v4ResponseQualityDetail(quality)),
-                ],
+              child: Text(
+                overallResponseSummary,
+                style: const TextStyle(height: 1.5),
               ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'Strengths & Focus Areas',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            _V4InfoCard(
+              title: 'Strengths',
+              child: strengths.isNotEmpty
+                  ? _V4Bullets(values: strengths)
+                  : const Text(
+                      'No specific strengths were included with this saved result.',
+                    ),
+            ),
+            const SizedBox(height: 12),
+            _V4InfoCard(
+              title: 'Focus Areas',
+              child: focus.isNotEmpty
+                  ? _V4Bullets(values: focus)
+                  : const Text(
+                      'No specific areas to explore were included with this saved result.',
+                    ),
             ),
             const SizedBox(height: 18),
             Text(
@@ -507,24 +582,6 @@ class _StudentV4ProfileView extends StatelessWidget {
               ),
             const SizedBox(height: 12),
             _V4InfoCard(
-              title: 'Strengths',
-              child: strengths.isNotEmpty
-                  ? _V4Bullets(values: strengths)
-                  : const Text(
-                      'No specific strengths were included with this saved result.',
-                    ),
-            ),
-            const SizedBox(height: 12),
-            _V4InfoCard(
-              title: 'Areas to Explore',
-              child: focus.isNotEmpty
-                  ? _V4Bullets(values: focus)
-                  : const Text(
-                      'No specific areas to explore were included with this saved result.',
-                    ),
-            ),
-            const SizedBox(height: 12),
-            _V4InfoCard(
               title: 'Suggested Next Steps',
               child: actions.isNotEmpty
                   ? _V4Bullets(values: actions)
@@ -544,42 +601,6 @@ class _StudentV4ProfileView extends StatelessWidget {
               itemSnapshot: _maps(payload['itemSnapshot']),
               responses: _maps(payload['responses']),
               domainSummaries: domainSummaries,
-            ),
-            const SizedBox(height: 12),
-            _V4InfoCard(
-              title: 'Response Completeness',
-              child: Text(
-                _v4CompletenessCopy(quality),
-                style: const TextStyle(height: 1.45),
-              ),
-            ),
-            const SizedBox(height: 12),
-            _V4TransparencySection(
-              title: 'How This Result Was Created',
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'This V4 assessment includes 50 questions across five well-being areas. It asks about the past seven days using a four-point agreement scale.',
-                    style: TextStyle(height: 1.45),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'The server calculated this result deterministically from your saved responses.',
-                    style: TextStyle(height: 1.45),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Generative AI does not determine this Full Assessment result.',
-                    style: TextStyle(height: 1.45),
-                  ),
-                  const SizedBox(height: 10),
-                  Text('Instrument version: $instrumentVersion'),
-                  Text('Algorithm version: $algorithmVersion'),
-                  Text('Record format: $schemaVersion'),
-                  Text('Reference set: $referenceSetVersion'),
-                ],
-              ),
             ),
             const SizedBox(height: 12),
             const _V4TransparencySection(
@@ -620,6 +641,7 @@ class _StudentV4ProfileView extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             OutlinedButton.icon(
+              style: AssessmentPresentation.outlinedButtonStyle(context),
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) =>
@@ -631,6 +653,7 @@ class _StudentV4ProfileView extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             FilledButton(
+              style: AssessmentPresentation.filledButtonStyle(context),
               onPressed: () => Navigator.of(
                 context,
               ).pushNamedAndRemoveUntil(RouteNames.home, (route) => false),
@@ -678,15 +701,36 @@ class _V4DomainReflectionCard extends StatelessWidget {
     final summary =
         _v4NonEmptyText(domain['summary']) ??
         'This area is available for reflection based on your saved responses.';
-    return _V4InfoCard(
-      title: title,
-      trailing: _v4DomainLabel(domain['status']?.toString()),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return AssessmentSurfaceCard(
+      padding: EdgeInsets.zero,
+      child: ExpansionTile(
+        key: ValueKey('v4-domain-${domain['domainId']}'),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AssessmentStatusPill(
+                label: _v4DomainLabel(domain['status']?.toString()),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                summary,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AssessmentPresentation.muted(context),
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
         children: [
-          Text(summary, style: const TextStyle(height: 1.45)),
           if (hasDetails) ...[
-            const SizedBox(height: 12),
             if (focus != null)
               _V4DomainDetail(label: 'What to notice', value: focus),
             if (strength != null)
@@ -696,14 +740,11 @@ class _V4DomainReflectionCard extends StatelessWidget {
             if (prompt != null)
               _V4DomainDetail(label: 'Reflection prompt', value: prompt),
           ] else
-            const Padding(
-              padding: EdgeInsets.only(top: 10),
-              child: Text(
-                'Detailed reflections were not included with this earlier saved result.',
-                style: TextStyle(
-                  color: _ResultPalette.secondaryText,
-                  height: 1.4,
-                ),
+            Text(
+              'Detailed reflections were not included with this earlier saved result.',
+              style: TextStyle(
+                color: AssessmentPresentation.muted(context),
+                height: 1.4,
               ),
             ),
         ],
@@ -733,52 +774,29 @@ class _V4DomainDetail extends StatelessWidget {
 }
 
 class _V4InfoCard extends StatelessWidget {
-  const _V4InfoCard({required this.title, required this.child, this.trailing});
+  const _V4InfoCard({required this.title, required this.child});
 
   final String title;
   final Widget child;
-  final String? trailing;
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
+  Widget build(BuildContext context) => AssessmentSurfaceCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
-              if (trailing != null) _V4StatusChip(label: trailing!),
-            ],
-          ),
-          const SizedBox(height: 8),
-          child,
-        ],
-      ),
-    ),
-  );
-}
-
-class _V4StatusChip extends StatelessWidget {
-  const _V4StatusChip({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-    decoration: BoxDecoration(
-      color: QuickAssessmentPalette.selectedFill,
-      borderRadius: BorderRadius.circular(999),
-    ),
-    child: Text(
-      label,
-      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        child,
+      ],
     ),
   );
 }
@@ -848,12 +866,6 @@ String _v4DomainTitle(String? value) => switch (value) {
   ),
   _ => 'Well-being area',
 };
-String _v4ConfidenceLabel(String? value) => switch (value) {
-  'high' => 'High confidence',
-  'usableWithCaution' => 'Usable with caution',
-  _ => 'Limited responses',
-};
-
 String _v4AssessmentLabel(
   String? populationRole,
   Map<String, dynamic> instrument,
@@ -880,32 +892,6 @@ String _v4CompletedLabel(Object? value) {
   final date = completedAt.toLocal();
   return 'Completed ${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 }
-
-String _v4CompletenessCopy(Map<String, dynamic> quality) {
-  final answered = _v4Int(quality['answered']);
-  final presented = _v4Int(quality['presented']);
-  if (answered == null || presented == null || presented <= 0) {
-    return 'More responses are needed for a complete result.';
-  }
-  final confidence = _v4ConfidenceLabel(quality['confidence']?.toString());
-  return '$answered of $presented answered. $confidence. Skipped questions are excluded.';
-}
-
-String _v4ResponseQualityDetail(Map<String, dynamic> quality) {
-  final answered = _v4Int(quality['answered']);
-  final presented = _v4Int(quality['presented']);
-  if (answered == null || presented == null || presented <= 0) {
-    return 'Response completeness details are unavailable for this saved result.';
-  }
-  return _v4CompletenessCopy(quality);
-}
-
-int? _v4Int(Object? value) => switch (value) {
-  int current => current,
-  num current => current.toInt(),
-  String current => int.tryParse(current),
-  _ => null,
-};
 
 class _Hero extends StatelessWidget {
   const _Hero({required this.result});

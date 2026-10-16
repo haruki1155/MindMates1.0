@@ -2,9 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../providers/assessment_provider.dart';
+import '../../../providers/auth_provider.dart';
 import '../../../routes/route_names.dart';
 import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
 import '../models/student_assessment_models.dart';
+import 'assessment_domain_review_screen.dart';
+import 'assessment_submission_review_screen.dart';
+import 'intervention_breathing_screen.dart';
+import 'intervention_feedback_screen.dart';
+import 'intervention_grounding_screen.dart';
+import 'intervention_walking_screen.dart';
+import '../models/intervention_models.dart';
+import '../widgets/domain_preview_loading_view.dart';
 
 /// Main assessment screen: presents one question at a time with a clear
 /// progress header, a focused question card, and a secure footer.
@@ -22,8 +31,99 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<AssessmentProvider>().startStudentAssessment();
+      String? userId;
+      try {
+        userId = context.read<AuthProvider>().authenticatedUserId;
+      } on ProviderNotFoundException {
+        // Assessment entry is authentication-bound. Isolated widget tests may
+        // provide pre-initialized AssessmentProvider state, but must not cause
+        // this screen to create an unauthenticated session.
+        return;
+      }
+      context.read<AssessmentProvider>().ensureStudentAssessmentStarted(
+        userId: userId,
+      );
     });
+  }
+
+  Future<void> _presentPostAnswerFlow(AssessmentProvider provider) async {
+    if (provider.flowStage == AssessmentFlowStage.domainReview ||
+        provider.flowStage == AssessmentFlowStage.recoverableError) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => AssessmentDomainReviewScreen(
+            preview: provider.domainPreview,
+            error: provider.domainPreviewError,
+            onRetry: () => provider.retryDomainPreview(),
+            previewAfterRetry: () => provider.domainPreview,
+            errorAfterRetry: () => provider.domainPreviewError,
+            onBack: provider.returnToAnsweringFromDomainReview,
+            intervention: provider.pendingIntervention,
+            onTryActivity: () async {
+              final attempt = provider.beginInterventionAttempt();
+              final outcome = await Navigator.of(context)
+                  .push<InterventionOutcome>(
+                    MaterialPageRoute(
+                      builder: (_) => switch (provider.pendingIntervention!) {
+                        InterventionType.breathing =>
+                          const InterventionBreathingScreen(),
+                        InterventionType.grounding =>
+                          const InterventionGroundingScreen(),
+                        InterventionType.walking =>
+                          const InterventionWalkingScreen(),
+                        InterventionType.appointment =>
+                          const InterventionGroundingScreen(),
+                      },
+                    ),
+                  );
+              if (!mounted) return;
+              final resolved = outcome ?? InterventionOutcome.cancelled;
+              if (resolved == InterventionOutcome.completed) {
+                final feedback = await Navigator.of(context)
+                    .push<InterventionFeedback>(
+                      MaterialPageRoute(
+                        builder: (_) => const InterventionFeedbackScreen(),
+                      ),
+                    );
+                if (!mounted) return;
+                if (feedback != null) {
+                  provider.recordInterventionFeedback(attempt, feedback);
+                }
+              }
+              provider.handleInterventionOutcome(attempt, resolved);
+              if (provider.flowStage != AssessmentFlowStage.domainReview &&
+                  context.mounted) {
+                Navigator.of(context).pop();
+              }
+            },
+            onContinue: () {
+              provider.continueAfterDomainReview();
+              Navigator.of(context).pop();
+            },
+          ),
+        ),
+      );
+    }
+    if (!mounted) return;
+    if (provider.flowStage == AssessmentFlowStage.submissionReview) {
+      final confirmed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => const AssessmentSubmissionReviewScreen(),
+        ),
+      );
+      if (!mounted) return;
+      if (confirmed == true) {
+        provider.confirmV4Submission();
+      } else {
+        provider.returnToAnsweringFromSubmissionReview();
+        return;
+      }
+    }
+    if (provider.flowStage == AssessmentFlowStage.submitting && mounted) {
+      Navigator.of(
+        context,
+      ).pushReplacementNamed(RouteNames.studentAssessmentComplete);
+    }
   }
 
   @override
@@ -37,6 +137,26 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
             body: Center(
               child: CircularProgressIndicator(color: _StudentPalette.primary),
             ),
+          );
+        }
+        if (provider.flowStage == AssessmentFlowStage.previewLoading) {
+          final domains = provider.studentQuestions
+              .map((item) => item.v4DomainId)
+              .whereType<String>()
+              .toSet()
+              .toList(growable: false);
+          final pendingDomain = provider.pendingDomainId;
+          final domainQuestions = provider.studentQuestions
+              .where((item) => item.v4DomainId == pendingDomain)
+              .toList(growable: false);
+          return DomainPreviewLoadingView(
+            domainLabel: domainQuestions.isEmpty
+                ? 'this area'
+                : _questionDomainLabel(domainQuestions.first),
+            domainNumber: pendingDomain == null
+                ? 1
+                : domains.indexOf(pendingDomain) + 1,
+            domainCount: domains.length,
           );
         }
         final domainProgress = _domainProgressFor(
@@ -82,14 +202,10 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
                       question: question,
                       selectedAnswer: provider.currentStudentAnswer,
                       canGoBack: provider.canGoBackStudentQuestion,
-                      onAnswer: (answer) {
-                        final wasLast = provider.isLastStudentQuestion;
-                        provider.answerCurrentStudentQuestion(answer);
-                        if (wasLast && context.mounted) {
-                          Navigator.of(context).pushReplacementNamed(
-                            RouteNames.studentAssessmentComplete,
-                          );
-                        }
+                      onAnswer: (answer) async {
+                        await provider.answerCurrentStudentQuestion(answer);
+                        if (!context.mounted) return;
+                        await _presentPostAnswerFlow(provider);
                       },
                       onBack: provider.goBackStudentQuestion,
                     ),

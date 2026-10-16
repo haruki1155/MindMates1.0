@@ -11,6 +11,8 @@ export {
   submitQuickAssessmentDev,
   submitFullAssessment,
   submitFullAssessmentDev,
+  previewAssessmentDomain,
+  previewAssessmentDomainDev,
 } from "./assessment/submissions";
 export {
   provisionAppUserProfile,

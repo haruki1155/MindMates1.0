@@ -10,6 +10,19 @@ import '../features/student_assessment/data/workplace_assessment_v4_questions.da
 import '../features/student_assessment/models/student_assessment_models.dart';
 import '../features/student_assessment/services/student_assessment_calculator.dart';
 import '../repositories/assessment_repository.dart';
+import '../features/student_assessment/models/intervention_models.dart';
+import '../features/student_assessment/services/intervention_rotation_policy.dart';
+
+enum AssessmentFlowStage {
+  answering,
+  previewLoading,
+  domainReview,
+  interventionActive,
+  submissionReview,
+  resuming,
+  submitting,
+  recoverableError,
+}
 
 class AssessmentProvider extends ChangeNotifier {
   AssessmentProvider(this._repository);
@@ -26,7 +39,27 @@ class AssessmentProvider extends ChangeNotifier {
   final List<StudentAssessmentAnswer> _studentAnswers = [];
   StudentAssessmentResult? _studentResult;
   String? _v4SubmissionId;
+  Map<String, Object>? _savedV4Payload;
   bool _isSavingQuickAssessment = false;
+  AssessmentFlowStage _flowStage = AssessmentFlowStage.answering;
+  Map<String, Object>? _domainPreview;
+  Object? _domainPreviewError;
+  String? _pendingDomainId;
+  int _previewGeneration = 0;
+  bool _isRecordingStudentAnswer = false;
+  bool _isSavingStudentAssessment = false;
+  InterventionRotationPolicy _interventionRotation =
+      InterventionRotationPolicy();
+  InterventionType? _pendingIntervention;
+  int _interventionAttempt = 0;
+  final Map<int, InterventionFeedback> _interventionFeedback = {};
+  final Map<String, Map<String, Object>> _domainPreviews = {};
+  final Set<String> _v4AppointmentPromptedSubmissionIds = {};
+  final Set<String> _quickAppointmentPromptedResultIds = {};
+  String? _authenticatedUserId;
+  String? _assessmentSessionOwnerId;
+  int _sessionGeneration = 0;
+  bool _isBoundToAuthentication = false;
 
   AssessmentRole? get selectedRole => _selectedRole;
   String get name => _name;
@@ -38,6 +71,79 @@ class AssessmentProvider extends ChangeNotifier {
       List.unmodifiable(_studentAnswers);
   StudentAssessmentResult? get studentResult => _studentResult;
   bool get isSavingQuickAssessment => _isSavingQuickAssessment;
+  AssessmentFlowStage get flowStage => _flowStage;
+  Map<String, Object>? get domainPreview => _domainPreview;
+  Object? get domainPreviewError => _domainPreviewError;
+  String? get pendingDomainId => _pendingDomainId;
+  String? get v4SubmissionId => _v4SubmissionId;
+  bool get isSavingStudentAssessment => _isSavingStudentAssessment;
+  InterventionType? get pendingIntervention => _pendingIntervention;
+  Map<String, Map<String, Object>> get domainPreviews =>
+      Map.unmodifiable(_domainPreviews);
+  Map<int, InterventionFeedback> get interventionFeedback =>
+      Map.unmodifiable(_interventionFeedback);
+  String? get assessmentSessionOwnerId => _assessmentSessionOwnerId;
+
+  /// Binds volatile assessment state to the live Firebase Auth identity.
+  /// A UID transition (including sign-out) invalidates every account-scoped
+  /// response, preview, submission ID, prompt guard, and async continuation.
+  void bindAuthenticatedUser(String? userId) {
+    final normalized = userId?.trim();
+    final next = normalized == null || normalized.isEmpty ? null : normalized;
+    if (_isBoundToAuthentication && _authenticatedUserId == next) return;
+    _isBoundToAuthentication = true;
+    _authenticatedUserId = next;
+    _clearAccountScopedState();
+    notifyListeners();
+  }
+
+  bool _ownsSession(String userId) {
+    final normalized = userId.trim();
+    if (normalized.isEmpty) return false;
+    // Unit tests can exercise provider behavior without a Firebase binding.
+    if (!_isBoundToAuthentication &&
+        _authenticatedUserId == null &&
+        _assessmentSessionOwnerId == null) {
+      return true;
+    }
+    return _authenticatedUserId == normalized &&
+        _assessmentSessionOwnerId == normalized;
+  }
+
+  bool _isCurrentSession(int generation, String? owner) =>
+      generation == _sessionGeneration && owner == _assessmentSessionOwnerId;
+
+  void _clearAccountScopedState() {
+    _sessionGeneration += 1;
+    _selectedRole = null;
+    _name = '';
+    _currentQuestionIndex = 0;
+    _selectedOptions.clear();
+    _quickResult = null;
+    _isSavingQuickAssessment = false;
+    _quickAppointmentPromptedResultIds.clear();
+    _studentQuestionIndex = 0;
+    _studentQuestions = const [];
+    _studentAnswers.clear();
+    _studentResult = null;
+    _v4SubmissionId = null;
+    _savedV4Payload = null;
+    _flowStage = AssessmentFlowStage.answering;
+    _domainPreview = null;
+    _domainPreviewError = null;
+    _pendingDomainId = null;
+    _previewGeneration += 1;
+    _isRecordingStudentAnswer = false;
+    _isSavingStudentAssessment = false;
+    _interventionRotation = InterventionRotationPolicy();
+    _pendingIntervention = null;
+    _interventionAttempt += 1;
+    _interventionFeedback.clear();
+    _domainPreviews.clear();
+    _v4AppointmentPromptedSubmissionIds.clear();
+    _assessmentSessionOwnerId = null;
+  }
+
   bool get isStudentAssessmentV4 =>
       AppEnvironmentConfig.isStaging &&
       activeAssessmentUserType == AssessmentUserType.student;
@@ -166,6 +272,7 @@ class AssessmentProvider extends ChangeNotifier {
     _currentQuestionIndex = 0;
     _selectedOptions.clear();
     _quickResult = null;
+    _quickAppointmentPromptedResultIds.clear();
     notifyListeners();
   }
 
@@ -231,18 +338,27 @@ class AssessmentProvider extends ChangeNotifier {
 
   Future<Map<String, Object>?> saveQuickAssessmentForUser(String userId) async {
     final result = _quickResult;
-    if (result == null || _isSavingQuickAssessment) return null;
+    if (result == null ||
+        _isSavingQuickAssessment ||
+        (_authenticatedUserId != null && _authenticatedUserId != userId)) {
+      return null;
+    }
 
+    final generation = _sessionGeneration;
+    final owner = _assessmentSessionOwnerId;
     _isSavingQuickAssessment = true;
     notifyListeners();
     try {
-      return await _repository.saveQuickAssessment(
+      final payload = await _repository.saveQuickAssessment(
         userId: userId,
         result: result,
       );
+      return _isCurrentSession(generation, owner) ? payload : null;
     } finally {
-      _isSavingQuickAssessment = false;
-      notifyListeners();
+      if (_isCurrentSession(generation, owner)) {
+        _isSavingQuickAssessment = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -250,50 +366,142 @@ class AssessmentProvider extends ChangeNotifier {
     return _repository.ensureQuickAssessmentCompletion(userId);
   }
 
-  void startStudentAssessment() {
+  void startStudentAssessment({String? userId}) {
+    final owner = userId?.trim().isNotEmpty == true
+        ? userId!.trim()
+        : _authenticatedUserId;
+    if ((_isBoundToAuthentication && _authenticatedUserId == null) ||
+        (_authenticatedUserId != null && owner != _authenticatedUserId)) {
+      return;
+    }
+    _sessionGeneration += 1;
+    _assessmentSessionOwnerId = owner;
     _studentQuestionIndex = 0;
     _studentAnswers.clear();
     _studentResult = null;
     _v4SubmissionId = isV4FullAssessment
         ? 'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
         : null;
+    _savedV4Payload = null;
     _studentQuestions = _questionsForActiveRole()
         .where((question) => !question.isConditional)
         .toList();
+    _flowStage = AssessmentFlowStage.answering;
+    _domainPreview = null;
+    _domainPreviewError = null;
+    _pendingDomainId = null;
+    _previewGeneration += 1;
+    _interventionRotation = InterventionRotationPolicy();
+    _pendingIntervention = null;
+    _interventionFeedback.clear();
+    _domainPreviews.clear();
+    _v4AppointmentPromptedSubmissionIds.clear();
     notifyListeners();
   }
 
-  void answerCurrentStudentQuestion(
+  /// Used by the assessment screen after reconstruction. Starting a new
+  /// assessment remains explicit through [startStudentAssessment].
+  void ensureStudentAssessmentStarted({String? userId}) {
+    final owner = userId?.trim().isNotEmpty == true
+        ? userId!.trim()
+        : _authenticatedUserId;
+    if ((_isBoundToAuthentication && _authenticatedUserId == null) ||
+        (_authenticatedUserId != null && owner != _authenticatedUserId)) {
+      return;
+    }
+    if (hasStudentAssessmentStarted && _assessmentSessionOwnerId == owner) {
+      return;
+    }
+    startStudentAssessment(userId: owner);
+  }
+
+  Future<void> answerCurrentStudentQuestion(
     LikertAnswer answer, {
     bool isSkipped = false,
-  }) {
+  }) async {
+    if (_isRecordingStudentAnswer ||
+        _flowStage != AssessmentFlowStage.answering) {
+      return;
+    }
     final question = currentStudentQuestion;
     if (question == null) return;
+    _isRecordingStudentAnswer = true;
+    final generation = _sessionGeneration;
+    final owner = _assessmentSessionOwnerId;
 
-    _studentAnswers.removeWhere(
-      (existing) => existing.questionId == question.id,
-    );
-    _studentAnswers.add(
-      StudentAssessmentAnswer(
-        questionId: question.id,
-        answer: answer,
-        isSkipped: isSkipped,
-      ),
-    );
+    try {
+      _studentAnswers.removeWhere(
+        (existing) => existing.questionId == question.id,
+      );
+      _studentAnswers.add(
+        StudentAssessmentAnswer(
+          questionId: question.id,
+          answer: answer,
+          isSkipped: isSkipped,
+        ),
+      );
+      _invalidatePreviewFor(question.v4DomainId);
 
-    if (isLastStudentQuestion) {
-      if (!isV4FullAssessment) {
+      if (isV4FullAssessment &&
+          question.v4DomainId != null &&
+          _isDomainComplete(question.v4DomainId!)) {
+        _pendingDomainId = question.v4DomainId;
+        await _requestPendingDomainPreview(
+          expectedSessionGeneration: generation,
+          expectedOwner: owner,
+        );
+        return;
+      }
+
+      if (isLastStudentQuestion) {
         _studentResult = StudentAssessmentCalculator.calculate(
           questions: _studentQuestions,
           answers: _studentAnswers,
           userType: activeAssessmentUserType,
         );
+        notifyListeners();
+        return;
       }
+
+      _studentQuestionIndex += 1;
       notifyListeners();
+    } finally {
+      if (_isCurrentSession(generation, owner)) {
+        _isRecordingStudentAnswer = false;
+      }
+    }
+  }
+
+  Future<void> retryDomainPreview() => _requestPendingDomainPreview(
+    expectedSessionGeneration: _sessionGeneration,
+    expectedOwner: _assessmentSessionOwnerId,
+  );
+
+  void continueAfterDomainReview() {
+    if (_flowStage != AssessmentFlowStage.domainReview &&
+        _flowStage != AssessmentFlowStage.recoverableError) {
       return;
     }
+    _flowStage = AssessmentFlowStage.resuming;
+    _domainPreviewError = null;
+    _pendingDomainId = null;
+    if (isLastStudentQuestion) {
+      _flowStage = isV4FullAssessment
+          ? AssessmentFlowStage.submissionReview
+          : AssessmentFlowStage.submitting;
+    } else {
+      _studentQuestionIndex += 1;
+      _flowStage = AssessmentFlowStage.answering;
+    }
+    notifyListeners();
+  }
 
-    _studentQuestionIndex += 1;
+  void returnToAnsweringFromDomainReview() {
+    if (_flowStage != AssessmentFlowStage.domainReview &&
+        _flowStage != AssessmentFlowStage.recoverableError) {
+      return;
+    }
+    _flowStage = AssessmentFlowStage.answering;
     notifyListeners();
   }
 
@@ -301,28 +509,187 @@ class AssessmentProvider extends ChangeNotifier {
     if (!canGoBackStudentQuestion) return;
     _studentResult = null;
     _studentQuestionIndex -= 1;
+    _flowStage = AssessmentFlowStage.answering;
     notifyListeners();
   }
 
-  Future<Map<String, Object>?> saveStudentAssessmentForUser(String userId) {
-    if (isV4FullAssessment) {
-      return _repository.saveV4FullAssessment(
-        userId: userId,
-        instrumentVersion: _v4InstrumentVersion,
-        answers: _studentAnswers,
-        submissionId:
-            _v4SubmissionId ??
-            'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
-      );
+  Future<Map<String, Object>?> saveStudentAssessmentForUser(
+    String userId,
+  ) async {
+    if (_isSavingStudentAssessment || !_ownsSession(userId)) return null;
+    if (isV4FullAssessment && _savedV4Payload != null) {
+      return _savedV4Payload;
     }
-    final result = _studentResult;
-    if (result == null) return Future.value();
+    final generation = _sessionGeneration;
+    final owner = _assessmentSessionOwnerId;
+    _isSavingStudentAssessment = true;
+    try {
+      if (isV4FullAssessment) {
+        final payload = await _repository.saveV4FullAssessment(
+          userId: userId,
+          instrumentVersion: _v4InstrumentVersion,
+          answers: _studentAnswers,
+          submissionId:
+              _v4SubmissionId ??
+              'v4_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}',
+        );
+        if (!_isCurrentSession(generation, owner)) return null;
+        _savedV4Payload = payload;
+        return payload;
+      }
+      final result = _studentResult;
+      if (result == null) return null;
 
-    return _repository.saveStudentAssessment(
-      userId: userId,
-      result: result,
-      answers: _studentAnswers,
-    );
+      final payload = await _repository.saveStudentAssessment(
+        userId: userId,
+        result: result,
+        answers: _studentAnswers,
+      );
+      return _isCurrentSession(generation, owner) ? payload : null;
+    } finally {
+      if (_isCurrentSession(generation, owner)) {
+        _isSavingStudentAssessment = false;
+      }
+    }
+  }
+
+  bool _isDomainComplete(String domainId) {
+    final questions = _studentQuestions
+        .where((question) => question.v4DomainId == domainId)
+        .toList();
+    return questions.length == 10 &&
+        questions.every(
+          (question) =>
+              _studentAnswers.any((answer) => answer.questionId == question.id),
+        );
+  }
+
+  List<StudentAssessmentAnswer> _answersForDomain(String domainId) => [
+    for (final question in _studentQuestions)
+      if (question.v4DomainId == domainId)
+        _studentAnswers.firstWhere(
+          (answer) => answer.questionId == question.id,
+        ),
+  ];
+
+  Future<void> _requestPendingDomainPreview({
+    required int expectedSessionGeneration,
+    required String? expectedOwner,
+  }) async {
+    if (!_isCurrentSession(expectedSessionGeneration, expectedOwner)) return;
+    final domainId = _pendingDomainId;
+    if (!isV4FullAssessment ||
+        domainId == null ||
+        _flowStage == AssessmentFlowStage.previewLoading) {
+      return;
+    }
+    final generation = ++_previewGeneration;
+    _flowStage = AssessmentFlowStage.previewLoading;
+    _domainPreview = null;
+    _domainPreviewError = null;
+    notifyListeners();
+    try {
+      final preview = await _repository.previewV4AssessmentDomain(
+        instrumentVersion: _v4InstrumentVersion,
+        domainId: domainId,
+        answers: _answersForDomain(domainId),
+      );
+      if (!_isCurrentSession(expectedSessionGeneration, expectedOwner) ||
+          generation != _previewGeneration ||
+          _pendingDomainId != domainId) {
+        return;
+      }
+      _domainPreview = preview;
+      _domainPreviews[domainId] = preview;
+      _pendingIntervention = preview['interventionEligible'] == true
+          ? _interventionRotation.select(domainId)
+          : null;
+      if (_pendingIntervention == null) {
+        _domainPreview = null;
+        _pendingDomainId = null;
+        if (isLastStudentQuestion) {
+          _flowStage = AssessmentFlowStage.submissionReview;
+        } else {
+          _studentQuestionIndex += 1;
+          _flowStage = AssessmentFlowStage.answering;
+        }
+      } else {
+        _flowStage = AssessmentFlowStage.domainReview;
+      }
+    } catch (error) {
+      if (!_isCurrentSession(expectedSessionGeneration, expectedOwner) ||
+          generation != _previewGeneration ||
+          _pendingDomainId != domainId) {
+        return;
+      }
+      _domainPreviewError = error;
+      _flowStage = AssessmentFlowStage.recoverableError;
+    }
+    notifyListeners();
+  }
+
+  int beginInterventionAttempt() {
+    if (_flowStage != AssessmentFlowStage.domainReview ||
+        _pendingIntervention == null) {
+      return 0;
+    }
+    _flowStage = AssessmentFlowStage.interventionActive;
+    _interventionAttempt += 1;
+    notifyListeners();
+    return _interventionAttempt;
+  }
+
+  void handleInterventionOutcome(int attempt, InterventionOutcome outcome) {
+    if (attempt == 0 ||
+        attempt != _interventionAttempt ||
+        _flowStage != AssessmentFlowStage.interventionActive) {
+      return;
+    }
+    if (outcome == InterventionOutcome.cancelled ||
+        outcome == InterventionOutcome.failed) {
+      _flowStage = AssessmentFlowStage.domainReview;
+      notifyListeners();
+      return;
+    }
+    _flowStage = AssessmentFlowStage.domainReview;
+    continueAfterDomainReview();
+  }
+
+  void recordInterventionFeedback(int attempt, InterventionFeedback feedback) {
+    if (attempt == 0 || attempt != _interventionAttempt) return;
+    _interventionFeedback.putIfAbsent(attempt, () => feedback);
+    notifyListeners();
+  }
+
+  void confirmV4Submission() {
+    if (_flowStage != AssessmentFlowStage.submissionReview) return;
+    _flowStage = AssessmentFlowStage.submitting;
+    notifyListeners();
+  }
+
+  void returnToAnsweringFromSubmissionReview() {
+    if (_flowStage != AssessmentFlowStage.submissionReview) return;
+    _flowStage = AssessmentFlowStage.answering;
+    notifyListeners();
+  }
+
+  /// Returns true once per in-progress V4 submission so result-screen rebuilds
+  /// cannot show the PACC offer repeatedly.
+  bool claimV4AppointmentPrompt(String submissionId) =>
+      _v4AppointmentPromptedSubmissionIds.add(submissionId);
+
+  /// Returns true once for each completed Quick Assessment result in the
+  /// current assessment session.
+  bool claimQuickAppointmentPrompt(String resultId) =>
+      _quickAppointmentPromptedResultIds.add(resultId);
+
+  void _invalidatePreviewFor(String? domainId) {
+    if (domainId == null || _pendingDomainId != domainId) return;
+    _previewGeneration += 1;
+    _domainPreview = null;
+    _domainPreviewError = null;
+    _pendingDomainId = null;
+    _flowStage = AssessmentFlowStage.answering;
   }
 
   Future<void> saveAssessmentClarityFeedback(String clarity) {

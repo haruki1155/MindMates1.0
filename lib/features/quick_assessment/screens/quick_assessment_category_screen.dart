@@ -9,6 +9,7 @@ import '../../../routes/route_names.dart';
 import '../../counseling/screens/pacc_counseling_screen.dart';
 import '../../student_assessment/models/assessment_interpretation_models.dart';
 import '../models/quick_assessment_models.dart';
+import '../services/quick_assessment_action_policy.dart';
 import '../widgets/quick_assessment_widgets.dart';
 
 class QuickAssessmentCategoryScreen extends StatefulWidget {
@@ -21,11 +22,28 @@ class QuickAssessmentCategoryScreen extends StatefulWidget {
 
 class _QuickAssessmentCategoryScreenState
     extends State<QuickAssessmentCategoryScreen> {
-  bool _promptRequested = false;
+  AssessmentProvider? _assessmentProvider;
+  String? _promptedResultKey;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final provider = context.read<AssessmentProvider>();
+    if (identical(_assessmentProvider, provider)) return;
+    _assessmentProvider?.removeListener(_queueAppointmentPrompt);
+    _assessmentProvider = provider;
+    provider.addListener(_queueAppointmentPrompt);
+    _queueAppointmentPrompt();
+  }
+
+  @override
+  void dispose() {
+    _assessmentProvider?.removeListener(_queueAppointmentPrompt);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    _requestAppointmentDecision();
     return Consumer<AssessmentProvider>(
       builder: (context, provider, _) {
         final role = provider.selectedRole ?? AssessmentRole.student;
@@ -60,32 +78,38 @@ class _QuickAssessmentCategoryScreenState
     );
   }
 
-  void _requestAppointmentDecision() {
-    if (_promptRequested ||
-        context.read<AssessmentProvider>().quickResult == null) {
+  void _queueAppointmentPrompt() {
+    final result = _assessmentProvider?.quickResult;
+    if (result == null ||
+        !QuickAssessmentActionPolicy.forLevel(
+          result.overallLevel,
+        ).promptsForAppointment) {
       return;
     }
-    _promptRequested = true;
+    final resultKey =
+        '${result.createdAt.toUtc().toIso8601String()}:${result.overallLevel.name}';
+    if (_promptedResultKey == resultKey) return;
+    _promptedResultKey = resultKey;
+    if (!_assessmentProvider!.claimQuickAppointmentPrompt(resultKey)) return;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      final result = context.read<AssessmentProvider>().quickResult;
       final wantsAppointment = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => AlertDialog(
           icon: const Icon(Icons.calendar_month_outlined, size: 34),
-          title: const Text('Set an appointment?'),
+          title: const Text('Would you like to talk with a PACC counselor?'),
           content: const Text(
-            'Do you want to set an appointment with PACC to discuss your well-being result?',
+            'Your quick check-in suggests that additional support may be helpful. Would you like to request a confidential counseling appointment with PACC?',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('No'),
+              child: const Text('No, Continue'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Yes'),
+              child: const Text('Yes, Book Appointment'),
             ),
           ],
         ),
@@ -93,10 +117,7 @@ class _QuickAssessmentCategoryScreenState
       if (!mounted || wantsAppointment != true) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => PaccCounselingScreen(
-            startBooking: true,
-            initialConcern: result?.interpretation.userSummary ?? '',
-          ),
+          builder: (_) => const PaccCounselingScreen(startBooking: true),
         ),
       );
     });
@@ -122,6 +143,11 @@ class _DecisionContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final actionPolicy = provider.quickResult == null
+        ? null
+        : QuickAssessmentActionPolicy.forLevel(
+            provider.quickResult!.overallLevel,
+          );
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
       decoration: BoxDecoration(
@@ -252,8 +278,8 @@ class _DecisionContent extends StatelessWidget {
             const Divider(height: 28),
           ],
           const SizedBox(height: 20),
-          const Text(
-            'Full Assessment Optional',
+          Text(
+            actionPolicy?.heading ?? 'Full Assessment Optional',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: QuickAssessmentPalette.text,
@@ -264,7 +290,7 @@ class _DecisionContent extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            _messageFor(provider, role),
+            actionPolicy?.guidance ?? _messageFor(provider, role),
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: QuickAssessmentPalette.secondaryText,
@@ -274,48 +300,63 @@ class _DecisionContent extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 18),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: QuickAssessmentPalette.cream,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: QuickAssessmentPalette.softBorder),
-            ),
-            child: Text(
-              'You can answer the full ${role.label.toLowerCase()} assessment now for deeper insights, or skip it and take it later from your dashboard.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: QuickAssessmentPalette.mutedText,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                height: 1.36,
+          if (actionPolicy?.showsFullAssessmentAction ?? true)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: QuickAssessmentPalette.cream,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: QuickAssessmentPalette.softBorder),
+              ),
+              child: Text(
+                'You can answer the full ${role.label.toLowerCase()} assessment now for deeper insights, or take it later from your dashboard.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: QuickAssessmentPalette.mutedText,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  height: 1.36,
+                ),
               ),
             ),
-          ),
           const SizedBox(height: 26),
-          SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: ElevatedButton(
-              onPressed: () => _openFullAssessment(context),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: QuickAssessmentPalette.primary,
-                foregroundColor: QuickAssessmentPalette.text,
-                elevation: 4,
-                shadowColor: QuickAssessmentPalette.shadow,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+          if (actionPolicy?.showsFullAssessmentAction ?? true) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: ElevatedButton(
+                onPressed: () => _openFullAssessment(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: QuickAssessmentPalette.primary,
+                  foregroundColor: QuickAssessmentPalette.text,
+                  elevation: 4,
+                  shadowColor: QuickAssessmentPalette.shadow,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-                textStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
-                ),
+                child: const Text('Take Full Assessment'),
               ),
-              child: Text('Take ${role.label} Assessment'),
             ),
-          ),
-          const SizedBox(height: 12),
+            const SizedBox(height: 12),
+          ],
+          if (actionPolicy?.showsAppointmentAction ?? false) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: OutlinedButton.icon(
+                onPressed: () => _openPaccBooking(context),
+                icon: const Icon(Icons.calendar_month_outlined),
+                label: const Text('Book a PACC appointment'),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           SizedBox(
             width: double.infinity,
             height: 44,
@@ -335,7 +376,7 @@ class _DecisionContent extends StatelessWidget {
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              child: const Text('Not Now'),
+              child: const Text('Continue to Home'),
             ),
           ),
         ],
@@ -348,6 +389,14 @@ class _DecisionContent extends StatelessWidget {
     final prefix = name.isEmpty ? 'Your' : '$name, your';
 
     return '$prefix quick assessment is saved. Your ${role.label.toLowerCase()} answers will choose the right full assessment question set.';
+  }
+
+  void _openPaccBooking(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const PaccCounselingScreen(startBooking: true),
+      ),
+    );
   }
 
   Future<void> _openFullAssessment(BuildContext context) async {

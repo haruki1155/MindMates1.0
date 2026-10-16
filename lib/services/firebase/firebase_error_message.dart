@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +11,9 @@ class FirebaseErrorMessage {
   const FirebaseErrorMessage._();
 
   static String describe(Object error, {required String fallback}) {
+    if (error is TimeoutException) {
+      return 'MindMate did not respond in time. Your request may still be processing; check your connection before trying again.';
+    }
     final text = [
       error.toString(),
       if (error is FirebaseFunctionsException) error.message ?? '',

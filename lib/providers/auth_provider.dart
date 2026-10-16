@@ -19,10 +19,15 @@ enum SignupState {
 }
 
 class AuthProvider extends ChangeNotifier {
-  AuthProvider(this._repository, {this.onSessionCleared});
+  AuthProvider(
+    this._repository, {
+    this.onSessionCleared,
+    this.signOutCleanupTimeout = const Duration(seconds: 5),
+  });
 
   final AuthRepository _repository;
   final VoidCallback? onSessionCleared;
+  final Duration signOutCleanupTimeout;
 
   bool _isAuthenticated = false;
   bool _isLoading = false;
@@ -32,13 +37,17 @@ class AuthProvider extends ChangeNotifier {
   String? _pendingSignupSchoolId;
   SignupState _signupState = SignupState.idle;
   StreamSubscription<String?>? _authSubscription;
+  bool _requiresExplicitReauthentication = false;
 
   bool get isAuthenticated => _isAuthenticated;
   bool get isLoading => _isLoading;
-  String? get userId => _userId ?? _repository.currentUserId;
+  String? get userId => _requiresExplicitReauthentication
+      ? null
+      : _userId ?? _repository.currentUserId;
 
   /// The current Firebase user ID, excluding any cached provider state.
-  String? get authenticatedUserId => _repository.currentUserId;
+  String? get authenticatedUserId =>
+      _requiresExplicitReauthentication ? null : _repository.currentUserId;
   String? get currentUserEmail {
     try {
       return _repository.currentUserEmail;
@@ -132,6 +141,7 @@ class AuthProvider extends ChangeNotifier {
         _clearSession();
         return;
       }
+      if (_requiresExplicitReauthentication) return;
       if (_userId == id && _isAuthenticated) return;
       _userId = id;
       _isAuthenticated = true;
@@ -140,6 +150,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   String? hydrateCurrentUser() {
+    if (_requiresExplicitReauthentication) return null;
     final id = _repository.currentUserId;
     if (id == null || id.isEmpty) {
       _clearSession();
@@ -153,6 +164,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<String?> restoreCurrentUser() async {
+    if (_requiresExplicitReauthentication) return null;
     String? id = _repository.currentUserId;
     if (id == null) {
       try {
@@ -408,6 +420,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> signOut() async {
     await _repository.signOut();
+    _requiresExplicitReauthentication = false;
     _clearSession(notify: false);
     notifyListeners();
   }
@@ -432,6 +445,7 @@ class AuthProvider extends ChangeNotifier {
     Future<String?> Function() action, {
     bool signOutOnFailure = false,
   }) async {
+    _requiresExplicitReauthentication = false;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -446,8 +460,8 @@ class AuthProvider extends ChangeNotifier {
       _isAuthenticated = true;
       return id;
     } catch (error, stackTrace) {
-      _isAuthenticated = false;
-      _userId = null;
+      _clearSession(notify: false);
+      _requiresExplicitReauthentication = signOutOnFailure;
       FirebaseErrorMessage.log(
         error,
         stackTrace,
@@ -455,7 +469,7 @@ class AuthProvider extends ChangeNotifier {
       );
       if (signOutOnFailure) {
         try {
-          await _repository.signOut();
+          await _repository.signOut().timeout(signOutCleanupTimeout);
         } catch (signOutError, signOutStackTrace) {
           FirebaseErrorMessage.log(
             signOutError,

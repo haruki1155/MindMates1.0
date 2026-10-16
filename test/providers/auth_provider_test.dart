@@ -6,6 +6,7 @@ import 'package:mind_mates/features/quick_assessment/models/quick_assessment_mod
 import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/repositories/auth_repository.dart';
 import 'package:mind_mates/services/auth/auth_service.dart';
+import 'package:mind_mates/services/firebase/callable_request_timeout.dart';
 
 void main() {
   test(
@@ -63,6 +64,59 @@ void main() {
     expect(repository.signOutCalls, 1);
     expect(provider.isAuthenticated, isFalse);
     expect(provider.signupState, SignupState.authenticationFailed);
+  });
+
+  test('resolver timeout clears loading even when cleanup sign-out stalls',
+      () async {
+    final provider = AuthProvider(
+      _TimeoutAuthRepository(),
+      signOutCleanupTimeout: Duration.zero,
+    );
+
+    final userId = await provider.signIn(
+      schoolId: '2026-0001',
+      password: 'password',
+    );
+
+    expect(userId, isNull);
+    expect(provider.isLoading, isFalse);
+    expect(provider.isAuthenticated, isFalse);
+    expect(provider.errorMessage, contains('did not respond in time'));
+  });
+
+  test('Firebase Auth failure after resolution clears loading and session',
+      () async {
+    final repository = _FailedSignInRepository();
+    final provider = AuthProvider(repository);
+
+    final userId = await provider.signIn(
+      schoolId: '2026-0001',
+      password: 'password',
+    );
+
+    expect(userId, isNull);
+    expect(provider.isLoading, isFalse);
+    expect(provider.isAuthenticated, isFalse);
+    expect(repository.signOutCalls, 1);
+    expect(provider.errorMessage, contains('Email address or password'));
+  });
+
+  test('late auth state after a rejected sign-in stays signed out', () async {
+    final repository = _LateAuthRepository();
+    final provider = AuthProvider(repository)..monitorAuthState();
+
+    expect(
+      await provider.signIn(schoolId: '2026-0001', password: 'password'),
+      isNull,
+    );
+    repository.currentUserId = 'late_user';
+    repository.controller.add('late_user');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(provider.isAuthenticated, isFalse);
+    expect(provider.userId, isNull);
+    expect(provider.hydrateCurrentUser(), isNull);
+    await repository.controller.close();
   });
 
   test('App Check rejection has a distinct signup state', () async {
@@ -315,6 +369,65 @@ class _AuthenticationFailureRepository extends AuthRepository {
   Future<void> signOut() async {
     signOutCalls++;
   }
+}
+
+class _TimeoutAuthRepository extends AuthRepository {
+  _TimeoutAuthRepository() : super(AuthService());
+
+  @override
+  Future<firebase_auth.UserCredential> signIn({
+    required String schoolId,
+    required String password,
+  }) async => throw CallableRequestTimeoutException(
+    operation: 'school_id_resolver',
+    timeout: const Duration(seconds: 30),
+  );
+
+  @override
+  Future<void> signOut() => Completer<void>().future;
+}
+
+class _FailedSignInRepository extends AuthRepository {
+  _FailedSignInRepository() : super(AuthService());
+
+  int signOutCalls = 0;
+
+  @override
+  Future<firebase_auth.UserCredential> signIn({
+    required String schoolId,
+    required String password,
+  }) async => throw firebase_auth.FirebaseAuthException(
+    code: 'invalid-credential',
+  );
+
+  @override
+  Future<void> signOut() async {
+    signOutCalls++;
+  }
+}
+
+class _LateAuthRepository extends AuthRepository {
+  _LateAuthRepository() : super(AuthService());
+
+  final controller = StreamController<String?>();
+
+  @override
+  String? currentUserId;
+
+  @override
+  Future<firebase_auth.UserCredential> signIn({
+    required String schoolId,
+    required String password,
+  }) async => throw CallableRequestTimeoutException(
+    operation: 'firebase_auth_sign_in',
+    timeout: const Duration(seconds: 30),
+  );
+
+  @override
+  Future<void> signOut() async {}
+
+  @override
+  Stream<String?> watchAuthenticatedUserIds() => controller.stream;
 }
 
 class _ProfileLookupFailureRepository extends AuthRepository {

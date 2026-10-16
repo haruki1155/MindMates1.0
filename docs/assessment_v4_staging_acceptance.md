@@ -76,3 +76,39 @@ Production promotion: **NOT PERFORMED**.
 This is a technical staging acceptance record. Local/pilot instrument
 validation remains a separate product and psychometric gate before any
 production promotion.
+
+## Phase 8.1 local milestone and TECNO UX acceptance
+
+Validated local checkpoint: `193d1eae7fd257d343114d223cc50bac14462f1b`
+(`assessment-v4-phase8.1-local-193d1e`). This is a local milestone tag only;
+it has not been pushed, merged, or deployed.
+
+The complete staging Flutter regression run passed **552 tests**. The focused
+TECNO CN5 staging build check confirmed the authenticated Student V4 path:
+
+- the preview-loading view appears while a completed category is reviewed,
+  rather than authorizing or saving a final submission;
+- non-eligible category previews advance to the following category;
+- eligible Social Adjustment and Emotional Well-Being previews show the
+  optional activity decision, and declining safely continues the Assessment;
+- the final review displays 50/50 answers, five completed categories, a
+  collapsed **About this assessment** disclosure, and a distinct explicit
+  **Submit assessment** action.
+
+No final submission was selected during this acceptance check. The TECNO
+device currently retains its synthetic, in-progress Review Assessment session
+for separate disposition; this record does not authorize modifying it.
+
+### Remaining Gate B acceptance work
+
+The Phase 8.1 loading and final-review UX is physically accepted. The following
+items remain open and must not be inferred from this milestone:
+
+- complete physical verification of each intervention activity and its
+  controls, including Walking sensor/fallback behavior;
+- Teaching and Non-Teaching device acceptance;
+- saved-result presentation and conditional PACC prompt lifecycle acceptance;
+- final persistence and other-role acceptance evidence.
+
+Assessment staging acceptance is not production readiness. Production
+promotion remains **NOT PERFORMED**.

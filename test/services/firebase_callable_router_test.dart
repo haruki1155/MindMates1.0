@@ -23,6 +23,13 @@ void main() {
         ? 'submitFullAssessmentDev'
         : 'submitFullAssessment';
     expect(FirebaseCallableRouter.name('submitFullAssessment'), fullExpected);
+    final previewExpected = environment == 'staging'
+        ? 'previewAssessmentDomainDev'
+        : 'previewAssessmentDomain';
+    expect(
+      FirebaseCallableRouter.name('previewAssessmentDomain'),
+      previewExpected,
+    );
   });
 
   test('does not rewrite an unknown callable', () {
