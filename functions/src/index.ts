@@ -14,6 +14,7 @@ export {
   previewAssessmentDomain,
   previewAssessmentDomainDev,
 } from "./assessment/submissions";
+export {createMoodEntry, createMoodEntryDev} from "./mood_entries";
 export {
   provisionAppUserProfile,
   provisionAppUserProfileDev,

@@ -11,6 +11,7 @@ class FirestoreCollections {
   static const assessments = 'assessments';
   static const assessmentFeedback = 'assessment_feedback';
   static const moods = 'moods';
+  static const moodEntries = 'moodEntries';
   static const appointments = 'appointments';
   static const appointmentQueue = 'appointment_queue';
   static const appointmentHistory = 'history';

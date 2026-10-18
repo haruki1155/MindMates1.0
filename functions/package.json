@@ -9,6 +9,8 @@
     "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc",
     "test": "npm run build && node --test --test-concurrency=1 lib/**/*.test.js",
+    "test:mood-v2": "npm run build && node --test --test-concurrency=1 lib/mood_entries.test.js lib/mood_entries_rules.test.js",
+    "test:mood-v2-callable": "npm run build && node --test --test-concurrency=1 lib/mood_entries_callable_emulator.test.js",
     "test:rules": "npm run build && node --test lib/firestore_sleep_rules.rules.js lib/firebase_secret_chat_rules.rules.js",
     "test:profile-rules": "npm run build && node --test lib/profile_rules.rules.js",
     "profiles:dry-run": "npm run build && node lib/backfill_profiles.js",
