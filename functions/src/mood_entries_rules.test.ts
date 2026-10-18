@@ -8,7 +8,7 @@ import {
   initializeTestEnvironment,
   RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import {collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where} from "firebase/firestore";
+import {collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where} from "firebase/firestore";
 
 const projectId = "mind-mates-mood-v2-rules-test";
 let environment: RulesTestEnvironment;
@@ -45,6 +45,29 @@ test("only the authenticated V2 owner can read owner-scoped history", async () =
   await assertSucceeds(getDocs(query(collection(ownerStore, "moodEntries"), where("userId", "==", owner))));
   await assertFails(getDoc(doc(otherStore, "moodEntries", entry)));
   await assertFails(getDocs(query(collection(otherStore, "moodEntries"), where("userId", "==", owner))));
+});
+
+test("owner-scoped V2 history supports the bounded timestamp ordering used by the combined reader", async () => {
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "moodEntries", "later"), {
+      userId: owner,
+      level: 4,
+      dateKey: "2026-01-02",
+      occurredAt: new Date("2026-01-02T00:00:00.000Z"),
+    });
+  });
+  const store = environment.authenticatedContext(owner).firestore();
+  const history = query(
+    collection(store, "moodEntries"),
+    where("userId", "==", owner),
+    where("occurredAt", ">=", new Date("2026-01-01T00:00:00.000Z")),
+    orderBy("occurredAt", "desc"),
+  );
+
+  const snapshot = await assertSucceeds(getDocs(history));
+  if (snapshot.docs.map((item) => item.id).join(",") !== "later,mood_v2_owner_request") {
+    throw new Error("Unexpected owner-scoped history ordering.");
+  }
 });
 
 test("all direct V2 creates, edits, and deletes are denied", async () => {
