@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {Timestamp} from "firebase-admin/firestore";
 
-import {aiProvider, attemptGemini, classifyMindAidSafety, controlledCrisisResponse, dialogflowModeEvent, dialogflowSessionId, effectiveConversationMode, eligibleRecentTurns, geminiFallbackReason, isCurrentFirstPersonRisk, isSafeMindAidOutput, sanitizeRecentTurns} from "./mind_aid";
+import {aiProvider, attemptGemini, classifyMindAidSafety, controlledCrisisResponse, dialogflowModeEvent, dialogflowSessionId, effectiveConversationMode, eligibleRecentTurns, geminiFallbackReason, isCurrentFirstPersonRisk, isSafeMindAidOutput, manilaMoodDateKey, moodV2HistoryEnabled, sanitizeRecentTurns, summarizeDerivedMoodHistory} from "./mind_aid";
 import {buildMindAidSystemInstruction, mindAidSystemPrompt} from "./mind_aid_llm/mind_aid_system_prompt";
 
 test("classifies English and Taglish crisis messages before Dialogflow", () => {
@@ -11,6 +12,20 @@ test("classifies English and Taglish crisis messages before Dialogflow", () => {
   assert.equal(classifyMindAidSafety("I feel stressed about finals"), "safeSupport");
   assert.equal(classifyMindAidSafety("I cannot go on anymore"), "crisisOrImmediateRisk");
   assert.equal(classifyMindAidSafety("kms"), "crisisOrImmediateRisk");
+});
+
+test("keeps mixed Mood V2 context disabled by default and counts same-day events separately when enabled", () => {
+  assert.equal(moodV2HistoryEnabled(undefined), false);
+  assert.equal(moodV2HistoryEnabled("true"), true);
+  const summary = summarizeDerivedMoodHistory([
+    {identity: "legacy:daily", level: 2, occurredAt: Timestamp.fromDate(new Date("2026-08-01T01:00:00.000Z")), dateKey: "2026-08-01"},
+    {identity: "v2:one", level: 4, occurredAt: Timestamp.fromDate(new Date("2026-08-01T02:00:00.000Z")), dateKey: "2026-08-01"},
+    {identity: "v2:one", level: 4, occurredAt: Timestamp.fromDate(new Date("2026-08-01T02:00:00.000Z")), dateKey: "2026-08-01"},
+  ], "partial");
+  assert.equal(summary.ordered.length, 2);
+  assert.equal(summary.ordered[0].level, 4);
+  assert.equal(summary.coverage, "partial");
+  assert.equal(manilaMoodDateKey(Timestamp.fromDate(new Date("2026-08-01T16:00:00.000Z"))), "2026-08-02");
 });
 
 test("only routes current first-person self-harm statements into the crisis path", () => {
