@@ -12,6 +12,8 @@ import 'package:mind_mates/features/mind_aid/domain/mind_aid_context.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_dataset_models.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_model_provider.dart';
 import 'package:mind_mates/features/mind_aid/domain/mind_aid_safety.dart';
+import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
+import 'package:mind_mates/features/mood/domain/mood_v2_compatibility.dart';
 import 'package:mind_mates/models/mind_aid_message_model.dart';
 import 'package:mind_mates/models/mood_model.dart';
 import 'package:mind_mates/models/report_model.dart';
@@ -513,6 +515,36 @@ void main() {
       final snapshot = MindAidContextRepository.buildSnapshot();
 
       expect(snapshot, isNull);
+    });
+
+    test('uses the privacy-safe V2 projection without legacy note fields', () {
+      final projection = MindAidMoodCompatibility.summarize(
+        MoodHistoryWindow(
+          events: [
+            NormalizedMoodEvent(
+              id: 'v2-1',
+              userId: 'user_1',
+              level: 2,
+              dateKey: '2026-07-03',
+              occurredAt: DateTime.utc(2026, 7, 3),
+              source: MoodEventSource.v2,
+              note: 'must not reach MindAid context',
+              label: 'private label',
+            ),
+          ],
+          coverage: MoodHistoryCoverage.partial,
+        ),
+      );
+
+      final snapshot = MindAidContextRepository.buildSnapshot(
+        mixedMood: projection,
+      );
+
+      expect(snapshot, isNotNull);
+      expect(snapshot!.latestMoodLevel, 2);
+      expect(snapshot.latestMoodLabel, isNull);
+      expect(snapshot.hasMoodNote, isFalse);
+      expect(snapshot.moodHistoryCoverage, MoodHistoryCoverage.partial);
     });
   });
 

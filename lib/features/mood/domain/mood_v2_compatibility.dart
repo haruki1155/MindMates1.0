@@ -60,12 +60,12 @@ class MindAidMoodCompatibilitySnapshot {
 
   final int? latestLevel;
   final double? recentAverage;
-  final MindAidMoodTrend? trend;
+  final MoodV2MindAidTrend? trend;
   final DateTime? lastCheckInAt;
   final MoodHistoryCoverage coverage;
 }
 
-enum MindAidMoodTrend { improving, declining, steady }
+enum MoodV2MindAidTrend { improving, declining, steady }
 
 /// Produces only coarse recommendation metrics. Notes, labels, entry method,
 /// and expression metadata are never included in this projection.
@@ -79,7 +79,7 @@ class MindAidMoodCompatibility {
         ? null
         : sample.fold<int>(0, (sum, event) => sum + event.level) /
               sample.length;
-    MindAidMoodTrend? trend;
+    MoodV2MindAidTrend? trend;
     if (sample.length >= 4) {
       final recent =
           sample.take(3).fold<int>(0, (sum, event) => sum + event.level) / 3;
@@ -88,10 +88,10 @@ class MindAidMoodCompatibility {
           olderValues.fold<int>(0, (sum, event) => sum + event.level) /
           olderValues.length;
       trend = recent - older >= .6
-          ? MindAidMoodTrend.improving
+          ? MoodV2MindAidTrend.improving
           : recent - older <= -.6
-          ? MindAidMoodTrend.declining
-          : MindAidMoodTrend.steady;
+          ? MoodV2MindAidTrend.declining
+          : MoodV2MindAidTrend.steady;
     }
     return MindAidMoodCompatibilitySnapshot(
       latestLevel: events.isEmpty ? null : events.first.level,

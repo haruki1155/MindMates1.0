@@ -1,3 +1,5 @@
+import '../../mood/domain/mood_v2_analytics.dart';
+
 import 'mind_aid_companion_models.dart';
 
 class MindAidAssessmentContext {
@@ -74,6 +76,7 @@ class MindAidWellnessSnapshot {
     this.breathingSessionCount = 0,
     this.mindfulBreathingMinutes = 0,
     this.lastCheckInAt,
+    this.moodHistoryCoverage,
   });
 
   final int? latestMoodLevel;
@@ -92,6 +95,10 @@ class MindAidWellnessSnapshot {
   final int breathingSessionCount;
   final int mindfulBreathingMinutes;
   final DateTime? lastCheckInAt;
+
+  /// Null keeps the legacy context contract unchanged. A non-null value tells
+  /// V2-aware consumers whether the combined window is complete.
+  final MoodHistoryCoverage? moodHistoryCoverage;
 
   bool get hasMoodData => latestMoodLevel != null || recentMoodAverage != null;
 
@@ -169,6 +176,7 @@ class MindAidWellnessSnapshot {
     int? breathingSessionCount,
     int? mindfulBreathingMinutes,
     DateTime? lastCheckInAt,
+    MoodHistoryCoverage? moodHistoryCoverage,
   }) {
     return MindAidWellnessSnapshot(
       latestMoodLevel: latestMoodLevel ?? this.latestMoodLevel,
@@ -189,6 +197,7 @@ class MindAidWellnessSnapshot {
       mindfulBreathingMinutes:
           mindfulBreathingMinutes ?? this.mindfulBreathingMinutes,
       lastCheckInAt: lastCheckInAt ?? this.lastCheckInAt,
+      moodHistoryCoverage: moodHistoryCoverage ?? this.moodHistoryCoverage,
     );
   }
 }
