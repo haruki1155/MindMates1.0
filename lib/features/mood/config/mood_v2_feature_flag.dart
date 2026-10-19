@@ -25,4 +25,8 @@ class MoodV2FeatureFlag {
     'ENABLE_MOOD_V2_HISTORY_READ',
     defaultValue: false,
   );
+  static const insightsRead = bool.fromEnvironment(
+    'ENABLE_MOOD_V2_INSIGHTS_READ',
+    defaultValue: false,
+  );
 }

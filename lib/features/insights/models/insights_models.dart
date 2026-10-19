@@ -2,6 +2,7 @@ import '../../../core/utils/firestore_mapper.dart';
 import '../../../models/mood_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../models/report_model.dart';
+import '../../mood/domain/mood_v2_analytics.dart';
 
 /// The minimum trusted profile context needed to tailor educational resources.
 /// A missing role intentionally resolves to shared content only.
@@ -163,17 +164,40 @@ class InsightMetricsSummary {
     required this.checkIns,
     required this.goodDays,
     required this.totalLogs,
+    this.moodActiveDays,
+    this.moodStreakDays,
+    this.moodHistoryCoverage,
   });
 
   final int checkIns;
   final int goodDays;
   final int totalLogs;
+  final int? moodActiveDays;
+  final int? moodStreakDays;
+  final MoodHistoryCoverage? moodHistoryCoverage;
+
+  bool get usesMoodV2 => moodHistoryCoverage != null;
+  bool get hasPartialMoodHistory =>
+      moodHistoryCoverage == MoodHistoryCoverage.partial;
 
   factory InsightMetricsSummary.from({
     required List<MoodModel> moods,
     ReportModel? report,
+    MoodAnalyticsSnapshot? moodV2Analytics,
     DateTime? now,
   }) {
+    if (moodV2Analytics != null) {
+      final weekly = moodV2Analytics.weekly;
+      return InsightMetricsSummary(
+        // A check-in is an entry, while a mood-active day remains distinct.
+        checkIns: weekly.entryCount,
+        goodDays: weekly.distribution[4] + weekly.distribution[5],
+        totalLogs: moodV2Analytics.eventCount + (report?.assessmentCount ?? 0),
+        moodActiveDays: weekly.activeDayCount,
+        moodStreakDays: moodV2Analytics.streak.currentDays,
+        moodHistoryCoverage: moodV2Analytics.coverage,
+      );
+    }
     final effectiveNow = now ?? DateTime.now();
     final startOfWeek = DateTime(
       effectiveNow.year,

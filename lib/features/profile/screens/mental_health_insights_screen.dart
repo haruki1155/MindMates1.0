@@ -8,6 +8,7 @@ import '../../../providers/mood_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
+import '../../mood/config/mood_v2_feature_flag.dart';
 
 class MentalHealthInsightsScreen extends StatefulWidget {
   const MentalHealthInsightsScreen({super.key});
@@ -32,6 +33,10 @@ class _MentalHealthInsightsScreenState
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final moodProvider = _readProviderOrNull<MoodProvider>(context);
+      if (MoodV2FeatureFlag.insightsRead) {
+        moodProvider?.loadMoodV2History(recommendationContext.userId);
+      }
       _readProviderOrNull<InsightsProvider>(
         context,
       )?.loadInsights(recommendationContext);
@@ -53,7 +58,13 @@ class _MentalHealthInsightsScreenState
     final moodProvider = _watchProviderOrNull<MoodProvider>(context);
     final moods = moodProvider?.moods ?? const [];
     final report = _watchProviderOrNull<ReportProvider>(context)?.latestReport;
-    final metrics = InsightMetricsSummary.from(moods: moods, report: report);
+    final metrics = InsightMetricsSummary.from(
+      moods: moods,
+      report: report,
+      moodV2Analytics: MoodV2FeatureFlag.insightsRead
+          ? moodProvider?.v2Analytics
+          : null,
+    );
     final hasCheckedInToday = moodProvider?.hasCheckedInToday == true;
     final insightsTheme = _InsightsTheme.of(context);
     final bottomInset = MediaQuery.paddingOf(context).bottom;
@@ -857,18 +868,22 @@ class _WeeklyGlanceCard extends StatelessWidget {
     final theme = _InsightsTheme.of(context);
     final items = [
       InsightMetric(
-        label: 'Check-ins',
+        label: metrics.usesMoodV2 ? 'Mood entries' : 'Check-ins',
         value: '${metrics.checkIns}',
         icon: 'fire',
       ),
       InsightMetric(
-        label: 'Good days',
-        value: '${metrics.goodDays}',
+        label: metrics.usesMoodV2 ? 'Mood-active days' : 'Good days',
+        value: metrics.usesMoodV2
+            ? '${metrics.moodActiveDays}'
+            : '${metrics.goodDays}',
         icon: 'mood',
       ),
       InsightMetric(
-        label: 'Total logs',
-        value: '${metrics.totalLogs}',
+        label: metrics.usesMoodV2 ? 'Mood streak' : 'Total logs',
+        value: metrics.usesMoodV2
+            ? '${metrics.moodStreakDays}'
+            : '${metrics.totalLogs}',
         icon: 'chart',
       ),
     ];
@@ -922,6 +937,13 @@ class _WeeklyGlanceCard extends StatelessWidget {
               ],
             ],
           ),
+          if (metrics.hasPartialMoodHistory) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Mood history is incomplete; these are windowed insights.',
+              style: _InsightsText.metricLabel.copyWith(color: theme.text),
+            ),
+          ],
         ],
       ),
     );
