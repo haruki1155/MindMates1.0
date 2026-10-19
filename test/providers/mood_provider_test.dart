@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/models/mood_model.dart';
+import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/providers/mood_provider.dart';
+import 'package:mind_mates/repositories/mood_combined_history_repository.dart';
 import 'package:mind_mates/repositories/mood_repository.dart';
 
 void main() {
@@ -101,6 +105,121 @@ void main() {
     expect(provider.moods.single.createdAt, beforeMidnight);
     expect(provider.todayMood, isNotNull);
   });
+
+  test('V2 reader keeps same-day entries distinct from active days', () async {
+    final history = MoodCombinedHistoryRepository(
+      identity: const _MoodIdentity('user_1'),
+      legacySource: _MoodSource(MoodEventSource.legacy, [
+        _event(
+          'legacy',
+          DateTime.utc(2026, 7, 7, 16),
+          2,
+          MoodEventSource.legacy,
+        ),
+      ]),
+      v2Source: _MoodSource(MoodEventSource.v2, [
+        _event('v2-one', DateTime.utc(2026, 7, 7, 17), 4, MoodEventSource.v2),
+        _event('v2-two', DateTime.utc(2026, 7, 7, 18), 5, MoodEventSource.v2),
+      ]),
+    );
+    final provider = MoodProvider(
+      _FakeMoodRepository(),
+      combinedHistoryRepository: history,
+      useMoodV2Read: true,
+      nowProvider: () => DateTime.utc(2026, 7, 8),
+    );
+
+    await provider.loadMoodV2History('user_1');
+
+    expect(provider.v2Analytics!.eventCount, 3);
+    expect(provider.v2Analytics!.activeDayCount, 1);
+    expect(provider.todayMood, isNull);
+    expect(provider.hasCheckedInToday, isFalse);
+  });
+
+  test('V2 reader clears prior state and ignores a stale account result', () async {
+    final identity = _MutableMoodIdentity('user_1');
+    final delayedLegacy = Completer<MoodHistorySourcePage>();
+    final history = MoodCombinedHistoryRepository(
+      identity: identity,
+      legacySource: _DeferredMoodSource(
+        MoodEventSource.legacy,
+        {'user_1': delayedLegacy},
+      ),
+      v2Source: _MoodSource(MoodEventSource.v2, const []),
+    );
+    final provider = MoodProvider(
+      _FakeMoodRepository(),
+      combinedHistoryRepository: history,
+      useMoodV2Read: true,
+    );
+
+    final firstRequest = provider.loadMoodV2History('user_1');
+    identity.currentUserId = 'user_2';
+    await provider.loadMoodV2History('user_2');
+
+    expect(provider.v2History, isNotNull);
+    expect(provider.v2History!.uniqueEvents, isEmpty);
+    delayedLegacy.complete(
+      MoodHistorySourcePage(
+        events: [_event('stale', DateTime.utc(2026, 7, 7), 1, MoodEventSource.legacy)],
+      ),
+    );
+    await firstRequest;
+
+    expect(provider.v2History!.uniqueEvents, isEmpty);
+    expect(provider.v2HistoryErrorMessage, isNull);
+  });
+}
+
+NormalizedMoodEvent _event(
+  String id,
+  DateTime at,
+  int level,
+  MoodEventSource source,
+) => NormalizedMoodEvent(
+  id: id,
+  userId: 'user_1',
+  level: level,
+  dateKey: MoodManilaCalendar.dateKeyForInstant(at),
+  occurredAt: at,
+  source: source,
+);
+
+class _MoodIdentity implements MoodHistoryIdentity {
+  const _MoodIdentity(this.currentUserId);
+  @override
+  final String? currentUserId;
+}
+
+class _MutableMoodIdentity implements MoodHistoryIdentity {
+  _MutableMoodIdentity(this.currentUserId);
+  @override
+  String? currentUserId;
+}
+
+class _MoodSource implements MoodHistorySource {
+  const _MoodSource(this.source, this.events);
+  @override
+  final MoodEventSource source;
+  final List<NormalizedMoodEvent> events;
+  @override
+  Future<MoodHistorySourcePage> fetch(MoodHistorySourceRequest request) async =>
+      MoodHistorySourcePage(events: events);
+}
+
+class _DeferredMoodSource implements MoodHistorySource {
+  _DeferredMoodSource(this.source, this.responses);
+
+  @override
+  final MoodEventSource source;
+  final Map<String, Completer<MoodHistorySourcePage>> responses;
+
+  @override
+  Future<MoodHistorySourcePage> fetch(MoodHistorySourceRequest request) {
+    return responses[request.userId]?.future ??
+        Future.value(const MoodHistorySourcePage(events: []));
+  }
 }
 
 class _FakeMoodRepository extends MoodRepository {

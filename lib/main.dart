@@ -29,6 +29,7 @@ import 'repositories/breathing_repository.dart';
 import 'repositories/insights_repository.dart';
 import 'repositories/mental_health_activity_repository.dart';
 import 'repositories/mind_aid_repository_screen.dart';
+import 'repositories/mood_combined_history_repository.dart';
 import 'repositories/mood_repository.dart';
 import 'repositories/notification_repository.dart';
 import 'repositories/report_repository.dart';
@@ -66,7 +67,12 @@ Widget _mobileApp() => MultiProvider(
       create: (_) => AuthProvider(AuthRepository(AuthService())),
     ),
     ChangeNotifierProvider(create: (_) => UserProvider(UserRepository())),
-    ChangeNotifierProvider(create: (_) => MoodProvider(MoodRepository())),
+    ChangeNotifierProvider(
+      create: (_) => MoodProvider(
+        MoodRepository(),
+        combinedHistoryRepository: MoodCombinedHistoryRepository(),
+      ),
+    ),
     ChangeNotifierProvider(
       create: (_) => AppointmentProvider(AppointmentRepository()),
     ),

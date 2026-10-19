@@ -15,6 +15,8 @@ import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../models/mood_model.dart';
 import '../../../repositories/mood_repository.dart';
+import '../config/mood_v2_feature_flag.dart';
+import '../widgets/mood_v2_history_panel.dart';
 
 const bool _expressionCheckInEnabled = true;
 
@@ -141,9 +143,24 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       );
     }
     if (_todayMood != null) {
-      return _DailyMoodResult(
-        mood: _todayMood!,
-        currentStreak: _readProviderOrNull<UserProvider>()?.user?.dayStreak,
+      final moodProvider = _readProviderOrNull<MoodProvider>();
+      final showV2History =
+          MoodV2FeatureFlag.historyRead &&
+          (moodProvider?.isMoodV2ReadEnabled ?? false);
+      return Column(
+        children: [
+          _DailyMoodResult(
+            mood: _todayMood!,
+            currentStreak: _readProviderOrNull<UserProvider>()?.user?.dayStreak,
+          ),
+          if (showV2History) ...[
+            const SizedBox(height: 20),
+            MoodV2HistoryPanel(
+              history: moodProvider?.v2History,
+              errorMessage: moodProvider?.v2HistoryErrorMessage,
+            ),
+          ],
+        ],
       );
     }
     return Column(
@@ -234,6 +251,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _todayError = null;
     });
     await provider.loadTodayMood(userId, now: _now);
+    if (MoodV2FeatureFlag.historyRead) {
+      await provider.loadMoodV2History(userId, now: _now);
+    }
     if (!mounted) return;
     setState(() {
       _isLoadingToday = false;

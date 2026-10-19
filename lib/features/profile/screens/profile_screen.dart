@@ -10,10 +10,13 @@ import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/mood_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/sleep_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
+import '../../mood/config/mood_v2_feature_flag.dart';
+import '../../mood/domain/mood_v2_analytics.dart';
 
 typedef EditProfileImagePicker = Future<EditProfileImage?> Function();
 
@@ -87,6 +90,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     final shouldLoadReport = !_requestedReport;
     final sleepProvider = _sleepProviderOrNull(context);
     final shouldLoadSleep = sleepProvider != null && !_requestedSleep;
+    final moodProvider = _moodProviderOrNull(context);
 
     if (!shouldLoadProfile && !shouldLoadReport && !shouldLoadSleep) return;
 
@@ -109,6 +113,9 @@ class _ProfileScreenState extends State<ProfileScreen>
         });
       }
       if (shouldLoadSleep) sleepProvider.load(userId);
+      if (MoodV2FeatureFlag.profileRead) {
+        moodProvider?.loadMoodV2History(userId);
+      }
     });
   }
 
@@ -124,6 +131,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       builder: (context, userProvider, _) {
         final reportProvider = _watchReportProviderOrNull(context);
         final sleepProvider = _watchSleepProviderOrNull(context);
+        final moodProvider = _moodProviderOrNull(context);
         final authProvider = widget.data == null && userProvider.user == null
             ? _authProviderOrNull(context)
             : null;
@@ -140,6 +148,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                       description: reportProvider.latestReport!.description,
                     ),
               sleepAverage: sleepProvider?.profileAverage,
+              moodV2Analytics: MoodV2FeatureFlag.profileRead
+                  ? moodProvider?.v2Analytics
+                  : null,
               onSleepTap: () =>
                   Navigator.of(context).pushNamed(RouteNames.sleepQuality),
             );
@@ -297,6 +308,14 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  MoodProvider? _moodProviderOrNull(BuildContext context) {
+    try {
+      return context.watch<MoodProvider>();
+    } on ProviderNotFoundException {
+      return null;
+    }
+  }
+
   static const _defaultSummary = ProfileSummaryData(
     title: 'Mental Health Summary',
     description: "This week's positive moods",
@@ -308,6 +327,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     String? fallbackEmail,
     ProfileSummaryData? summary,
     double? sleepAverage,
+    MoodAnalyticsSnapshot? moodV2Analytics,
     VoidCallback? onSleepTap,
   }) {
     final effectiveUser =
@@ -346,6 +366,25 @@ class _ProfileScreenState extends State<ProfileScreen>
           value: effectiveUser.age?.toString() ?? '--',
           icon: Icons.cake_outlined,
         ),
+        if (moodV2Analytics != null) ...[
+          ProfileMetricData(
+            label: 'Mood-active days',
+            value: '${moodV2Analytics.weekly.activeDayCount}',
+            icon: Icons.calendar_month_outlined,
+          ),
+          ProfileMetricData(
+            label: 'Mood streak',
+            value: '${moodV2Analytics.streak.currentDays}',
+            icon: Icons.mood_outlined,
+          ),
+          ProfileMetricData(
+            label: moodV2Analytics.streak.isLongestWindowed
+                ? 'Longest mood streak (window)'
+                : 'Longest mood streak',
+            value: '${moodV2Analytics.streak.longestDays}',
+            icon: Icons.timeline_outlined,
+          ),
+        ],
       ],
       summary: summary ?? _defaultSummary,
     );

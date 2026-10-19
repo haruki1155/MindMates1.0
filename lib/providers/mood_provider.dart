@@ -1,14 +1,27 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/mood_model.dart';
+import '../features/mood/config/mood_v2_feature_flag.dart';
+import '../features/mood/domain/mood_v2_analytics.dart';
+import '../repositories/mood_combined_history_repository.dart';
 import '../repositories/mood_repository.dart';
 
 class MoodProvider extends ChangeNotifier {
-  MoodProvider(this._repository, {DateTime Function()? nowProvider})
-    : _nowProvider = nowProvider ?? DateTime.now;
+  MoodProvider(
+    this._repository, {
+    DateTime Function()? nowProvider,
+    MoodCombinedHistoryRepository? combinedHistoryRepository,
+    bool useMoodV2Read = MoodV2FeatureFlag.providerRead,
+  }) : _nowProvider = nowProvider ?? DateTime.now,
+       // ignore: prefer_initializing_formals
+       _combinedHistoryRepository = combinedHistoryRepository,
+       // ignore: prefer_initializing_formals
+       _useMoodV2Read = useMoodV2Read;
 
   final MoodRepository _repository;
   final DateTime Function() _nowProvider;
+  final MoodCombinedHistoryRepository? _combinedHistoryRepository;
+  final bool _useMoodV2Read;
 
   List<MoodModel> _moods = [];
   bool _isLoading = false;
@@ -16,6 +29,12 @@ class MoodProvider extends ChangeNotifier {
   String? _errorMessage;
   MoodModel? _todayMood;
   DailyMoodSaveResult? _dailySaveResult;
+  MoodHistoryWindow? _v2History;
+  MoodAnalyticsSnapshot? _v2Analytics;
+  String? _v2HistoryUserId;
+  bool _isLoadingV2History = false;
+  String? _v2HistoryErrorMessage;
+  int _v2RequestGeneration = 0;
 
   List<MoodModel> get moods => List.unmodifiable(_moods);
   bool get isLoading => _isLoading;
@@ -24,6 +43,67 @@ class MoodProvider extends ChangeNotifier {
   MoodModel? get todayMood => _todayMood;
   bool get hasCheckedInToday => _todayMood != null;
   DailyMoodSaveResult? get dailySaveResult => _dailySaveResult;
+  MoodHistoryWindow? get v2History => _v2History;
+  MoodAnalyticsSnapshot? get v2Analytics => _v2Analytics;
+  bool get isLoadingV2History => _isLoadingV2History;
+  String? get v2HistoryErrorMessage => _v2HistoryErrorMessage;
+  bool get isMoodV2ReadEnabled =>
+      _useMoodV2Read && _combinedHistoryRepository != null;
+
+  /// Read-only V2 state is kept separate from the legacy public fields.
+  /// A user/session change invalidates pending results before they can surface.
+  Future<void> loadMoodV2History(String userId, {DateTime? now}) async {
+    final repository = _combinedHistoryRepository;
+    if (!_useMoodV2Read || repository == null || userId.trim().isEmpty) {
+      return;
+    }
+    final generation = ++_v2RequestGeneration;
+    // Do not briefly display the prior account's read-only history while the
+    // authenticated session changes and the new request is pending.
+    if (_v2HistoryUserId != userId) {
+      _v2History = null;
+      _v2Analytics = null;
+    }
+    _v2HistoryUserId = userId;
+    _isLoadingV2History = true;
+    _v2HistoryErrorMessage = null;
+    notifyListeners();
+    try {
+      final page = await repository.fetch(
+        MoodCombinedHistoryRequest(userId: userId, pageSize: 100),
+      );
+      if (generation != _v2RequestGeneration || _v2HistoryUserId != userId) {
+        return;
+      }
+      _v2History = page.window;
+      _v2Analytics = MoodAnalytics.summarize(
+        page.window,
+        referenceInstant: now ?? _nowProvider(),
+      );
+    } catch (_) {
+      if (generation != _v2RequestGeneration || _v2HistoryUserId != userId) {
+        return;
+      }
+      _v2History = null;
+      _v2Analytics = null;
+      _v2HistoryErrorMessage = 'Unable to load mood history.';
+    } finally {
+      if (generation == _v2RequestGeneration && _v2HistoryUserId == userId) {
+        _isLoadingV2History = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  void clearMoodV2History() {
+    _v2RequestGeneration++;
+    _v2HistoryUserId = null;
+    _v2History = null;
+    _v2Analytics = null;
+    _v2HistoryErrorMessage = null;
+    _isLoadingV2History = false;
+    notifyListeners();
+  }
 
   Future<void> loadRecentMoods(String userId, {DateTime? now}) async {
     _isLoading = true;

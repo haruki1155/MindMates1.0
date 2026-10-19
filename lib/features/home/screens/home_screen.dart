@@ -11,6 +11,8 @@ import '../../../providers/mood_provider.dart';
 import '../../../providers/notification_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
+import '../../mood/config/mood_v2_feature_flag.dart';
+import '../../mood/domain/mood_v2_analytics.dart';
 import '../../../repositories/assessment_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
@@ -146,7 +148,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _readProviderOrNull<UserProvider>(
           context,
         )?.recordActivity(userId, UserActivityType.appOpen);
-        _readProviderOrNull<MoodProvider>(context)?.loadRecentMoods(userId);
+        final moodProvider = _readProviderOrNull<MoodProvider>(context);
+        moodProvider?.loadRecentMoods(userId);
+        if (MoodV2FeatureFlag.homeRead) {
+          moodProvider?.loadMoodV2History(userId, now: widget._nowProvider());
+        }
         final reportProvider = _readProviderOrNull<ReportProvider>(context);
         if (reportProvider == null) return;
         reportProvider.loadLatestReport(userId).then((_) {
@@ -210,7 +216,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     final unreadNotifications =
         _watchProviderOrNull<NotificationProvider>(context)?.unreadCount ?? 0;
-    final todayMood = _watchProviderOrNull<MoodProvider>(context)?.todayMood;
+    final moodProvider = _watchProviderOrNull<MoodProvider>(context);
+    final todayMood = moodProvider?.todayMood;
+    final moodV2 = MoodV2FeatureFlag.homeRead
+        ? moodProvider?.v2Analytics
+        : null;
     final todayMoodLabel = todayMood == null
         ? null
         : (todayMood.label?.trim().isNotEmpty ?? false)
@@ -263,6 +273,31 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                             const SizedBox(height: 12),
+                            if (moodV2 != null) ...[
+                              HomeAnimatedSection(
+                                delay: 76,
+                                child: HomeMoodV2SummaryCard(
+                                  latestLevel: moodV2.daily.isEmpty
+                                      ? null
+                                      : moodV2.daily.last.latestEvent?.level,
+                                  entriesToday: moodV2.daily
+                                      .where(
+                                        (day) =>
+                                            day.dateKey ==
+                                            MoodManilaCalendar.dateKeyForInstant(
+                                              widget._nowProvider(),
+                                            ),
+                                      )
+                                      .fold<int>(
+                                        0,
+                                        (sum, day) => sum + day.events.length,
+                                      ),
+                                  moodStreakDays: moodV2.streak.currentDays,
+                                  isPartial: moodV2.coverage.name == 'partial',
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
                             HomeAnimatedSection(
                               delay: 74,
                               child: HomeStreakCard(
