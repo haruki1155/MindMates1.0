@@ -31,7 +31,7 @@ after(async () => {
   // remains intentionally empty to make node:test await module-level cleanup.
 });
 
-test("authenticated client invokes createMoodEntryDev through Auth, Functions, and Firestore emulators", async () => {
+test("authenticated non-pilot is rejected by createMoodEntryDev without a Firestore write", async () => {
   sequence += 1;
   const app = initializeApp(
     {projectId, apiKey: "phase2-emulator-only-api-key"},
@@ -57,21 +57,21 @@ test("authenticated client invokes createMoodEntryDev through Auth, Functions, a
       functions,
       "createMoodEntryDev",
     );
-    const result = await invoke({
-      level: 4,
-      label: "Steady",
-      note: "",
-      entryMethod: "manual",
-      expressionAssistUsed: false,
-      expressionSuggestionAccepted: false,
-      clientRequestId: requestId(sequence),
-    });
-    const entryId = String(result.data.entryId);
-    const stored = await db.collection("moodEntries").doc(entryId).get();
-    assert.equal(result.data.userId, credential.user.uid);
-    assert.equal(stored.exists, true);
-    assert.equal(stored.data()?.calculationAuthority, "server");
-    assert.equal(stored.data()?.userId, credential.user.uid);
+    await assert.rejects(
+      () => invoke({
+        level: 4,
+        label: "Steady",
+        note: "",
+        entryMethod: "manual",
+        expressionAssistUsed: false,
+        expressionSuggestionAccepted: false,
+        clientRequestId: requestId(sequence),
+      }),
+      (error: unknown) => String(error).includes("permission-denied"),
+    );
+    const stored = await db.collection("moodEntries")
+      .where("userId", "==", credential.user.uid).get();
+    assert.equal(stored.empty, true);
   } finally {
     await deleteApp(app);
   }

@@ -1,6 +1,7 @@
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
+import {defineString} from "firebase-functions/params";
 
 if (!getApps().length) initializeApp();
 
@@ -8,6 +9,9 @@ const db = getFirestore();
 const moodEntries = db.collection("moodEntries");
 const REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EXPRESSION_MODEL_VERSION = "justinshenk_fer_tflite_v1";
+// This deployment parameter is intentionally empty by default. Only a
+// staging deployer may set it, and callable clients cannot override it.
+const moodV2StagingPilotUids = defineString("MOOD_V2_STAGING_PILOT_UIDS", {default: ""});
 const ALLOWED_FIELDS = new Set([
   "level",
   "label",
@@ -29,6 +33,30 @@ type MoodEntryInput = {
   expressionModelVersion: string | null;
   clientRequestId: string;
 };
+
+export type MoodV2RolloutGate = {
+  projectId: string;
+  pilotUserIds: ReadonlySet<string>;
+};
+
+function currentProjectId(): string {
+  return (process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT ?? "").trim();
+}
+
+export function moodV2RolloutGate(): MoodV2RolloutGate {
+  return {
+    projectId: currentProjectId(),
+    pilotUserIds: new Set(
+      moodV2StagingPilotUids.value().split(",").map((value) => value.trim()).filter(Boolean),
+    ),
+  };
+}
+
+export function requireMoodV2StagingPilot(uid: string, gate: MoodV2RolloutGate = moodV2RolloutGate()): void {
+  if (gate.projectId !== "mindmate-staging" || !gate.pilotUserIds.has(uid)) {
+    throw new HttpsError("permission-denied", "Mood V2 is not enabled for this account.");
+  }
+}
 
 function requireUid(request: {auth?: {uid?: string}}): string {
   const uid = request.auth?.uid?.trim();
@@ -175,8 +203,10 @@ export async function createMoodEntryForUser(
   uid: string,
   input: MoodEntryInput,
   trustedInstant: Timestamp = Timestamp.now(),
+  gate: MoodV2RolloutGate = moodV2RolloutGate(),
 ): Promise<Record<string, unknown>> {
   await requireEligibleAppUser(uid);
+  requireMoodV2StagingPilot(uid, gate);
   const entryRef = moodEntries.doc(moodEntryDocumentId(uid, input.clientRequestId));
   // One trusted instant is retained on first creation. Retries never recompute
   // the timestamp or Manila day, even if they arrive after midnight.

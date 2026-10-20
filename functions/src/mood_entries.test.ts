@@ -7,6 +7,7 @@ import {CallableRequest, HttpsError} from "firebase-functions/v2/https";
 import {
   createMoodEntryForUser,
   createMoodEntryHandler,
+  MoodV2RolloutGate,
   manilaDateKey,
   moodEntryDocumentId,
   parseMoodEntryInput,
@@ -50,6 +51,10 @@ function callable(uid: string | undefined, data: unknown): CallableRequest {
   return {auth: uid ? {uid} : undefined, data} as CallableRequest;
 }
 
+function stagingGate(uid: string): MoodV2RolloutGate {
+  return {projectId: "mindmate-staging", pilotUserIds: new Set([uid])};
+}
+
 beforeEach(() => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) {
     throw new Error("mood_entries.test.ts requires the Firestore emulator.");
@@ -69,7 +74,7 @@ test("creates one immutable server-authoritative V2 entry without touching legac
   await db.collection("moods").doc(`legacy-${uid}`).set({userId: uid, level: 2});
   const instant = Timestamp.fromDate(new Date("2026-01-01T16:00:00.000Z"));
 
-  const created = await createMoodEntryForUser(uid, parseMoodEntryInput(payload(2)), instant);
+  const created = await createMoodEntryForUser(uid, parseMoodEntryInput(payload(2)), instant, stagingGate(uid));
   const entry = await db.collection("moodEntries").doc(moodEntryDocumentId(uid, requestId(2))).get();
 
   assert.equal(entry.exists, true);
@@ -89,19 +94,19 @@ test("same request ID returns the original entry while a conflicting payload is 
   const first = await createMoodEntryForUser(
     uid,
     parseMoodEntryInput(payload(3)),
-    Timestamp.fromDate(new Date("2026-01-01T15:59:00.000Z")),
+    Timestamp.fromDate(new Date("2026-01-01T15:59:00.000Z")), stagingGate(uid),
   );
   const retry = await createMoodEntryForUser(
     uid,
     parseMoodEntryInput(payload(3)),
-    Timestamp.fromDate(new Date("2026-01-01T16:01:00.000Z")),
+    Timestamp.fromDate(new Date("2026-01-01T16:01:00.000Z")), stagingGate(uid),
   );
   assert.equal(retry.entryId, first.entryId);
   assert.equal(retry.occurredAt, first.occurredAt);
   assert.equal(retry.dateKey, first.dateKey);
 
   await assert.rejects(
-    () => createMoodEntryForUser(uid, parseMoodEntryInput({...payload(3), level: 1})),
+    () => createMoodEntryForUser(uid, parseMoodEntryInput({...payload(3), level: 1}), Timestamp.now(), stagingGate(uid)),
     (error: unknown) => error instanceof HttpsError && error.code === "already-exists",
   );
 });
@@ -111,8 +116,8 @@ test("concurrent identical requests create exactly one stable entry", async () =
   await seedEligibleProfile(uid);
   const input = parseMoodEntryInput(payload(4));
   const [left, right] = await Promise.all([
-    createMoodEntryForUser(uid, input),
-    createMoodEntryForUser(uid, input),
+    createMoodEntryForUser(uid, input, Timestamp.now(), stagingGate(uid)),
+    createMoodEntryForUser(uid, input, Timestamp.now(), stagingGate(uid)),
   ]);
   const entries = await db.collection("moodEntries").where("userId", "==", uid).get();
   assert.equal(entries.size, 1);
@@ -139,7 +144,7 @@ test("ineligible profiles cannot write and errors do not echo private notes", as
   });
   const privateNote = "do-not-echo-sensitive-note";
   await assert.rejects(
-    () => createMoodEntryForUser(uid, parseMoodEntryInput({...payload(6), note: privateNote})),
+    () => createMoodEntryForUser(uid, parseMoodEntryInput({...payload(6), note: privateNote}), Timestamp.now(), stagingGate(uid)),
     (error: unknown) => {
       assert.equal(error instanceof HttpsError, true);
       assert.equal(String(error).includes(privateNote), false);
@@ -151,4 +156,16 @@ test("ineligible profiles cannot write and errors do not echo private notes", as
 test("Manila date keys use one server instant across the midnight boundary", () => {
   assert.equal(manilaDateKey(new Date("2026-01-01T15:59:59.999Z")), "2026-01-01");
   assert.equal(manilaDateKey(new Date("2026-01-01T16:00:00.000Z")), "2026-01-02");
+});
+
+test("closed rollout gate rejects eligible users without creating V2 records", async () => {
+  const uid = userId();
+  await seedEligibleProfile(uid);
+  await assert.rejects(
+    () => createMoodEntryForUser(uid, parseMoodEntryInput(payload(7)), Timestamp.now(), {
+      projectId: "mindmate-staging", pilotUserIds: new Set(),
+    }),
+    (error: unknown) => error instanceof HttpsError && error.code === "permission-denied",
+  );
+  assert.equal((await db.collection("moodEntries").where("userId", "==", uid).get()).empty, true);
 });
