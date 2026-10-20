@@ -6,14 +6,28 @@ import '../features/mood/config/mood_v2_feature_flag.dart';
 import '../features/mood/domain/mood_v2_analytics.dart';
 import '../services/firebase/firebase_callable_router.dart';
 
+/// Narrow client contract for the disabled Mood V2 writer. Keeping this
+/// injectable lets widget tests prove the UI state machine without enabling a
+/// callable or contacting Firebase.
+abstract interface class MoodV2EntryWriter {
+  Future<MoodV2Event> create({
+    required int level,
+    required String clientRequestId,
+    String? label,
+    String? note,
+    String entryMethod,
+    bool expressionAssistUsed,
+    bool expressionSuggestionAccepted,
+    String? expressionModelVersion,
+  });
+}
+
 /// Disabled adapter for the later Mood V2 rollout. Existing Mood screens and
 /// legacy daily writes do not instantiate or call this repository yet.
-class MoodV2Repository {
-  MoodV2Repository({
-    FirebaseFunctions? functions,
-    FirebaseFirestore? firestore,
-  }) : _providedFunctions = functions,
-       _providedFirestore = firestore;
+class MoodV2Repository implements MoodV2EntryWriter {
+  MoodV2Repository({FirebaseFunctions? functions, FirebaseFirestore? firestore})
+    : _providedFunctions = functions,
+      _providedFirestore = firestore;
 
   final FirebaseFunctions? _providedFunctions;
   final FirebaseFirestore? _providedFirestore;
@@ -23,6 +37,7 @@ class MoodV2Repository {
   FirebaseFirestore get _firestore =>
       _providedFirestore ?? FirebaseFirestore.instance;
 
+  @override
   Future<MoodV2Event> create({
     required int level,
     required String clientRequestId,
@@ -49,7 +64,10 @@ class MoodV2Repository {
     return _fromCallable(Map<String, dynamic>.from(result.data as Map));
   }
 
-  Future<List<NormalizedMoodEvent>> fetchHistory(String userId, {int limit = 50}) async {
+  Future<List<NormalizedMoodEvent>> fetchHistory(
+    String userId, {
+    int limit = 50,
+  }) async {
     if (!MoodV2FeatureFlag.enabled) return const [];
     final query = await _firestore
         .collection(FirestoreCollections.moodEntries)
@@ -72,7 +90,9 @@ class MoodV2Repository {
     entryMethod: data['entryMethod']?.toString(),
   );
 
-  NormalizedMoodEvent _fromDocument(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+  NormalizedMoodEvent _fromDocument(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
     final data = doc.data();
     return MoodV2Event(
       id: doc.id,

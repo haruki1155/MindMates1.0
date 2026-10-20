@@ -15,6 +15,7 @@ import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../models/mood_model.dart';
 import '../../../repositories/mood_repository.dart';
+import '../../../repositories/mood_v2_repository.dart';
 import '../config/mood_v2_feature_flag.dart';
 import '../widgets/mood_v2_history_panel.dart';
 
@@ -25,10 +26,16 @@ class LogMoodScreen extends StatefulWidget {
     super.key,
     DateTime Function()? nowProvider,
     this.expressionScreenBuilder,
+    this.moodV2Writer,
+    this.moodV2Enabled = MoodV2FeatureFlag.enabled,
+    this.moodV2RequestIdGenerator,
   }) : _nowProvider = nowProvider ?? DateTime.now;
 
   final DateTime Function() _nowProvider;
   final WidgetBuilder? expressionScreenBuilder;
+  final MoodV2EntryWriter? moodV2Writer;
+  final bool moodV2Enabled;
+  final String Function()? moodV2RequestIdGenerator;
 
   @override
   State<LogMoodScreen> createState() => _LogMoodScreenState();
@@ -47,6 +54,10 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   String? _todayError;
   MoodModel? _todayMood;
   String? _loadedUserId;
+  String? _moodV2RequestId;
+  _MoodV2Draft? _moodV2RetryDraft;
+  String? _moodV2Error;
+  int _moodV2RequestGeneration = 0;
   Timer? _midnightTimer;
 
   DateTime get _now => widget._nowProvider();
@@ -62,11 +73,13 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final userId = _currentUserId();
-    if (userId == null || userId.isEmpty || _loadedUserId == userId) return;
+    final userId = _currentUserId(listen: true);
+    if (_loadedUserId == userId) return;
+    _invalidateMoodV2Request();
     _loadedUserId = userId;
+    if (userId == null || userId.isEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _loadTodayMood(userId);
+      if (mounted && _currentUserId() == userId) _loadTodayMood(userId);
     });
   }
 
@@ -153,6 +166,15 @@ class _LogMoodScreenState extends State<LogMoodScreen>
             mood: _todayMood!,
             currentStreak: _readProviderOrNull<UserProvider>()?.user?.dayStreak,
           ),
+          if (widget.moodV2Enabled) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const ValueKey('mood-v2-add-entry'),
+              onPressed: _isSaving ? null : _startAdditionalMoodEntry,
+              icon: const Icon(Icons.add_circle_outline_rounded),
+              label: const Text('Log another mood entry'),
+            ),
+          ],
           if (showV2History) ...[
             const SizedBox(height: 20),
             MoodV2HistoryPanel(
@@ -204,6 +226,14 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           characterCount: _noteLength,
           isEnabled: !_isSaving,
         ),
+        if (_moodV2Error != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _moodV2Error!,
+            key: const ValueKey('mood-v2-save-error'),
+            style: const TextStyle(color: Colors.redAccent),
+          ),
+        ],
         const SizedBox(height: 18),
         _SaveMoodButton(
           isEnabled:
@@ -272,13 +302,17 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       return;
     }
 
+    setState(() => _isSaving = true);
+    if (widget.moodV2Enabled) {
+      await _saveMoodV2(userId, mood);
+      return;
+    }
     final moodProvider = _readProviderOrNull<MoodProvider>();
     if (moodProvider == null) {
+      setState(() => _isSaving = false);
       _showSnack('Unable to save mood.');
       return;
     }
-
-    setState(() => _isSaving = true);
     final referenceNow = _now;
 
     final success = await moodProvider.logDailyMood(
@@ -336,6 +370,90 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     );
   }
 
+  void _startAdditionalMoodEntry() {
+    setState(() {
+      _todayMood = null;
+      _moodV2RequestId = null;
+      _moodV2RetryDraft = null;
+      _moodV2Error = null;
+    });
+  }
+
+  Future<void> _saveMoodV2(String userId, _MoodChoice mood) async {
+    final writer = widget.moodV2Writer ?? MoodV2Repository();
+    final requestId = _moodV2RequestId ??= _newMoodV2RequestId();
+    final draft = _moodV2RetryDraft ??= _MoodV2Draft(
+      level: mood.level,
+      label: mood.label,
+      note: _noteController.text,
+      entryMethod: _expressionCue == null ? 'manual' : 'expression_assisted',
+      expressionAssistUsed: _expressionCue != null,
+      expressionSuggestionAccepted: _expressionSuggestionAccepted ?? false,
+      expressionModelVersion: _expressionCueSource == ExpressionCueSource.tflite
+          ? TfliteExpressionClassifier.modelVersion
+          : null,
+    );
+    final requestGeneration = _moodV2RequestGeneration;
+    try {
+      await writer.create(
+        level: draft.level,
+        label: draft.label,
+        note: draft.note,
+        entryMethod: draft.entryMethod,
+        expressionAssistUsed: draft.expressionAssistUsed,
+        expressionSuggestionAccepted: draft.expressionSuggestionAccepted,
+        expressionModelVersion: draft.expressionModelVersion,
+        clientRequestId: requestId,
+      );
+    } catch (_) {
+      if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
+      setState(() {
+        _isSaving = false;
+        _moodV2Error = 'Unable to save this mood entry. Try again.';
+      });
+      return;
+    }
+    if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
+    setState(() {
+      _isSaving = false;
+      _moodV2RequestId = null;
+      _moodV2RetryDraft = null;
+      _moodV2Error = null;
+      _selectedMood = null;
+      _expressionCue = null;
+      _expressionCueSource = null;
+      _expressionSuggestionAccepted = null;
+      _noteController.clear();
+      _noteLength = 0;
+    });
+    _showSnack('Mood entry saved.');
+  }
+
+  bool _isCurrentMoodV2Request(String userId, int requestGeneration) =>
+      mounted &&
+      requestGeneration == _moodV2RequestGeneration &&
+      _currentUserId() == userId;
+
+  void _invalidateMoodV2Request() {
+    _moodV2RequestGeneration++;
+    _moodV2RequestId = null;
+    _moodV2RetryDraft = null;
+    _moodV2Error = null;
+    _isSaving = false;
+  }
+
+  String _newMoodV2RequestId() {
+    final supplied = widget.moodV2RequestIdGenerator?.call();
+    if (supplied != null && supplied.isNotEmpty) return supplied;
+    final random = math.Random.secure();
+    String group(int length) => List.generate(
+      length,
+      (_) => random.nextInt(16).toRadixString(16),
+    ).join();
+    return '${group(8)}-${group(4)}-4${group(3)}-'
+        '${(8 + random.nextInt(4)).toRadixString(16)}${group(3)}-${group(12)}';
+  }
+
   void _scheduleMidnightRefresh() {
     _midnightTimer?.cancel();
     final now = _now;
@@ -350,6 +468,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         _expressionCue = null;
         _expressionCueSource = null;
         _expressionSuggestionAccepted = null;
+        _invalidateMoodV2Request();
         _noteController.clear();
       });
       final userId = _currentUserId();
@@ -358,21 +477,23 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     });
   }
 
-  String? _currentUserId() {
-    final authProvider = _readProviderOrNull<AuthProvider>();
+  String? _currentUserId({bool listen = false}) {
+    final authProvider = _readProviderOrNull<AuthProvider>(listen: listen);
     final authUserId =
         authProvider?.userId ?? authProvider?.hydrateCurrentUser();
     if (authUserId != null && authUserId.isNotEmpty) return authUserId;
 
-    final profileUserId = _readProviderOrNull<UserProvider>()?.user?.id;
+    final profileUserId = _readProviderOrNull<UserProvider>(
+      listen: listen,
+    )?.user?.id;
     if (profileUserId != null && profileUserId.isNotEmpty) return profileUserId;
 
     return null;
   }
 
-  T? _readProviderOrNull<T>() {
+  T? _readProviderOrNull<T>({bool listen = false}) {
     try {
-      return context.read<T>();
+      return listen ? context.watch<T>() : context.read<T>();
     } on ProviderNotFoundException {
       return null;
     }
@@ -383,6 +504,26 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
   }
+}
+
+class _MoodV2Draft {
+  const _MoodV2Draft({
+    required this.level,
+    required this.label,
+    required this.note,
+    required this.entryMethod,
+    required this.expressionAssistUsed,
+    required this.expressionSuggestionAccepted,
+    required this.expressionModelVersion,
+  });
+
+  final int level;
+  final String label;
+  final String note;
+  final String entryMethod;
+  final bool expressionAssistUsed;
+  final bool expressionSuggestionAccepted;
+  final String? expressionModelVersion;
 }
 
 class _ExpressionCheckInEntry extends StatelessWidget {
