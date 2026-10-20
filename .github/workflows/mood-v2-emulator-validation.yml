@@ -1,0 +1,88 @@
+name: Mood V2 emulator validation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/mood-v2-emulator-validation.yml"
+      - "ci/firebase.mood-v2.emulators.json"
+      - "ci/run_mood_v2_staging_identity_isolated.sh"
+      - "functions/**"
+      - "firestore.rules"
+      - "firestore.indexes.json"
+      - "lib/features/mood/**"
+      - "lib/repositories/mood_v2_repository.dart"
+      - "test/features/mood/**"
+  workflow_dispatch:
+
+# This workflow never needs write permissions, deployment environments,
+# Firebase login tokens, workload identity, or Google Cloud credentials.
+permissions:
+  contents: read
+
+jobs:
+  functions-unit-and-demo-emulators:
+    name: Functions unit and demo-project emulators
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      HOME: ${{ runner.temp }}/mood-v2-firebase-home
+      GOOGLE_APPLICATION_CREDENTIALS: ""
+      CLOUDSDK_CONFIG: ${{ runner.temp }}/mood-v2-empty-gcloud
+      FIREBASE_TOKEN: ""
+      MOOD_V2_STAGING_PILOT_UIDS: ""
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Functions and local Firebase CLI
+        run: |
+          npm ci --prefix functions
+          npm install --prefix "$RUNNER_TEMP/mood-v2-firebase-tools" --no-save firebase-tools@15.29.0
+      - name: Build Functions independently
+        run: npm run build --prefix functions
+      - name: Prepare only local emulator binaries
+        run: |
+          "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" setup:emulators:auth,firestore
+      - name: Run demo-project Rules and negative authorization validation
+        run: |
+          "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" emulators:exec \
+            --config ci/firebase.mood-v2.emulators.json \
+            --project demo-mindmate-mood-v2 \
+            --only auth,firestore,functions \
+            "cd functions && FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FUNCTIONS_EMULATOR_HOST=127.0.0.1 FUNCTIONS_EMULATOR_PORT=5001 GCLOUD_PROJECT=demo-mindmate-mood-v2 node --test --test-concurrency=1 lib/mood_entries.test.js lib/mood_entries_rules.test.js lib/mood_entries_callable_emulator.test.js"
+      - name: Run staging-identity integration only with verified network isolation
+        env:
+          FIREBASE_BIN: ${{ runner.temp }}/mood-v2-firebase-tools/node_modules/.bin/firebase
+          MOOD_V2_TEST_PILOT_UID: mood-v2-ci-synthetic-pilot
+          MOOD_V2_STAGING_PILOT_UIDS: mood-v2-ci-synthetic-pilot
+        run: ci/run_mood_v2_staging_identity_isolated.sh
+
+  flutter-mood-v2-regression:
+    name: Flutter Mood V2 regression
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.4"
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Confirm all Mood V2 flags stay disabled by default
+        run: flutter test test/features/mood/mood_v2_repository_test.dart --dart-define=APP_ENV=staging
+      - name: Run focused Mood V2 UI tests
+        run: flutter test test/features/mood/log_mood_screen_test.dart --dart-define=APP_ENV=staging
+      - name: Run complete staging regression suite
+        run: flutter test --dart-define=APP_ENV=staging
+      - name: Analyze Flutter source
+        run: flutter analyze --no-pub
