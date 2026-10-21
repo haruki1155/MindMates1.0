@@ -69,7 +69,7 @@ test("authenticated non-pilot is rejected by createMoodEntryDev without a Firest
         expressionSuggestionAccepted: false,
         clientRequestId: requestId(sequence),
       }),
-      (error: unknown) => String(error).includes("permission-denied"),
+      {code: "functions/permission-denied"},
     );
     const stored = await db.collection("moodEntries")
       .where("userId", "==", credential.user.uid).get();
@@ -131,7 +131,7 @@ test("configured staging pilot creates one idempotent server-authoritative entry
 
     await assert.rejects(
       () => invoke({...request, level: 3}),
-      (error: unknown) => String(error).includes("already-exists"),
+      {code: "functions/already-exists"},
     );
     const entries = await db.collection("moodEntries")
       .where("userId", "==", configuredPilotUid).get();
