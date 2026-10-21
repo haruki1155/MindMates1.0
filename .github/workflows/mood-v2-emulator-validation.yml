@@ -64,6 +64,7 @@ jobs:
             --only auth,firestore,functions \
             "cd functions && FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FUNCTIONS_EMULATOR_HOST=127.0.0.1 FUNCTIONS_EMULATOR_PORT=5001 GCLOUD_PROJECT=demo-mindmate-mood-v2 node --test --test-concurrency=1 lib/mood_entries_callable_emulator.test.js"
       - name: Run staging-identity integration only with verified network isolation
+        id: mode-b
         env:
           FIREBASE_BIN: ${{ runner.temp }}/mood-v2-firebase-tools/node_modules/.bin/firebase
           MOOD_V2_TEST_PILOT_UID: mood-v2-ci-synthetic-pilot

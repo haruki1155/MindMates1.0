@@ -4,6 +4,18 @@
 # result, never permission to contact a live Firebase project.
 set -euo pipefail
 
+report_mode_b() {
+  local status="$1"
+  local detail="$2"
+  echo "MODE_B=${status}: ${detail}"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "mode_b=${status,,}" >> "$GITHUB_OUTPUT"
+  fi
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '## Mood V2 staging-identity integration\n\n**%s** — %s\n' "$status" "$detail" >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
 : "${FIREBASE_BIN:?Set FIREBASE_BIN to the prepared firebase-tools executable.}"
 : "${MOOD_V2_TEST_PILOT_UID:?Set a synthetic emulator-only pilot UID.}"
 
@@ -20,12 +32,12 @@ if [[ -d "$source_home/.cache/firebase/emulators" ]]; then
   mkdir -p "$isolated_home/.cache/firebase"
   cp -a "$source_home/.cache/firebase/emulators" "$isolated_home/.cache/firebase/"
 else
-  echo "MODE_B=BLOCKED: Firebase emulator binaries were not prepared."
+  report_mode_b "BLOCKED" "Firebase emulator binaries were not prepared."
   exit 0
 fi
 
 if ! command -v unshare >/dev/null || ! command -v ip >/dev/null; then
-  echo "MODE_B=BLOCKED: Linux network namespace tools are unavailable."
+  report_mode_b "BLOCKED" "Linux network namespace tools are unavailable."
   exit 0
 fi
 
@@ -36,7 +48,7 @@ if ! unshare --user --map-root-user --net bash -ceu '
   test -z "$(ip route show default)"
   ! curl --noproxy "*" --connect-timeout 2 --max-time 3 http://1.1.1.1 >/dev/null 2>&1
 '; then
-  echo "MODE_B=BLOCKED: outbound network isolation could not be established and verified."
+  report_mode_b "BLOCKED" "Outbound network isolation could not be established and verified."
   exit 0
 fi
 
@@ -63,4 +75,4 @@ unshare --user --map-root-user --net bash -ceu '
     --only auth,firestore,functions \
     "cd functions && printf '%s\\n' 'MODE_B: transactional idempotency' && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=mindmate-staging node --test --test-concurrency=1 lib/mood_entries.test.js && printf '%s\\n' 'MODE_B: Firestore Rules' && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=mindmate-staging node --test --test-concurrency=1 lib/mood_entries_rules.test.js && printf '%s\\n' 'MODE_B: authenticated callable integration' && FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FUNCTIONS_EMULATOR_HOST=127.0.0.1 FUNCTIONS_EMULATOR_PORT=5001 GCLOUD_PROJECT=mindmate-staging node --test --test-concurrency=1 lib/mood_entries_callable_emulator.test.js"
 '
-echo "MODE_B=PASSED: staging-identity emulator integration ran with loopback-only networking."
+report_mode_b "PASSED" "Staging-identity emulator integration ran with loopback-only networking."
