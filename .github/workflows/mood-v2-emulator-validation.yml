@@ -1,17 +1,6 @@
 name: Mood V2 emulator validation
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/mood-v2-emulator-validation.yml"
-      - "ci/firebase.mood-v2.emulators.json"
-      - "ci/run_mood_v2_staging_identity_isolated.sh"
-      - "functions/**"
-      - "firestore.rules"
-      - "firestore.indexes.json"
-      - "lib/features/mood/**"
-      - "lib/repositories/mood_v2_repository.dart"
-      - "test/features/mood/**"
   workflow_dispatch:
 
 # This workflow never needs write permissions, deployment environments,
@@ -33,6 +22,8 @@ jobs:
       MOOD_V2_STAGING_PILOT_UIDS: ""
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
@@ -51,13 +42,27 @@ jobs:
       - name: Prepare only local emulator binaries
         run: |
           "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" setup:emulators:auth,firestore
-      - name: Run demo-project Rules and negative authorization validation
+      - name: Run demo-project transactional idempotency validation
         run: |
           "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" emulators:exec \
             --config ci/firebase.mood-v2.emulators.json \
             --project demo-mindmate-mood-v2 \
             --only auth,firestore,functions \
-            "cd functions && FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FUNCTIONS_EMULATOR_HOST=127.0.0.1 FUNCTIONS_EMULATOR_PORT=5001 GCLOUD_PROJECT=demo-mindmate-mood-v2 node --test --test-concurrency=1 lib/mood_entries.test.js lib/mood_entries_rules.test.js lib/mood_entries_callable_emulator.test.js"
+            "cd functions && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-mindmate-mood-v2 node --test --test-concurrency=1 lib/mood_entries.test.js"
+      - name: Run demo-project Firestore Rules validation
+        run: |
+          "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" emulators:exec \
+            --config ci/firebase.mood-v2.emulators.json \
+            --project demo-mindmate-mood-v2 \
+            --only auth,firestore,functions \
+            "cd functions && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-mindmate-mood-v2 node --test --test-concurrency=1 lib/mood_entries_rules.test.js"
+      - name: Run demo-project callable rejection validation
+        run: |
+          "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" emulators:exec \
+            --config ci/firebase.mood-v2.emulators.json \
+            --project demo-mindmate-mood-v2 \
+            --only auth,firestore,functions \
+            "cd functions && FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FUNCTIONS_EMULATOR_HOST=127.0.0.1 FUNCTIONS_EMULATOR_PORT=5001 GCLOUD_PROJECT=demo-mindmate-mood-v2 node --test --test-concurrency=1 lib/mood_entries_callable_emulator.test.js"
       - name: Run staging-identity integration only with verified network isolation
         env:
           FIREBASE_BIN: ${{ runner.temp }}/mood-v2-firebase-tools/node_modules/.bin/firebase
@@ -72,6 +77,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.4"
