@@ -1,6 +1,9 @@
 name: Mood V2 emulator validation
 
 on:
+  push:
+    branches:
+      - ci/mood-v2-phase5a-validation
   workflow_dispatch:
 
 # This workflow never needs write permissions, deployment environments,
