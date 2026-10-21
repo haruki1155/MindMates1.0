@@ -18,9 +18,10 @@ report_mode_b() {
 
 : "${FIREBASE_BIN:?Set FIREBASE_BIN to the prepared firebase-tools executable.}"
 : "${MOOD_V2_TEST_PILOT_UID:?Set a synthetic emulator-only pilot UID.}"
+: "${SUPER_ADMIN_UID:?Set a synthetic emulator-only SUPER_ADMIN_UID for Functions parameter discovery.}"
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-config="$root_dir/ci/firebase.mood-v2.emulators.json"
+config="$root_dir/firebase.mood-v2.emulators.json"
 source_home="${HOME:?HOME is required for the preloaded emulator binaries.}"
 isolated_home="$(mktemp -d)"
 trap 'rm -rf "$isolated_home"' EXIT
@@ -67,6 +68,7 @@ unshare --user --map-root-user --net bash -ceu '
     XDG_CONFIG_HOME="$ISOLATED_HOME/.config" \
     CLOUDSDK_CONFIG="$ISOLATED_HOME/.gcloud" \
     GOOGLE_APPLICATION_CREDENTIALS="" \
+    SUPER_ADMIN_UID="$SUPER_ADMIN_UID" \
     MOOD_V2_TEST_PILOT_UID="$MOOD_V2_TEST_PILOT_UID" \
     MOOD_V2_STAGING_PILOT_UIDS="$MOOD_V2_STAGING_PILOT_UIDS" \
     "$FIREBASE_BIN" emulators:exec \

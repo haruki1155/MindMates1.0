@@ -47,30 +47,39 @@ jobs:
             echo "GOOGLE_APPLICATION_CREDENTIALS="
             echo "FIREBASE_TOKEN="
             echo "MOOD_V2_STAGING_PILOT_UIDS="
+            echo "SUPER_ADMIN_UID=mood-v2-ci-super-admin"
           } >> "$GITHUB_ENV"
       - name: Build Functions independently
         run: npm run build --prefix functions
+      - name: Provide synthetic Functions parameter for emulator discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The emulator requires all defineString parameters during discovery.
+          # This non-privileged placeholder exists only on the ephemeral runner.
+          printf '%s\n' 'SUPER_ADMIN_UID=mood-v2-ci-super-admin' > functions/.env.local
+          chmod 600 functions/.env.local
       - name: Prepare local Firestore emulator binary
         run: |
           "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" setup:emulators:firestore
       - name: Run demo-project transactional idempotency validation
         run: |
           "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" emulators:exec \
-            --config ci/firebase.mood-v2.emulators.json \
+            --config firebase.mood-v2.emulators.json \
             --project demo-mindmate-mood-v2 \
             --only auth,firestore,functions \
             "cd functions && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-mindmate-mood-v2 node --test --test-concurrency=1 lib/mood_entries.test.js"
       - name: Run demo-project Firestore Rules validation
         run: |
           "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" emulators:exec \
-            --config ci/firebase.mood-v2.emulators.json \
+            --config firebase.mood-v2.emulators.json \
             --project demo-mindmate-mood-v2 \
             --only auth,firestore,functions \
             "cd functions && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-mindmate-mood-v2 node --test --test-concurrency=1 lib/mood_entries_rules.test.js"
       - name: Run demo-project callable rejection validation
         run: |
           "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" emulators:exec \
-            --config ci/firebase.mood-v2.emulators.json \
+            --config firebase.mood-v2.emulators.json \
             --project demo-mindmate-mood-v2 \
             --only auth,firestore,functions \
             "cd functions && FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FUNCTIONS_EMULATOR_HOST=127.0.0.1 FUNCTIONS_EMULATOR_PORT=5001 GCLOUD_PROJECT=demo-mindmate-mood-v2 node --test --test-concurrency=1 lib/mood_entries_callable_emulator.test.js"
