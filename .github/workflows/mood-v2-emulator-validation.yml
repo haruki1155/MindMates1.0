@@ -50,9 +50,9 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Build Functions independently
         run: npm run build --prefix functions
-      - name: Prepare only local emulator binaries
+      - name: Prepare local Firestore emulator binary
         run: |
-          "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" setup:emulators:auth,firestore
+          "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" setup:emulators:firestore
       - name: Run demo-project transactional idempotency validation
         run: |
           "$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase" emulators:exec \
