@@ -17,12 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    env:
-      HOME: ${{ runner.temp }}/mood-v2-firebase-home
-      GOOGLE_APPLICATION_CREDENTIALS: ""
-      CLOUDSDK_CONFIG: ${{ runner.temp }}/mood-v2-empty-gcloud
-      FIREBASE_TOKEN: ""
-      MOOD_V2_STAGING_PILOT_UIDS: ""
     steps:
       - uses: actions/checkout@v5
         with:
@@ -40,6 +34,20 @@ jobs:
         run: |
           npm ci --prefix functions
           npm install --prefix "$RUNNER_TEMP/mood-v2-firebase-tools" --no-save firebase-tools@15.29.0
+      - name: Prepare isolated test environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+          mkdir -p "$RUNNER_TEMP/mood-v2-firebase-home" "$RUNNER_TEMP/mood-v2-empty-gcloud"
+          chmod 700 "$RUNNER_TEMP/mood-v2-firebase-home" "$RUNNER_TEMP/mood-v2-empty-gcloud"
+          {
+            echo "HOME=$RUNNER_TEMP/mood-v2-firebase-home"
+            echo "CLOUDSDK_CONFIG=$RUNNER_TEMP/mood-v2-empty-gcloud"
+            echo "GOOGLE_APPLICATION_CREDENTIALS="
+            echo "FIREBASE_TOKEN="
+            echo "MOOD_V2_STAGING_PILOT_UIDS="
+          } >> "$GITHUB_ENV"
       - name: Build Functions independently
         run: npm run build --prefix functions
       - name: Prepare only local emulator binaries
@@ -69,10 +77,11 @@ jobs:
       - name: Run staging-identity integration only with verified network isolation
         id: mode-b
         env:
-          FIREBASE_BIN: ${{ runner.temp }}/mood-v2-firebase-tools/node_modules/.bin/firebase
           MOOD_V2_TEST_PILOT_UID: mood-v2-ci-synthetic-pilot
           MOOD_V2_STAGING_PILOT_UIDS: mood-v2-ci-synthetic-pilot
-        run: ci/run_mood_v2_staging_identity_isolated.sh
+        run: |
+          export FIREBASE_BIN="$RUNNER_TEMP/mood-v2-firebase-tools/node_modules/.bin/firebase"
+          ci/run_mood_v2_staging_identity_isolated.sh
 
   flutter-mood-v2-regression:
     name: Flutter Mood V2 regression
