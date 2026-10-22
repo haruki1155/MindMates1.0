@@ -85,4 +85,11 @@ grep -Fxq -- '/tmp:rw,noexec,nosuid,size=512m,mode=1777' "$temp_dir/integration_
 grep -Fq 'readonly FIREBASE_DEBUG_PATH=/tmp/firebase-debug.log' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 grep -Fq 'if ! : > "$FIREBASE_DEBUG_PATH"; then' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 grep -Fq 'FIREBASE_DEBUG_PATH="$FIREBASE_DEBUG_PATH"' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+
+# The offline image must carry a Java 21 runtime because Firebase CLI 15 no
+# longer supports the default Debian Java 17 runtime.
+grep -Fq 'FROM eclipse-temurin:21-jre AS java21' "$root_dir/ci/mood-v2-mode-b.Dockerfile"
+grep -Fq 'COPY --from=java21 /opt/java/openjdk /opt/java/openjdk' "$root_dir/ci/mood-v2-mode-b.Dockerfile"
+grep -Fq 'ENV JAVA_HOME=/opt/java/openjdk' "$root_dir/ci/mood-v2-mode-b.Dockerfile"
+grep -Fq '&& java -version' "$root_dir/ci/mood-v2-mode-b.Dockerfile"
 echo 'Mode B Docker result contract tests passed.'
