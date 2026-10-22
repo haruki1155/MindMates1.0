@@ -53,7 +53,7 @@ set +e
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
-  --tmpfs /tmp:rw,noexec,nosuid,size=256m \
+  --tmpfs /tmp:rw,noexec,nosuid,size=512m,mode=1777 \
   --env MOOD_V2_TEST_PILOT_UID="$MOOD_V2_TEST_PILOT_UID" \
   --env MOOD_V2_STAGING_PILOT_UIDS="$MOOD_V2_STAGING_PILOT_UIDS" \
   "$image"

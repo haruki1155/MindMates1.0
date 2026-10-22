@@ -76,5 +76,13 @@ grep -Fxq -- '--cap-drop' "$temp_dir/integration_passed.args"
 grep -Fxq -- 'ALL' "$temp_dir/integration_passed.args"
 grep -Fxq -- '--security-opt' "$temp_dir/integration_passed.args"
 grep -Fxq -- 'no-new-privileges:true' "$temp_dir/integration_passed.args"
+grep -Fxq -- '--tmpfs' "$temp_dir/integration_passed.args"
+grep -Fxq -- '/tmp:rw,noexec,nosuid,size=512m,mode=1777' "$temp_dir/integration_passed.args"
 ! grep -Fxq -- '--network=host' "$temp_dir/integration_passed.args"
+
+# Firebase CLI must write only to the container-local tmpfs, even though the
+# workspace remains read-only and the emulator command is credential-scrubbed.
+grep -Fq 'readonly FIREBASE_DEBUG_PATH=/tmp/firebase-debug.log' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+grep -Fq 'if ! : > "$FIREBASE_DEBUG_PATH"; then' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+grep -Fq 'FIREBASE_DEBUG_PATH="$FIREBASE_DEBUG_PATH"' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 echo 'Mode B Docker result contract tests passed.'

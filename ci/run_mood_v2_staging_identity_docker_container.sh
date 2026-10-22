@@ -8,6 +8,7 @@ set -euo pipefail
 #   42 = isolation/emulator infrastructure blocked before tests could run
 #   1  = an authenticated integration assertion failed
 readonly MODE_B_BLOCKED_EXIT_CODE=42
+readonly FIREBASE_DEBUG_PATH=/tmp/firebase-debug.log
 
 : "${MOOD_V2_TEST_PILOT_UID:?Set a synthetic emulator-only pilot UID.}"
 : "${MOOD_V2_STAGING_PILOT_UIDS:?Set the synthetic pilot allowlist.}"
@@ -32,12 +33,22 @@ if curl --noproxy '*' --connect-timeout 2 --max-time 3 http://1.1.1.1 >/dev/null
   exit "$MODE_B_BLOCKED_EXIT_CODE"
 fi
 
+# The application filesystem is intentionally read-only. Firebase CLI normally
+# writes firebase-debug.log in its working directory, so reserve a private
+# writable path on the container-local tmpfs before starting any emulator.
+umask 077
+if ! : > "$FIREBASE_DEBUG_PATH"; then
+  echo "MODE_B=BLOCKED: Docker offline container cannot create the Firebase debug log."
+  exit "$MODE_B_BLOCKED_EXIT_CODE"
+fi
+
 run_emulators() {
   local command="$1"
   env -i \
     PATH="$PATH" \
     HOME="$HOME" \
     TMPDIR=/tmp \
+    FIREBASE_DEBUG_PATH="$FIREBASE_DEBUG_PATH" \
     XDG_CONFIG_HOME=/tmp/config \
     CLOUDSDK_CONFIG=/tmp/gcloud \
     GOOGLE_APPLICATION_CREDENTIALS= \
