@@ -26,7 +26,8 @@ if curl --noproxy '*' --connect-timeout 2 --max-time 3 http://1.1.1.1 >/dev/null
   exit 0
 fi
 
-run_tests() {
+run_emulators() {
+  local command="$1"
   env -i \
     PATH="$PATH" \
     HOME="$HOME" \
@@ -42,10 +43,15 @@ run_tests() {
       --config /workspace/firebase.mood-v2.emulators.json \
       --project mindmate-staging \
       --only auth,firestore,functions \
-      "cd /workspace/functions && printf '%s\\n' 'MODE_B: transactional idempotency' && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=mindmate-staging node --test --test-concurrency=1 lib/mood_entries.test.js && printf '%s\\n' 'MODE_B: Firestore Rules' && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=mindmate-staging node --test --test-concurrency=1 lib/mood_entries_rules.test.js && printf '%s\\n' 'MODE_B: authenticated callable integration' && FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FUNCTIONS_EMULATOR_HOST=127.0.0.1 FUNCTIONS_EMULATOR_PORT=5001 GCLOUD_PROJECT=mindmate-staging node --test --test-concurrency=1 lib/mood_entries_callable_emulator.test.js"
+      "$command"
 }
 
-if run_tests; then
+if ! run_emulators "node -e \"const net = require('node:net'); const ports = [9099, 8080, 5001]; Promise.all(ports.map((port) => new Promise((resolve, reject) => { const socket = net.connect({host: '127.0.0.1', port}, () => { socket.end(); resolve(); }); socket.on('error', reject); }))).catch((error) => { console.error(error); process.exit(1); });\""; then
+  echo "MODE_B=BLOCKED: Docker offline container could not start all local emulators."
+  exit 0
+fi
+
+if run_emulators "cd /workspace/functions && printf '%s\\n' 'MODE_B: transactional idempotency' && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=mindmate-staging node --test --test-concurrency=1 lib/mood_entries.test.js && printf '%s\\n' 'MODE_B: Firestore Rules' && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=mindmate-staging node --test --test-concurrency=1 lib/mood_entries_rules.test.js && printf '%s\\n' 'MODE_B: authenticated callable integration' && FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FUNCTIONS_EMULATOR_HOST=127.0.0.1 FUNCTIONS_EMULATOR_PORT=5001 GCLOUD_PROJECT=mindmate-staging node --test --test-concurrency=1 lib/mood_entries_callable_emulator.test.js"; then
   echo "MODE_B=PASSED: Docker ran staging-identity emulators with loopback-only networking."
 else
   echo "MODE_B=FAILED: Docker-isolated staging-identity emulator tests failed."
