@@ -93,6 +93,31 @@ Rollback is additive and preserves `moodEntries` records:
 separate client/build controls. The MindAid Function-side history behavior must
 also remain disabled unless its own reviewed environment control is enabled.
 
+## CI-to-feature integration plan
+
+The following files are CI-only corrections currently on
+`ci/mood-v2-phase5a-validation` after the preserved feature checkpoint
+`f46f932`. They must be reviewed and cherry-picked or merged into the Mood V2
+feature/release branch as one validation-infrastructure batch only after Mode B
+has a reviewed outcome. They must never be merged directly from the CI branch
+into `main`.
+
+| File | Purpose | Feature-branch disposition |
+| --- | --- | --- |
+| `.github/workflows/mood-v2-emulator-validation.yml` | Credential-free branch-scoped validation workflow | Include after workflow review. |
+| `firebase.mood-v2.emulators.json` | Root-relative Auth/Firestore/Functions emulator config | Include; it has no live project credentials. |
+| `ci/run_mood_v2_staging_identity_isolated.sh` | Namespace-first, fail-closed Mode B launcher | Include with the Docker fallback. |
+| `ci/mood-v2-mode-b.Dockerfile` and `.dockerignore` | Prebuilt offline emulator image and allowlisted build context | Include only after a Docker-capable runner validates it. |
+| `ci/run_mood_v2_staging_identity_docker*.sh` | No-mount, `--network none`, credential-scrubbed execution | Include only after a Docker-capable runner validates it. |
+| `functions/src/mood_entries_callable_emulator.test.ts` | Exact callable-code/no-write integration assertions | Include; it does not alter callable authorization. |
+| This document | Deployment/rollback/acceptance controls | Include with the release-readiness review. |
+
+Before integration, verify that the feature branch still has disabled flags,
+that no `.env.*`, service-account, Docker socket, deployment configuration, or
+unrelated provisioning file is included, and that the final workflow has
+`contents: read` permissions only. The feature branch remains unchanged until
+that integration is separately authorized.
+
 ## Phase 5C acceptance cases
 
 Use disposable staging fixtures and synthetic levels only. Capture record
