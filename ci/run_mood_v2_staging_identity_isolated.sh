@@ -37,9 +37,14 @@ else
   exit 0
 fi
 
+run_docker_fallback() {
+  local reason="$1"
+  echo "MODE_B: namespace isolation unavailable (${reason}); attempting Docker --network none fallback."
+  exec bash "$root_dir/ci/run_mood_v2_staging_identity_docker.sh"
+}
+
 if ! command -v unshare >/dev/null || ! command -v ip >/dev/null; then
-  report_mode_b "BLOCKED" "Linux network namespace tools are unavailable."
-  exit 0
+  run_docker_fallback "required namespace tools are unavailable"
 fi
 
 # First prove the runner grants an isolated namespace with only loopback. This
@@ -49,8 +54,7 @@ if ! unshare --user --map-root-user --net bash -ceu '
   test -z "$(ip route show default)"
   ! curl --noproxy "*" --connect-timeout 2 --max-time 3 http://1.1.1.1 >/dev/null 2>&1
 '; then
-  report_mode_b "BLOCKED" "Outbound network isolation could not be established and verified."
-  exit 0
+  run_docker_fallback "unprivileged namespace creation or verification failed"
 fi
 
 export ROOT_DIR="$root_dir"
