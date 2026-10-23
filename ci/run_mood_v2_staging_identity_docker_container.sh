@@ -9,6 +9,7 @@ set -euo pipefail
 #   1  = an authenticated integration assertion failed
 readonly MODE_B_BLOCKED_EXIT_CODE=42
 readonly FIREBASE_DEBUG_PATH=/tmp/firebase-debug.log
+readonly FIREBASE_EMULATOR_WORKDIR=/tmp/mood-v2-emulators
 
 : "${MOOD_V2_TEST_PILOT_UID:?Set a synthetic emulator-only pilot UID.}"
 : "${MOOD_V2_STAGING_PILOT_UIDS:?Set the synthetic pilot allowlist.}"
@@ -41,26 +42,36 @@ if ! : > "$FIREBASE_DEBUG_PATH"; then
   echo "MODE_B=BLOCKED: Docker offline container cannot create the Firebase debug log."
   exit "$MODE_B_BLOCKED_EXIT_CODE"
 fi
+if ! mkdir -p "$FIREBASE_EMULATOR_WORKDIR"; then
+  echo "MODE_B=BLOCKED: Docker offline container cannot create the Firebase emulator work directory."
+  exit "$MODE_B_BLOCKED_EXIT_CODE"
+fi
 
 run_emulators() {
   local command="$1"
-  env -i \
-    PATH="$PATH" \
-    HOME="$HOME" \
-    TMPDIR=/tmp \
-    FIREBASE_DEBUG_PATH="$FIREBASE_DEBUG_PATH" \
-    XDG_CONFIG_HOME=/tmp/config \
-    CLOUDSDK_CONFIG=/tmp/gcloud \
-    GOOGLE_APPLICATION_CREDENTIALS= \
-    FIREBASE_TOKEN= \
-    SUPER_ADMIN_UID=mood-v2-ci-super-admin \
-    MOOD_V2_TEST_PILOT_UID="$MOOD_V2_TEST_PILOT_UID" \
-    MOOD_V2_STAGING_PILOT_UIDS="$MOOD_V2_STAGING_PILOT_UIDS" \
-    firebase emulators:exec \
-      --config /workspace/firebase.mood-v2.emulators.json \
-      --project mindmate-staging \
-      --only auth,firestore,functions \
-      "$command"
+  (
+    # Firestore and Functions emit component logs relative to the Firebase CLI
+    # working directory. Keep those files on tmpfs while referring to the
+    # immutable workspace configuration by absolute path.
+    cd "$FIREBASE_EMULATOR_WORKDIR"
+    env -i \
+      PATH="$PATH" \
+      HOME="$HOME" \
+      TMPDIR=/tmp \
+      FIREBASE_DEBUG_PATH="$FIREBASE_DEBUG_PATH" \
+      XDG_CONFIG_HOME=/tmp/config \
+      CLOUDSDK_CONFIG=/tmp/gcloud \
+      GOOGLE_APPLICATION_CREDENTIALS= \
+      FIREBASE_TOKEN= \
+      SUPER_ADMIN_UID=mood-v2-ci-super-admin \
+      MOOD_V2_TEST_PILOT_UID="$MOOD_V2_TEST_PILOT_UID" \
+      MOOD_V2_STAGING_PILOT_UIDS="$MOOD_V2_STAGING_PILOT_UIDS" \
+      firebase emulators:exec \
+        --config /workspace/firebase.mood-v2.emulators.json \
+        --project mindmate-staging \
+        --only auth,firestore,functions \
+        "$command"
+  )
 }
 
 if ! run_emulators "node -e \"const net = require('node:net'); const ports = [9099, 8080, 5001]; Promise.all(ports.map((port) => new Promise((resolve, reject) => { const socket = net.connect({host: '127.0.0.1', port}, () => { socket.end(); resolve(); }); socket.on('error', reject); }))).catch((error) => { console.error(error); process.exit(1); });\""; then

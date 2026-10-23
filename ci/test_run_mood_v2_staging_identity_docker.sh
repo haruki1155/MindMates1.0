@@ -83,8 +83,12 @@ grep -Fxq -- '/tmp:rw,noexec,nosuid,size=512m,mode=1777' "$temp_dir/integration_
 # Firebase CLI must write only to the container-local tmpfs, even though the
 # workspace remains read-only and the emulator command is credential-scrubbed.
 grep -Fq 'readonly FIREBASE_DEBUG_PATH=/tmp/firebase-debug.log' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+grep -Fq 'readonly FIREBASE_EMULATOR_WORKDIR=/tmp/mood-v2-emulators' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 grep -Fq 'if ! : > "$FIREBASE_DEBUG_PATH"; then' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+grep -Fq 'if ! mkdir -p "$FIREBASE_EMULATOR_WORKDIR"; then' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+grep -Fq 'cd "$FIREBASE_EMULATOR_WORKDIR"' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 grep -Fq 'FIREBASE_DEBUG_PATH="$FIREBASE_DEBUG_PATH"' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+grep -Fq -- '--config /workspace/firebase.mood-v2.emulators.json' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 
 # The offline image must carry a Java 21 runtime because Firebase CLI 15 no
 # longer supports the default Debian Java 17 runtime.
