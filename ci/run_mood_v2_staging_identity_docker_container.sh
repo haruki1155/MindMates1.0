@@ -58,14 +58,18 @@ prepare_emulator_functions_source() {
   tar -C /workspace/functions --exclude='./node_modules' -cf - . \
     | tar -C "$FIREBASE_FUNCTIONS_SOURCE" -xf -
   ln -s /workspace/functions/node_modules "$FIREBASE_FUNCTIONS_SOURCE/node_modules"
+  ln -sfn /workspace/firestore.rules "$FIREBASE_EMULATOR_WORKDIR/firestore.rules"
+  ln -sfn /workspace/firestore.indexes.json "$FIREBASE_EMULATOR_WORKDIR/firestore.indexes.json"
 
-  node - "$FIREBASE_EMULATOR_CONFIG" "$FIREBASE_FUNCTIONS_SOURCE" <<'NODE'
+  node - "$FIREBASE_EMULATOR_CONFIG" <<'NODE'
 const fs = require('node:fs');
-const [configPath, functionsSource] = process.argv.slice(2);
+const [configPath] = process.argv.slice(2);
 const config = JSON.parse(
   fs.readFileSync('/workspace/firebase.mood-v2.emulators.json', 'utf8'),
 );
-config.functions = {...config.functions, source: functionsSource};
+// Firebase CLI resolves these paths relative to the generated config file.
+// Keep the source writable on /tmp and Rules/indexes linked to immutable input.
+config.functions = {...config.functions, source: '../mood-v2-functions'};
 fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, {
   mode: 0o600,
 });

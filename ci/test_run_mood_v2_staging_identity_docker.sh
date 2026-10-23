@@ -92,8 +92,10 @@ grep -Fq 'cd "$FIREBASE_EMULATOR_WORKDIR"' "$root_dir/ci/run_mood_v2_staging_ide
 grep -Fq 'FIREBASE_DEBUG_PATH="$FIREBASE_DEBUG_PATH"' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 grep -Fq 'tar -C /workspace/functions --exclude=' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 grep -Fq 'ln -s /workspace/functions/node_modules "$FIREBASE_FUNCTIONS_SOURCE/node_modules"' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+grep -Fq 'ln -sfn /workspace/firestore.rules "$FIREBASE_EMULATOR_WORKDIR/firestore.rules"' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+grep -Fq 'ln -sfn /workspace/firestore.indexes.json "$FIREBASE_EMULATOR_WORKDIR/firestore.indexes.json"' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 grep -Fq "fs.readFileSync('/workspace/firebase.mood-v2.emulators.json', 'utf8')" "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
-grep -Fq 'config.functions = {...config.functions, source: functionsSource};' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
+grep -Fq "config.functions = {...config.functions, source: '../mood-v2-functions'};" "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 grep -Fq -- '--config "$FIREBASE_EMULATOR_CONFIG"' "$root_dir/ci/run_mood_v2_staging_identity_docker_container.sh"
 
 # The offline image must carry a Java 21 runtime because Firebase CLI 15 no
