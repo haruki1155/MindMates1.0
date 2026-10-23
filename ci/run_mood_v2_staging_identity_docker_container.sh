@@ -60,6 +60,11 @@ prepare_emulator_functions_source() {
   ln -s /workspace/functions/node_modules "$FIREBASE_FUNCTIONS_SOURCE/node_modules"
   ln -sfn /workspace/firestore.rules "$FIREBASE_EMULATOR_WORKDIR/firestore.rules"
   ln -sfn /workspace/firestore.indexes.json "$FIREBASE_EMULATOR_WORKDIR/firestore.indexes.json"
+  # defineString parameters are resolved from the Functions source dotenv file
+  # in the emulator. Keep the synthetic pilot allowlist exclusively on tmpfs.
+  printf '\nMOOD_V2_STAGING_PILOT_UIDS=%s\n' "$MOOD_V2_STAGING_PILOT_UIDS" \
+    >> "$FIREBASE_FUNCTIONS_SOURCE/.env.local"
+  chmod 600 "$FIREBASE_FUNCTIONS_SOURCE/.env.local"
 
   node - "$FIREBASE_EMULATOR_CONFIG" <<'NODE'
 const fs = require('node:fs');
