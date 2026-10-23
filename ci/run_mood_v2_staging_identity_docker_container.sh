@@ -10,6 +10,8 @@ set -euo pipefail
 readonly MODE_B_BLOCKED_EXIT_CODE=42
 readonly FIREBASE_DEBUG_PATH=/tmp/firebase-debug.log
 readonly FIREBASE_EMULATOR_WORKDIR=/tmp/mood-v2-emulators
+readonly FIREBASE_FUNCTIONS_SOURCE=/tmp/mood-v2-functions
+readonly FIREBASE_EMULATOR_CONFIG="$FIREBASE_EMULATOR_WORKDIR/firebase.mood-v2.emulators.json"
 
 : "${MOOD_V2_TEST_PILOT_UID:?Set a synthetic emulator-only pilot UID.}"
 : "${MOOD_V2_STAGING_PILOT_UIDS:?Set the synthetic pilot allowlist.}"
@@ -47,12 +49,40 @@ if ! mkdir -p "$FIREBASE_EMULATOR_WORKDIR"; then
   exit "$MODE_B_BLOCKED_EXIT_CODE"
 fi
 
+# The Functions emulator updates its source-local dotenv file while resolving
+# runtime parameters. Keep that mutable emulator-only source on tmpfs; the
+# image's /workspace source and Firebase configuration stay read-only.
+prepare_emulator_functions_source() {
+  rm -rf "$FIREBASE_FUNCTIONS_SOURCE"
+  mkdir -p "$FIREBASE_FUNCTIONS_SOURCE"
+  tar -C /workspace/functions --exclude='./node_modules' -cf - . \
+    | tar -C "$FIREBASE_FUNCTIONS_SOURCE" -xf -
+  ln -s /workspace/functions/node_modules "$FIREBASE_FUNCTIONS_SOURCE/node_modules"
+
+  node - "$FIREBASE_EMULATOR_CONFIG" "$FIREBASE_FUNCTIONS_SOURCE" <<'NODE'
+const fs = require('node:fs');
+const [configPath, functionsSource] = process.argv.slice(2);
+const config = JSON.parse(
+  fs.readFileSync('/workspace/firebase.mood-v2.emulators.json', 'utf8'),
+);
+config.functions = {...config.functions, source: functionsSource};
+fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, {
+  mode: 0o600,
+});
+NODE
+}
+
+if ! prepare_emulator_functions_source; then
+  echo "MODE_B=BLOCKED: Docker offline container could not prepare a writable Functions emulator source."
+  exit "$MODE_B_BLOCKED_EXIT_CODE"
+fi
+
 run_emulators() {
   local command="$1"
   (
     # Firestore and Functions emit component logs relative to the Firebase CLI
-    # working directory. Keep those files on tmpfs while referring to the
-    # immutable workspace configuration by absolute path.
+    # working directory. Keep those files and the generated emulator config on
+    # tmpfs while retaining the immutable workspace config as the template.
     cd "$FIREBASE_EMULATOR_WORKDIR"
     env -i \
       PATH="$PATH" \
@@ -67,7 +97,7 @@ run_emulators() {
       MOOD_V2_TEST_PILOT_UID="$MOOD_V2_TEST_PILOT_UID" \
       MOOD_V2_STAGING_PILOT_UIDS="$MOOD_V2_STAGING_PILOT_UIDS" \
       firebase emulators:exec \
-        --config /workspace/firebase.mood-v2.emulators.json \
+        --config "$FIREBASE_EMULATOR_CONFIG" \
         --project mindmate-staging \
         --only auth,firestore,functions \
         "$command"
