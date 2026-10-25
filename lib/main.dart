@@ -79,7 +79,13 @@ Widget _mobileApp() => MultiProvider(
     ChangeNotifierProvider(
       create: (_) => NotificationProvider(NotificationRepository()),
     ),
-    ChangeNotifierProvider(create: (_) => ReportProvider(ReportRepository())),
+    ChangeNotifierProvider(
+      create: (_) => ReportProvider(
+        ReportRepository(
+          combinedMoodHistory: MoodCombinedHistoryRepository(),
+        ),
+      ),
+    ),
     ChangeNotifierProvider(
       create: (_) =>
           MentalHealthActivityProvider(MentalHealthActivityRepository()),

@@ -12,6 +12,7 @@ import '/features/mind_aid/domain/mind_aid_context.dart';
 import '/features/mind_aid/domain/mind_aid_integration_models.dart';
 import '/features/counseling/screens/pacc_counseling_screen.dart';
 import '/repositories/mind_aid_context_repository.dart';
+import '/repositories/mood_combined_history_repository.dart';
 import '/routes/route_names.dart';
 
 class MindAidPage extends StatefulWidget {
@@ -23,7 +24,9 @@ class MindAidPage extends StatefulWidget {
 
 class _MindAidPageState extends State<MindAidPage> {
   final MindAidContextRepository _contextRepository =
-      MindAidContextRepository();
+      MindAidContextRepository(
+        combinedMoodHistory: MoodCombinedHistoryRepository(),
+      );
 
   String? _loadedContextKey;
   String? _loadedSnapshotUserId;
