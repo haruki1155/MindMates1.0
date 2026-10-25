@@ -16,7 +16,6 @@ class FirebaseCallableRouter {
     'submitFullAssessment',
     'previewAssessmentDomain',
     'sendMindAidMessage',
-    'createMoodEntry',
   };
 
   static String name(String protectedName) {
@@ -32,5 +31,8 @@ extension FirebaseFunctionsRouting on FirebaseFunctions {
   HttpsCallable routedCallable(
     String protectedName, {
     HttpsCallableOptions? options,
-  }) => httpsCallable(FirebaseCallableRouter.name(protectedName), options: options);
+  }) => httpsCallable(
+    FirebaseCallableRouter.name(protectedName),
+    options: options,
+  );
 }

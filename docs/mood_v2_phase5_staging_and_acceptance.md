@@ -15,6 +15,12 @@ deployment nor client feature activation.
 - `createMoodEntry` and `createMoodEntryDev` derive identity, timestamp, and
   Manila date key on the server. Clients cannot submit a UID, date key, or
   authoritative timestamp.
+- The Flutter Mood V2 writer always calls the protected `createMoodEntry`.
+  `createMoodEntryDev` remains available for separately controlled backend
+  diagnostics and is never selected by the client router.
+- `ENABLE_STAGING_APP_CHECK=false` is the client default. An approved pilot
+  sets it to `true`, activates the platform provider, and fails startup unless
+  Firebase issues a non-empty token.
 
 ## Future staging deployment manifest
 
@@ -86,7 +92,7 @@ Rollback is additive and preserves `moodEntries` records:
 | --- | --- | --- | --- | --- |
 | Legacy-only baseline | Empty | false | all false | Existing legacy writer/readers only. |
 | Read-only compatibility test | Empty | false | one approved reader flag true | Combined reader can be observed; no V2 write path is enabled. |
-| Synthetic pilot writing | Explicit disposable UID only | true in a dedicated pilot APK | only approved readers true | Callable permits only that synthetic account; retry remains UUID-idempotent. |
+| Synthetic pilot writing | Explicit disposable UID only | true in a dedicated pilot APK | all false for the first writer-only pass | Protected callable permits only that synthetic account; retry remains UUID-idempotent. |
 | Rollback | Empty | false in replacement APK | all false | Legacy behavior resumes; historical records remain read-only. |
 
 `ENABLE_MOOD_V2_REPORTS_READ` and `ENABLE_MOOD_V2_MINDAID_READ` remain
@@ -119,6 +125,36 @@ unrelated provisioning file is included, and that the final workflow has
 that integration is separately authorized.
 
 ## Phase 5C acceptance cases
+
+The first client pass is writer-only and uses these exact build controls:
+
+```text
+APP_ENV=staging
+ENABLE_STAGING_APP_CHECK=true
+ENABLE_MOOD_V2=true
+ENABLE_MOOD_V2_PROVIDER_READ=false
+ENABLE_MOOD_V2_HOME_READ=false
+ENABLE_MOOD_V2_PROFILE_READ=false
+ENABLE_MOOD_V2_HISTORY_READ=false
+ENABLE_MOOD_V2_INSIGHTS_READ=false
+ENABLE_MOOD_V2_REPORTS_READ=false
+ENABLE_MOOD_V2_MINDAID_READ=false
+```
+
+For an Android emulator or debug APK, register only the debug token generated
+by Firebase's debug provider in `mindmate-staging`. Revoke that token after the
+test. This proves App Check enforcement and callable routing, but does not prove
+Play Integrity attestation. A separate signed release/device test is required
+for Play Integrity evidence.
+
+The live client pass may add at most three synthetic `moodEntries`, one for
+each intentional submission with a distinct UUID. Idempotent retry and
+changed-payload conflict checks must add zero records. Activate only the
+protected `createMoodEntry` pilot allowlist for the designated synthetic UID;
+keep the Dev callable gate empty. Immediately after evidence capture, restore
+the protected callable allowlist to empty, verify both gates are closed, revoke
+the emulator/debug App Check credential, and leave existing synthetic records
+for separately authorized cleanup.
 
 Use disposable staging fixtures and synthetic levels only. Capture record
 counts, request IDs, event IDs, and timestamps without recording notes,

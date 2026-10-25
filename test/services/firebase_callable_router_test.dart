@@ -30,6 +30,11 @@ void main() {
       FirebaseCallableRouter.name('previewAssessmentDomain'),
       previewExpected,
     );
+    expect(
+      FirebaseCallableRouter.name('createMoodEntry'),
+      'createMoodEntry',
+      reason: 'Mood V2 always uses the App Check-protected callable.',
+    );
   });
 
   test('does not rewrite an unknown callable', () {

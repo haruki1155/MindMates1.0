@@ -60,7 +60,10 @@ class FirebaseRuntimeDiagnostics {
       : 'release';
 
   static String get _appCheckProvider {
-    if (AppEnvironmentConfig.isStaging) return 'staging-disabled';
+    if (AppEnvironmentConfig.isStaging &&
+        !AppEnvironmentConfig.stagingAppCheckEnabled) {
+      return 'staging-disabled';
+    }
     if (kIsWeb) return 'recaptcha-enterprise';
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:

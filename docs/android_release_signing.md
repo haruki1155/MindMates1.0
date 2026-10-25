@@ -34,10 +34,13 @@ builds, `flutter build apk --debug --flavor staging` is also sufficient: the
 app derives the environment from Flutter's selected flavor, preventing a
 staging native Firebase app from being initialized with development options.
 
-The staging APK deliberately does not activate Firebase App Check. Matching
-callable functions disable enforcement only when deployed to the exact
-`mindmate-staging` project, so testers do not need per-device debug tokens.
-Never point this flavor at production or distribute it as a production build.
+The ordinary staging APK does not activate Firebase App Check. A separately
+approved App Check pilot build must add
+`--dart-define=ENABLE_STAGING_APP_CHECK=true`; debug builds then use Firebase's
+Android debug provider and require a registered staging-only debug token.
+Release builds use Play Integrity. Never embed a debug token in source or Dart
+defines, point this flavor at production, or distribute it as a production
+build.
 
 Google sign-in for staging uses the Android OAuth registration for
 `com.example.mind_mates.staging` and the repository's debug signing SHA-1.
