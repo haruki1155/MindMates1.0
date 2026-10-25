@@ -7,6 +7,7 @@ import 'package:mind_mates/features/mood/expression_check_in/expression_check_in
 import 'package:mind_mates/features/mood/expression_check_in/expression_scan_logic.dart';
 import 'package:mind_mates/features/mood/screens/log_mood_screen.dart';
 import 'package:mind_mates/models/mood_model.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/mood_provider.dart';
@@ -307,6 +308,34 @@ void main() {
     );
   });
 
+  testWidgets('enabled V2 writer supports every app-user population role', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    for (final role in PopulationRole.values) {
+      final writer = _FakeMoodV2Writer();
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: MoodProvider(_FakeMoodRepository()),
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_${role.name}', populationRole: role)),
+          moodV2Enabled: true,
+          moodV2Writer: writer,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Okay'));
+      await tester.pump();
+      await tester.tap(find.text('Save mood check-in'));
+      await tester.pumpAndSettle();
+
+      expect(writer.levels, [4], reason: '${role.label} can save a mood');
+    }
+  });
+
   testWidgets('V2 retry preserves one request ID after a failed attempt', (
     tester,
   ) async {
@@ -457,7 +486,10 @@ double? _cardBorderWidth(WidgetTester tester, Finder finder) {
   return border.top.width;
 }
 
-UserModel _user({required String id}) {
+UserModel _user({
+  required String id,
+  PopulationRole? populationRole,
+}) {
   return UserModel(
     id: id,
     email: 'student@example.com',
@@ -467,6 +499,7 @@ UserModel _user({required String id}) {
     schoolId: '2026-0001',
     department: 'CCS',
     course: 'BSIT',
+    populationRole: populationRole,
   );
 }
 
