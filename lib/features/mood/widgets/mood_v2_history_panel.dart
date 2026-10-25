@@ -10,10 +10,18 @@ class MoodV2HistoryPanel extends StatelessWidget {
     super.key,
     required this.history,
     this.errorMessage,
+    this.hasMore = false,
+    this.isLoadingMore = false,
+    this.paginationErrorMessage,
+    this.onLoadMore,
   });
 
   final MoodHistoryWindow? history;
   final String? errorMessage;
+  final bool hasMore;
+  final bool isLoadingMore;
+  final String? paginationErrorMessage;
+  final VoidCallback? onLoadMore;
 
   @override
   Widget build(BuildContext context) {
@@ -25,27 +33,113 @@ class MoodV2HistoryPanel extends StatelessWidget {
         color: colors.error,
       );
     }
-    if (history == null || history!.uniqueEvents.isEmpty) {
+    if (history == null) {
       return _HistoryMessage(
         icon: Icons.mood_outlined,
         text: 'No mood entries in this history window.',
         color: colors.onSurfaceVariant,
       );
     }
-    final days = MoodAnalytics.dailyAggregates(history!.uniqueEvents);
-    return ListView.separated(
-      key: const Key('mood-v2-history-list'),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: days.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 10),
-      itemBuilder: (context, index) {
-        final day = days[days.length - 1 - index];
-        return _MoodDayCard(
-          day: day,
-          isPartial: history!.coverage == MoodHistoryCoverage.partial,
-        );
-      },
+    final events = history!.uniqueEvents;
+    if (events.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _HistoryMessage(
+            icon: Icons.mood_outlined,
+            text: 'No mood entries in this history window.',
+            color: colors.onSurfaceVariant,
+          ),
+          if (paginationErrorMessage != null) ...[
+            const SizedBox(height: 12),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                paginationErrorMessage!,
+                key: const Key('mood-v2-history-pagination-error'),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: colors.error),
+              ),
+            ),
+          ],
+          if (hasMore && onLoadMore != null) ...[
+            const SizedBox(height: 12),
+            Semantics(
+              button: true,
+              label: isLoadingMore
+                  ? 'Loading more mood history'
+                  : 'Load more mood history',
+              child: OutlinedButton.icon(
+                key: const Key('mood-v2-history-load-more'),
+                onPressed: isLoadingMore ? null : onLoadMore,
+                icon: isLoadingMore
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.expand_more),
+                label: Text(isLoadingMore ? 'Loading history…' : 'Load more'),
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+    final days = MoodAnalytics.dailyAggregates(events);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListView.separated(
+          key: const Key('mood-v2-history-list'),
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: days.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final day = days[days.length - 1 - index];
+            return _MoodDayCard(
+              day: day,
+              isPartial: history!.coverage == MoodHistoryCoverage.partial,
+            );
+          },
+        ),
+        if (paginationErrorMessage != null) ...[
+          const SizedBox(height: 12),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              paginationErrorMessage!,
+              key: const Key('mood-v2-history-pagination-error'),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: colors.error),
+            ),
+          ),
+        ],
+        if (hasMore && onLoadMore != null) ...[
+          const SizedBox(height: 12),
+          Semantics(
+            button: true,
+            label: isLoadingMore
+                ? 'Loading more mood history'
+                : 'Load more mood history',
+            child: OutlinedButton.icon(
+              key: const Key('mood-v2-history-load-more'),
+              onPressed: isLoadingMore ? null : onLoadMore,
+              icon: isLoadingMore
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.expand_more),
+              label: Text(isLoadingMore ? 'Loading history…' : 'Load more'),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

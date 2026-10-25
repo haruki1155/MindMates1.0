@@ -67,11 +67,13 @@ Widget _mobileApp() => MultiProvider(
       create: (_) => AuthProvider(AuthRepository(AuthService())),
     ),
     ChangeNotifierProvider(create: (_) => UserProvider(UserRepository())),
-    ChangeNotifierProvider(
+    ChangeNotifierProxyProvider<AuthProvider, MoodProvider>(
       create: (_) => MoodProvider(
         MoodRepository(),
         combinedHistoryRepository: MoodCombinedHistoryRepository(),
       ),
+      update: (_, auth, mood) =>
+          mood!..bindAuthenticatedUser(auth.authenticatedUserId),
     ),
     ChangeNotifierProvider(
       create: (_) => AppointmentProvider(AppointmentRepository()),

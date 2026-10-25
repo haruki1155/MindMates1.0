@@ -140,6 +140,12 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   }
 
   Widget _buildContent() {
+    final moodProvider = _readProviderOrNull<MoodProvider>(
+      listen: MoodV2FeatureFlag.historyRead,
+    );
+    final showV2History =
+        MoodV2FeatureFlag.historyRead &&
+        (moodProvider?.isMoodV2ReadEnabled ?? false);
     if (_isLoadingToday) {
       return const SizedBox(
         height: 360,
@@ -156,10 +162,6 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       );
     }
     if (_todayMood != null) {
-      final moodProvider = _readProviderOrNull<MoodProvider>();
-      final showV2History =
-          MoodV2FeatureFlag.historyRead &&
-          (moodProvider?.isMoodV2ReadEnabled ?? false);
       return Column(
         children: [
           _DailyMoodResult(
@@ -177,10 +179,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ],
           if (showV2History) ...[
             const SizedBox(height: 20),
-            MoodV2HistoryPanel(
-              history: moodProvider?.v2History,
-              errorMessage: moodProvider?.v2HistoryErrorMessage,
-            ),
+            _buildMoodV2HistoryPanel(moodProvider),
           ],
         ],
       );
@@ -243,9 +242,28 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           isSaving: _isSaving,
           onPressed: _saveMood,
         ),
+        if (showV2History) ...[
+          const SizedBox(height: 20),
+          _buildMoodV2HistoryPanel(moodProvider),
+        ],
       ],
     );
   }
+
+  Widget _buildMoodV2HistoryPanel(MoodProvider? moodProvider) =>
+      MoodV2HistoryPanel(
+        history: moodProvider?.v2History,
+        errorMessage: moodProvider?.v2HistoryErrorMessage,
+        hasMore: moodProvider?.canLoadMoreMoodV2History ?? false,
+        isLoadingMore: moodProvider?.isLoadingMoreV2History ?? false,
+        paginationErrorMessage: moodProvider?.v2PaginationErrorMessage,
+        onLoadMore: () {
+          final userId = _currentUserId();
+          if (userId != null) {
+            moodProvider?.loadMoreMoodV2History(userId, now: _now);
+          }
+        },
+      );
 
   Future<void> _openExpressionCheckIn() async {
     final result = await Navigator.of(context).push<ExpressionCheckInResult>(

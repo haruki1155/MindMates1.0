@@ -32,8 +32,15 @@ class MoodProvider extends ChangeNotifier {
   MoodHistoryWindow? _v2History;
   MoodAnalyticsSnapshot? _v2Analytics;
   String? _v2HistoryUserId;
+  String? _authenticatedUserId;
+  bool _isBoundToAuthentication = false;
+  MoodCombinedHistoryCursor? _v2NextCursor;
+  MoodCombinedHistoryCursor? _v2RetryCursor;
+  bool _hasV2Retry = false;
   bool _isLoadingV2History = false;
+  bool _isLoadingMoreV2History = false;
   String? _v2HistoryErrorMessage;
+  String? _v2PaginationErrorMessage;
   int _v2RequestGeneration = 0;
 
   List<MoodModel> get moods => List.unmodifiable(_moods);
@@ -46,15 +53,32 @@ class MoodProvider extends ChangeNotifier {
   MoodHistoryWindow? get v2History => _v2History;
   MoodAnalyticsSnapshot? get v2Analytics => _v2Analytics;
   bool get isLoadingV2History => _isLoadingV2History;
+  bool get isLoadingMoreV2History => _isLoadingMoreV2History;
   String? get v2HistoryErrorMessage => _v2HistoryErrorMessage;
+  String? get v2PaginationErrorMessage => _v2PaginationErrorMessage;
+  bool get canLoadMoreMoodV2History => _v2NextCursor != null || _hasV2Retry;
   bool get isMoodV2ReadEnabled =>
       _useMoodV2Read && _combinedHistoryRepository != null;
+
+  /// Invalidate account-scoped V2 reads as soon as Auth changes, including
+  /// while an older page is still pending.
+  void bindAuthenticatedUser(String? userId) {
+    final next = userId?.trim();
+    final normalized = next == null || next.isEmpty ? null : next;
+    if (_isBoundToAuthentication && _authenticatedUserId == normalized) return;
+    _isBoundToAuthentication = true;
+    _authenticatedUserId = normalized;
+    clearMoodV2History();
+  }
 
   /// Read-only V2 state is kept separate from the legacy public fields.
   /// A user/session change invalidates pending results before they can surface.
   Future<void> loadMoodV2History(String userId, {DateTime? now}) async {
     final repository = _combinedHistoryRepository;
-    if (!_useMoodV2Read || repository == null || userId.trim().isEmpty) {
+    if (!_useMoodV2Read ||
+        repository == null ||
+        userId.trim().isEmpty ||
+        (_isBoundToAuthentication && _authenticatedUserId != userId)) {
       return;
     }
     final generation = ++_v2RequestGeneration;
@@ -66,7 +90,12 @@ class MoodProvider extends ChangeNotifier {
     }
     _v2HistoryUserId = userId;
     _isLoadingV2History = true;
+    _isLoadingMoreV2History = false;
     _v2HistoryErrorMessage = null;
+    _v2PaginationErrorMessage = null;
+    _v2NextCursor = null;
+    _v2RetryCursor = null;
+    _hasV2Retry = false;
     notifyListeners();
     try {
       final page = await repository.fetch(
@@ -75,11 +104,7 @@ class MoodProvider extends ChangeNotifier {
       if (generation != _v2RequestGeneration || _v2HistoryUserId != userId) {
         return;
       }
-      _v2History = page.window;
-      _v2Analytics = MoodAnalytics.summarize(
-        page.window,
-        referenceInstant: now ?? _nowProvider(),
-      );
+      _applyMoodV2Page(page, now: now, previousEvents: const []);
     } catch (_) {
       if (generation != _v2RequestGeneration || _v2HistoryUserId != userId) {
         return;
@@ -95,6 +120,90 @@ class MoodProvider extends ChangeNotifier {
     }
   }
 
+  /// Appends one bounded older page. A source failure leaves loaded entries in
+  /// place and retains the same cursor for an explicit retry.
+  Future<void> loadMoreMoodV2History(String userId, {DateTime? now}) async {
+    final repository = _combinedHistoryRepository;
+    final history = _v2History;
+    if (!_useMoodV2Read ||
+        repository == null ||
+        history == null ||
+        _isLoadingMoreV2History ||
+        userId.trim().isEmpty ||
+        (_isBoundToAuthentication && _authenticatedUserId != userId) ||
+        userId != _v2HistoryUserId ||
+        !canLoadMoreMoodV2History) {
+      return;
+    }
+
+    final retrying = _hasV2Retry;
+    final cursor = retrying ? _v2RetryCursor : _v2NextCursor;
+    final generation = ++_v2RequestGeneration;
+    _isLoadingMoreV2History = true;
+    _v2PaginationErrorMessage = null;
+    notifyListeners();
+    try {
+      final page = await repository.fetch(
+        MoodCombinedHistoryRequest(
+          userId: userId,
+          pageSize: 100,
+          cursor: cursor,
+        ),
+      );
+      if (generation != _v2RequestGeneration || _v2HistoryUserId != userId) {
+        return;
+      }
+      _applyMoodV2Page(
+        page,
+        now: now,
+        previousEvents: history.uniqueEvents,
+        retryCursor: cursor,
+      );
+    } catch (_) {
+      if (generation != _v2RequestGeneration || _v2HistoryUserId != userId) {
+        return;
+      }
+      _hasV2Retry = true;
+      _v2RetryCursor = cursor;
+      _v2PaginationErrorMessage = 'Unable to load more mood history.';
+    } finally {
+      if (generation == _v2RequestGeneration && _v2HistoryUserId == userId) {
+        _isLoadingMoreV2History = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  void _applyMoodV2Page(
+    MoodCombinedHistoryPage page, {
+    required DateTime? now,
+    required List<NormalizedMoodEvent> previousEvents,
+    MoodCombinedHistoryCursor? retryCursor,
+  }) {
+    final combined = MoodHistoryWindow(
+      events: [...previousEvents, ...page.window.uniqueEvents],
+      coverage: MoodHistoryCoverage.partial,
+    ).uniqueEvents;
+    final hasFailedSource = page.failedSources.isNotEmpty;
+    _hasV2Retry = hasFailedSource;
+    _v2RetryCursor = hasFailedSource ? retryCursor : null;
+    _v2NextCursor = hasFailedSource ? null : page.nextCursor;
+    final isComplete = !hasFailedSource && page.nextCursor == null;
+    _v2History = MoodHistoryWindow(
+      events: combined,
+      coverage: isComplete
+          ? MoodHistoryCoverage.complete
+          : MoodHistoryCoverage.partial,
+    );
+    _v2Analytics = MoodAnalytics.summarize(
+      _v2History!,
+      referenceInstant: now ?? _nowProvider(),
+    );
+    _v2PaginationErrorMessage = hasFailedSource
+        ? 'Some mood history could not be loaded. Try again.'
+        : null;
+  }
+
   void clearMoodV2History() {
     _v2RequestGeneration++;
     _v2HistoryUserId = null;
@@ -102,6 +211,11 @@ class MoodProvider extends ChangeNotifier {
     _v2Analytics = null;
     _v2HistoryErrorMessage = null;
     _isLoadingV2History = false;
+    _isLoadingMoreV2History = false;
+    _v2NextCursor = null;
+    _v2RetryCursor = null;
+    _hasV2Retry = false;
+    _v2PaginationErrorMessage = null;
     notifyListeners();
   }
 

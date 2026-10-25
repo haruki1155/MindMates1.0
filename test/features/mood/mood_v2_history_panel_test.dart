@@ -69,12 +69,89 @@ void main() {
     );
     expect(find.text('Unable to load mood history.'), findsOneWidget);
   });
+
+  testWidgets(
+    'shows an accessible retryable load-more control without hiding history',
+    (tester) async {
+      var loadMoreCalls = 0;
+      await tester.binding.setSurfaceSize(const Size(320, 480));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        _app(
+          MoodHistoryWindow(
+            events: [
+              _event('one', DateTime.utc(2026, 7, 8), 3, MoodEventSource.v2),
+            ],
+            coverage: MoodHistoryCoverage.partial,
+          ),
+          hasMore: true,
+          paginationErrorMessage:
+              'Some mood history could not be loaded. Try again.',
+          onLoadMore: () => loadMoreCalls++,
+        ),
+      );
+
+      expect(find.textContaining('Mood 3/5'), findsOneWidget);
+      expect(
+        find.byKey(const Key('mood-v2-history-pagination-error')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('mood-v2-history-load-more')),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel('Load more mood history'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('mood-v2-history-load-more')));
+      expect(loadMoreCalls, 1);
+    },
+  );
+
+  testWidgets('empty partial history still offers an accessible retry', (
+    tester,
+  ) async {
+    var retries = 0;
+    await tester.pumpWidget(
+      _app(
+        const MoodHistoryWindow(
+          events: [],
+          coverage: MoodHistoryCoverage.partial,
+        ),
+        hasMore: true,
+        paginationErrorMessage:
+            'Some mood history could not be loaded. Try again.',
+        onLoadMore: () => retries++,
+      ),
+    );
+
+    expect(
+      find.byKey(const Key('mood-v2-history-pagination-error')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel('Load more mood history'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('mood-v2-history-load-more')));
+    expect(retries, 1);
+  });
 }
 
-Widget _app(MoodHistoryWindow? history, {String? errorMessage}) => MaterialApp(
+Widget _app(
+  MoodHistoryWindow? history, {
+  String? errorMessage,
+  bool hasMore = false,
+  bool isLoadingMore = false,
+  String? paginationErrorMessage,
+  VoidCallback? onLoadMore,
+}) => MaterialApp(
   theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.amber)),
   home: Scaffold(
-    body: MoodV2HistoryPanel(history: history, errorMessage: errorMessage),
+    body: MoodV2HistoryPanel(
+      history: history,
+      errorMessage: errorMessage,
+      hasMore: hasMore,
+      isLoadingMore: isLoadingMore,
+      paginationErrorMessage: paginationErrorMessage,
+      onLoadMore: onLoadMore,
+    ),
   ),
 );
 
