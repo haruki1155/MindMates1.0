@@ -65,7 +65,7 @@ class FirebaseAppCheckService {
     'APP_CHECK_DEBUG_TOKEN',
   );
   static final _debugTokenPattern = RegExp(
-    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-'
     r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
   );
   static FirebaseAppCheckStatus _status = FirebaseAppCheckStatus.notStarted;

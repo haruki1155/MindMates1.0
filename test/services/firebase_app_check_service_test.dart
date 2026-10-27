@@ -37,11 +37,11 @@ void main() {
       stagingAppCheckEnabled: true,
       isDebugBuild: true,
       isAndroid: true,
-      configuredDebugToken: '123a4567-b89c-12d3-e456-789012345678',
+      configuredDebugToken: '123a4567-b89c-42d3-9456-789012345678',
     );
 
     expect(configuration.debugMode, isTrue);
-    expect(configuration.debugToken, '123a4567-b89c-12d3-e456-789012345678');
+    expect(configuration.debugToken, '123a4567-b89c-42d3-9456-789012345678');
   });
 
   test('staging Android debug configuration fails closed without a secret', () {
@@ -72,6 +72,20 @@ void main() {
     );
   });
 
+  test('staging Android debug configuration rejects a non-v4 UUID', () {
+    expect(
+      () => FirebaseAppCheckService.nativeConfigurationFor(
+        isStaging: true,
+        isProduction: false,
+        stagingAppCheckEnabled: true,
+        isDebugBuild: true,
+        isAndroid: true,
+        configuredDebugToken: '123a4567-b89c-32d3-9456-789012345678',
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
   test('production configuration never selects the debug provider', () {
     final configuration = FirebaseAppCheckService.nativeConfigurationFor(
       isStaging: false,
@@ -79,7 +93,7 @@ void main() {
       stagingAppCheckEnabled: true,
       isDebugBuild: true,
       isAndroid: true,
-      configuredDebugToken: '123a4567-b89c-12d3-e456-789012345678',
+      configuredDebugToken: '123a4567-b89c-42d3-9456-789012345678',
     );
 
     expect(configuration.debugMode, isFalse);
