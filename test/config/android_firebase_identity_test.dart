@@ -30,7 +30,10 @@ void main() {
     expect(gradle, contains('create("staging")'));
     expect(gradle, contains('create("development")'));
     expect(manifest, contains('package="$packageName"'));
-    expect(manifest, contains('android:name="ph.edu.ucu.mindmates.MainActivity"'));
+    expect(
+      manifest,
+      contains('android:name="ph.edu.ucu.mindmates.MainActivity"'),
+    );
     expect(manifest, contains('android.permission.INTERNET'));
     expect(activity.existsSync(), isTrue);
     expect(activity.readAsStringSync(), contains('package $packageName'));
@@ -59,14 +62,20 @@ void main() {
     expect(firebaseOptions, contains("appId: '$firebaseAppId'"));
   });
 
-  test('debug App Check tokens cannot be injected through Dart defines', () {
-    final appCheckService = File(
-      'lib/services/firebase/firebase_app_check_service.dart',
-    ).readAsStringSync();
+  test(
+    'staging debug App Check secret remains explicit and production-safe',
+    () {
+      final appCheckService = File(
+        'lib/services/firebase/firebase_app_check_service.dart',
+      ).readAsStringSync();
 
-    expect(appCheckService, contains('const AndroidDebugProvider()'));
-    expect(appCheckService, contains('const AndroidPlayIntegrityProvider()'));
-    expect(appCheckService, isNot(contains('APP_CHECK_DEBUG_TOKEN')));
-    expect(appCheckService, isNot(contains('debugToken:')));
-  });
+      expect(appCheckService, contains("'APP_CHECK_DEBUG_TOKEN'"));
+      expect(
+        appCheckService,
+        contains('AndroidDebugProvider(debugToken: debugToken)'),
+      );
+      expect(appCheckService, contains('const AndroidPlayIntegrityProvider()'));
+      expect(appCheckService, contains('isProduction'));
+    },
+  );
 }

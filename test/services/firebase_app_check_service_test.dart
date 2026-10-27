@@ -30,6 +30,62 @@ void main() {
     );
   });
 
+  test('valid staging Android debug configuration forwards its secret', () {
+    final configuration = FirebaseAppCheckService.nativeConfigurationFor(
+      isStaging: true,
+      isProduction: false,
+      stagingAppCheckEnabled: true,
+      isDebugBuild: true,
+      isAndroid: true,
+      configuredDebugToken: '123a4567-b89c-12d3-e456-789012345678',
+    );
+
+    expect(configuration.debugMode, isTrue);
+    expect(configuration.debugToken, '123a4567-b89c-12d3-e456-789012345678');
+  });
+
+  test('staging Android debug configuration fails closed without a secret', () {
+    expect(
+      () => FirebaseAppCheckService.nativeConfigurationFor(
+        isStaging: true,
+        isProduction: false,
+        stagingAppCheckEnabled: true,
+        isDebugBuild: true,
+        isAndroid: true,
+        configuredDebugToken: ' ',
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('staging Android debug configuration rejects an invalid secret', () {
+    expect(
+      () => FirebaseAppCheckService.nativeConfigurationFor(
+        isStaging: true,
+        isProduction: false,
+        stagingAppCheckEnabled: true,
+        isDebugBuild: true,
+        isAndroid: true,
+        configuredDebugToken: 'not-a-debug-secret',
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('production configuration never selects the debug provider', () {
+    final configuration = FirebaseAppCheckService.nativeConfigurationFor(
+      isStaging: false,
+      isProduction: true,
+      stagingAppCheckEnabled: true,
+      isDebugBuild: true,
+      isAndroid: true,
+      configuredDebugToken: '123a4567-b89c-12d3-e456-789012345678',
+    );
+
+    expect(configuration.debugMode, isFalse);
+    expect(configuration.debugToken, isNull);
+  });
+
   test(
     'web configuration error tells developers how to configure App Check',
     () {
@@ -161,7 +217,10 @@ class _FakeAppCheckGateway implements FirebaseAppCheckGateway {
   final List<bool> forceRefreshes = [];
 
   @override
-  Future<void> activateNative({required bool debugMode}) async {
+  Future<void> activateNative({
+    required bool debugMode,
+    String? debugToken,
+  }) async {
     activationCalls++;
     if (activationError != null) throw activationError!;
   }

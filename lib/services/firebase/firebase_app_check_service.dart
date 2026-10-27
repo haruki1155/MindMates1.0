@@ -15,7 +15,7 @@ enum FirebaseAppCheckStatus {
 
 abstract interface class FirebaseAppCheckGateway {
   Future<void> activateWeb(String siteKey);
-  Future<void> activateNative({required bool debugMode});
+  Future<void> activateNative({required bool debugMode, String? debugToken});
   Future<String?> getToken({required bool forceRefresh});
 }
 
@@ -27,10 +27,10 @@ class FirebaseAppCheckPluginGateway implements FirebaseAppCheckGateway {
       .activate(providerWeb: ReCaptchaEnterpriseProvider(siteKey));
 
   @override
-  Future<void> activateNative({required bool debugMode}) =>
+  Future<void> activateNative({required bool debugMode, String? debugToken}) =>
       FirebaseAppCheck.instance.activate(
         providerAndroid: debugMode
-            ? const AndroidDebugProvider()
+            ? AndroidDebugProvider(debugToken: debugToken)
             : const AndroidPlayIntegrityProvider(),
         providerApple: debugMode
             ? const AppleDebugProvider()
@@ -42,6 +42,16 @@ class FirebaseAppCheckPluginGateway implements FirebaseAppCheckGateway {
       FirebaseAppCheck.instance.getToken(forceRefresh);
 }
 
+class NativeAppCheckConfiguration {
+  const NativeAppCheckConfiguration({
+    required this.debugMode,
+    required this.debugToken,
+  });
+
+  final bool debugMode;
+  final String? debugToken;
+}
+
 class FirebaseAppCheckService {
   const FirebaseAppCheckService._();
 
@@ -51,6 +61,13 @@ class FirebaseAppCheckService {
   );
   static const stagingPilotEnabled =
       AppEnvironmentConfig.stagingAppCheckEnabled;
+  static const _stagingAndroidDebugToken = String.fromEnvironment(
+    'APP_CHECK_DEBUG_TOKEN',
+  );
+  static final _debugTokenPattern = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
+    r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  );
   static FirebaseAppCheckStatus _status = FirebaseAppCheckStatus.notStarted;
 
   static FirebaseAppCheckStatus get status => _status;
@@ -68,6 +85,39 @@ class FirebaseAppCheckService {
       siteKey.trim().isEmpty
       ? FirebaseAppCheckStatus.missingWebConfiguration
       : FirebaseAppCheckStatus.active;
+
+  static NativeAppCheckConfiguration nativeConfigurationFor({
+    required bool isStaging,
+    required bool isProduction,
+    required bool stagingAppCheckEnabled,
+    required bool isDebugBuild,
+    required bool isAndroid,
+    required String configuredDebugToken,
+  }) {
+    if (isProduction) {
+      return const NativeAppCheckConfiguration(
+        debugMode: false,
+        debugToken: null,
+      );
+    }
+
+    final requiresStagingAndroidDebugToken =
+        isStaging && stagingAppCheckEnabled && isDebugBuild && isAndroid;
+    if (!requiresStagingAndroidDebugToken) {
+      return NativeAppCheckConfiguration(
+        debugMode: isDebugBuild,
+        debugToken: null,
+      );
+    }
+
+    final debugToken = configuredDebugToken.trim();
+    if (!_debugTokenPattern.hasMatch(debugToken)) {
+      throw StateError(
+        'Staging Android debug App Check requires a valid APP_CHECK_DEBUG_TOKEN.',
+      );
+    }
+    return NativeAppCheckConfiguration(debugMode: true, debugToken: debugToken);
+  }
 
   static Future<void> activate({FirebaseAppCheckGateway? gateway}) async {
     final client = gateway ?? const FirebaseAppCheckPluginGateway();
@@ -96,7 +146,17 @@ class FirebaseAppCheckService {
       return;
     }
 
-    if (kDebugMode && defaultTargetPlatform == TargetPlatform.android) {
+    final nativeConfiguration = nativeConfigurationFor(
+      isStaging: AppEnvironmentConfig.isStaging,
+      isProduction: AppEnvironmentConfig.current == AppEnvironment.production,
+      stagingAppCheckEnabled: stagingPilotEnabled,
+      isDebugBuild: kDebugMode,
+      isAndroid: defaultTargetPlatform == TargetPlatform.android,
+      configuredDebugToken: _stagingAndroidDebugToken,
+    );
+
+    if (nativeConfiguration.debugMode &&
+        defaultTargetPlatform == TargetPlatform.android) {
       debugPrint(
         'Firebase App Check debug mode is active. Copy the Android debug token '
         'from Logcat and register it in Firebase Console for '
@@ -105,7 +165,10 @@ class FirebaseAppCheckService {
     }
 
     try {
-      await client.activateNative(debugMode: kDebugMode);
+      await client.activateNative(
+        debugMode: nativeConfiguration.debugMode,
+        debugToken: nativeConfiguration.debugToken,
+      );
       if (AppEnvironmentConfig.isStaging) {
         await _requirePluginToken(client, forceRefresh: true);
       }
