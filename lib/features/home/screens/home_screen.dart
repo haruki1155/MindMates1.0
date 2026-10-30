@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:phosphor_icons/phosphor_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -28,6 +29,8 @@ import '../../notifications/screens/notifications_screen.dart';
 import '../../notifications/widgets/appointment_notification_banner.dart';
 import '../models/home_dashboard_data.dart';
 import '../widgets/home_dashboard_widgets.dart';
+import '../widgets/pilot_uid_diagnostic.dart';
+import '../../../core/config/app_environment.dart';
 
 enum _HomeNavDestination { today, services, appointments, secretChat, messages }
 
@@ -261,6 +264,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         sliver: SliverList.list(
                           children: [
+                            if (kDebugMode && AppEnvironmentConfig.isStaging)
+                              const PilotUidDiagnostic(),
                             HomeAnimatedSection(
                               delay: 70,
                               child: HomeWelcomeCard(
