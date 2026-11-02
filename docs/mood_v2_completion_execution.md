@@ -111,7 +111,7 @@ and reviewed session-only discovery timeout. Verify live READY/empty/100% traffi
 after restoration, not merely a successful CLI exit. App Check retention follows
 the supervisor's current decision. This design does not grant any live action.
 
-## Approved local integration � 2026-11-02
+## Approved local integration — 2026-11-02
 
 The supervisor explicitly approved the local commit, App Check/UID integration,
 and integrated validation. Implementation checkpoint: `2b407d9b96fe247b10dcd47bf8706a7cc0c6bef6`.
@@ -129,7 +129,7 @@ Raw structured reports and integration report are retained locally under
 `C:\Users\Mj\.codex\tmp\mindmate-mood-v2-integration-20261102`.
 
 This section supersedes the earlier pending local-integration decision, not the
-historical pre-integration evidence. Phase 1 PASS; Phases 2�6 local checks PASS
+historical pre-integration evidence. Phase 1 PASS; Phases 2–6 local checks PASS
 and release acceptance PARTIAL; Phase 7 local checkpoint/integration PASS with
 remote release actions still blocked by separate approval and acceptance gates.
 
@@ -138,3 +138,17 @@ must be executed using the zero-new-record procedure above, or explicitly defer
 that live gate. Reader-device acceptance separately requires an approved build
 configuration/artifact and supervised read-only verification of the existing
 synthetic records. Do not infer either approval from local integration approval.
+
+## Final approved staging freeze — 2026-11-02
+
+Later reader/device passes, isolated Profile correction and supervisor deferral
+supersede the pending decisions above. **Protected-staging replay/conflict: NOT
+TESTED LIVE — accepted limitation.** Reassess before production. No successful
+Save was repeated, original credentials restored, or new pilot cycle executed.
+
+Final application/test source is `3b5a6d74c60d5b3ad8c7bf39ba976336248c6579`.
+Its focused regressions/analyzer and exact-APK Profile device acceptance passed.
+The earlier full-suite result retains its exact tested merge attribution.
+See [the final staging freeze](mood_v2_staging_freeze_20261102.md) for phase
+results, artifact hashes, current closed revisions and production limitations.
+The approved checkpoint is local only: no push, main merge or deployment.

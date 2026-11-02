@@ -8,12 +8,12 @@ deployment, build/install, push or merge is authorized by this document.
 | Task | Implementation / tests | Status and remaining gate |
 | --- | --- | --- |
 | 1 Audit | Contract, flags, writer/readers, Rules, Git | PASS; remote main `0bd77f0`, candidate 32 ahead/0 behind; both Mood worktrees clean at audit |
-| 2 Writer | `functions/src/mood_entries.ts`, `mood_entries.test.ts`, `mood_entries_callable_emulator.test.ts` | PARTIAL; Functions build and 8 isolated demo-emulator tests passed 2026-11-02. Protected replay/conflict and fresh closed-gate check remain open |
-| 3 History | `mood_combined_history_repository.dart`, `mood_provider.dart`, `log_mood_screen.dart`, `mood_v2_history_panel.dart`; matching tests | PARTIAL release gate / local PASS: newest-first entries, initial retry/loading, confirmed-write refresh implemented/tested. Device reader verification pending |
-| 4 Analytics | `mood_v2_analytics.dart`, Home/Profile metrics; analytics/history tests | PARTIAL release gate / local PASS: month boundary, event/day distinction, latest level, weekly distribution and windowed streak summary tested. Device verification pending |
-| 5 inSIGHT/security | `insights_provider.dart`; provider, Rules and callable tests | PARTIAL release gate / local PASS: writer calls owner-scoped invalidation/refresh; stale-account completion cannot refresh next owner; 3 isolated Rules tests pass. Owner-only Rules unchanged |
-| 6 Regression/device | CI Flutter command, Functions scripts, emulator configuration | PARTIAL: final working diff has 611 named Flutter passes, zero failures/skips; analyzer clean; 8 transaction, 3 Rules and 15 MindAid unit passes. Device/read rollout remains open; integrated-client validation passed at bb60d974 (620 named tests, 104 loading events, zero failures/skips) |
-| 7 Integration | Existing feature and App Check worktrees | Local PASS: approved checkpoint 2b407d9 and conflict-free merge bb60d974; clean worktree verified. Remote/staging release gates remain open |
+| 2 Writer | Trusted callable / transaction tests | PASS for staging with explicit user-approved live replay/conflict deferral; accepted Save preserved, 8 local transaction passes, closed revisions verified |
+| 3 History | Combined history, MoodProvider and history panel | PASS; four existing records across two Manila dates, newest-first same-day events, loading/retry/pagination tests |
+| 4 Analytics | Manila analytics, Home/Profile metrics | PASS; summary/distribution/unique-day/streak tests and reader device acceptance; all six Profile metrics verified after isolated correction |
+| 5 inSIGHT/security | Scoped refresh, Rules and callable tests | PASS within staging scope; owner/stale-owner/privacy guards, 3 Rules passes, inSIGHT device pass; live replay/conflict limitation retained |
+| 6 Regression/device | Integrated and final affected-module evidence | PASS; 620 named/104 loading at bb60d974; 105 focused named/13 loading at 3b5a6d74; analyzers clean; backend tests preserved. Exact attribution in freeze report |
+| 7 Integration | Local feature integration/freeze | PASS for approved local-only scope; annotated tag mood-v2-staging-20261102-limited. No push/main merge |
 
 Evidence labels: source inspection and 2026-11-02 local results are
 VERIFIED_THIS_RUN. The completion plan reports one successful manual Flutter
@@ -33,3 +33,13 @@ Dependencies: server-authoritative writer -> confirmed success -> owner-scoped
 provider refresh and inSIGHT invalidation -> normalized combined history ->
 descriptive analytics -> gated presentation. Legacy Mood serialization and
 activity-wide `users.dayStreak` are unchanged.
+
+## Final staging decision — 2026-11-02
+
+**Protected-staging replay/conflict: NOT TESTED LIVE — accepted limitation.**
+The supervisor explicitly approved Gate 2 deferral. Reassess before production;
+this is not a live test PASS or production readiness. Initial-audit evidence above
+is historical. Final read-only checks independently confirmed four pilot/zero
+nonpilot, both empty gates and READY revisions with 100% serving traffic.
+See [staging freeze](mood_v2_staging_freeze_20261102.md) for complete evidence,
+artifact identity, exact test sources and boundaries. Source defaults remain false.
