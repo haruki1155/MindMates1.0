@@ -254,6 +254,14 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       MoodV2HistoryPanel(
         history: moodProvider?.v2History,
         errorMessage: moodProvider?.v2HistoryErrorMessage,
+        isLoading: moodProvider?.isLoadingV2History ?? false,
+        analytics: moodProvider?.v2Analytics,
+        onRetry: () {
+          final userId = _currentUserId();
+          if (userId != null) {
+            moodProvider?.loadMoodV2History(userId, now: _now);
+          }
+        },
         hasMore: moodProvider?.canLoadMoreMoodV2History ?? false,
         isLoadingMore: moodProvider?.isLoadingMoreV2History ?? false,
         paginationErrorMessage: moodProvider?.v2PaginationErrorMessage,
@@ -445,6 +453,26 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _noteLength = 0;
     });
     _showSnack('Mood entry saved.');
+    unawaited(_refreshAfterConfirmedMoodV2Write(userId, requestGeneration));
+  }
+
+  Future<void> _refreshAfterConfirmedMoodV2Write(
+    String userId,
+    int requestGeneration,
+  ) async {
+    final insights = _readProviderOrNull<InsightsProvider>();
+    insights?.invalidateForConfirmedMoodV2Write(userId);
+    try {
+      final mood = _readProviderOrNull<MoodProvider>();
+      if (mood?.isMoodV2ReadEnabled ?? false) {
+        await mood!.loadMoodV2History(userId, now: _now);
+      }
+      if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
+      await insights?.refreshLoadedContext(userId);
+    } catch (_) {
+      // A confirmed write stays successful when a dependent read is unavailable.
+      // Providers retain their own scoped error/last-successful-content state.
+    }
   }
 
   bool _isCurrentMoodV2Request(String userId, int requestGeneration) =>

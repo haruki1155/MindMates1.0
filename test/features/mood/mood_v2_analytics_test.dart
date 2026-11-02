@@ -24,6 +24,27 @@ void main() {
   }) => MoodHistoryWindow(events: events, coverage: coverage);
 
   group('Mood V2 analytics', () {
+    test(
+      'Manila month boundary keeps consecutive days and distinct entries',
+      () {
+        final snapshot = MoodAnalytics.summarize(
+          window([
+            event('october', DateTime.utc(2026, 10, 31, 15, 59)),
+            event('november-a', DateTime.utc(2026, 10, 31, 16)),
+            event('november-b', DateTime.utc(2026, 10, 31, 17)),
+          ]),
+          referenceInstant: DateTime.utc(2026, 11, 1),
+        );
+        expect(snapshot.daily.map((day) => day.dateKey), [
+          '2026-10-31',
+          '2026-11-01',
+        ]);
+        expect(snapshot.eventCount, 3);
+        expect(snapshot.activeDayCount, 2);
+        expect(snapshot.streak.currentDays, 2);
+        expect(snapshot.streak.longestDays, 2);
+      },
+    );
     test('three same-day events are three entries and one active day', () {
       final snapshot = MoodAnalytics.summarize(
         window([

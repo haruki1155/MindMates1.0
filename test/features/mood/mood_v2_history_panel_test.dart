@@ -5,6 +5,112 @@ import 'package:mind_mates/features/mood/widgets/mood_v2_history_panel.dart';
 
 void main() {
   testWidgets(
+    'summary separates entries from days and labels windowed streak',
+    (tester) async {
+      final window = MoodHistoryWindow(
+        events: [
+          _event('one', DateTime.utc(2026, 7, 7, 16), 2, MoodEventSource.v2),
+          _event('two', DateTime.utc(2026, 7, 7, 17), 4, MoodEventSource.v2),
+        ],
+        coverage: MoodHistoryCoverage.partial,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: MoodV2HistoryPanel(
+                history: window,
+                analytics: MoodAnalytics.summarize(
+                  window,
+                  referenceInstant: DateTime.utc(2026, 7, 8),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(
+        find.text('2 entries across 1 mood-active day in loaded history'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('2 entries · 1 mood-active day this week'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Longest mood streak (loaded window): 1 day'),
+        findsOneWidget,
+      );
+      expect(find.text('Level 2: 1'), findsOneWidget);
+    expect(find.text('Latest recorded level: 4/5'), findsOneWidget);
+      expect(find.text('Level 4: 1'), findsOneWidget);
+      expect(
+        find.text('Summary uses incomplete recorded history.'),
+        findsOneWidget,
+      );
+    },
+  );
+  testWidgets('newest entry renders first within each Manila day', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        MoodHistoryWindow(
+          events: [
+            _event(
+              'older',
+              DateTime.utc(2026, 7, 7, 16),
+              2,
+              MoodEventSource.v2,
+            ),
+            _event(
+              'newer',
+              DateTime.utc(2026, 7, 7, 17),
+              4,
+              MoodEventSource.v2,
+            ),
+          ],
+          coverage: MoodHistoryCoverage.complete,
+        ),
+      ),
+    );
+    expect(
+      tester.getTopLeft(find.textContaining('Mood 4/5')).dy,
+      lessThan(tester.getTopLeft(find.textContaining('Mood 2/5')).dy),
+    );
+  });
+
+  testWidgets('initial history failure offers an explicit retry', (
+    tester,
+  ) async {
+    var retries = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: MoodV2HistoryPanel(
+            history: null,
+            errorMessage: 'Unable to load mood history.',
+            onRetry: () => retries++,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Retry history'));
+    expect(retries, 1);
+  });
+
+  testWidgets('loading is distinct from empty history', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MoodV2HistoryPanel(history: null, isLoading: true),
+        ),
+      ),
+    );
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('No mood entries in this history window.'), findsNothing);
+  });
+  testWidgets(
     'groups multiple entries on one Manila date without hiding either',
     (tester) async {
       await tester.pumpWidget(

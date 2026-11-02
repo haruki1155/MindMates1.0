@@ -11,6 +11,8 @@ import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/mood_provider.dart';
+import 'package:mind_mates/providers/insights_provider.dart';
+import 'package:mind_mates/repositories/insights_repository.dart';
 import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/mood_repository.dart';
@@ -21,6 +23,69 @@ import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets(
+    'dependent history failure cannot turn a confirmed write into a retry',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final mood = _RecordingMoodProvider();
+      final insights = _RecordingInsightsProvider();
+      final writer = _FakeMoodV2Writer();
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: mood,
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_1')),
+          insightsProvider: insights,
+          moodV2Enabled: true,
+          moodV2Writer: writer,
+        ),
+      );
+      await tester.pumpAndSettle();
+      mood.refreshedUsers.clear();
+      mood.throwOnRefresh = true;
+      await tester.tap(find.text('Great'));
+      await tester.pump();
+      await tester.tap(find.text('Save mood check-in'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mood entry saved.'), findsOneWidget);
+      expect(
+        find.text('Unable to save this mood entry. Try again.'),
+        findsNothing,
+      );
+      expect(writer.requestIds, hasLength(1));
+      expect(insights.invalidatedUsers, ['user_1']);
+    },
+  );
+  testWidgets('confirmed V2 save refreshes owner history and inSIGHT once', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final mood = _RecordingMoodProvider();
+    final insights = _RecordingInsightsProvider();
+    final writer = _FakeMoodV2Writer();
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: mood,
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        insightsProvider: insights,
+        moodV2Enabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+    mood.refreshedUsers.clear();
+    await tester.tap(find.text('Great'));
+    await tester.pump();
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pumpAndSettle();
+    expect(mood.refreshedUsers, ['user_1']);
+    expect(insights.invalidatedUsers, ['user_1']);
+    expect(insights.refreshedUsers, ['user_1']);
+    expect(writer.levels, [5]);
+  });
   testWidgets('renders all mood choices and note field', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -410,12 +475,14 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final writer = _FakeMoodV2Writer(pending: true);
+    final insights = _RecordingInsightsProvider();
     final userProvider = UserProvider(_FakeUserRepository())
       ..setUser(_user(id: 'user_1'));
     await tester.pumpWidget(
       _logMoodApp(
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: userProvider,
+        insightsProvider: insights,
         moodV2Enabled: true,
         moodV2Writer: writer,
       ),
@@ -434,6 +501,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Mood entry saved.'), findsNothing);
+    expect(insights.invalidatedUsers, isEmpty);
+    expect(insights.refreshedUsers, isEmpty);
     expect(
       tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
       isNotNull,
@@ -445,6 +514,7 @@ Widget _logMoodApp({
   required MoodProvider moodProvider,
   UserProvider? userProvider,
   ReportProvider? reportProvider,
+  InsightsProvider? insightsProvider,
   DateTime Function()? nowProvider,
   WidgetBuilder? expressionScreenBuilder,
   bool moodV2Enabled = false,
@@ -458,6 +528,8 @@ Widget _logMoodApp({
         ChangeNotifierProvider<UserProvider>.value(value: userProvider),
       if (reportProvider != null)
         ChangeNotifierProvider<ReportProvider>.value(value: reportProvider),
+      if (insightsProvider != null)
+        ChangeNotifierProvider<InsightsProvider>.value(value: insightsProvider),
     ],
     child: MaterialApp(
       home: LogMoodScreen(
@@ -486,10 +558,7 @@ double? _cardBorderWidth(WidgetTester tester, Finder finder) {
   return border.top.width;
 }
 
-UserModel _user({
-  required String id,
-  PopulationRole? populationRole,
-}) {
+UserModel _user({required String id, PopulationRole? populationRole}) {
   return UserModel(
     id: id,
     email: 'student@example.com',
@@ -501,6 +570,34 @@ UserModel _user({
     course: 'BSIT',
     populationRole: populationRole,
   );
+}
+
+class _RecordingMoodProvider extends MoodProvider {
+  _RecordingMoodProvider() : super(_FakeMoodRepository());
+  bool throwOnRefresh = false;
+  final refreshedUsers = <String>[];
+  @override
+  bool get isMoodV2ReadEnabled => true;
+  @override
+  Future<void> loadMoodV2History(String userId, {DateTime? now}) async {
+    refreshedUsers.add(userId);
+    if (throwOnRefresh) throw StateError('offline');
+  }
+}
+
+class _RecordingInsightsProvider extends InsightsProvider {
+  _RecordingInsightsProvider() : super(InsightsRepository());
+  final invalidatedUsers = <String>[];
+  final refreshedUsers = <String>[];
+  @override
+  void invalidateForConfirmedMoodV2Write(String userId) {
+    invalidatedUsers.add(userId);
+  }
+
+  @override
+  Future<void> refreshLoadedContext(String userId) async {
+    refreshedUsers.add(userId);
+  }
 }
 
 class _FakeMoodRepository extends MoodRepository {

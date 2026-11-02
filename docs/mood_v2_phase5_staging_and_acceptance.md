@@ -1,5 +1,15 @@
 # Mood V2 Phase 5 staging readiness and acceptance plan
 
+> Historical rollout document. The combined Rules/indexes/two-Functions commands
+> below are obsolete examples, not approved operations. Existing deployed Rules,
+> index and TTL settings must be preserved. Any future authorized pilot affects
+> only `functions:createMoodEntry`, with explicit staging target, bounded writes,
+> mandatory empty-gate restoration and separately approved containment. Dev stays
+> closed and unchanged. The supervisor alone presses Save. App Check registration
+> retention/deletion follows the current explicit user decision, never automatic
+> cleanup instructions here. See `mood_v2_completion_matrix.md` for accepted Save
+> evidence; do not repeat it merely to replace historical failed-cycle reports.
+
 Status: local preparation only. This document authorizes neither a Firebase
 deployment nor client feature activation.
 
@@ -30,8 +40,6 @@ the reviewed Mood V2 feature/release commit, never from the CI-only branch.
 1. Confirm the target before any deployment:
 
    ```powershell
-   firebase.cmd use staging
-   firebase.cmd projects:list
    git rev-parse HEAD
    git status --short
    ```
@@ -49,11 +57,13 @@ the reviewed Mood V2 feature/release commit, never from the CI-only branch.
    The initial deployment must keep this value empty. It closes the callable
    to every account while Rules/indexes and Function revisions are introduced.
 
-3. Build and review the exact scope, then deploy only these resources:
+3. Existing Rules, indexes and TTL are already deployed. Do not redeploy them
+   as part of a writer acceptance cycle. Only after separate explicit approval,
+   build and review the protected-callable-only scope:
 
    ```powershell
    npm.cmd run build --prefix functions
-   firebase.cmd deploy --only firestore:rules,firestore:indexes,functions:createMoodEntry,functions:createMoodEntryDev --project mindmate-staging
+   firebase.cmd deploy --only functions:createMoodEntry --project mindmate-staging
    ```
 
    Do not use `--force`, do not deploy Hosting, and do not deploy unrelated
@@ -61,9 +71,10 @@ the reviewed Mood V2 feature/release commit, never from the CI-only branch.
    condition.
 
 4. After a separate pilot authorization, replace the empty value with only
-   approved disposable synthetic UID(s), redeploy the two callables, and
+   the single approved disposable synthetic UID, redeploy only the protected
+   callable, and
    record the authorized UID list outside source control. Never place personal
-   or real-student IDs in the allowlist.
+   or real-student IDs in the allowlist. Keep Dev unchanged and closed.
 
 ## Resource and rollback review
 
@@ -76,8 +87,9 @@ the reviewed Mood V2 feature/release commit, never from the CI-only branch.
 
 Rollback is additive and preserves `moodEntries` records:
 
-1. Close `MOOD_V2_STAGING_PILOT_UIDS` to the empty value and redeploy only the
-   two callables if a pilot must stop accepting writes.
+1. Close `MOOD_V2_STAGING_PILOT_UIDS` to the empty value and perform only the
+   explicitly approved protected-callable restoration. Verify the serving
+   revision, effective gate and 100% traffic; Dev stays unchanged and closed.
 2. Disable all V2 client build-time flags in the next pilot build or withdraw
    distribution of a pilot build. Existing legacy logging remains available.
 3. If a Function revision itself is defective, restore the previously reviewed
@@ -141,9 +153,10 @@ ENABLE_MOOD_V2_REPORTS_READ=false
 ENABLE_MOOD_V2_MINDAID_READ=false
 ```
 
-For an Android emulator or debug APK, register only the debug token generated
-by Firebase's debug provider in `mindmate-staging`. Revoke that token after the
-test. This proves App Check enforcement and callable routing, but does not prove
+For an Android debug APK, use the separately approved private UUID V4 debug
+configuration. Registration changes require explicit approval; do not replace
+or revoke a retained registration automatically. Token and protected-callable
+evidence proves App Check enforcement and routing for that session, but not
 Play Integrity attestation. A separate signed release/device test is required
 for Play Integrity evidence.
 
@@ -152,8 +165,8 @@ each intentional submission with a distinct UUID. Idempotent retry and
 changed-payload conflict checks must add zero records. Activate only the
 protected `createMoodEntry` pilot allowlist for the designated synthetic UID;
 keep the Dev callable gate empty. Immediately after evidence capture, restore
-the protected callable allowlist to empty, verify both gates are closed, revoke
-the emulator/debug App Check credential, and leave existing synthetic records
+the protected callable allowlist to empty, verify both gates are closed, follow
+the supervisor's explicit App Check retention/cleanup decision, and leave records
 for separately authorized cleanup.
 
 Use disposable staging fixtures and synthetic levels only. Capture record

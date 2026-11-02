@@ -10,6 +10,9 @@ class MoodV2HistoryPanel extends StatelessWidget {
     super.key,
     required this.history,
     this.errorMessage,
+    this.isLoading = false,
+    this.onRetry,
+    this.analytics,
     this.hasMore = false,
     this.isLoadingMore = false,
     this.paginationErrorMessage,
@@ -18,6 +21,9 @@ class MoodV2HistoryPanel extends StatelessWidget {
 
   final MoodHistoryWindow? history;
   final String? errorMessage;
+  final bool isLoading;
+  final VoidCallback? onRetry;
+  final MoodAnalyticsSnapshot? analytics;
   final bool hasMore;
   final bool isLoadingMore;
   final String? paginationErrorMessage;
@@ -26,11 +32,24 @@ class MoodV2HistoryPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    if (isLoading && history == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
     if (errorMessage != null) {
-      return _HistoryMessage(
-        icon: Icons.error_outline,
-        text: errorMessage!,
-        color: colors.error,
+      return Column(
+        children: [
+          _HistoryMessage(
+            icon: Icons.error_outline,
+            text: errorMessage!,
+            color: colors.error,
+          ),
+          if (onRetry != null)
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry history'),
+            ),
+        ],
       );
     }
     if (history == null) {
@@ -45,6 +64,7 @@ class MoodV2HistoryPanel extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (analytics != null) _MoodSummary(analytics: analytics!),
           _HistoryMessage(
             icon: Icons.mood_outlined,
             text: 'No mood entries in this history window.',
@@ -91,6 +111,11 @@ class MoodV2HistoryPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (isLoading) const LinearProgressIndicator(),
+        if (analytics != null) ...[
+          _MoodSummary(analytics: analytics!),
+          const SizedBox(height: 12),
+        ],
         ListView.separated(
           key: const Key('mood-v2-history-list'),
           shrinkWrap: true,
@@ -144,6 +169,68 @@ class MoodV2HistoryPanel extends StatelessWidget {
   }
 }
 
+class _MoodSummary extends StatelessWidget {
+  const _MoodSummary({required this.analytics});
+  final MoodAnalyticsSnapshot analytics;
+
+  String _quantity(int value, String singular, String plural) =>
+      '$value ${value == 1 ? singular : plural}';
+
+  @override
+  Widget build(BuildContext context) {
+    final weekly = analytics.weekly;
+    final streak = analytics.streak;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Recorded mood summary',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            if (analytics.daily.isNotEmpty)
+              Text(
+                'Latest recorded level: ${analytics.daily.last.latestEvent!.level}/5',
+              ),
+            Text(
+              '${_quantity(analytics.eventCount, 'entry', 'entries')} across '
+              '${_quantity(analytics.activeDayCount, 'mood-active day', 'mood-active days')} in loaded history',
+            ),
+            Text(
+              '${_quantity(weekly.entryCount, 'entry', 'entries')} · '
+              '${_quantity(weekly.activeDayCount, 'mood-active day', 'mood-active days')} this week',
+            ),
+            Text(
+              'Mood streak: ${_quantity(streak.currentDays, 'day', 'days')}',
+            ),
+            Text(
+              '${streak.isLongestWindowed ? 'Longest mood streak (loaded window)' : 'Longest mood streak'}: '
+              '${_quantity(streak.longestDays, 'day', 'days')}',
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Recorded levels this week',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            Wrap(
+              spacing: 12,
+              children: [
+                for (var level = 1; level <= 5; level++)
+                  Text('Level $level: ${weekly.distribution[level]}'),
+              ],
+            ),
+            if (analytics.coverage == MoodHistoryCoverage.partial)
+              const Text('Summary uses incomplete recorded history.'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _HistoryMessage extends StatelessWidget {
   const _HistoryMessage({
     required this.icon,
@@ -179,7 +266,7 @@ class _MoodDayCard extends StatelessWidget {
           children: [
             Text(day.dateKey, style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: 6),
-            for (final event in day.events)
+            for (final event in day.events.reversed)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Text(

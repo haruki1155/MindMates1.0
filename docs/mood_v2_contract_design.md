@@ -1,8 +1,11 @@
 # Mood Tracking & Analytics V2 — Technical Contract
 
-Status: contract approved; Phase 1 pure-Dart analytics implemented. Persistence remains design-only.
+Status: approved contract; additive persistence and gated readers are implemented.
+See `mood_v2_completion_matrix.md` for current acceptance versus historical design.
 Base: `0bd77f0aead2aa09198857e1f20ac8dc765c667a` (`origin/main`).
-No application source, Rules, indexes, Functions, Firebase data, or deployment resources are changed by this document.
+This document does not authorize deployments or live data changes. Owner-only
+V2 reads are the implemented boundary; broader administrator/counselor reads
+remain out of scope. Historical proposal sections below do not grant that access.
 
 ## Conditional-approval decisions
 
@@ -76,7 +79,7 @@ moodEntries/<entryId>
 
 **ID and idempotency.** The client generates an opaque UUID `clientRequestId`; the trusted callable resolves the UID-scoped request record and event in one transaction. Retrying the same canonical payload returns the original event. A concurrent or later retry with the same key but a different canonical level/label/note/method fails with an idempotency-conflict error. A second intentional entry receives a new key. The repository must never use a deterministic day ID for V2 events.
 
-**Authority and validation.** The callable requires Firebase Auth, applies the constrained field set/types/lengths, assigns one server `Timestamp.now()` value to `occurredAt`, derives its `Asia/Manila` `dateKey`, rejects unsupported fields, and persists the event/request record atomically. V2 Rules deny direct create, update, and delete; authenticated owners may read/list only their events and admins follow the existing trusted read policy. This prevents client-clock and concurrent-retry ambiguity.
+**Authority and validation.** The callable requires Firebase Auth, applies the constrained field set/types/lengths, assigns one server `Timestamp.now()` value to `occurredAt`, derives its `Asia/Manila` `dateKey`, rejects unsupported fields, and persists the event/request record atomically. V2 Rules deny direct create, update, and delete; authenticated owners may read/list only their events; broader staff/admin reads remain out of scope. This prevents client-clock and concurrent-retry ambiguity.
 
 **Immutability/editing.** Initial V2 user behavior is append-only: users cannot edit or delete events. Authorized privacy/account-deletion processing is distinct from normal user behavior, must run in trusted infrastructure, and must audit/reconcile affected aggregates. A later edit feature needs a separately approved trusted operation, retains original `dateKey`/`occurredAt`, increments `revision`, sets `editedAt`, and recomputes affected aggregates.
 
@@ -136,11 +139,14 @@ Do not present an average as a clinical conclusion. The existing 1–5 ordered s
 
 ## 5. Proposed Rules, indexes, APIs, and inSIGHT contract
 
-### Firestore Rules proposal (not applied)
+### Firestore Rules contract
 
-`match /moodEntries/{entryId}` should permit owner reads/listing and trusted-admin reads, while `allow create, update, delete: if false`. The callable uses the Admin SDK and remains the sole write path. It must not weaken legacy `moods` Rules.
+`match /moodEntries/{entryId}` permits owner reads/listing only, with
+`allow create, update, delete: if false`. The callable uses the Admin SDK and
+remains the sole write path. Broader staff/admin access is not implemented or
+authorized. Legacy `moods` Rules must remain unchanged.
 
-### Index proposal (not applied)
+### Index contract (deployment acceptance recorded separately)
 
 Add `moodEntries(userId ASC, occurredAt DESC)` for recent/history; add `moodEntries(userId ASC, dateKey ASC, occurredAt ASC)` only if date-range aggregation queries need it. Validate actual query shapes with the emulator before adding any index.
 
