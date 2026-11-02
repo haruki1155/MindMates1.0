@@ -12,8 +12,8 @@ deployment, build/install, push or merge is authorized by this document.
 | 3 History | `mood_combined_history_repository.dart`, `mood_provider.dart`, `log_mood_screen.dart`, `mood_v2_history_panel.dart`; matching tests | PARTIAL release gate / local PASS: newest-first entries, initial retry/loading, confirmed-write refresh implemented/tested. Device reader verification pending |
 | 4 Analytics | `mood_v2_analytics.dart`, Home/Profile metrics; analytics/history tests | PARTIAL release gate / local PASS: month boundary, event/day distinction, latest level, weekly distribution and windowed streak summary tested. Device verification pending |
 | 5 inSIGHT/security | `insights_provider.dart`; provider, Rules and callable tests | PARTIAL release gate / local PASS: writer calls owner-scoped invalidation/refresh; stale-account completion cannot refresh next owner; 3 isolated Rules tests pass. Owner-only Rules unchanged |
-| 6 Regression/device | CI Flutter command, Functions scripts, emulator configuration | PARTIAL: final working diff has 611 named Flutter passes, zero failures/skips; analyzer clean; 8 transaction, 3 Rules and 15 MindAid unit passes. Device/read rollout and integrated-client validation remain open |
-| 7 Integration | Existing feature and App Check worktrees | Pending review/acceptance and approved integration; no new worktree required |
+| 6 Regression/device | CI Flutter command, Functions scripts, emulator configuration | PARTIAL: final working diff has 611 named Flutter passes, zero failures/skips; analyzer clean; 8 transaction, 3 Rules and 15 MindAid unit passes. Device/read rollout remains open; integrated-client validation passed at bb60d974 (620 named tests, 104 loading events, zero failures/skips) |
+| 7 Integration | Existing feature and App Check worktrees | Local PASS: approved checkpoint 2b407d9 and conflict-free merge bb60d974; clean worktree verified. Remote/staging release gates remain open |
 
 Evidence labels: source inspection and 2026-11-02 local results are
 VERIFIED_THIS_RUN. The completion plan reports one successful manual Flutter

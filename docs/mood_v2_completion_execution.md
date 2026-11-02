@@ -110,3 +110,31 @@ must use explicit `--project mindmate-staging --only functions:createMoodEntry`
 and reviewed session-only discovery timeout. Verify live READY/empty/100% traffic
 after restoration, not merely a successful CLI exit. App Check retention follows
 the supervisor's current decision. This design does not grant any live action.
+
+## Approved local integration — 2026-11-02
+
+The supervisor explicitly approved the local commit, App Check/UID integration,
+and integrated validation. Implementation checkpoint: `2b407d9b96fe247b10dcd47bf8706a7cc0c6bef6`.
+Conflict-free normal merge of `a200b9062bf53e67e8414eb9db8e3ddbb6833fab`:
+`bb60d974cb278eeed3cd2cc01ade1adbe1a5db7a`.
+
+VERIFIED_THIS_RUN at that merged source: full staging suite 620 named passes,
+104 suite-loading passes, zero failures/skips, exit 0; enabled provider/history
+Save-screen suite 16 named passes, one loading event, zero failures/skips;
+analyzer no issues; Functions build and diff check exit 0. No backend/Rules/index
+changes were introduced by this merge. Existing isolated emulator evidence is
+retained; it was not redundantly rerun. Client remediation branch and unrelated
+primary-worktree changes are preserved. No APK or remote operation occurred.
+Raw structured reports and integration report are retained locally under
+`C:\Users\Mj\.codex\tmp\mindmate-mood-v2-integration-20261102`.
+
+This section supersedes the earlier pending local-integration decision, not the
+historical pre-integration evidence. Phase 1 PASS; Phases 2–6 local checks PASS
+and release acceptance PARTIAL; Phase 7 local checkpoint/integration PASS with
+remote release actions still blocked by separate approval and acceptance gates.
+
+Next authorization boundary: choose whether protected staging replay/conflict
+must be executed using the zero-new-record procedure above, or explicitly defer
+that live gate. Reader-device acceptance separately requires an approved build
+configuration/artifact and supervised read-only verification of the existing
+synthetic records. Do not infer either approval from local integration approval.
