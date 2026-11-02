@@ -668,12 +668,20 @@ class _ProfileSummaryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 22),
-          Row(
-            children: List.generate(3, (index) {
-              final metric = index < metrics.length ? metrics[index] : null;
-              return Expanded(child: _MetricSlot(metric: metric));
-            }),
-          ),
+          for (
+            var start = 0;
+            start < (metrics.length < 3 ? 3 : metrics.length);
+            start += 3
+          ) ...[
+            if (start > 0) const SizedBox(height: 18),
+            Row(
+              children: List.generate(3, (offset) {
+                final index = start + offset;
+                final metric = index < metrics.length ? metrics[index] : null;
+                return Expanded(child: _MetricSlot(metric: metric));
+              }),
+            ),
+          ],
         ],
       ),
     );
