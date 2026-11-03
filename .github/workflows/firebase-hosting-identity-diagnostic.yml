@@ -1,0 +1,48 @@
+name: Inspect staging Hosting credential identity only
+
+on:
+  push:
+    branches:
+      - fix/hosting-preview-identity-diagnostic
+
+permissions: {}
+
+jobs:
+  inspect_identity:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/fix/hosting-preview-identity-diagnostic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate and display staging credential metadata only
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          def fail():
+              sys.exit('Credential metadata validation failed.')
+
+          raw = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
+          if not raw:
+              fail()
+          try:
+              account = json.loads(raw)
+          except (json.JSONDecodeError, TypeError):
+              fail()
+          if not isinstance(account, dict):
+              fail()
+          if account.get('type') != 'service_account' or account.get('project_id') != 'mindmate-staging':
+              fail()
+          email = account.get('client_email')
+          if not isinstance(email, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+-]*@[A-Za-z0-9][A-Za-z0-9.-]*\.gserviceaccount\.com', email):
+              fail()
+          private_key = account.get('private_key')
+          if not isinstance(private_key, str) or not private_key.strip():
+              fail()
+          print(json.dumps({'project_id': account['project_id'], 'client_email': email}, sort_keys=True))
+          PY
