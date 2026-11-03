@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Validate and display staging credential metadata only
+      - name: Validate staging project and classify known credential identity
         shell: bash
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING }}
@@ -44,5 +44,11 @@ jobs:
           private_key = account.get('private_key')
           if not isinstance(private_key, str) or not private_key.strip():
               fail()
-          print(json.dumps({'project_id': account['project_id'], 'client_email': email}, sort_keys=True))
+          known_accounts = {
+              'firebase-adminsdk-fbsvc@mindmate-staging.iam.gserviceaccount.com': 'FIREBASE_ADMINSDK',
+              '978195258114-compute@developer.gserviceaccount.com': 'COMPUTE_DEFAULT',
+              'mindmate-staging@appspot.gserviceaccount.com': 'APPSPOT_DEFAULT',
+          }
+          classification = known_accounts.get(email, 'UNRECOGNIZED')
+          print(classification)
           PY
