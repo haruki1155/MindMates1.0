@@ -4,6 +4,17 @@ import 'package:mind_mates/services/firebase/firebase_app_check_service.dart';
 import 'package:mind_mates/services/firebase/firebase_runtime_diagnostics.dart';
 
 void main() {
+  const environment = String.fromEnvironment(
+    'APP_ENV',
+    defaultValue: 'development',
+  );
+  const stagingPilotEnabled = bool.fromEnvironment(
+    'ENABLE_STAGING_APP_CHECK',
+    defaultValue: false,
+  );
+
+  setUp(FirebaseAppCheckService.resetForTesting);
+
   test('web App Check requires a non-empty Enterprise site key', () {
     expect(
       FirebaseAppCheckService.statusForWebSiteKey(''),
@@ -17,6 +28,76 @@ void main() {
       FirebaseAppCheckService.statusForWebSiteKey('site-key'),
       FirebaseAppCheckStatus.active,
     );
+  });
+
+  test('valid staging Android debug configuration forwards its secret', () {
+    final configuration = FirebaseAppCheckService.nativeConfigurationFor(
+      isStaging: true,
+      isProduction: false,
+      stagingAppCheckEnabled: true,
+      isDebugBuild: true,
+      isAndroid: true,
+      configuredDebugToken: '123a4567-b89c-42d3-9456-789012345678',
+    );
+
+    expect(configuration.debugMode, isTrue);
+    expect(configuration.debugToken, '123a4567-b89c-42d3-9456-789012345678');
+  });
+
+  test('staging Android debug configuration fails closed without a secret', () {
+    expect(
+      () => FirebaseAppCheckService.nativeConfigurationFor(
+        isStaging: true,
+        isProduction: false,
+        stagingAppCheckEnabled: true,
+        isDebugBuild: true,
+        isAndroid: true,
+        configuredDebugToken: ' ',
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('staging Android debug configuration rejects an invalid secret', () {
+    expect(
+      () => FirebaseAppCheckService.nativeConfigurationFor(
+        isStaging: true,
+        isProduction: false,
+        stagingAppCheckEnabled: true,
+        isDebugBuild: true,
+        isAndroid: true,
+        configuredDebugToken: 'not-a-debug-secret',
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('staging Android debug configuration rejects a non-v4 UUID', () {
+    expect(
+      () => FirebaseAppCheckService.nativeConfigurationFor(
+        isStaging: true,
+        isProduction: false,
+        stagingAppCheckEnabled: true,
+        isDebugBuild: true,
+        isAndroid: true,
+        configuredDebugToken: '123a4567-b89c-32d3-9456-789012345678',
+      ),
+      throwsA(isA<StateError>()),
+    );
+  });
+
+  test('production configuration never selects the debug provider', () {
+    final configuration = FirebaseAppCheckService.nativeConfigurationFor(
+      isStaging: false,
+      isProduction: true,
+      stagingAppCheckEnabled: true,
+      isDebugBuild: true,
+      isAndroid: true,
+      configuredDebugToken: '123a4567-b89c-42d3-9456-789012345678',
+    );
+
+    expect(configuration.debugMode, isFalse);
+    expect(configuration.debugToken, isNull);
   });
 
   test(
@@ -45,4 +126,129 @@ void main() {
       'correlation-123',
     );
   });
+
+  test(
+    'staging App Check is explicitly disabled unless pilot-enabled',
+    () async {
+      if (environment != 'staging' || stagingPilotEnabled) return;
+      final gateway = _FakeAppCheckGateway();
+
+      await FirebaseAppCheckService.activate(gateway: gateway);
+      expect(
+        await FirebaseAppCheckService.refreshToken(gateway: gateway),
+        isNull,
+      );
+      await FirebaseAppCheckService.requireToken(gateway: gateway);
+
+      expect(
+        FirebaseAppCheckService.status,
+        FirebaseAppCheckStatus.disabledForStaging,
+      );
+      expect(gateway.activationCalls, 0);
+      expect(gateway.tokenCalls, 0);
+    },
+  );
+
+  test(
+    'enabled staging pilot activates a provider and requires a real token',
+    () async {
+      if (environment != 'staging' || !stagingPilotEnabled) return;
+      final gateway = _FakeAppCheckGateway(token: 'verified-token');
+
+      await FirebaseAppCheckService.activate(gateway: gateway);
+
+      expect(FirebaseAppCheckService.status, FirebaseAppCheckStatus.active);
+      expect(gateway.activationCalls, 1);
+      expect(gateway.forceRefreshes, [true]);
+
+      expect(
+        await FirebaseAppCheckService.refreshToken(gateway: gateway),
+        'verified-token',
+      );
+      await FirebaseAppCheckService.requireToken(gateway: gateway);
+      expect(gateway.forceRefreshes, [true, true, false]);
+    },
+  );
+
+  test('enabled staging pilot fails closed when no token is issued', () async {
+    if (environment != 'staging' || !stagingPilotEnabled) return;
+    final gateway = _FakeAppCheckGateway(token: '  ');
+
+    await expectLater(
+      FirebaseAppCheckService.activate(gateway: gateway),
+      throwsA(isA<StateError>()),
+    );
+
+    expect(
+      FirebaseAppCheckService.status,
+      FirebaseAppCheckStatus.activationFailed,
+    );
+    expect(gateway.activationCalls, 1);
+  });
+
+  test(
+    'enabled staging pilot loses active status when refresh fails',
+    () async {
+      if (environment != 'staging' || !stagingPilotEnabled) return;
+      final gateway = _FakeAppCheckGateway(token: 'verified-token');
+      await FirebaseAppCheckService.activate(gateway: gateway);
+      gateway.token = null;
+
+      await expectLater(
+        FirebaseAppCheckService.refreshToken(gateway: gateway),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(
+        FirebaseAppCheckService.status,
+        FirebaseAppCheckStatus.activationFailed,
+      );
+    },
+  );
+
+  test('provider activation errors remain fail-closed', () async {
+    if (environment == 'staging' && !stagingPilotEnabled) return;
+    final gateway = _FakeAppCheckGateway(activationError: StateError('failed'));
+
+    await expectLater(
+      FirebaseAppCheckService.activate(gateway: gateway),
+      throwsA(isA<StateError>()),
+    );
+    expect(
+      FirebaseAppCheckService.status,
+      FirebaseAppCheckStatus.activationFailed,
+    );
+  });
+}
+
+class _FakeAppCheckGateway implements FirebaseAppCheckGateway {
+  _FakeAppCheckGateway({this.token = 'verified-token', this.activationError});
+
+  String? token;
+  final Object? activationError;
+  int activationCalls = 0;
+  int tokenCalls = 0;
+  final List<bool> forceRefreshes = [];
+
+  @override
+  Future<void> activateNative({
+    required bool debugMode,
+    String? debugToken,
+  }) async {
+    activationCalls++;
+    if (activationError != null) throw activationError!;
+  }
+
+  @override
+  Future<void> activateWeb(String siteKey) async {
+    activationCalls++;
+    if (activationError != null) throw activationError!;
+  }
+
+  @override
+  Future<String?> getToken({required bool forceRefresh}) async {
+    tokenCalls++;
+    forceRefreshes.add(forceRefresh);
+    return token;
+  }
 }

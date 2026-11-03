@@ -24,6 +24,10 @@ class AppEnvironmentConfig {
 
   static bool get isStaging => current == AppEnvironment.staging;
   static const functionsRegion = 'us-central1';
+  static const stagingAppCheckEnabled = bool.fromEnvironment(
+    'ENABLE_STAGING_APP_CHECK',
+    defaultValue: false,
+  );
 
   static String get expectedProjectId => switch (current) {
     AppEnvironment.development => 'mindmate-dev-4e91c',

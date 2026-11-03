@@ -1,0 +1,19 @@
+# Send only the files consumed by the isolated emulator image. This prevents
+# source-control metadata, credentials, local build products, and unrelated
+# application files from entering the Docker build context.
+*
+!functions/
+!functions/**
+!ci/
+!ci/mood-v2-mode-b.Dockerfile
+!ci/run_mood_v2_staging_identity_docker_container.sh
+!firebase.mood-v2.emulators.json
+!firestore.rules
+!firestore.indexes.json
+
+# Re-exclude local and generated Functions content after the allowlist above.
+functions/node_modules/
+functions/lib/
+functions/.env
+functions/.env.*
+functions/*.log

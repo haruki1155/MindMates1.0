@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,17 +7,85 @@ import 'package:mind_mates/features/mood/expression_check_in/expression_check_in
 import 'package:mind_mates/features/mood/expression_check_in/expression_scan_logic.dart';
 import 'package:mind_mates/features/mood/screens/log_mood_screen.dart';
 import 'package:mind_mates/models/mood_model.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/mood_provider.dart';
+import 'package:mind_mates/providers/insights_provider.dart';
+import 'package:mind_mates/repositories/insights_repository.dart';
 import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/mood_repository.dart';
+import 'package:mind_mates/repositories/mood_v2_repository.dart';
+import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets(
+    'dependent history failure cannot turn a confirmed write into a retry',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final mood = _RecordingMoodProvider();
+      final insights = _RecordingInsightsProvider();
+      final writer = _FakeMoodV2Writer();
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: mood,
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_1')),
+          insightsProvider: insights,
+          moodV2Enabled: true,
+          moodV2Writer: writer,
+        ),
+      );
+      await tester.pumpAndSettle();
+      mood.refreshedUsers.clear();
+      mood.throwOnRefresh = true;
+      await tester.tap(find.text('Great'));
+      await tester.pump();
+      await tester.tap(find.text('Save mood check-in'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mood entry saved.'), findsOneWidget);
+      expect(
+        find.text('Unable to save this mood entry. Try again.'),
+        findsNothing,
+      );
+      expect(writer.requestIds, hasLength(1));
+      expect(insights.invalidatedUsers, ['user_1']);
+    },
+  );
+  testWidgets('confirmed V2 save refreshes owner history and inSIGHT once', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final mood = _RecordingMoodProvider();
+    final insights = _RecordingInsightsProvider();
+    final writer = _FakeMoodV2Writer();
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: mood,
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        insightsProvider: insights,
+        moodV2Enabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+    mood.refreshedUsers.clear();
+    await tester.tap(find.text('Great'));
+    await tester.pump();
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pumpAndSettle();
+    expect(mood.refreshedUsers, ['user_1']);
+    expect(insights.invalidatedUsers, ['user_1']);
+    expect(insights.refreshedUsers, ['user_1']);
+    expect(writer.levels, [5]);
+  });
   testWidgets('renders all mood choices and note field', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -241,14 +311,215 @@ void main() {
     expect(moodRepository.createdUserId, isNull);
     expect(find.text('Please sign in to save your mood.'), findsOneWidget);
   });
+
+  testWidgets('disabled Mood V2 keeps the existing daily logger unchanged', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(_FakeMoodRepository()),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Great'));
+    await tester.pump();
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mood-v2-add-entry')), findsNothing);
+    expect(find.text("Today's check-in is complete"), findsOneWidget);
+  });
+
+  testWidgets('enabled V2 writer accepts multiple intentional entries', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final writer = _FakeMoodV2Writer();
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(_FakeMoodRepository()),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Enabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Great'));
+    await tester.pump();
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sad'));
+    await tester.pump();
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pumpAndSettle();
+
+    expect(writer.levels, [5, 1]);
+    expect(writer.requestIds.toSet().length, 2);
+    expect(
+      writer.requestIds.every(
+        RegExp(
+          r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+        ).hasMatch,
+      ),
+      isTrue,
+    );
+  });
+
+  testWidgets('enabled V2 writer supports every app-user population role', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    for (final role in PopulationRole.values) {
+      final writer = _FakeMoodV2Writer();
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: MoodProvider(_FakeMoodRepository()),
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_${role.name}', populationRole: role)),
+          moodV2Enabled: true,
+          moodV2Writer: writer,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Okay'));
+      await tester.pump();
+      await tester.tap(find.text('Save mood check-in'));
+      await tester.pumpAndSettle();
+
+      expect(writer.levels, [4], reason: '${role.label} can save a mood');
+    }
+  });
+
+  testWidgets('V2 retry preserves one request ID after a failed attempt', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final writer = _FakeMoodV2Writer(failuresRemaining: 1);
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(_FakeMoodRepository()),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Enabled: true,
+        moodV2Writer: writer,
+        moodV2RequestIdGenerator: () => '00000000-0000-4000-8000-000000000001',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Okay'));
+    await tester.pump();
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mood-v2-save-error')), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Edited after failure');
+    await tester.tap(find.text('Great'));
+    await tester.pump();
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pumpAndSettle();
+    expect(writer.requestIds, [
+      '00000000-0000-4000-8000-000000000001',
+      '00000000-0000-4000-8000-000000000001',
+    ]);
+    expect(writer.levels, [4, 4]);
+    expect(writer.notes, ['', '']);
+  });
+
+  testWidgets('V2 save prevents duplicate taps while a request is pending', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final writer = _FakeMoodV2Writer(pending: true);
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(_FakeMoodRepository()),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Enabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Tired'));
+    await tester.pump();
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pump();
+    expect(
+      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      isNull,
+    );
+    expect(writer.requestIds, hasLength(1));
+
+    writer.completePending();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('V2 pending completion is ignored after an account change', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final writer = _FakeMoodV2Writer(pending: true);
+    final insights = _RecordingInsightsProvider();
+    final userProvider = UserProvider(_FakeUserRepository())
+      ..setUser(_user(id: 'user_1'));
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(_FakeMoodRepository()),
+        userProvider: userProvider,
+        insightsProvider: insights,
+        moodV2Enabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Tired'));
+    await tester.pump();
+    await tester.tap(find.text('Save mood check-in'));
+    await tester.pump();
+    expect(writer.requestIds, hasLength(1));
+
+    userProvider.setUser(_user(id: 'user_2'));
+    await tester.pumpAndSettle();
+    writer.completePending();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Mood entry saved.'), findsNothing);
+    expect(insights.invalidatedUsers, isEmpty);
+    expect(insights.refreshedUsers, isEmpty);
+    expect(
+      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      isNotNull,
+    );
+  });
 }
 
 Widget _logMoodApp({
   required MoodProvider moodProvider,
   UserProvider? userProvider,
   ReportProvider? reportProvider,
+  InsightsProvider? insightsProvider,
   DateTime Function()? nowProvider,
   WidgetBuilder? expressionScreenBuilder,
+  bool moodV2Enabled = false,
+  MoodV2EntryWriter? moodV2Writer,
+  String Function()? moodV2RequestIdGenerator,
 }) {
   return MultiProvider(
     providers: [
@@ -257,11 +528,16 @@ Widget _logMoodApp({
         ChangeNotifierProvider<UserProvider>.value(value: userProvider),
       if (reportProvider != null)
         ChangeNotifierProvider<ReportProvider>.value(value: reportProvider),
+      if (insightsProvider != null)
+        ChangeNotifierProvider<InsightsProvider>.value(value: insightsProvider),
     ],
     child: MaterialApp(
       home: LogMoodScreen(
         nowProvider: nowProvider,
         expressionScreenBuilder: expressionScreenBuilder,
+        moodV2Enabled: moodV2Enabled,
+        moodV2Writer: moodV2Writer,
+        moodV2RequestIdGenerator: moodV2RequestIdGenerator,
       ),
     ),
   );
@@ -282,7 +558,7 @@ double? _cardBorderWidth(WidgetTester tester, Finder finder) {
   return border.top.width;
 }
 
-UserModel _user({required String id}) {
+UserModel _user({required String id, PopulationRole? populationRole}) {
   return UserModel(
     id: id,
     email: 'student@example.com',
@@ -292,7 +568,36 @@ UserModel _user({required String id}) {
     schoolId: '2026-0001',
     department: 'CCS',
     course: 'BSIT',
+    populationRole: populationRole,
   );
+}
+
+class _RecordingMoodProvider extends MoodProvider {
+  _RecordingMoodProvider() : super(_FakeMoodRepository());
+  bool throwOnRefresh = false;
+  final refreshedUsers = <String>[];
+  @override
+  bool get isMoodV2ReadEnabled => true;
+  @override
+  Future<void> loadMoodV2History(String userId, {DateTime? now}) async {
+    refreshedUsers.add(userId);
+    if (throwOnRefresh) throw StateError('offline');
+  }
+}
+
+class _RecordingInsightsProvider extends InsightsProvider {
+  _RecordingInsightsProvider() : super(InsightsRepository());
+  final invalidatedUsers = <String>[];
+  final refreshedUsers = <String>[];
+  @override
+  void invalidateForConfirmedMoodV2Write(String userId) {
+    invalidatedUsers.add(userId);
+  }
+
+  @override
+  Future<void> refreshLoadedContext(String userId) async {
+    refreshedUsers.add(userId);
+  }
 }
 
 class _FakeMoodRepository extends MoodRepository {
@@ -376,6 +681,67 @@ class _FakeMoodRepository extends MoodRepository {
       ),
     ]);
   }
+}
+
+class _FakeMoodV2Writer implements MoodV2EntryWriter {
+  _FakeMoodV2Writer({this.failuresRemaining = 0, this.pending = false});
+
+  int failuresRemaining;
+  final bool pending;
+  final List<String> requestIds = [];
+  final List<int> levels = [];
+  final List<String?> notes = [];
+  Completer<MoodV2Event>? _pendingResult;
+
+  @override
+  Future<MoodV2Event> create({
+    required int level,
+    required String clientRequestId,
+    String? label,
+    String? note,
+    String entryMethod = 'manual',
+    bool expressionAssistUsed = false,
+    bool expressionSuggestionAccepted = false,
+    String? expressionModelVersion,
+  }) {
+    requestIds.add(clientRequestId);
+    levels.add(level);
+    notes.add(note);
+    if (failuresRemaining > 0) {
+      failuresRemaining--;
+      return Future<MoodV2Event>.error(StateError('offline'));
+    }
+    if (pending) {
+      return (_pendingResult ??= Completer<MoodV2Event>()).future;
+    }
+    return Future.value(
+      _event(level, clientRequestId, label, note, entryMethod),
+    );
+  }
+
+  void completePending() {
+    _pendingResult?.complete(
+      _event(levels.last, requestIds.last, null, null, 'manual'),
+    );
+  }
+
+  MoodV2Event _event(
+    int level,
+    String requestId,
+    String? label,
+    String? note,
+    String? entryMethod,
+  ) => MoodV2Event(
+    id: 'mood_v2_$requestId',
+    userId: 'user_1',
+    level: level,
+    dateKey: '2026-07-07',
+    occurredAt: DateTime.utc(2026, 7, 7, 12),
+    clientRequestId: requestId,
+    label: label,
+    note: note,
+    entryMethod: entryMethod,
+  );
 }
 
 class _FakeUserRepository extends UserRepository {

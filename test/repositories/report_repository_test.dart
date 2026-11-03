@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
+import 'package:mind_mates/repositories/mood_combined_history_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 
 void main() {
@@ -53,6 +55,54 @@ void main() {
   });
 
   group('ReportRepository.generateWeeklyReport', () {
+    test(
+      'gated V2 reader preserves events, active days, and partial coverage',
+      () async {
+        final dataSource = _FakeReportDataSource(userDoc: _userDoc());
+        final combined = MoodCombinedHistoryRepository(
+          identity: _FixedMoodIdentity('user_1'),
+          legacySource: _FixedMoodSource(MoodEventSource.legacy, [
+            _normalizedMood(
+              id: 'legacy-1',
+              at: DateTime.utc(2026, 6, 30, 16),
+              level: 2,
+              source: MoodEventSource.legacy,
+            ),
+          ]),
+          v2Source: _FixedMoodSource(MoodEventSource.v2, [
+            _normalizedMood(
+              id: 'v2-1',
+              at: DateTime.utc(2026, 7, 1, 1),
+              level: 4,
+              source: MoodEventSource.v2,
+            ),
+            _normalizedMood(
+              id: 'v2-2',
+              at: DateTime.utc(2026, 7, 1, 2),
+              level: 5,
+              source: MoodEventSource.v2,
+            ),
+          ]),
+        );
+        final repository = ReportRepository(
+          dataSource: dataSource,
+          combinedMoodHistory: combined,
+          useMoodV2Read: true,
+        );
+
+        await repository.generateWeeklyReport(
+          'user_1',
+          now: DateTime.utc(2026, 7, 2, 12),
+        );
+
+        final report = dataSource.createdReport!;
+        expect(report['moodCheckInCount'], 3);
+        expect(report['moodActiveDayCount'], 1);
+        expect(report['moodHistoryCoverage'], 'complete');
+        expect(report['averageMoodLevel'], 11 / 3);
+      },
+    );
+
     test('builds quick-only report fields and severe status', () async {
       final dataSource = _FakeReportDataSource(
         userDoc: _userDoc(),
@@ -428,6 +478,40 @@ bool _containsPrivateText(Object? value) {
   final text = value?.toString() ?? '';
   return text.contains('private anonymous post') ||
       text.contains('private anonymous comment');
+}
+
+NormalizedMoodEvent _normalizedMood({
+  required String id,
+  required DateTime at,
+  required int level,
+  required MoodEventSource source,
+}) => NormalizedMoodEvent(
+  id: id,
+  userId: 'user_1',
+  level: level,
+  dateKey: MoodManilaCalendar.dateKeyForInstant(at),
+  occurredAt: at,
+  source: source,
+);
+
+class _FixedMoodIdentity implements MoodHistoryIdentity {
+  const _FixedMoodIdentity(this.currentUserId);
+
+  @override
+  final String? currentUserId;
+}
+
+class _FixedMoodSource implements MoodHistorySource {
+  const _FixedMoodSource(this.source, this.events);
+
+  @override
+  final MoodEventSource source;
+  final List<NormalizedMoodEvent> events;
+
+  @override
+  Future<MoodHistorySourcePage> fetch(MoodHistorySourceRequest request) async {
+    return MoodHistorySourcePage(events: events);
+  }
 }
 
 class _FakeReportDataSource implements ReportRepositoryDataSource {

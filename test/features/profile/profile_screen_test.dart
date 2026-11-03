@@ -24,6 +24,78 @@ import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  for (final width in [320.0, 360.0, 800.0]) {
+    testWidgets('profile renders all six metrics and scrolls at width $width', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(Size(width, 640));
+      tester.platformDispatcher.textScaleFactorTestValue = 1.4;
+      addTearDown(() {
+        tester.binding.setSurfaceSize(null);
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+      final provider = UserProvider(_FakeUserRepository())
+        ..setUser(
+          const UserModel(id: 'synthetic-profile', email: 'test@example.test'),
+        );
+      const metrics = [
+        ProfileMetricData(
+          label: 'Day Streak',
+          value: '12',
+          icon: Icons.whatshot,
+        ),
+        ProfileMetricData(
+          label: 'Sleep Quality',
+          value: '4.5/5',
+          icon: Icons.bed,
+        ),
+        ProfileMetricData(label: 'Age', value: '21', icon: Icons.cake),
+        ProfileMetricData(
+          label: 'Mood-active days',
+          value: '3',
+          icon: Icons.today,
+        ),
+        ProfileMetricData(label: 'Mood streak', value: '2', icon: Icons.mood),
+        ProfileMetricData(
+          label: 'Longest mood streak (window)',
+          value: '5',
+          icon: Icons.timeline,
+        ),
+      ];
+      await tester.pumpWidget(
+        _profileApp(
+          provider,
+          data: const ProfileViewData(
+            displayName: 'Test Pilot',
+            metrics: metrics,
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+
+      for (final metric in metrics) {
+        expect(find.text(metric.label), findsOneWidget);
+        final metricColumn = find
+            .ancestor(
+              of: find.text(metric.label),
+              matching: find.byType(Column),
+            )
+            .first;
+        expect(
+          find.descendant(of: metricColumn, matching: find.text(metric.value)),
+          findsOneWidget,
+        );
+      }
+      await tester.ensureVisible(find.text('Longest mood streak (window)'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        tester.getRect(find.text('Longest mood streak (window)')).bottom,
+        lessThanOrEqualTo(640),
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('profile hero shows user info and day streak', (tester) async {
     final repository = _FakeUserRepository();
     final provider = UserProvider(repository)

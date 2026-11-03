@@ -4,19 +4,33 @@ import '../features/mind_aid/domain/mind_aid_context.dart';
 import '../models/mood_model.dart';
 import '../models/report_model.dart';
 import '../services/firebase/firestore_service.dart';
+import '../features/mood/domain/mood_v2_compatibility.dart';
+import 'mood_combined_history_repository.dart';
 
 class MindAidContextRepository {
-  MindAidContextRepository({FirestoreService? firestoreService})
-    : _firestoreService = firestoreService ?? FirestoreService();
+  MindAidContextRepository({
+    FirestoreService? firestoreService,
+    this.combinedMoodHistory,
+    this.useMoodV2Read = MoodV2ReadCompatibilityFlag.mindAidEnabled,
+  }) : _firestoreService = firestoreService ?? FirestoreService();
 
   final FirestoreService _firestoreService;
+  final MoodCombinedHistoryRepository? combinedMoodHistory;
+  final bool useMoodV2Read;
 
   Future<MindAidWellnessSnapshot?> fetchWellnessSnapshot(String userId) async {
     if (userId.trim().isEmpty || userId == 'guest') return null;
 
     try {
+      final combinedHistory = combinedMoodHistory;
+      final useCombinedMoodHistory = useMoodV2Read && combinedHistory != null;
       final results = await Future.wait([
-        _fetchRecentMoods(userId),
+        // When the gated reader is on, it owns both legacy and V2 reads. A
+        // separate legacy read could otherwise turn a recoverable V2-source
+        // failure into an all-or-nothing MindAid context failure.
+        useCombinedMoodHistory
+            ? Future.value(const <MoodModel>[])
+            : _fetchRecentMoods(userId),
         _fetchLatestAssessment(userId),
         _fetchLatestReport(userId),
         _fetchUser(userId),
@@ -27,8 +41,16 @@ class MindAidContextRepository {
       final report = results[2] as ReportModel?;
       final user = results[3] as Map<String, dynamic>?;
 
+      MindAidMoodCompatibilitySnapshot? mixedMood;
+      if (useCombinedMoodHistory) {
+        final page = await combinedHistory.fetch(
+          MoodCombinedHistoryRequest(userId: userId, pageSize: 14),
+        );
+        mixedMood = MindAidMoodCompatibility.summarize(page.window);
+      }
       return buildSnapshot(
         moods: moods,
+        mixedMood: mixedMood,
         latestAssessment: assessment,
         latestReport: report,
         user: user,
@@ -40,13 +62,21 @@ class MindAidContextRepository {
 
   static MindAidWellnessSnapshot? buildSnapshot({
     List<MoodModel> moods = const [],
+    MindAidMoodCompatibilitySnapshot? mixedMood,
     Map<String, dynamic>? latestAssessment,
     ReportModel? latestReport,
     Map<String, dynamic>? user,
   }) {
     final latestMood = moods.isEmpty ? null : moods.first;
-    final recentMoodAverage = _averageMood(moods);
-    final moodTrend = _moodTrend(moods);
+    final recentMoodAverage = mixedMood?.recentAverage ?? _averageMood(moods);
+    final moodTrend = mixedMood == null
+        ? _moodTrend(moods)
+        : switch (mixedMood.trend) {
+            MoodV2MindAidTrend.improving => MindAidMoodTrend.improving,
+            MoodV2MindAidTrend.declining => MindAidMoodTrend.declining,
+            MoodV2MindAidTrend.steady => MindAidMoodTrend.steady,
+            null => null,
+          };
     final assessmentScore = _assessmentScore(latestAssessment);
     final assessmentStatus = _assessmentStatus(latestAssessment, latestReport);
     final mentalStatusSignal = _firstNonEmpty([
@@ -64,17 +94,21 @@ class MindAidContextRepository {
 
     final hasAnySignal =
         latestMood != null ||
+        mixedMood?.latestLevel != null ||
         latestAssessment != null ||
         latestReport != null ||
         user != null;
     if (!hasAnySignal) return null;
 
     return MindAidWellnessSnapshot(
-      latestMoodLevel: latestMood?.level,
+      latestMoodLevel: mixedMood?.latestLevel ?? latestMood?.level,
       recentMoodAverage: recentMoodAverage,
       moodTrend: moodTrend,
-      latestMoodLabel: _emptyToNull(latestMood?.label),
-      hasMoodNote: (latestMood?.note ?? '').trim().isNotEmpty,
+      latestMoodLabel: mixedMood == null
+          ? _emptyToNull(latestMood?.label)
+          : null,
+      hasMoodNote:
+          mixedMood == null && (latestMood?.note ?? '').trim().isNotEmpty,
       assessmentStatus: assessmentStatus,
       assessmentScore: assessmentScore,
       mentalStatusSignal: mentalStatusSignal,
@@ -89,9 +123,11 @@ class MindAidContextRepository {
       breathingSessionCount: latestReport?.breathingSessionCount ?? 0,
       mindfulBreathingMinutes: latestReport?.mindfulBreathingMinutes ?? 0,
       lastCheckInAt:
+          mixedMood?.lastCheckInAt ??
           latestMood?.createdAt ??
           dateTimeFromFirestore(user?['lastActiveAt']) ??
           latestReport?.generatedAt,
+      moodHistoryCoverage: mixedMood?.coverage,
     );
   }
 

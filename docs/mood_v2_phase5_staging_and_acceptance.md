@@ -1,0 +1,211 @@
+# Mood V2 Phase 5 staging readiness and acceptance plan
+
+> Historical rollout document. The combined Rules/indexes/two-Functions commands
+> below are obsolete examples, not approved operations. Existing deployed Rules,
+> index and TTL settings must be preserved. Any future authorized pilot affects
+> only `functions:createMoodEntry`, with explicit staging target, bounded writes,
+> mandatory empty-gate restoration and separately approved containment. Dev stays
+> closed and unchanged. The supervisor alone presses Save. App Check registration
+> retention/deletion follows the current explicit user decision, never automatic
+> cleanup instructions here. See `mood_v2_completion_matrix.md` for accepted Save
+> evidence; do not repeat it merely to replace historical failed-cycle reports.
+
+Status: local preparation only. This document authorizes neither a Firebase
+deployment nor client feature activation.
+
+## Current release controls
+
+- `ENABLE_MOOD_V2=false` remains the default, so the legacy daily writer is
+  still the only production/staging client writer.
+- All client reader flags default to `false`: provider, Home, Profile, history,
+  inSIGHT, Reports, and MindAid are independently gated.
+- `MOOD_V2_STAGING_PILOT_UIDS` defaults to the empty string. The callable
+  rejects every caller until a staging-only deployer supplies an explicit,
+  verified synthetic UID allowlist.
+- `createMoodEntry` and `createMoodEntryDev` derive identity, timestamp, and
+  Manila date key on the server. Clients cannot submit a UID, date key, or
+  authoritative timestamp.
+- The Flutter Mood V2 writer always calls the protected `createMoodEntry`.
+  `createMoodEntryDev` remains available for separately controlled backend
+  diagnostics and is never selected by the client router.
+- `ENABLE_STAGING_APP_CHECK=false` is the client default. An approved pilot
+  sets it to `true`, activates the platform provider, and fails startup unless
+  Firebase issues a non-empty token.
+
+## Future staging deployment manifest
+
+Run these steps only after a separate staging deployment authorization and from
+the reviewed Mood V2 feature/release commit, never from the CI-only branch.
+
+1. Confirm the target before any deployment:
+
+   ```powershell
+   git rev-parse HEAD
+   git status --short
+   ```
+
+   The selected project must be `mindmate-staging`; a dirty worktree, a
+   production target, or an unreviewed commit is a stop condition.
+
+2. Use a protected, ignored Functions environment file for the first deploy:
+
+   ```text
+   # functions/.env.mindmate-staging (never commit)
+   MOOD_V2_STAGING_PILOT_UIDS=
+   ```
+
+   The initial deployment must keep this value empty. It closes the callable
+   to every account while Rules/indexes and Function revisions are introduced.
+
+3. Existing Rules, indexes and TTL are already deployed. Do not redeploy them
+   as part of a writer acceptance cycle. Only after separate explicit approval,
+   build and review the protected-callable-only scope:
+
+   ```powershell
+   npm.cmd run build --prefix functions
+   firebase.cmd deploy --only functions:createMoodEntry --project mindmate-staging
+   ```
+
+   Do not use `--force`, do not deploy Hosting, and do not deploy unrelated
+   Functions. Review any deletion or additional-resource prompt as a stop
+   condition.
+
+4. After a separate pilot authorization, replace the empty value with only
+   the single approved disposable synthetic UID, redeploy only the protected
+   callable, and
+   record the authorized UID list outside source control. Never place personal
+   or real-student IDs in the allowlist. Keep Dev unchanged and closed.
+
+## Resource and rollback review
+
+| Resource | Intended change | Safety check |
+| --- | --- | --- |
+| `createMoodEntry` / `createMoodEntryDev` | New server-authoritative V2 writers | Auth, profile eligibility, staging-project identity, and allowlist remain enforced. |
+| `firestore.rules` | Owner-only V2 reads; direct V2 writes denied | Legacy `moods` rules are unchanged. |
+| `firestore.indexes.json` | `moodEntries` owner/history query indexes only | No index deletion or unrelated index change. |
+| Client APK | No change during backend rollout | Keep every V2 flag false until a separately approved pilot APK. |
+
+Rollback is additive and preserves `moodEntries` records:
+
+1. Close `MOOD_V2_STAGING_PILOT_UIDS` to the empty value and perform only the
+   explicitly approved protected-callable restoration. Verify the serving
+   revision, effective gate and 100% traffic; Dev stays unchanged and closed.
+2. Disable all V2 client build-time flags in the next pilot build or withdraw
+   distribution of a pilot build. Existing legacy logging remains available.
+3. If a Function revision itself is defective, restore the previously reviewed
+   revision through the approved staging release process. New callables may
+   have no earlier revision; in that case keep the allowlist empty rather than
+   deleting records or weakening Rules.
+4. Do not delete or mutate existing V2/legacy mood records as a rollback step.
+
+## Flag matrix
+
+| State | Server pilot allowlist | `ENABLE_MOOD_V2` | Reader flags | Result |
+| --- | --- | --- | --- | --- |
+| Legacy-only baseline | Empty | false | all false | Existing legacy writer/readers only. |
+| Read-only compatibility test | Empty | false | one approved reader flag true | Combined reader can be observed; no V2 write path is enabled. |
+| Synthetic pilot writing | Explicit disposable UID only | true in a dedicated pilot APK | all false for the first writer-only pass | Protected callable permits only that synthetic account; retry remains UUID-idempotent. |
+| Rollback | Empty | false in replacement APK | all false | Legacy behavior resumes; historical records remain read-only. |
+
+`ENABLE_MOOD_V2_REPORTS_READ` and `ENABLE_MOOD_V2_MINDAID_READ` remain
+separate client/build controls. The MindAid Function-side history behavior must
+also remain disabled unless its own reviewed environment control is enabled.
+
+## CI-to-feature integration plan
+
+The following files are CI-only corrections currently on
+`ci/mood-v2-phase5a-validation` after the preserved feature checkpoint
+`f46f932`. They must be reviewed and cherry-picked or merged into the Mood V2
+feature/release branch as one validation-infrastructure batch only after Mode B
+has a reviewed outcome. They must never be merged directly from the CI branch
+into `main`.
+
+| File | Purpose | Feature-branch disposition |
+| --- | --- | --- |
+| `.github/workflows/mood-v2-emulator-validation.yml` | Credential-free branch-scoped validation workflow | Include after workflow review. |
+| `firebase.mood-v2.emulators.json` | Root-relative Auth/Firestore/Functions emulator config | Include; it has no live project credentials. |
+| `ci/run_mood_v2_staging_identity_isolated.sh` | Namespace-first, fail-closed Mode B launcher | Include with the Docker fallback. |
+| `ci/mood-v2-mode-b.Dockerfile` and `.dockerignore` | Prebuilt offline emulator image and allowlisted build context | Include only after a Docker-capable runner validates it. |
+| `ci/run_mood_v2_staging_identity_docker*.sh` | No-mount, `--network none`, credential-scrubbed execution | Include only after a Docker-capable runner validates it. |
+| `functions/src/mood_entries_callable_emulator.test.ts` | Exact callable-code/no-write integration assertions | Include; it does not alter callable authorization. |
+| This document | Deployment/rollback/acceptance controls | Include with the release-readiness review. |
+
+Before integration, verify that the feature branch still has disabled flags,
+that no `.env.*`, service-account, Docker socket, deployment configuration, or
+unrelated provisioning file is included, and that the final workflow has
+`contents: read` permissions only. The feature branch remains unchanged until
+that integration is separately authorized.
+
+## Phase 5C acceptance cases
+
+The first client pass is writer-only and uses these exact build controls:
+
+```text
+APP_ENV=staging
+ENABLE_STAGING_APP_CHECK=true
+ENABLE_MOOD_V2=true
+ENABLE_MOOD_V2_PROVIDER_READ=false
+ENABLE_MOOD_V2_HOME_READ=false
+ENABLE_MOOD_V2_PROFILE_READ=false
+ENABLE_MOOD_V2_HISTORY_READ=false
+ENABLE_MOOD_V2_INSIGHTS_READ=false
+ENABLE_MOOD_V2_REPORTS_READ=false
+ENABLE_MOOD_V2_MINDAID_READ=false
+```
+
+For an Android debug APK, use the separately approved private UUID V4 debug
+configuration. Registration changes require explicit approval; do not replace
+or revoke a retained registration automatically. Token and protected-callable
+evidence proves App Check enforcement and routing for that session, but not
+Play Integrity attestation. A separate signed release/device test is required
+for Play Integrity evidence.
+
+The live client pass may add at most three synthetic `moodEntries`, one for
+each intentional submission with a distinct UUID. Idempotent retry and
+changed-payload conflict checks must add zero records. Activate only the
+protected `createMoodEntry` pilot allowlist for the designated synthetic UID;
+keep the Dev callable gate empty. Immediately after evidence capture, restore
+the protected callable allowlist to empty, verify both gates are closed, follow
+the supervisor's explicit App Check retention/cleanup decision, and leave records
+for separately authorized cleanup.
+
+Use disposable staging fixtures and synthetic levels only. Capture record
+counts, request IDs, event IDs, and timestamps without recording notes,
+credentials, raw responses, or expression/camera data.
+
+1. First V2 mood entry creates one event with server `occurredAt` and Manila
+   `dateKey`.
+2. Second and third intentional same-day entries use different UUIDs, yield
+   three events, and one mood-active day.
+3. Retry after timeout uses the original UUID/payload and returns the original
+   event; a changed payload with that UUID returns `already-exists`.
+4. Refresh/history retain legacy and V2 records without identity duplicates;
+   partial coverage is visibly labelled rather than treated as all history.
+5. Mood-specific current/longest streaks use unique Manila dates while
+   `users.dayStreak` remains unchanged.
+6. Home, Profile, Reports, MindAid, and inSIGHT each retain legacy fallback
+   while their V2 reader flag is false, then are tested one flag at a time.
+7. Log out/account switch during a pending write; stale completion must not
+   affect the new account.
+8. Exercise slow-network, timeout, duplicate-tap, retry, and failure-state UI
+   behavior without automatic retry or duplicate records.
+9. Verify Student, Teaching, and Non-Teaching compatibility where the mood
+   feature is normally available, including responsive/accessibility layout.
+10. Verify direct Firestore create/update/delete and cross-user reads are
+    denied; inspect diagnostics for absence of notes and expression data.
+
+## Required gates before release acceptance
+
+- Docker or equivalent verified offline Mode B execution passes Auth, Rules,
+  transaction/idempotency, and callable integration using `mindmate-staging`
+  only inside local emulators.
+- Focused Mood V2 tests, full staging Flutter suite, analyzer, Functions build,
+  Functions tests, and Rules tests pass on the exact candidate commit.
+- A separately authorized staging deployment keeps the pilot allowlist empty
+  first, followed by synthetic-account smoke tests after explicit approval.
+- A pilot APK and physical-device acceptance occur only after backend
+  authorization; the preserved TECNO Assessment session is out of scope.
+
+Until these gates pass, panel comments Major #5, Major #6, and Minor #38 remain
+**IN PROGRESS**. No completion status is inferred from a green CI workflow that
+reports `MODE_B=BLOCKED`.

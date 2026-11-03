@@ -422,33 +422,76 @@ async function requireConsentAndRollout(uid: string): Promise<{personalizationEn
   };
 }
 
-async function derivedContext(uid: string): Promise<Record<string, unknown>> {
-  const [moods, assessments, user] = await Promise.all([
-    db.collection("moods").where("userId", "==", uid).orderBy("createdAt", "desc").limit(7).get(),
-    db.collection("assessments").where("userId", "==", uid).orderBy("createdAt", "desc").limit(1).get(),
-    db.collection("users").doc(uid).get(),
-  ]);
-  const levels = moods.docs.map((doc) => Number(doc.data().level)).filter(Number.isFinite);
-  const assessment = assessments.docs[0]?.data() ?? {};
-  const userData = user.data() ?? {};
+export function moodV2HistoryEnabled(value = process.env.MINDAID_MOOD_V2_HISTORY_ENABLED): boolean {
+  return String(value ?? "").trim().toLowerCase() === "true";
+}
+
+type DerivedMoodEvent = {identity: string; level: number; occurredAt: Timestamp; dateKey: string};
+
+export function manilaMoodDateKey(instant: Timestamp): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(instant.toDate());
+  const part = (type: string) => parts.find((item) => item.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function normalizeDerivedMoodEvent(
+  source: "legacy" | "v2", id: string, data: Record<string, unknown>, timestampField: string,
+): DerivedMoodEvent | null {
+  const level = Number(data.level);
+  const occurredAt = data[timestampField];
+  if (!Number.isInteger(level) || level < 1 || level > 5 || !(occurredAt instanceof Timestamp)) return null;
+  return {identity: `${source}:${id}`, level, occurredAt, dateKey: manilaMoodDateKey(occurredAt)};
+}
+
+export function summarizeDerivedMoodHistory(events: DerivedMoodEvent[], coverage: "complete" | "partial") {
+  const unique = new Map<string, DerivedMoodEvent>();
+  events.forEach((event) => unique.set(event.identity, event));
+  const ordered = [...unique.values()].sort((left, right) =>
+    right.occurredAt.toMillis() - left.occurredAt.toMillis() || left.identity.localeCompare(right.identity));
+  const sample = ordered.slice(0, 7);
+  const levels = sample.map((event) => event.level);
   const recentAverage = levels.length ? levels.reduce((sum, item) => sum + item, 0) / levels.length : null;
   let moodTrend = "unknown";
   if (levels.length >= 4) {
-    const recent = levels.slice(0, 3).reduce((sum, item) => sum + item, 0) / Math.min(3, levels.length);
+    const recent = levels.slice(0, 3).reduce((sum, item) => sum + item, 0) / 3;
     const olderValues = levels.slice(3, 6);
     const older = olderValues.reduce((sum, item) => sum + item, 0) / olderValues.length;
     moodTrend = recent - older >= .6 ? "improving" : recent - older <= -.6 ? "declining" : "steady";
   }
+  return {ordered, moodTrend, recentAverage, coverage};
+}
+
+async function derivedContext(uid: string): Promise<Record<string, unknown>> {
+  const useV2 = moodV2HistoryEnabled();
+  let v2Failed = false;
+  const [legacyResult, v2Result, assessments, user] = await Promise.all([
+    db.collection("moods").where("userId", "==", uid).orderBy("createdAt", "desc").limit(7).select("level", "createdAt").get(),
+    useV2
+      ? db.collection("moodEntries").where("userId", "==", uid).orderBy("occurredAt", "desc").limit(7).select("level", "occurredAt").get()
+        .catch(() => { v2Failed = true; return null; })
+      : Promise.resolve(null),
+    db.collection("assessments").where("userId", "==", uid).orderBy("createdAt", "desc").limit(1).get(),
+    db.collection("users").doc(uid).get(),
+  ]);
+  const events = legacyResult.docs.flatMap((doc) => normalizeDerivedMoodEvent("legacy", doc.id, doc.data(), "createdAt") ?? []);
+  if (v2Result) events.push(...v2Result.docs.flatMap((doc) => normalizeDerivedMoodEvent("v2", doc.id, doc.data(), "occurredAt") ?? []));
+  const mood = summarizeDerivedMoodHistory(events, v2Failed ? "partial" : "complete");
+  const levels = mood.ordered.map((event) => event.level);
+  const assessment = assessments.docs[0]?.data() ?? {};
+  const userData = user.data() ?? {};
   const concerns = Array.isArray(assessment.mainConcernAreas) ? assessment.mainConcernAreas.map(String).slice(0, 3) : [];
   return {
-    moodTrend,
-    recentMoodAverage: recentAverage == null ? null : Number(recentAverage.toFixed(1)),
+    moodTrend: mood.moodTrend,
+    recentMoodAverage: mood.recentAverage == null ? null : Number(mood.recentAverage.toFixed(1)),
     latestMoodLevel: levels[0] ?? null,
     assessmentLevel: String(assessment.status ?? assessment.overallLevel ?? ""),
     assessmentScore: Number(assessment.overallScore ?? assessment.concernScore ?? 0) || null,
     concernCategories: concerns,
     currentStreak: Number(userData.dayStreak ?? 0),
-    lastCheckInAt: moods.docs[0]?.data().createdAt instanceof Timestamp ? moods.docs[0].data().createdAt.toDate().toISOString() : null,
+    lastCheckInAt: mood.ordered[0]?.occurredAt.toDate().toISOString() ?? null,
+    moodHistoryCoverage: mood.coverage,
   };
 }
 

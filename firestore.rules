@@ -223,6 +223,14 @@ service cloud.firestore {
           && resource.data.timezone != 'Asia/Manila');
     }
 
+    // Mood V2 is written solely through its authenticated callable. This
+    // keeps the server instant, Manila date key, and idempotency transaction
+    // authoritative. Broader staff/admin reads are deliberately out of scope.
+    match /moodEntries/{entryId} {
+      allow get, list: if isOwner(resource.data.userId);
+      allow create, update, delete: if false;
+    }
+
     match /reports/{reportId} {
       allow create: if isOwner(request.resource.data.userId) || isAdmin();
       allow read: if isOwner(resource.data.userId) || isAdmin();

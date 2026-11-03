@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Builds the complete emulator test image while networking is available, then
+# starts the actual staging-identity test with Docker networking disabled.
+set -euo pipefail
+
+# Cross-script contract with the container launcher:
+#   0  = all authenticated integration tests passed
+#   42 = isolation/emulator infrastructure blocked before tests could run
+#   1  = authenticated integration assertion failure
+readonly MODE_B_BLOCKED_EXIT_CODE=42
+readonly DOCKER_STARTUP_EXIT_CODE=125
+
+report_mode_b() {
+  local status="$1"
+  local detail="$2"
+  echo "MODE_B=${status}: ${detail}"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "mode_b=${status,,}" >> "$GITHUB_OUTPUT"
+  fi
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '## Mood V2 staging-identity integration\n\n**%s** - %s\n' "$status" "$detail" >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+: "${MOOD_V2_TEST_PILOT_UID:?Set a synthetic emulator-only pilot UID.}"
+: "${MOOD_V2_STAGING_PILOT_UIDS:?Set the synthetic pilot allowlist.}"
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+docker_bin="${MOOD_V2_DOCKER_BIN:-docker}"
+if ! command -v "$docker_bin" >/dev/null 2>&1 || ! "$docker_bin" info >/dev/null 2>&1; then
+  report_mode_b "BLOCKED" "Docker is unavailable; staging-identity tests were not run."
+  exit "$MODE_B_BLOCKED_EXIT_CODE"
+fi
+
+tag_suffix="${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}"
+image="mindmate-mood-v2-mode-b:${tag_suffix}"
+cleanup() {
+  "$docker_bin" image rm --force "$image" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+# The build has network access only to fetch the base image, npm dependencies,
+# and the Firestore emulator. The following docker run receives no mounts,
+# credentials, Docker socket, or network route.
+if ! "$docker_bin" build --pull --file "$root_dir/ci/mood-v2-mode-b.Dockerfile" --tag "$image" "$root_dir"; then
+  report_mode_b "BLOCKED" "Docker could not prepare the offline emulator image."
+  exit "$MODE_B_BLOCKED_EXIT_CODE"
+fi
+
+set +e
+"$docker_bin" run --rm \
+  --network none \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,noexec,nosuid,size=512m,mode=1777 \
+  --env MOOD_V2_TEST_PILOT_UID="$MOOD_V2_TEST_PILOT_UID" \
+  --env MOOD_V2_STAGING_PILOT_UIDS="$MOOD_V2_STAGING_PILOT_UIDS" \
+  "$image"
+container_exit_code=$?
+set -e
+
+case "$container_exit_code" in
+  0)
+    report_mode_b "PASSED" "Docker ran staging-identity emulators with loopback-only networking."
+    exit 0
+    ;;
+  "$MODE_B_BLOCKED_EXIT_CODE"|"$DOCKER_STARTUP_EXIT_CODE")
+    report_mode_b "BLOCKED" "Docker isolation or local emulator startup was unavailable; authenticated tests were not run."
+    exit "$MODE_B_BLOCKED_EXIT_CODE"
+    ;;
+  1)
+    report_mode_b "FAILED" "Docker-isolated staging-identity integration assertions failed."
+    exit 1
+    ;;
+  *)
+    report_mode_b "FAILED" "Docker returned unexpected exit code ${container_exit_code}; treating it as a failed integration run."
+    exit 1
+    ;;
+esac

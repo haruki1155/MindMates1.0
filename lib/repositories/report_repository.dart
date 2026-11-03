@@ -5,6 +5,9 @@ import '../models/assessment_explanation_model.dart';
 import '../database/firestore_collections.dart';
 import '../models/report_model.dart';
 import '../services/firebase/firestore_service.dart';
+import '../features/mood/domain/mood_v2_analytics.dart';
+import '../features/mood/domain/mood_v2_compatibility.dart';
+import 'mood_combined_history_repository.dart';
 
 abstract class ReportRepositoryDataSource {
   Future<Map<String, dynamic>?> getUserDocument(String userId);
@@ -254,6 +257,8 @@ class ReportRepository {
   ReportRepository({
     FirestoreService? firestoreService,
     ReportRepositoryDataSource? dataSource,
+    this.combinedMoodHistory,
+    this.useMoodV2Read = MoodV2ReadCompatibilityFlag.reportsEnabled,
   }) : _firestoreService = firestoreService ?? FirestoreService() {
     _dataSource =
         dataSource ?? FirestoreReportRepositoryDataSource(_firestoreService);
@@ -261,6 +266,8 @@ class ReportRepository {
 
   final FirestoreService _firestoreService;
   late final ReportRepositoryDataSource _dataSource;
+  final MoodCombinedHistoryRepository? combinedMoodHistory;
+  final bool useMoodV2Read;
 
   Future<ReportModel?> fetchLatestReport(String userId) async {
     final docs = await _firestoreService.getDocuments(
@@ -408,6 +415,11 @@ class ReportRepository {
       'weekStart': Timestamp.fromDate(weekStart),
       'weekEnd': Timestamp.fromDate(weekEnd),
       'moodCheckInCount': moodSummary.count,
+      // V2 can contain multiple distinct check-ins on a Manila calendar day.
+      // Keep the established event count and expose the active-day count
+      // separately for readers that understand the additive field.
+      'moodActiveDayCount': moodSummary.activeDayCount,
+      'moodHistoryCoverage': moodSummary.coverage.name,
       'averageMoodLevel': moodSummary.average,
       'latestMoodLevel': moodSummary.latestLevel,
       'positiveMoodCount': moodSummary.positiveCount,
@@ -554,6 +566,25 @@ class ReportRepository {
     required DateTime since,
     required DateTime before,
   }) async {
+    final combinedHistory = combinedMoodHistory;
+    if (useMoodV2Read && combinedHistory != null) {
+      final page = await combinedHistory.fetch(
+        MoodCombinedHistoryRequest(
+          userId: userId,
+          startInclusive: since,
+          endExclusive: before,
+        ),
+      );
+      final summary = MoodReportsCompatibility.summarize(page.window);
+      return _MoodSummary(
+        count: summary.entryCount,
+        activeDayCount: summary.activeDayCount,
+        average: summary.averageLevel,
+        latestLevel: summary.latestLevel,
+        positiveCount: summary.positiveEntryCount,
+        coverage: summary.coverage,
+      );
+    }
     final docs = await _dataSource.fetchMoods(
       userId: userId,
       since: since,
@@ -572,9 +603,13 @@ class ReportRepository {
     final total = levels.fold<int>(0, (total, level) => total + level);
     return _MoodSummary(
       count: levels.length,
+      // Legacy Mood Logging permits one record per day, so its event and
+      // active-day counts remain equivalent.
+      activeDayCount: levels.length,
       average: levels.isEmpty ? null : total / levels.length,
       latestLevel: latest.isEmpty ? null : _intOrZero(latest.first['level']),
       positiveCount: levels.where((level) => level >= 4).length,
+      coverage: MoodHistoryCoverage.complete,
     );
   }
 
@@ -902,15 +937,19 @@ class _BreathingSummary {
 class _MoodSummary {
   const _MoodSummary({
     required this.count,
+    required this.activeDayCount,
     required this.average,
     required this.latestLevel,
     required this.positiveCount,
+    required this.coverage,
   });
 
   final int count;
+  final int activeDayCount;
   final double? average;
   final int? latestLevel;
   final int positiveCount;
+  final MoodHistoryCoverage coverage;
 }
 
 class _SecretChatSummary {

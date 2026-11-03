@@ -34,6 +34,62 @@ class HomeMetrics {
   static const cardPadding = 16.0;
 }
 
+/// Gated Mood V2 presentation. It deliberately labels this separately from
+/// the activity-wide Day Streak shown elsewhere on Home.
+class HomeMoodV2SummaryCard extends StatelessWidget {
+  const HomeMoodV2SummaryCard({
+    super.key,
+    required this.latestLevel,
+    required this.entriesToday,
+    required this.moodStreakDays,
+    required this.isPartial,
+  });
+
+  final int? latestLevel;
+  final int entriesToday;
+  final int moodStreakDays;
+  final bool isPartial;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: HomePalette.surfaceWarm,
+        borderRadius: BorderRadius.circular(HomeMetrics.radius),
+        border: Border.all(color: HomePalette.outlineStrong),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(HomeMetrics.cardPadding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Mood check-ins', style: HomeTextStyles.cardTitle),
+            const SizedBox(height: 6),
+            Text(
+              latestLevel == null
+                  ? 'No mood entries in this history window'
+                  : 'Latest mood: $latestLevel/5 · $entriesToday entr${entriesToday == 1 ? 'y' : 'ies'} today',
+              style: HomeTextStyles.body,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Mood streak: $moodStreakDays day${moodStreakDays == 1 ? '' : 's'}',
+              style: HomeTextStyles.body,
+            ),
+            if (isPartial) ...[
+              const SizedBox(height: 4),
+              const Text(
+                'History window is incomplete.',
+                style: HomeTextStyles.caption,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class HomeMotion {
   const HomeMotion._();
 
