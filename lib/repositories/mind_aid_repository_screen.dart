@@ -81,7 +81,7 @@ class MindAidRepository {
           conversationId: userId,
         );
       }
-      return _cloudService.saveConsent(
+      return await _cloudService.saveConsent(
         userId: userId,
         cloudConsent: preferences.cloudConsent,
         personalizationEnabled: preferences.personalizationEnabled,

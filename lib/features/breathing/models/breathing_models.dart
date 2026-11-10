@@ -121,12 +121,33 @@ class BreathingPhase {
     required this.guidance,
     required this.stepSeconds,
     required this.remainingStepSeconds,
+    required this.stepIndex,
   });
 
   final String label;
   final String guidance;
   final int stepSeconds;
   final int remainingStepSeconds;
+  final int stepIndex;
+}
+
+/// Research is linked to the general method, not to an untested app outcome.
+/// Exact counts and concern-to-technique matching are app design decisions
+/// unless the cited publication explicitly evaluated them.
+class BreathingEvidence {
+  const BreathingEvidence({
+    required this.source,
+    required this.title,
+    required this.url,
+    required this.summary,
+    required this.limitations,
+  });
+
+  final String source;
+  final String title;
+  final String url;
+  final String summary;
+  final String limitations;
 }
 
 class BreathingPlan {
@@ -224,6 +245,77 @@ class BreathingPlan {
     ),
   ];
 
+  static const slowBreathingEvidence = BreathingEvidence(
+    source: 'Zaccaro et al. (2018) — systematic review',
+    title: 'How Breath-Control Can Change Your Life',
+    url: 'https://doi.org/10.3389/fnhum.2018.00353',
+    summary:
+        'A systematic review describes physiological and psychological '
+        'correlates of slow breathing (under 10 breaths per minute).',
+    limitations:
+        'The review does not establish this exact count, session duration, '
+        'or concern-based matching as a proven treatment.',
+  );
+
+  static const boxBreathingEvidence = BreathingEvidence(
+    source: 'Yilmaz Balban et al. (2023) — randomized study',
+    title: 'Brief Structured Respiration Practices Enhance Mood and Reduce '
+        'Physiological Arousal',
+    url: 'https://doi.org/10.1016/j.xcrm.2022.100895',
+    summary:
+        'The study included equal-duration inhale, hold, exhale and hold '
+        'box breathing sessions over 28 days.',
+    limitations:
+        'The study individualized box-breathing counts. MindMate uses '
+        '4–4–4–4 seconds as an example, not a universally optimal schedule. '
+        'Breath holds may feel uncomfortable; stop or choose a non-hold mode.',
+  );
+
+  static const cyclicSighEvidence = BreathingEvidence(
+    source: 'Yilmaz Balban et al. (2023) — randomized study',
+    title: 'Brief Structured Respiration Practices Enhance Mood and Reduce '
+        'Physiological Arousal',
+    url: 'https://doi.org/10.1016/j.xcrm.2022.100895',
+    summary:
+        'Participants practiced a slow inhale, a shorter second inhale '
+        'and an extended exhale. Daily five-minute practice showed '
+        'promising improvements in positive affect.',
+    limitations:
+        'MindMate’s fixed 2–1–5 timing is an illustrative pacing choice; '
+        'the study did not validate that exact timing or a one-minute dose.',
+  );
+
+  static const nhsBreathingGuidance = BreathingEvidence(
+    source: 'NHS — breathing exercises for stress',
+    title: 'Breathing exercises for stress',
+    url:
+        'https://www.nhs.uk/mental-health/self-help/guides-tools-and-activities/breathing-exercises-for-stress/',
+    summary:
+        'The NHS recommends breathing in and out gently, optionally '
+        'counting up to five each way, without forcing the breath.',
+    limitations:
+        'This is clinical self-help guidance, not a trial validating '
+        'MindMate or promising an individual result.',
+  );
+
+  static BreathingEvidence evidenceFor(BreathingTechnique technique) {
+    if (identical(technique.pattern, BreathingPattern.box)) {
+      return boxBreathingEvidence;
+    }
+    if (identical(technique.pattern, BreathingPattern.cyclicSigh)) {
+      return cyclicSighEvidence;
+    }
+    if (identical(technique.pattern, BreathingPattern.nhsCalm)) {
+      return nhsBreathingGuidance;
+    }
+    return slowBreathingEvidence;
+  }
+
+  static String patternLabel(BreathingTechnique technique) => technique
+      .pattern.steps
+      .map((step) => '${step.label} ${step.seconds}s')
+      .join(' → ');
+
   static BreathingPhase phaseFor(
     BreathingTechnique technique,
     int elapsedSeconds,
@@ -238,7 +330,8 @@ class BreathingPlan {
         : elapsedSeconds % cycleSeconds;
     var cursor = 0;
 
-    for (final step in steps) {
+    for (var index = 0; index < steps.length; index++) {
+      final step = steps[index];
       final end = cursor + step.seconds;
       if (elapsedInCycle < end) {
         return BreathingPhase(
@@ -246,6 +339,7 @@ class BreathingPlan {
           guidance: step.guidance,
           stepSeconds: step.seconds,
           remainingStepSeconds: end - elapsedInCycle,
+          stepIndex: index,
         );
       }
       cursor = end;
@@ -257,6 +351,7 @@ class BreathingPlan {
       guidance: fallback.guidance,
       stepSeconds: fallback.seconds,
       remainingStepSeconds: 1,
+      stepIndex: steps.length - 1,
     );
   }
 }

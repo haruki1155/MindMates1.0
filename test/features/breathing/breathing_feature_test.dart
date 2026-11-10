@@ -41,6 +41,41 @@ void main() {
       expect(BreathingPlan.phaseFor(box, 4).label, 'Hold');
       expect(BreathingPlan.phaseFor(fourSevenEight, 11).label, 'Exhale');
       expect(BreathingPlan.phaseFor(routine, 600).label, 'Box breathing');
+      expect(BreathingPlan.phaseFor(box, 0).stepIndex, 0);
+      expect(BreathingPlan.phaseFor(box, 3).remainingStepSeconds, 1);
+      expect(BreathingPlan.phaseFor(box, 4).stepIndex, 1);
+      expect(BreathingPlan.phaseFor(box, 8).stepIndex, 2);
+      expect(BreathingPlan.phaseFor(box, 12).stepIndex, 3);
+      expect(BreathingPlan.phaseFor(box, 16).stepIndex, 0);
+    });
+
+    test('matches researched breathing patterns to verifiable sources', () {
+      final box = BreathingPlan.techniques.firstWhere(
+        (technique) => technique.id == 'box_breathing',
+      );
+      final nhs = BreathingPlan.techniques.firstWhere(
+        (technique) => technique.id == 'nhs_calm',
+      );
+      final balanced = BreathingPlan.techniques.firstWhere(
+        (technique) => technique.id == 'balanced_calm',
+      );
+      expect(
+        BreathingPlan.patternLabel(box),
+        'Inhale 4s → Hold 4s → Exhale 4s → Hold 4s',
+      );
+      expect(
+        BreathingPlan.evidenceFor(box).url,
+        'https://doi.org/10.1016/j.xcrm.2022.100895',
+      );
+      expect(BreathingPlan.evidenceFor(nhs).url, contains('nhs.uk'));
+      expect(
+        BreathingPlan.evidenceFor(balanced).url,
+        'https://doi.org/10.3389/fnhum.2018.00353',
+      );
+      expect(
+        BreathingPlan.evidenceFor(box).limitations,
+        contains('individualized'),
+      );
     });
   });
 
@@ -84,8 +119,10 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('1 min'));
-    await tester.pump();
+    expect(find.text('Your breathing pattern'), findsOneWidget);
+    expect(find.text('Inhale 3s'), findsOneWidget);
+    expect(find.text('Exhale 6s'), findsOneWidget);
+    expect(find.text('Scientific basis & limitations'), findsOneWidget);
 
     await tester.tap(find.text('Start breathing'));
     await tester.pump();
@@ -95,8 +132,12 @@ void main() {
     await tester.pump();
     expect(find.text('Session complete'), findsNothing);
 
-    await tester.pump(const Duration(seconds: 61));
-    await tester.pump();
+    // The updated breathing UI uses a fixed 5-minute session.
+    await tester.pump(const Duration(seconds: 299));
+    expect(find.text('Session complete'), findsNothing);
+
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(milliseconds: 700));
 
     expect(find.text('Session complete'), findsOneWidget);
   });
