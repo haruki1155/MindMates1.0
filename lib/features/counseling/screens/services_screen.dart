@@ -16,7 +16,7 @@ class ServicesScreen extends StatelessWidget {
           'Guidance and information that help students adjust, feel secure, and belong in the school community.',
       description:
           'This service provides adequate and substantial information related to personal, psychological, social, educational, and vocational fields and benefits new students by helping them acquire the necessary knowledge about the new school, its rules and regulations. Accordingly, this helps students make adjustments and feel a sense of security and belongingness.',
-      iconAsset: '📚.png',
+      iconAsset: 'books.png',
       headerColor: Color(0xFFFFCE3C),
       guides: [
         ServiceGuideData(
@@ -48,7 +48,7 @@ class ServicesScreen extends StatelessWidget {
           'Student records and personal information that support self-understanding, decisions, and placement.',
       description:
           'It involves the collection of reliable and intensive information and records of students to facilitate students\' understanding of their own self and help them use such information in decision-making and placement.',
-      iconAsset: '📋.png',
+      iconAsset: 'clipboard.png',
       headerColor: Color(0xFFB9C1D3),
       guides: [
         ServiceGuideData(
@@ -148,7 +148,7 @@ class ServicesScreen extends StatelessWidget {
           'Professional support for personal-social, educational, and psychological concerns.',
       description:
           'This service is considered as the "heart" of the guidance program. Through a dynamic relationship between students and a professionally trained counselor, it is designed to facilitate students in their personal-social, educational, and psychological issues to enhance their intrapersonal and interpersonal development and competencies.',
-      iconAsset: '👥.png',
+      iconAsset: 'people.png',
       headerColor: Color(0xFFF2A6A1),
       isCounseling: true,
     ),
@@ -158,7 +158,7 @@ class ServicesScreen extends StatelessWidget {
           'Continued contact and evaluation after students receive guidance assistance.',
       description:
           'This service helps determine the status of students who received assistance and maintains contact with graduates. It also determines the adequacy and sufficiency of the programs and services extended in meeting the needs of its clientele.',
-      iconAsset: '🎯-1.png',
+      iconAsset: '-1.png',
       headerColor: Color(0xFFD9AEAA),
       guides: [
         ServiceGuideData(
@@ -244,7 +244,7 @@ class ServicesScreen extends StatelessWidget {
           'Support in choosing appropriate educational, occupational, or employment paths.',
       description:
           'It offers facilitation of students\' movement to the appropriate educational or occupational level or program in pursuit of further education or other employment upon leaving the organization.',
-      iconAsset: '🎯.png',
+      iconAsset: 'target.png',
       headerColor: Color(0xFF8FB8DE),
       guides: [
         ServiceGuideData(
@@ -296,7 +296,7 @@ class ServicesScreen extends StatelessWidget {
           'Appropriate action and support for referrals from students, families, faculty, and staff.',
       description:
           'It involves responding and providing appropriate actions to referrals made by parents, faculty, other personnel, and students.',
-      iconAsset: '🤝.png',
+      iconAsset: 'handshake.png',
       headerColor: Color(0xFF83B797),
     ),
   ];

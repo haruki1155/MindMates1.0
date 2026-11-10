@@ -2479,7 +2479,7 @@ _CategoryVisualStyle _categoryVisualStyle(String id, String iconKey) {
       border: Color(0xFFE9C96C),
       accent: Color(0xFF8B6200),
       icon: Icons.self_improvement_rounded,
-      assetName: 'assets/images/INSIGHTS/🧘 Stress relief.png',
+      assetName: 'assets/images/INSIGHTS/stress_relief.png',
     ),
     'anxiety' => const _CategoryVisualStyle(
       id: 'anxiety',
@@ -2488,7 +2488,7 @@ _CategoryVisualStyle _categoryVisualStyle(String id, String iconKey) {
       border: Color(0xFFB8CEE8),
       accent: Color(0xFF3E6798),
       icon: Icons.cloud_outlined,
-      assetName: 'assets/images/INSIGHTS/💭 Manage anxiety.png',
+      assetName: 'assets/images/INSIGHTS/manage_anxiety.png',
     ),
     'emotional_wellbeing' => const _CategoryVisualStyle(
       id: 'emotional_wellbeing',
@@ -2497,7 +2497,7 @@ _CategoryVisualStyle _categoryVisualStyle(String id, String iconKey) {
       border: Color(0xFFB7D8BD),
       accent: Color(0xFF397250),
       icon: Icons.sentiment_satisfied_alt_rounded,
-      assetName: 'assets/images/INSIGHTS/😊 Mood tracking.png',
+      assetName: 'assets/images/INSIGHTS/mood_tracking.png',
     ),
     'sleep_mental_health' => const _CategoryVisualStyle(
       id: 'sleep_mental_health',
@@ -2506,7 +2506,7 @@ _CategoryVisualStyle _categoryVisualStyle(String id, String iconKey) {
       border: Color(0xFFC9BDE9),
       accent: Color(0xFF625394),
       icon: Icons.bedtime_rounded,
-      assetName: 'assets/images/INSIGHTS/😴 Better sleep.png',
+      assetName: 'assets/images/INSIGHTS/better_sleep.png',
     ),
     'self_esteem_confidence' => const _CategoryVisualStyle(
       id: 'self_esteem_confidence',

@@ -850,7 +850,7 @@ class HomeStreakCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               const HomeDashboardAssetImage(
-                assetName: '🔥.png',
+                assetName: 'fire_icon.png',
                 width: 46,
                 height: 46,
               ),

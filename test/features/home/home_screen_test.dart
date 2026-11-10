@@ -419,7 +419,7 @@ void main() {
       'x.png',
       'Notification.png',
       '+.png',
-      '🔥.png',
+      'fire_icon.png',
       'Thumbs up.png',
       'Good Quality.png',
     ]) {
@@ -433,7 +433,7 @@ void main() {
     );
 
     for (final assetName in [
-      '🐶.png',
+      'dog_icon.png',
       'Creativity.png',
       'Rolled Up Newspaper.png',
       'Warranty.png',

@@ -11,7 +11,7 @@ void main() {
         (item) => item.title == 'Sleep Quality',
       );
       expect(sleep.subtitle, 'Track rest and patterns');
-      expect(sleep.fullAssetPath, 'assets/images/INSIGHTS/😴 Better sleep.png');
+      expect(sleep.fullAssetPath, 'assets/images/INSIGHTS/better_sleep.png');
       expect(AppPages.routes[RouteNames.sleepQuality], isNotNull);
     },
   );

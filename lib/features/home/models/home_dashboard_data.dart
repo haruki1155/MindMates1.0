@@ -118,7 +118,7 @@ class HomeDashboardData {
           title: 'Talk to AI companion',
           subtitle: 'Get instant support anytime',
           icon: Icons.support_agent_outlined,
-          iconAssetName: '🐶.png',
+          iconAssetName: 'dog_icon.png',
           color: Color(0xFFD9AF6A),
         ),
         HomeResourceData(
@@ -168,8 +168,8 @@ class HomeDashboardData {
         HomeToolkitData(
           title: 'Sleep Quality',
           subtitle: 'Track rest and patterns',
-          imageName: '😴 Better sleep.png',
-          fullAssetPath: 'assets/images/INSIGHTS/😴 Better sleep.png',
+          imageName: 'better_sleep.png',
+          fullAssetPath: 'assets/images/INSIGHTS/better_sleep.png',
           colors: [Color(0xFFB9C9FF), Color(0xFF7E91D8)],
         ),
       ],
