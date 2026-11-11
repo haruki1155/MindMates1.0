@@ -6,8 +6,10 @@ import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 
 import '../expression_check_in/expression_check_in_screen.dart';
+import '../expression_check_in/photo_expression_screen.dart';
 import '../expression_check_in/expression_scan_logic.dart';
-import '../expression_check_in/tflite_expression_classifier.dart';
+import '../expression_check_in/tflite_expression_classifier.dart'
+    if (dart.library.js_interop) '../expression_check_in/tflite_expression_classifier_web.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/insights_provider.dart';
 import '../../../providers/mood_provider.dart';
@@ -397,7 +399,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       MaterialPageRoute(
         builder:
             widget.expressionScreenBuilder ??
-            (_) => const ExpressionCheckInScreen(),
+            (_) => const PhotoExpressionScreen(),
       ),
     );
     if (!mounted ||
