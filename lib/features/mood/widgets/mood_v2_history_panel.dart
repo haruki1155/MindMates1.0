@@ -19,6 +19,10 @@ class MoodV2HistoryPanel extends StatelessWidget {
     this.paginationErrorMessage,
     this.onLoadMore,
     this.showPersonalDetails = false,
+    this.v2PersonalNotes = const {},
+    this.v2NoteLoadingDays = const {},
+    this.v2NoteErrorDays = const {},
+    this.onExpandDay,
   });
 
   final MoodHistoryWindow? history;
@@ -31,6 +35,10 @@ class MoodV2HistoryPanel extends StatelessWidget {
   final String? paginationErrorMessage;
   final VoidCallback? onLoadMore;
   final bool showPersonalDetails;
+  final Map<String, String?> v2PersonalNotes;
+  final Set<String> v2NoteLoadingDays;
+  final Set<String> v2NoteErrorDays;
+  final ValueChanged<String>? onExpandDay;
 
   @override
   Widget build(BuildContext context) {
@@ -137,6 +145,10 @@ class MoodV2HistoryPanel extends StatelessWidget {
               day: day,
               isPartial: history!.coverage == MoodHistoryCoverage.partial,
               showPersonalDetails: showPersonalDetails,
+              notes: v2PersonalNotes,
+              notesLoading: v2NoteLoadingDays.contains(day.dateKey),
+              notesError: v2NoteErrorDays.contains(day.dateKey),
+              onExpandDay: onExpandDay,
             );
           },
         ),
@@ -265,10 +277,18 @@ class _MoodDayCard extends StatelessWidget {
     required this.day,
     required this.isPartial,
     required this.showPersonalDetails,
+    this.notes = const {},
+    this.notesLoading = false,
+    this.notesError = false,
+    this.onExpandDay,
   });
   final MoodDailyAggregate day;
   final bool isPartial;
   final bool showPersonalDetails;
+  final Map<String, String?> notes;
+  final bool notesLoading;
+  final bool notesError;
+  final ValueChanged<String>? onExpandDay;
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -294,6 +314,7 @@ class _MoodDayCard extends StatelessWidget {
                   for (final event in day.events.reversed)
                     ExpansionTile(
                       key: ValueKey(event.stableIdentity),
+                      onExpansionChanged: (open) { if (open) onExpandDay?.call(day.dateKey); },
                       tilePadding: const EdgeInsets.symmetric(horizontal: 12),
                       leading: MediaQuery.textScalerOf(context).scale(14) > 19
                           ? MoodGlyphIcon(label: event.label)
@@ -327,11 +348,12 @@ class _MoodDayCard extends StatelessWidget {
                       children: [
                         Align(
                           alignment: Alignment.centerLeft,
-                          child: Text(
-                            event.note?.trim().isNotEmpty == true
-                                ? event.note!
-                                : 'No note added.',
-                          ),
+                          child: notesError
+                              ? TextButton.icon(onPressed: () => onExpandDay?.call(day.dateKey), icon: const Icon(Icons.refresh), label: const Text('Unable to load notes. Retry'))
+                              : notesLoading || (onExpandDay != null && !notes.containsKey(event.stableIdentity))
+                              ? const Text('Loading note…')
+                              : Text((notes.containsKey(event.stableIdentity) ? notes[event.stableIdentity] : event.note)?.trim().isNotEmpty == true
+                                  ? (notes.containsKey(event.stableIdentity) ? notes[event.stableIdentity]! : event.note!) : 'No note added.'),
                         ),
                       ],
                     ),

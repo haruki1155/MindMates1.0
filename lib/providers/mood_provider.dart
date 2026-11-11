@@ -34,6 +34,39 @@ class MoodProvider extends ChangeNotifier {
   String? _errorMessage;
   MoodModel? _todayMood;
   NormalizedMoodEvent? _confirmedV2Mood;
+  final Map<String, String?> _v2PersonalNotes = {};
+  final Set<String> _v2NoteLoadingDays = {};
+  final Set<String> _v2NoteErrorDays = {};
+  int _noteGeneration = 0;
+  Map<String, String?> get v2PersonalNotes => Map.unmodifiable(_v2PersonalNotes);
+  Set<String> get v2NoteLoadingDays => Set.unmodifiable(_v2NoteLoadingDays);
+  Set<String> get v2NoteErrorDays => Set.unmodifiable(_v2NoteErrorDays);
+
+  Future<void> loadMoodV2DayNotes(String userId, String dateKey) async {
+    if (!isMoodV2ReadEnabled || _v2HistoryUserId != userId ||
+        (_isBoundToAuthentication && _authenticatedUserId != userId) ||
+        _v2NoteLoadingDays.contains(dateKey)) return;
+    final events = _v2History!.uniqueEvents.where((e) => e.dateKey == dateKey &&
+      !_v2PersonalNotes.containsKey(e.stableIdentity)).toList();
+    if (events.isEmpty) return;
+    final generation = _noteGeneration;
+    _v2NoteLoadingDays.add(dateKey);
+    _v2NoteErrorDays.remove(dateKey);
+    notifyListeners();
+    try {
+      final notes = await _combinedHistoryRepository!.fetchOwnerNotes(userId: userId, events: events);
+      if (generation != _noteGeneration || _v2HistoryUserId != userId) return;
+      _v2PersonalNotes.addAll(notes);
+    } catch (_) {
+      if (generation != _noteGeneration || _v2HistoryUserId != userId) return;
+      _v2NoteErrorDays.add(dateKey);
+    } finally {
+      if (generation == _noteGeneration && _v2HistoryUserId == userId) {
+        _v2NoteLoadingDays.remove(dateKey);
+        notifyListeners();
+      }
+    }
+  }
 
   void recordConfirmedMoodV2Entry(MoodV2Event entry) {
     if (_isBoundToAuthentication && entry.userId != _authenticatedUserId) return;
@@ -243,6 +276,10 @@ class MoodProvider extends ChangeNotifier {
   }
 
   void clearMoodV2History() {
+    _noteGeneration++;
+    _v2PersonalNotes.clear();
+    _v2NoteLoadingDays.clear();
+    _v2NoteErrorDays.clear();
     _v2RequestGeneration++;
     _v2HistoryUserId = null;
     _v2History = null;

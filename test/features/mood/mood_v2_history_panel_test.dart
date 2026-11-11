@@ -4,6 +4,16 @@ import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/features/mood/widgets/mood_v2_history_panel.dart';
 
 void main() {
+  testWidgets('personal detail shows saved note instead of false empty placeholder', (tester) async {
+    final window = MoodHistoryWindow(events: [_event('saved', DateTime.utc(2026, 11, 12), 3, MoodEventSource.v2)], coverage: MoodHistoryCoverage.complete);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: MoodV2HistoryPanel(
+      history: window, showPersonalDetails: true, v2PersonalNotes: const {'v2:saved': 'A persisted reflection'},
+    ))));
+    await tester.tap(find.byType(ExpansionTile).first);
+    await tester.pumpAndSettle();
+    expect(find.text('A persisted reflection'), findsOneWidget);
+    expect(find.text('No note added.'), findsNothing);
+  });
   testWidgets(
     'summary separates entries from days and labels windowed streak',
     (tester) async {

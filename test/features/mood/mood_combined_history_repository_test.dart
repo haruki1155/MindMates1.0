@@ -3,6 +3,32 @@ import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/repositories/mood_combined_history_repository.dart';
 
 void main() {
+  test('owner note details are source-qualified and reject foreign ownership or changed auth', () async {
+    final identity = FakeIdentity('owner');
+    var changed = false;
+    var foreign = false;
+    final repository = MoodCombinedHistoryRepository(
+      identity: identity,
+      legacySource: FakeSource(MoodEventSource.legacy, []),
+      v2Source: FakeSource(MoodEventSource.v2, []),
+      ownerNoteDocumentReader: (source, id) async {
+        if (changed) identity.uid = 'other';
+        return {'userId': foreign ? 'other' : 'owner', 'note': source == MoodEventSource.v2 ? 'A real saved note' : ''};
+      },
+    );
+    final events = [for (final source in MoodEventSource.values)
+      NormalizedMoodEvent(id: 'shared', userId: 'owner', level: 3, dateKey: '2026-11-12',
+        occurredAt: DateTime.utc(2026, 11, 12), source: source)];
+    final notes = await repository.fetchOwnerNotes(userId: 'owner', events: events);
+    expect(notes['v2:shared'], 'A real saved note');
+    expect(notes['legacy:shared'], '');
+    expect(events.every((e) => e.note == null), isTrue);
+    foreign = true;
+    await expectLater(repository.fetchOwnerNotes(userId: 'owner', events: events), throwsStateError);
+    foreign = false;
+    changed = true;
+    await expectLater(repository.fetchOwnerNotes(userId: 'owner', events: events), throwsStateError);
+  });
   NormalizedMoodEvent event(
     MoodEventSource source,
     String id,

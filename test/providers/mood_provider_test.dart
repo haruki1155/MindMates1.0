@@ -8,6 +8,33 @@ import 'package:mind_mates/repositories/mood_combined_history_repository.dart';
 import 'package:mind_mates/repositories/mood_repository.dart';
 
 void main() {
+  test('private notes retry errors and discard completion after account switch', () async {
+    final pending = Completer<Map<String, dynamic>?>();
+    var fail = true;
+    final repository = MoodCombinedHistoryRepository(
+      identity: const _MoodIdentity('user_1'),
+      legacySource: const _MoodSource(MoodEventSource.legacy, []),
+      v2Source: _MoodSource(MoodEventSource.v2, [_event('note', DateTime.utc(2026, 11, 12), 3, MoodEventSource.v2)]),
+      ownerNoteDocumentReader: (source, id) async {
+        if (fail) throw StateError('offline');
+        return pending.future;
+      },
+    );
+    final provider = MoodProvider(_FakeMoodRepository(), useMoodV2Read: true, combinedHistoryRepository: repository);
+    provider.bindAuthenticatedUser('user_1');
+    await provider.loadMoodV2History('user_1');
+    await provider.loadMoodV2DayNotes('user_1', '2026-11-12');
+    expect(provider.v2NoteErrorDays, contains('2026-11-12'));
+    expect(provider.v2PersonalNotes, isEmpty);
+    fail = false;
+    final request = provider.loadMoodV2DayNotes('user_1', '2026-11-12');
+    provider.bindAuthenticatedUser('user_2');
+    pending.complete({'userId':'user_1', 'note':'Private'});
+    await request;
+    expect(provider.v2PersonalNotes, isEmpty);
+    expect(provider.v2NoteLoadingDays, isEmpty);
+    expect(provider.v2NoteErrorDays, isEmpty);
+  });
   test('latest V2 mood survives stale refresh and clears at midnight or account change', () async {
     var now = DateTime.utc(2026, 11, 12, 3);
     final provider = MoodProvider(_FakeMoodRepository(), nowProvider: () => now,

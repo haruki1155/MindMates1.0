@@ -132,7 +132,12 @@ class MoodCombinedHistoryRepository {
     MoodHistoryIdentity? identity,
     MoodHistorySource? legacySource,
     MoodHistorySource? v2Source,
-  }) : _identity = identity ?? FirebaseMoodHistoryIdentity(),
+    Future<Map<String, dynamic>?> Function(MoodEventSource source, String id)? ownerNoteDocumentReader,
+  }) : _ownerNoteDocumentReader = ownerNoteDocumentReader ?? ((source, id) async =>
+            (await (firestore ?? FirebaseFirestore.instance).collection(
+              source == MoodEventSource.legacy ? FirestoreCollections.moods : FirestoreCollections.moodEntries,
+            ).doc(id).get()).data()),
+       _identity = identity ?? FirebaseMoodHistoryIdentity(),
        _legacySource =
            legacySource ??
            FirebaseMoodHistorySource(
@@ -147,6 +152,30 @@ class MoodCombinedHistoryRepository {
            );
 
   final MoodHistoryIdentity _identity;
+  final Future<Map<String, dynamic>?> Function(MoodEventSource source, String id) _ownerNoteDocumentReader;
+
+  /// Explicit personal-detail read. Never add these values to analytics events.
+  Future<Map<String, String?>> fetchOwnerNotes({required String userId, required List<NormalizedMoodEvent> events}) async {
+    _requireCurrentUser(userId);
+    if (events.any((e) => e.userId != userId || e.id.isEmpty || e.id.contains('/'))) {
+      throw StateError('Invalid owner detail request');
+    }
+    final notes = <String, String?>{};
+    for (var start = 0; start < events.length; start += 20) {
+      _requireCurrentUser(userId);
+      final chunk = events.skip(start).take(20).toList();
+      final documents = await Future.wait(chunk.map((e) => _ownerNoteDocumentReader(e.source, e.id)));
+      _requireCurrentUser(userId);
+      for (var i = 0; i < chunk.length; i++) {
+        final document = documents[i];
+        if (document == null || document['userId'] != userId) {
+          throw StateError('Owner detail unavailable');
+        }
+        notes[chunk[i].stableIdentity] = document['note'] as String?;
+      }
+    }
+    return notes;
+  }
   final MoodHistorySource _legacySource;
   final MoodHistorySource _v2Source;
 
