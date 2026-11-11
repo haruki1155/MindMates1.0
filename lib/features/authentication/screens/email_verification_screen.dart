@@ -16,22 +16,43 @@ class EmailVerificationScreen extends StatefulWidget {
       _EmailVerificationScreenState();
 }
 
-class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
+class _EmailVerificationScreenState extends State<EmailVerificationScreen>
+    with WidgetsBindingObserver {
   static const _resendDelay = 60;
+
+  /// How long the green "Email verified" state stays visible before the
+  /// screen moves on to profile setup.
+  static const _verifiedHoldDuration = Duration(milliseconds: 1200);
+
+  /// How often the screen checks in the background whether the email has
+  /// been verified, so the button can turn green without a tap.
+  static const _autoCheckInterval = Duration(seconds: 5);
+  Timer? _autoCheckTimer;
+  bool _autoChecking = false;
+
+  /// True when verification was detected in the background; the button then
+  /// shows "Continue" and waits for the user's tap.
+  bool _autoVerified = false;
   bool _checking = false;
   bool _sending = false;
   bool _cancelling = false;
   int _resendSeconds = 0;
   Timer? _resendTimer;
   String? _message;
-  bool _messageIsError = false;
+  _StatusTone _messageTone = _StatusTone.info;
   bool _emailSent = false;
+  bool _verified = false;
 
-  bool get _busy => _checking || _sending || _cancelling;
+  bool get _busy => _checking || _sending || _cancelling || _verified;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _autoCheckTimer = Timer.periodic(
+      _autoCheckInterval,
+      (_) => _checkSilently(),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _resend();
     });
@@ -39,8 +60,45 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoCheckTimer?.cancel();
     _resendTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Returning from the mail app is the most likely moment the link was opened.
+    if (state == AppLifecycleState.resumed) _checkSilently();
+  }
+
+  /// Background check: turns the screen green when the email is verified.
+  /// Failures are ignored; the user can still tap the button to check.
+  Future<void> _checkSilently() async {
+    if (_autoChecking || _busy) return;
+    _autoChecking = true;
+    try {
+      final authProvider = context.read<AuthProvider>();
+      await authProvider.reloadCurrentUser();
+      if (!mounted || _busy || !authProvider.currentUserEmailVerified) return;
+      _autoCheckTimer?.cancel();
+      setState(() {
+        _verified = true;
+        _autoVerified = true;
+        _messageTone = _StatusTone.verified;
+        _message = 'Email verified. Tap Continue to set up your profile.';
+      });
+    } catch (_) {
+      // Silent by design: a manual check reports errors.
+    } finally {
+      _autoChecking = false;
+    }
+  }
+
+  void _continueToProfile() {
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(RouteNames.profileSetup, (route) => false);
   }
 
   Future<void> _checkVerification() async {
@@ -53,12 +111,20 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       await authProvider.reloadCurrentUser();
       if (!mounted) return;
       if (authProvider.currentUserEmailVerified) {
+        setState(() {
+          _verified = true;
+          _checking = false;
+          _messageTone = _StatusTone.verified;
+          _message = 'Email verified. Continuing to your profile…';
+        });
+        await Future<void>.delayed(_verifiedHoldDuration);
+        if (!mounted) return;
         Navigator.of(
           context,
         ).pushNamedAndRemoveUntil(RouteNames.profileSetup, (route) => false);
       } else {
         setState(() {
-          _messageIsError = false;
+          _messageTone = _StatusTone.notVerified;
           _message =
               'Not verified yet. Open the link in your email, then return here.';
         });
@@ -66,7 +132,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _messageIsError = true;
+        _messageTone = _StatusTone.error;
         _message = FirebaseErrorMessage.describe(
           error,
           fallback: 'Unable to check verification status. Try again.',
@@ -87,7 +153,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
       await context.read<AuthProvider>().sendEmailVerification();
       if (!mounted) return;
       setState(() {
-        _messageIsError = false;
+        _messageTone = _StatusTone.info;
         _emailSent = true;
         _message = 'Verification email sent. Check your inbox and spam folder.';
       });
@@ -95,7 +161,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _messageIsError = true;
+        _messageTone = _StatusTone.error;
         _message = FirebaseErrorMessage.describe(
           error,
           fallback: 'Unable to resend the verification email right now.',
@@ -157,7 +223,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _messageIsError = true;
+        _messageTone = _StatusTone.error;
         _message =
             context.read<AuthProvider>().errorMessage ??
             'Unable to cancel this pending registration. Please try again.';
@@ -208,13 +274,16 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
                           _VerificationCard(
                             email: email,
                             emailSent: _emailSent,
+                            verified: _verified,
                             checking: _checking,
                             busy: _busy,
                             resendLabel: resendLabel,
                             resendEnabled: !_busy && _resendSeconds == 0,
                             message: _message,
-                            messageIsError: _messageIsError,
+                            messageTone: _messageTone,
                             onCheck: _checkVerification,
+                            continueMode: _autoVerified,
+                            onContinue: _continueToProfile,
                             onResend: _resend,
                             onUseAnotherEmail: _useAnotherEmail,
                           ),
@@ -295,26 +364,35 @@ class _VerificationCard extends StatelessWidget {
   const _VerificationCard({
     required this.email,
     required this.emailSent,
+    required this.verified,
     required this.checking,
     required this.busy,
     required this.resendLabel,
     required this.resendEnabled,
     required this.message,
-    required this.messageIsError,
+    required this.messageTone,
     required this.onCheck,
+    required this.continueMode,
+    required this.onContinue,
     required this.onResend,
     required this.onUseAnotherEmail,
   });
 
   final String email;
   final bool emailSent;
+  final bool verified;
   final bool checking;
   final bool busy;
   final String resendLabel;
   final bool resendEnabled;
   final String? message;
-  final bool messageIsError;
+  final _StatusTone messageTone;
   final VoidCallback onCheck;
+
+  /// Verification was detected in the background: the green button reads
+  /// "Continue" and stays enabled until the user taps it.
+  final bool continueMode;
+  final VoidCallback onContinue;
   final VoidCallback onResend;
   final VoidCallback onUseAnotherEmail;
 
@@ -390,6 +468,8 @@ class _VerificationCard extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          _VerificationBadge(verified: verified),
           const SizedBox(height: 20),
           const _Instruction(
             number: '1',
@@ -404,14 +484,14 @@ class _VerificationCard extends StatelessWidget {
           ),
           if (message != null) ...[
             const SizedBox(height: 18),
-            _Status(message: message!, isError: messageIsError),
+            _Status(message: message!, tone: messageTone),
           ],
           const SizedBox(height: 22),
           SizedBox(
             width: double.infinity,
             height: 52,
             child: FilledButton.icon(
-              onPressed: busy ? null : onCheck,
+              onPressed: continueMode ? onContinue : (busy ? null : onCheck),
               icon: checking
                   ? const SizedBox(
                       width: 17,
@@ -421,11 +501,20 @@ class _VerificationCard extends StatelessWidget {
                         color: Colors.white,
                       ),
                     )
-                  : const Icon(Icons.verified_rounded, size: 19),
+                  : Icon(
+                      continueMode
+                          ? Icons.arrow_forward_rounded
+                          : Icons.verified_rounded,
+                      size: 19,
+                    ),
               label: Text(
-                checking ? 'Checking status...' : 'I verified my email',
+                continueMode
+                    ? 'Continue'
+                    : checking
+                    ? 'Checking status...'
+                    : 'I verified my email',
               ),
-              style: _primaryButtonStyle,
+              style: _checkButtonStyle(verified: verified),
             ),
           ),
           const SizedBox(height: 8),
@@ -499,29 +588,100 @@ class _Instruction extends StatelessWidget {
   }
 }
 
-class _Status extends StatelessWidget {
-  const _Status({required this.message, required this.isError});
-  final String message;
-  final bool isError;
+enum _StatusTone { info, error, notVerified, verified }
+
+/// Always-visible verification status: red until the email is verified,
+/// then green.
+class _VerificationBadge extends StatelessWidget {
+  const _VerificationBadge({required this.verified});
+  final bool verified;
 
   @override
   Widget build(BuildContext context) {
-    final foreground = isError ? const Color(0xFF923B35) : AppColors.primary;
+    final (label, foreground, background, icon) = verified
+        ? (
+            'Email verified',
+            _Colors.verified,
+            const Color(0xFFE8F5E9),
+            Icons.verified_rounded,
+          )
+        : (
+            'Not yet verified',
+            AppColors.error,
+            const Color(0xFFFDECEA),
+            Icons.cancel_outlined,
+          );
+    return Semantics(
+      label: label,
+      excludeSemantics: true,
+      child: Container(
+        key: const Key('email-verification-badge'),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: foreground),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: foreground,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Status extends StatelessWidget {
+  const _Status({required this.message, required this.tone});
+  final String message;
+  final _StatusTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final (foreground, background, icon) = switch (tone) {
+      _StatusTone.info => (
+        AppColors.primary,
+        const Color(0xFFEAF6F2),
+        Icons.info_outline_rounded,
+      ),
+      _StatusTone.error => (
+        const Color(0xFF923B35),
+        const Color(0xFFFFEEEC),
+        Icons.error_outline_rounded,
+      ),
+      _StatusTone.notVerified => (
+        AppColors.error,
+        const Color(0xFFFDECEA),
+        Icons.cancel_outlined,
+      ),
+      _StatusTone.verified => (
+        _Colors.verified,
+        const Color(0xFFE8F5E9),
+        Icons.check_circle_outline_rounded,
+      ),
+    };
     return Container(
+      key: const Key('email-verification-status'),
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isError ? const Color(0xFFFFEEEC) : const Color(0xFFEAF6F2),
+        color: background,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            isError ? Icons.error_outline_rounded : Icons.info_outline_rounded,
-            size: 18,
-            color: foreground,
-          ),
+          Icon(icon, size: 18, color: foreground),
           const SizedBox(width: 9),
           Expanded(
             child: Text(
@@ -602,13 +762,19 @@ class _SoftCircle extends StatelessWidget {
   }
 }
 
-final _primaryButtonStyle = FilledButton.styleFrom(
-  backgroundColor: AppColors.primary,
-  foregroundColor: Colors.white,
-  disabledBackgroundColor: AppColors.primary.withAlpha(110),
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-  textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
-);
+/// "I verified my email" button: red until the email is verified, then green.
+/// It stays green while disabled during the hold before profile setup.
+ButtonStyle _checkButtonStyle({required bool verified}) =>
+    FilledButton.styleFrom(
+      backgroundColor: verified ? _Colors.verified : AppColors.error,
+      foregroundColor: Colors.white,
+      disabledBackgroundColor: verified
+          ? _Colors.verified
+          : AppColors.error.withAlpha(110),
+      disabledForegroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+    );
 
 class _Colors {
   const _Colors._();
@@ -621,4 +787,5 @@ class _Colors {
   static const body = Color(0xFF3F4D49);
   static const muted = Color(0xFF687571);
   static const shadow = Color(0xFF4B3A12);
+  static const verified = Color(0xFF2E7D32);
 }
