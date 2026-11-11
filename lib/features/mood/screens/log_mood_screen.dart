@@ -50,6 +50,41 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     with WidgetsBindingObserver {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _noteController = TextEditingController();
+  final FocusNode _noteFocus = FocusNode();
+  final GlobalKey _noteFieldKey = GlobalKey();
+  bool _reflectionOffered = false;
+  DialogRoute<bool>? _reflectionRoute;
+
+  void _dismissReflection() {
+    final route = _reflectionRoute;
+    _reflectionRoute = null;
+    if (route != null) WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (route.isActive) route.navigator?.removeRoute(route);
+    });
+  }
+
+  Future<void> _offerMoodReflection() async {
+    if (!widget.moodV2Enabled || _reflectionOffered || !mounted || _isSaving) return;
+    _reflectionOffered = true;
+    final owner = _currentUserId();
+    final generation = _moodV2RequestGeneration;
+    final route = DialogRoute<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      backgroundColor: MoodLogPalette.surface,
+      title: const Text('Why do you feel this way?'),
+      content: const Text("You can share a little insight in the note below. It's optional."),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Skip', style: TextStyle(color: MoodLogPalette.ink))),
+        FilledButton(style: FilledButton.styleFrom(backgroundColor: MoodLogPalette.gold, foregroundColor: MoodLogPalette.ink), onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Add note')),
+      ],
+    ));
+    _reflectionRoute = route;
+    final addNote = await Navigator.of(context).push(route);
+    if (_reflectionRoute == route) _reflectionRoute = null;
+    if (!mounted || owner != _currentUserId() || generation != _moodV2RequestGeneration || addNote != true) return;
+    _noteFocus.requestFocus();
+    final field = _noteFieldKey.currentContext;
+    if (field != null) await Scrollable.ensureVisible(field, duration: const Duration(milliseconds: 200), alignment: .3);
+  }
   _MoodChoice? _selectedMood;
   ExpressionCue? _expressionCue;
   ExpressionCueSource? _expressionCueSource;
@@ -83,6 +118,8 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     super.didChangeDependencies();
     final userId = _currentUserId(listen: true);
     if (_loadedUserId == userId) return;
+    _dismissReflection();
+    _reflectionOffered = false;
     _invalidateMoodV2Request();
     _loadedUserId = userId;
     _todayLoadGeneration++;
@@ -112,6 +149,8 @@ class _LogMoodScreenState extends State<LogMoodScreen>
 
   @override
   void dispose() {
+    _dismissReflection();
+    _noteFocus.dispose();
     _noteController
       ..removeListener(_handleNoteChanged)
       ..dispose();
@@ -294,11 +333,16 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           compact: widget.moodV2Enabled,
           selectedMood: _selectedMood,
           isEnabled: !_isSaving,
-          onSelected: (mood) => setState(() => _selectedMood = mood),
+          onSelected: (mood) {
+            setState(() => _selectedMood = mood);
+            unawaited(_offerMoodReflection());
+          },
         ),
         if (widget.moodV2Enabled) ...[
           const SizedBox(height: 16),
           _ThoughtsBox(
+            key: _noteFieldKey,
+            focusNode: _noteFocus,
             controller: _noteController,
             characterCount: _noteLength,
             compact: true,
@@ -424,6 +468,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _expressionSuggestionAccepted = true;
       if (suggestion != null) _selectedMood = suggestion;
     });
+    if (suggestion != null) unawaited(_offerMoodReflection());
   }
 
   Future<void> _loadTodayMood(String userId) async {
@@ -590,6 +635,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       );
       if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
       _confirmedV2Entry = entry;
+      _reflectionOffered = false;
       _readProviderOrNull<MoodProvider>()?.recordConfirmedMoodV2Entry(entry);
     } catch (_) {
       if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
@@ -1596,6 +1642,8 @@ class _MoodEmojiBadge extends StatelessWidget {
 class _ThoughtsBox extends StatelessWidget {
   final bool compact;
   const _ThoughtsBox({
+    super.key,
+    this.focusNode,
     this.compact = false,
     required this.controller,
     required this.characterCount,
@@ -1603,6 +1651,7 @@ class _ThoughtsBox extends StatelessWidget {
   });
 
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final int characterCount;
   final bool isEnabled;
 
@@ -1611,6 +1660,7 @@ class _ThoughtsBox extends StatelessWidget {
     if (compact) {
       return TextField(
         controller: controller,
+        focusNode: focusNode,
         enabled: isEnabled,
         maxLength: 300,
         minLines: 1,

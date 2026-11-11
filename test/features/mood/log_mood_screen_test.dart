@@ -24,6 +24,37 @@ import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('reflection offers Skip and Add note once per unsaved entry', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final writer = _FakeMoodV2Writer();
+    await tester.pumpWidget(_logMoodApp(moodProvider: MoodProvider(_FakeMoodRepository()),
+      userProvider: UserProvider(_FakeUserRepository())..setUser(_user(id: 'user_1')),
+      moodV2Enabled: true, moodV2Writer: writer));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Keep my draft');
+    await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+    await tester.pumpAndSettle();
+    expect(find.text('Why do you feel this way?'), findsOneWidget);
+    expect(writer.levels, isEmpty);
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'Keep my draft');
+    await tester.tap(find.byKey(const ValueKey('mood-card-Great')));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+    expect(writer.levels, [5]);
+    await tester.tap(find.text('Log another mood'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add note'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+    expect(writer.levels, [5]);
+  });
   testWidgets('v2 compact picker has summary and full width Excited row', (
     tester,
   ) async {
@@ -94,6 +125,7 @@ void main() {
           await tester.ensureVisible(find.text(label));
           await tester.pumpAndSettle();
           await tester.tap(find.text(label));
+    await _skipReflection(tester);
           await tester.pumpAndSettle();
         }
         expect(
@@ -134,6 +166,7 @@ void main() {
       'Excited',
     ]) {
       await tester.tap(find.text(label));
+    await _skipReflection(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save mood entry'));
       await tester.pumpAndSettle();
@@ -206,6 +239,7 @@ void main() {
       await tester.pumpAndSettle();
       mood.refreshedUsers.clear();
       await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
       await tester.pump();
       await tester.tap(find.text('Save mood check-in'));
       await tester.pumpAndSettle();
@@ -231,6 +265,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Great'));
       await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
       await tester.pump();
       await tester.ensureVisible(find.text('Save mood entry'));
       await tester.pumpAndSettle();
@@ -268,6 +303,7 @@ void main() {
       mood.refreshedUsers.clear();
       mood.throwOnRefresh = true;
       await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
       await tester.pump();
       await tester.tap(find.text('Save mood entry'));
       await tester.pumpAndSettle();
@@ -312,6 +348,7 @@ void main() {
     await tester.pumpAndSettle();
     mood.refreshedUsers.clear();
     await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
@@ -357,6 +394,7 @@ void main() {
     expect(_cardBorderWidth(tester, angryCard), 1.2);
 
     await tester.tap(find.text('Angry'));
+    await _skipReflection(tester);
     await tester.pumpAndSettle();
 
     expect(_cardBorderWidth(tester, angryCard), 2);
@@ -396,6 +434,7 @@ void main() {
     expect(find.text('Smiling expression detected'), findsOneWidget);
     expect(_saveButton(tester).onPressed, isNull);
     await tester.tap(find.text('Yes, somewhat'));
+    await _skipReflection(tester);
     await tester.pump();
     expect(_saveButton(tester).onPressed, isNotNull);
     debugDefaultTargetPlatformOverride = null;
@@ -437,6 +476,7 @@ void main() {
     await tester.tap(find.text('Not really'));
     await tester.pump();
     await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
     await tester.pump();
     expect(_saveButton(tester).onPressed, isNotNull);
     await tester.ensureVisible(find.text('Save mood check-in'));
@@ -489,6 +529,7 @@ void main() {
     );
 
     await tester.tap(find.text('Stressed'));
+    await _skipReflection(tester);
     await tester.enterText(find.byType(TextField), 'Exams feel heavy.');
     await tester.tap(find.text('Save mood check-in'));
     await tester.pumpAndSettle();
@@ -520,6 +561,7 @@ void main() {
     );
 
     await tester.tap(find.text('Sad'));
+    await _skipReflection(tester);
     await tester.ensureVisible(find.text('Save mood check-in'));
     await tester.pump();
     await tester.tap(find.text('Save mood check-in'));
@@ -543,6 +585,7 @@ void main() {
     );
 
     await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
     await tester.ensureVisible(find.text('Save mood check-in'));
     await tester.pump();
     await tester.tap(find.text('Save mood check-in'));
@@ -568,6 +611,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood check-in'));
     await tester.pumpAndSettle();
@@ -610,6 +654,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
@@ -637,6 +682,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
@@ -644,6 +690,7 @@ void main() {
     await tester.tap(find.text('Log another mood'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Sad'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
@@ -680,6 +727,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
       await tester.pump();
       await tester.tap(find.text('Save mood entry'));
       await tester.pumpAndSettle();
@@ -707,6 +755,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
@@ -714,6 +763,7 @@ void main() {
 
     await tester.enterText(find.byType(TextField), 'Edited after failure');
     await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
@@ -743,6 +793,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Tired'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pump();
@@ -773,6 +824,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
@@ -807,6 +859,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Tired'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pump();
@@ -840,6 +893,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
     await tester.enterText(find.byType(TextField), 'Legacy daily draft');
     now = DateTime.utc(2026, 7, 7, 16, 0, 2);
     await tester.pump(const Duration(seconds: 7));
@@ -870,6 +924,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
     await tester.enterText(find.byType(TextField), 'Unsaved synthetic draft');
     now = DateTime.utc(2026, 7, 7, 16, 0, 2);
     await tester.pump(const Duration(seconds: 7));
@@ -907,6 +962,7 @@ void main() {
       await tester.pumpWidget(app());
       await tester.pumpAndSettle();
       await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
       await tester.enterText(
         find.byType(TextField),
         'Original synthetic payload',
@@ -915,6 +971,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(writer.requestIds, hasLength(1));
       await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
       await tester.enterText(find.byType(TextField), 'Edited unsaved input');
       now = DateTime.utc(2026, 7, 7, 16, 0, 2);
       await tester.pump(const Duration(seconds: 7));
@@ -939,6 +996,7 @@ void main() {
       await tester.tap(find.text('Log another mood'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
       await tester.enterText(find.byType(TextField), 'Intentional new entry');
       await tester.tap(find.text('Save mood entry'));
       await tester.pumpAndSettle();
@@ -967,6 +1025,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
       await tester.pump();
       await tester.tap(find.text('Save mood entry'));
       await tester.pump();
@@ -1017,6 +1076,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
     await tester.enterText(
       find.byType(TextField),
       'Account one synthetic draft',
@@ -1034,6 +1094,7 @@ void main() {
     expect(find.byKey(const ValueKey('mood-v2-save-error')), findsNothing);
     writer.responseUserId = 'user_2';
     await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
     await tester.pump();
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
@@ -1324,5 +1385,13 @@ class _FakeReportRepository extends ReportRepository {
   @override
   Future<ReportModel?> fetchLatestReport(String userId) async {
     return null;
+  }
+}
+
+Future<void> _skipReflection(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  if (find.byType(AlertDialog).evaluate().isNotEmpty) {
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
   }
 }
