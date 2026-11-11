@@ -220,7 +220,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _watchProviderOrNull<NotificationProvider>(context)?.unreadCount ?? 0;
     final moodProvider = _watchProviderOrNull<MoodProvider>(context);
     final todayMood = moodProvider?.todayMood;
-    final todayMoodLabel = todayMood == null
+    final latest = MoodV2FeatureFlag.homeRead
+        ? moodProvider?.latestMoodForToday(now: widget._nowProvider())
+        : null;
+    final todayMoodLabel = latest != null
+        ? (latest.label?.trim().isNotEmpty == true ? latest.label!.trim() : 'Mood logged')
+        : todayMood == null
         ? null
         : (todayMood.label?.trim().isNotEmpty ?? false)
         ? todayMood.label!.trim()

@@ -590,6 +590,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       );
       if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
       _confirmedV2Entry = entry;
+      _readProviderOrNull<MoodProvider>()?.recordConfirmedMoodV2Entry(entry);
     } catch (_) {
       if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
       setState(() {

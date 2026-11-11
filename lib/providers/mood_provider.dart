@@ -33,6 +33,31 @@ class MoodProvider extends ChangeNotifier {
   bool _isLoadingToday = false;
   String? _errorMessage;
   MoodModel? _todayMood;
+  NormalizedMoodEvent? _confirmedV2Mood;
+
+  void recordConfirmedMoodV2Entry(MoodV2Event entry) {
+    if (_isBoundToAuthentication && entry.userId != _authenticatedUserId) return;
+    final normalized = entry.toNormalized();
+    if (_confirmedV2Mood == null ||
+        !normalized.occurredAt.isBefore(_confirmedV2Mood!.occurredAt)) {
+      _confirmedV2Mood = normalized;
+      notifyListeners();
+    }
+  }
+
+  NormalizedMoodEvent? latestMoodForToday({DateTime? now}) {
+    final date = MoodManilaCalendar.dateKeyForInstant(now ?? _nowProvider());
+    final owner = _isBoundToAuthentication ? _authenticatedUserId : _v2HistoryUserId;
+    if (owner == null) return null;
+    final candidates = MoodHistoryWindow(events: [
+      ...?_v2History?.events,
+      if (_confirmedV2Mood != null) _confirmedV2Mood!,
+      if (_todayMood != null) NormalizedMoodEvent.fromLegacy(_todayMood!),
+    ], coverage: MoodHistoryCoverage.partial).uniqueEvents.where(
+      (e) => e.userId == owner && e.dateKey == date,
+    ).toList();
+    return candidates.isEmpty ? null : candidates.last;
+  }
   DailyMoodSaveResult? _dailySaveResult;
   MoodHistoryWindow? _v2History;
   MoodAnalyticsSnapshot? _v2Analytics;
@@ -76,6 +101,7 @@ class MoodProvider extends ChangeNotifier {
     _legacySessionGeneration++;
     _moods = [];
     _todayMood = null;
+    _confirmedV2Mood = null;
     _dailySaveResult = null;
     _errorMessage = null;
     _isLoading = false;
