@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../domain/mood_v2_analytics.dart';
+import '../domain/mood_journey_period.dart';
 import '../../home/widgets/home_dashboard_widgets.dart';
 
 class MoodJourneySummary extends StatefulWidget {
@@ -8,9 +9,13 @@ class MoodJourneySummary extends StatefulWidget {
     super.key,
     required this.history,
     required this.now,
+    this.period,
+    this.onPeriodChanged,
   });
   final MoodHistoryWindow history;
   final DateTime now;
+  final MoodJourneyPeriod? period;
+  final ValueChanged<MoodJourneyPeriod>? onPeriodChanged;
 
   @override
   State<MoodJourneySummary> createState() => _MoodJourneySummaryState();
@@ -30,13 +35,13 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
       referenceInstant: widget.now,
     );
     final days = events.map((e) => e.dateKey).toSet();
-    final start = _month
-        ? DateTime.utc(today.year, today.month)
-        : today.subtract(Duration(days: today.weekday - 1));
-    final filtered = events.where((e) {
-      final date = MoodManilaCalendar.dateForKey(e.dateKey);
-      return !date.isBefore(start) && !date.isAfter(today);
-    }).toList();
+    final period =
+        widget.period ??
+        (_month ? MoodJourneyPeriod.month : MoodJourneyPeriod.week);
+    final start = moodJourneyStart(period, widget.now);
+    final filtered = events
+        .where((e) => includesMoodJourneyDate(e.dateKey, period, widget.now))
+        .toList();
     final active = filtered.map((e) => e.dateKey).toSet().length;
     final counts = <String, int>{};
     for (final event in filtered) {
@@ -157,10 +162,18 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
             ButtonSegment(value: false, label: Text('This Week')),
             ButtonSegment(value: true, label: Text('This Month')),
           ],
-          selected: {_month},
-          showSelectedIcon: false,
-          onSelectionChanged: (values) =>
-              setState(() => _month = values.single),
+          selected: {period == MoodJourneyPeriod.month},
+          showSelectedIcon: true,
+          onSelectionChanged: (values) {
+            final value = values.single
+                ? MoodJourneyPeriod.month
+                : MoodJourneyPeriod.week;
+            if (widget.onPeriodChanged != null) {
+              widget.onPeriodChanged!(value);
+            } else {
+              setState(() => _month = values.single);
+            }
+          },
           style: ButtonStyle(
             minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
             backgroundColor: WidgetStateProperty.resolveWith(
@@ -223,6 +236,13 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
               ],
             );
           },
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            '${MaterialLocalizations.of(context).formatShortDate(start)} – ${MaterialLocalizations.of(context).formatShortDate(today)}',
+            style: const TextStyle(color: HomePalette.muted),
+          ),
         ),
         if (widget.history.coverage == MoodHistoryCoverage.partial)
           const Padding(

@@ -8,22 +8,26 @@ import '../../../providers/mood_provider.dart';
 import '../../../routes/route_names.dart';
 import '../widgets/mood_v2_history_panel.dart';
 import '../widgets/mood_journey_summary.dart';
+import '../domain/mood_journey_period.dart';
 import '../../home/widgets/home_dashboard_widgets.dart';
 
 class MoodJourneyScreen extends StatefulWidget {
-  const MoodJourneyScreen({super.key});
+  const MoodJourneyScreen({super.key, this.nowProvider});
+  final DateTime Function()? nowProvider;
 
   @override
   State<MoodJourneyScreen> createState() => _MoodJourneyScreenState();
 }
 
 class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
+  DateTime get _now => widget.nowProvider?.call() ?? DateTime.now();
   String? _loadedUser;
+  MoodJourneyPeriod _period = MoodJourneyPeriod.week;
   Timer? _midnightTimer;
 
   void _scheduleMidnight() {
     _midnightTimer?.cancel();
-    final now = DateTime.now().toUtc();
+    final now = _now.toUtc();
     final manila = now.add(const Duration(hours: 8));
     final next = DateTime.utc(
       manila.year,
@@ -123,13 +127,17 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                   MoodJourneySummary(
                     key: ValueKey(uid),
                     history: safeHistory,
-                    now: DateTime.now(),
+                    now: _now,
+                    period: _period,
+                    onPeriodChanged: (value) => setState(() => _period = value),
                   ),
                 MoodV2HistoryPanel(
                   history: safeHistory,
                   isLoading: mood?.isLoadingV2History ?? false,
                   errorMessage: mood?.v2HistoryErrorMessage,
                   showPersonalDetails: true,
+                  period: _period,
+                  referenceInstant: _now,
                   v2PersonalNotes: mood?.v2PersonalNotes ?? const {},
                   v2NoteLoadingDays: mood?.v2NoteLoadingDays ?? const {},
                   v2NoteErrorDays: mood?.v2NoteErrorDays ?? const {},

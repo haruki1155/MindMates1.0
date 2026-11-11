@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../domain/mood_v2_analytics.dart';
+import '../domain/mood_journey_period.dart';
 import 'mood_glyph.dart';
 import '../../home/widgets/home_dashboard_widgets.dart';
 
@@ -23,6 +24,8 @@ class MoodV2HistoryPanel extends StatelessWidget {
     this.v2NoteLoadingDays = const {},
     this.v2NoteErrorDays = const {},
     this.onExpandDay,
+    this.period,
+    this.referenceInstant,
   });
 
   final MoodHistoryWindow? history;
@@ -39,6 +42,8 @@ class MoodV2HistoryPanel extends StatelessWidget {
   final Set<String> v2NoteLoadingDays;
   final Set<String> v2NoteErrorDays;
   final ValueChanged<String>? onExpandDay;
+  final MoodJourneyPeriod? period;
+  final DateTime? referenceInstant;
 
   @override
   Widget build(BuildContext context) {
@@ -118,7 +123,19 @@ class MoodV2HistoryPanel extends StatelessWidget {
         ],
       );
     }
-    final days = MoodAnalytics.dailyAggregates(events);
+    final days = MoodAnalytics.dailyAggregates(
+      events
+          .where(
+            (e) =>
+                period == null ||
+                includesMoodJourneyDate(
+                  e.dateKey,
+                  period!,
+                  referenceInstant ?? DateTime.now(),
+                ),
+          )
+          .toList(),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -133,6 +150,15 @@ class MoodV2HistoryPanel extends StatelessWidget {
           _MoodSummary(analytics: analytics!),
           const SizedBox(height: 12),
         ],
+        if (days.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              history!.coverage == MoodHistoryCoverage.partial
+                  ? 'No check-ins loaded for this period. Load more history to check earlier dates.'
+                  : 'No check-ins in this period.',
+            ),
+          ),
         ListView.separated(
           key: const Key('mood-v2-history-list'),
           shrinkWrap: true,
@@ -293,75 +319,144 @@ class _MoodDayCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     if (showPersonalDetails) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      final date = MoodManilaCalendar.dateForKey(day.dateKey);
+      final fullDate = MaterialLocalizations.of(context).formatFullDate(date);
+      const weekdays = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday',
+      ];
+      return Card(
+        color: HomePalette.surface,
+        child: ExpansionTile(
+          key: ValueKey(
+            'mood-day-${day.events.first.userId}-${day.dateKey}',
+          ),
+          onExpansionChanged: (open) {
+            if (open) onExpandDay?.call(day.dateKey);
+          },
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          title: Semantics(
+            label: fullDate,
             child: Text(
-              '${MaterialLocalizations.of(context).formatFullDate(MoodManilaCalendar.dateForKey(day.dateKey))} · ${day.entryCount} check-in${day.entryCount == 1 ? '' : 's'}',
+              weekdays[date.weekday - 1],
               style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
             ),
           ),
-          Container(
-            decoration: HomeDecor.card(),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                children: [
-                  for (final event in day.events.reversed)
-                    ExpansionTile(
-                      key: ValueKey(event.stableIdentity),
-                      onExpansionChanged: (open) { if (open) onExpandDay?.call(day.dateKey); },
-                      tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-                      leading: MediaQuery.textScalerOf(context).scale(14) > 19
-                          ? MoodGlyphIcon(label: event.label)
-                          : Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.circle,
-                                  size: 9,
-                                  color: Color(0xFF2F7D6D),
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  _manilaTime(event.occurredAt).format(context),
-                                  style: const TextStyle(fontSize: 13),
-                                ),
-                                const SizedBox(width: 12),
-                                MoodGlyphIcon(label: event.label),
-                              ],
-                            ),
-                      subtitle: MediaQuery.textScalerOf(context).scale(14) > 19
-                          ? Text(_manilaTime(event.occurredAt).format(context))
-                          : null,
-                      title: Text(
-                        event.label?.isNotEmpty == true
-                            ? event.label!
-                            : 'Mood entry',
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-                      children: [
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: notesError
-                              ? TextButton.icon(onPressed: () => onExpandDay?.call(day.dateKey), icon: const Icon(Icons.refresh), label: const Text('Unable to load notes. Retry'))
-                              : notesLoading || (onExpandDay != null && !notes.containsKey(event.stableIdentity))
-                              ? const Text('Loading note…')
-                              : Text((notes.containsKey(event.stableIdentity) ? notes[event.stableIdentity] : event.note)?.trim().isNotEmpty == true
-                                  ? (notes.containsKey(event.stableIdentity) ? notes[event.stableIdentity]! : event.note!) : 'No note added.'),
-                        ),
-                      ],
-                    ),
-                ],
+          subtitle: Text(
+            '${day.entryCount} check-in${day.entryCount == 1 ? '' : 's'}',
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  fullDate,
+                  style: const TextStyle(color: HomePalette.muted),
+                ),
               ),
             ),
-          ),
-        ],
+            Container(
+              decoration: HomeDecor.card(),
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(16),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  children: [
+                    for (final event in day.events.reversed)
+                      ExpansionTile(
+                        key: ValueKey(event.stableIdentity),
+                        onExpansionChanged: (open) {
+                          if (open) onExpandDay?.call(day.dateKey);
+                        },
+                        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                        leading: MediaQuery.textScalerOf(context).scale(14) > 19
+                            ? MoodGlyphIcon(label: event.label)
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.circle,
+                                    size: 9,
+                                    color: Color(0xFF2F7D6D),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    _manilaTime(
+                                      event.occurredAt,
+                                    ).format(context),
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  MoodGlyphIcon(label: event.label),
+                                ],
+                              ),
+                        subtitle:
+                            MediaQuery.textScalerOf(context).scale(14) > 19
+                            ? Text(
+                                _manilaTime(event.occurredAt).format(context),
+                              )
+                            : null,
+                        title: Text(
+                          event.label?.isNotEmpty == true
+                              ? event.label!
+                              : 'Mood entry',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          20,
+                          0,
+                          20,
+                          16,
+                        ),
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: notesError
+                                ? TextButton.icon(
+                                    onPressed: () =>
+                                        onExpandDay?.call(day.dateKey),
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text(
+                                      'Unable to load notes. Retry',
+                                    ),
+                                  )
+                                : notesLoading ||
+                                      (onExpandDay != null &&
+                                          !notes.containsKey(
+                                            event.stableIdentity,
+                                          ))
+                                ? const Text('Loading note…')
+                                : Text(
+                                    (notes.containsKey(event.stableIdentity)
+                                                    ? notes[event
+                                                          .stableIdentity]
+                                                    : event.note)
+                                                ?.trim()
+                                                .isNotEmpty ==
+                                            true
+                                        ? (notes.containsKey(
+                                                event.stableIdentity,
+                                              )
+                                              ? notes[event.stableIdentity]!
+                                              : event.note!)
+                                        : 'No note added.',
+                                  ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
     return Card(

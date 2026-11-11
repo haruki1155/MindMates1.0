@@ -9,6 +9,21 @@ import 'package:mind_mates/features/mood/screens/mood_journey_screen.dart';
 import 'package:mind_mates/features/mood/widgets/mood_journey_summary.dart';
 
 void main() {
+  testWidgets('week month filters summary and collapsed days together', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MultiProvider(providers: [
+      ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+      ChangeNotifierProvider<MoodProvider>.value(value: _PeriodMood()),
+    ], child: MaterialApp(home: MoodJourneyScreen(nowProvider: () => DateTime.utc(2026, 11, 12)))));
+    await tester.pumpAndSettle();
+    expect(find.text('1 check-in · 1 mood-active day'), findsOneWidget);
+    expect(find.text('Sunday'), findsNothing);
+    await tester.tap(find.text('This Month'));
+    await tester.pumpAndSettle();
+    expect(find.text('2 check-ins · 2 mood-active days'), findsOneWidget);
+    expect(find.text('Sunday'), findsOneWidget);
+  });
   testWidgets(
     'journey hides the previous account history after an account switch',
     (tester) async {
@@ -24,6 +39,10 @@ void main() {
         ),
       );
       await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('mood-v2-history-list')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(ExpansionTile).first);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Okay'));
       await tester.pumpAndSettle();
       expect(find.text('Private account A note'), findsOneWidget);
@@ -194,6 +213,9 @@ void main() {
       ),
     );
     expect(find.textContaining('2 check-ins'), findsOneWidget);
+    expect(find.textContaining('Okay'), findsNothing);
+    await tester.tap(find.byType(ExpansionTile).first);
+    await tester.pumpAndSettle();
     expect(find.textContaining('Okay'), findsNWidgets(2));
     await tester.tap(find.byType(ExpansionTile).last);
     await tester.pumpAndSettle();
@@ -216,6 +238,14 @@ class _JourneyAuth extends ChangeNotifier implements AuthProvider {
 }
 
 class _JourneyMood extends ChangeNotifier implements MoodProvider {
+  @override
+  Map<String, String?> get v2PersonalNotes => const {'v2:one': 'Private account A note'};
+  @override
+  Set<String> get v2NoteLoadingDays => const {};
+  @override
+  Set<String> get v2NoteErrorDays => const {};
+  @override
+  Future<void> loadMoodV2DayNotes(String uid, String day) async {}
   @override
   bool get isMoodV2ReadEnabled => true;
   @override
@@ -248,4 +278,12 @@ class _JourneyMood extends ChangeNotifier implements MoodProvider {
   Future<void> loadMoodV2History(String userId, {DateTime? now}) async {}
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _PeriodMood extends _JourneyMood {
+  @override
+  MoodHistoryWindow get v2History => MoodHistoryWindow(coverage: MoodHistoryCoverage.complete, events: [
+    for (final day in [1, 11]) NormalizedMoodEvent(id: '$day', userId: 'account-a', level: 3,
+      dateKey: '2026-11-${day.toString().padLeft(2, '0')}', occurredAt: DateTime.utc(2026, 11, day), source: MoodEventSource.v2, label: 'Okay'),
+  ]);
 }
