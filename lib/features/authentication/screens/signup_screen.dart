@@ -70,38 +70,10 @@ class _SignupBodyState extends State<_SignupBody> {
   void initState() {
     super.initState();
     _emailController.addListener(_handleEmailChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _showRegistrationInstructions();
-    });
   }
 
   void _handleEmailChanged() {
     if (mounted) setState(() {});
-  }
-
-  Future<void> _showRegistrationInstructions() {
-    return showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        icon: const Icon(Icons.how_to_reg_outlined),
-        title: const Text('Before you create an account'),
-        content: const Text(
-          'Student accounts use a valid personal email address and Student ID.\n\n'
-          'Teaching personnel must use their official UCU email (for example, '
-          'juandelacruz@ucu.edu.ph). The form will automatically change to '
-          'Teaching and ask for an Employee ID.\n\n'
-          'Non-teaching registration remains unchanged while a reliable '
-          'verification method is being prepared. There is no manual account-type selector.',
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _handleTermsChanged() async {
@@ -538,7 +510,7 @@ class _SignupFormCard extends StatelessWidget {
               },
             ),
             const SizedBox(height: 7),
-            _AccountTypeNotice(isTeaching: !isStudent),
+            _EmailGuide(kind: _emailKindFor(emailController.text)),
             const SizedBox(height: 7),
             _SignupField(
               controller: firstNameController,
@@ -691,30 +663,42 @@ class _SignupFormCard extends StatelessWidget {
   }
 }
 
-class _AccountTypeNotice extends StatelessWidget {
-  const _AccountTypeNotice({required this.isTeaching});
+enum _EmailKind { empty, personal, institutional }
 
-  final bool isTeaching;
+_EmailKind _emailKindFor(String email) {
+  if (email.trim().isEmpty) return _EmailKind.empty;
+  return AuthRepository.isInstitutionalEmployeeEmail(email)
+      ? _EmailKind.institutional
+      : _EmailKind.personal;
+}
+
+/// Guide under the Email Address field; its line follows the typed email.
+class _EmailGuide extends StatelessWidget {
+  const _EmailGuide({required this.kind});
+
+  final _EmailKind kind;
 
   @override
   Widget build(BuildContext context) {
-    final title = isTeaching
-        ? 'Teaching personnel account detected'
-        : 'Student account';
-    final message = isTeaching
-        ? 'Official UCU email confirmed. Your Employee ID and work details are required.'
-        : 'Use your student details below. Teaching personnel must enter an @ucu.edu.ph email.';
+    const title = 'Email guide';
+    final message = switch (kind) {
+      _EmailKind.empty =>
+        'Use your personal email or your institutional email.',
+      _EmailKind.personal => 'Personal email detected.',
+      _EmailKind.institutional => 'Institutional email detected.',
+    };
     return Container(
+      key: const Key('signup-email-guide'),
       padding: const EdgeInsets.all(11),
       decoration: BoxDecoration(
-        color: isTeaching ? const Color(0xFFE8F5EF) : const Color(0xFFFFF4D6),
+        color: const Color(0xFFFFF4D6),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            isTeaching ? Icons.verified_outlined : Icons.school_outlined,
+          const Icon(
+            Icons.info_outline_rounded,
             size: 18,
             color: _SignupColors.text,
           ),
@@ -723,9 +707,9 @@ class _AccountTypeNotice extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                const Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _SignupColors.text,
                     fontSize: 11,
                     fontWeight: FontWeight.w900,
