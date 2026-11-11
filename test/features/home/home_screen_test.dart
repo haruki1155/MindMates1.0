@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/mood/config/mood_v2_feature_flag.dart';
 import 'package:mind_mates/features/home/data/daily_affirmation_quotes.dart';
 import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
@@ -261,7 +262,11 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Log your mood').first);
+    await tester.tap(
+      find
+          .text(MoodV2FeatureFlag.enabled ? 'Log a mood' : 'Log your mood')
+          .first,
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('How are you feeling?'), findsOneWidget);

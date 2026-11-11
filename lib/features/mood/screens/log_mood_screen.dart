@@ -19,6 +19,7 @@ import '../../../repositories/mood_repository.dart';
 import '../../../repositories/mood_v2_repository.dart';
 import '../config/mood_v2_feature_flag.dart';
 import '../widgets/mood_v2_history_panel.dart';
+import 'mood_journey_screen.dart';
 
 const bool _expressionCheckInEnabled = true;
 
@@ -184,12 +185,29 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                         : 'Mood ${entry.level}/5',
                   ),
                   Text('Recorded on ${entry.dateKey} (Asia/Manila)'),
+                  Text(
+                    'Time: ${TimeOfDay.fromDateTime(entry.occurredAt.toUtc().add(const Duration(hours: 8))).format(context)} (Manila)',
+                  ),
                   const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const MoodJourneyScreen(),
+                      ),
+                    ),
+                    child: const Text('View My Mood Journey'),
+                  ),
                   OutlinedButton.icon(
                     key: const ValueKey('mood-v2-add-entry'),
                     onPressed: _startAdditionalMoodEntry,
                     icon: const Icon(Icons.add_circle_outline_rounded),
                     label: const Text('Log another mood entry'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(
+                      context,
+                    ).popUntil((route) => route.isFirst),
+                    child: const Text('Return Home'),
                   ),
                   const Text('This is a wellness record, not a diagnosis.'),
                 ],

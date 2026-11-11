@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import '../domain/mood_v2_analytics.dart';
 
 /// Read-only, gated presentation for multiple Mood V2 events per Manila day.
-/// It intentionally accepts normalized events only and never exposes notes or
-/// expression metadata.
+/// Personal details are opt-in for an authenticated owner's journey screen.
 class MoodV2HistoryPanel extends StatelessWidget {
   const MoodV2HistoryPanel({
     super.key,
@@ -17,6 +16,7 @@ class MoodV2HistoryPanel extends StatelessWidget {
     this.isLoadingMore = false,
     this.paginationErrorMessage,
     this.onLoadMore,
+    this.showPersonalDetails = false,
   });
 
   final MoodHistoryWindow? history;
@@ -28,6 +28,7 @@ class MoodV2HistoryPanel extends StatelessWidget {
   final bool isLoadingMore;
   final String? paginationErrorMessage;
   final VoidCallback? onLoadMore;
+  final bool showPersonalDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -112,6 +113,12 @@ class MoodV2HistoryPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (isLoading) const LinearProgressIndicator(),
+        if (showPersonalDetails &&
+            history!.coverage == MoodHistoryCoverage.partial)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text('Based on loaded entries'),
+          ),
         if (analytics != null) ...[
           _MoodSummary(analytics: analytics!),
           const SizedBox(height: 12),
@@ -127,6 +134,7 @@ class MoodV2HistoryPanel extends StatelessWidget {
             return _MoodDayCard(
               day: day,
               isPartial: history!.coverage == MoodHistoryCoverage.partial,
+              showPersonalDetails: showPersonalDetails,
             );
           },
         ),
@@ -251,9 +259,14 @@ class _HistoryMessage extends StatelessWidget {
 }
 
 class _MoodDayCard extends StatelessWidget {
-  const _MoodDayCard({required this.day, required this.isPartial});
+  const _MoodDayCard({
+    required this.day,
+    required this.isPartial,
+    required this.showPersonalDetails,
+  });
   final MoodDailyAggregate day;
   final bool isPartial;
+  final bool showPersonalDetails;
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -264,13 +277,26 @@ class _MoodDayCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(day.dateKey, style: Theme.of(context).textTheme.titleSmall),
+            Text(
+              showPersonalDetails
+                  ? '${MaterialLocalizations.of(context).formatFullDate(MoodManilaCalendar.dateForKey(day.dateKey))} · ${day.entryCount} check-in${day.entryCount == 1 ? '' : 's'}'
+                  : day.dateKey,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
             const SizedBox(height: 6),
             for (final event in day.events.reversed)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Text(
-                  '${_manilaTime(event.occurredAt).format(context)} · Mood ${event.level}/5',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${_manilaTime(event.occurredAt).format(context)} · ${showPersonalDetails && (event.label?.isNotEmpty ?? false) ? event.label : 'Mood ${event.level}/5'}',
+                    ),
+                    if (showPersonalDetails &&
+                        (event.note?.trim().isNotEmpty ?? false))
+                      Text(event.note!),
+                  ],
                 ),
               ),
             if (isPartial) ...[

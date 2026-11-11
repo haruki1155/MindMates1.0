@@ -43,12 +43,16 @@ class HomeMoodV2SummaryCard extends StatelessWidget {
     required this.entriesToday,
     required this.moodStreakDays,
     required this.isPartial,
+    this.onLogMood,
+    this.onViewJourney,
   });
 
   final int? latestLevel;
   final int entriesToday;
   final int moodStreakDays;
   final bool isPartial;
+  final VoidCallback? onLogMood;
+  final VoidCallback? onViewJourney;
 
   @override
   Widget build(BuildContext context) {
@@ -65,10 +69,17 @@ class HomeMoodV2SummaryCard extends StatelessWidget {
           children: [
             const Text('Mood check-ins', style: HomeTextStyles.cardTitle),
             const SizedBox(height: 6),
+            if (onLogMood != null)
+              Text(
+                "Today's check-ins: $entriesToday",
+                style: HomeTextStyles.body,
+              ),
             Text(
               latestLevel == null
                   ? 'No mood entries in this history window'
-                  : 'Latest mood: $latestLevel/5 · $entriesToday entr${entriesToday == 1 ? 'y' : 'ies'} today',
+                  : onLogMood == null
+                  ? 'Latest mood: $latestLevel/5 · $entriesToday entr${entriesToday == 1 ? 'y' : 'ies'} today'
+                  : 'Latest mood: $latestLevel/5',
               style: HomeTextStyles.body,
             ),
             const SizedBox(height: 4),
@@ -83,6 +94,24 @@ class HomeMoodV2SummaryCard extends StatelessWidget {
                 style: HomeTextStyles.caption,
               ),
             ],
+            if (onLogMood != null || onViewJourney != null)
+              Wrap(
+                spacing: 8,
+                children: [
+                  if (onLogMood != null)
+                    FilledButton(
+                      onPressed: onLogMood,
+                      child: Text(
+                        entriesToday > 0 ? 'Log another mood' : 'Log a mood',
+                      ),
+                    ),
+                  if (onViewJourney != null)
+                    TextButton(
+                      onPressed: onViewJourney,
+                      child: const Text('My Mood Journey'),
+                    ),
+                ],
+              ),
           ],
         ),
       ),

@@ -14,6 +14,7 @@ import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../mood/config/mood_v2_feature_flag.dart';
 import '../../mood/domain/mood_v2_analytics.dart';
+import '../../mood/screens/mood_journey_screen.dart';
 import '../../../repositories/assessment_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
@@ -299,6 +300,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                   moodStreakDays: moodV2.streak.currentDays,
                                   isPartial: moodV2.coverage.name == 'partial',
+                                  onLogMood: MoodV2FeatureFlag.enabled
+                                      ? _openLogMood
+                                      : null,
+                                  onViewJourney: MoodV2FeatureFlag.enabled
+                                      ? () => Navigator.of(context).push(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                const MoodJourneyScreen(),
+                                          ),
+                                        )
+                                      : null,
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -339,12 +351,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             HomeAnimatedSection(
                               delay: 86,
                               child: HomeWideButton(
-                                label:
-                                    context
-                                        .watch<MoodProvider>()
-                                        .hasCheckedInToday
-                                    ? 'View today’s mood'
-                                    : 'Log your mood',
+                                label: MoodV2FeatureFlag.actionLabel(
+                                  hasCheckedInToday: context
+                                      .watch<MoodProvider>()
+                                      .hasCheckedInToday,
+                                ),
                                 icon: Icons.add,
                                 assetName: '+.png',
                                 onTap: _openLogMood,
