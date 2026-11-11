@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:phosphor_icons/phosphor_icons.dart';
@@ -14,6 +15,7 @@ import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../mood/config/mood_v2_feature_flag.dart';
 import '../../../repositories/assessment_repository.dart';
+import '../../../repositories/mood_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
 import '../../quick_assessment/models/quick_assessment_models.dart';
@@ -93,7 +95,32 @@ class PaccHomeScheduleStatus extends StatelessWidget {
   }
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  Timer? _moodMidnight;
+  void _scheduleMoodMidnight() {
+    _moodMidnight?.cancel();
+    final now = widget._nowProvider().toUtc();
+    final manila = now.add(const Duration(hours: 8));
+    final next = DateTime.utc(
+      manila.year,
+      manila.month,
+      manila.day + 1,
+    ).subtract(const Duration(hours: 8));
+    _moodMidnight = Timer(next.difference(now), () {
+      if (!mounted) return;
+      setState(() {});
+      _scheduleMoodMidnight();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      setState(() {});
+      _scheduleMoodMidnight();
+    }
+  }
+
   final ScrollController _scrollController = ScrollController();
   final AppNotificationService _notifications = AppNotificationService();
 
@@ -113,11 +140,15 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _scheduleMoodMidnight();
     _scrollController.addListener(_handleScroll);
   }
 
   @override
   void dispose() {
+    _moodMidnight?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _notifications.dispose();
     _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
@@ -219,7 +250,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final unreadNotifications =
         _watchProviderOrNull<NotificationProvider>(context)?.unreadCount ?? 0;
     final moodProvider = _watchProviderOrNull<MoodProvider>(context);
-    final todayMood = moodProvider?.todayMood;
+    final storedMood = moodProvider?.todayMood;
+    final todayMood =
+        storedMood != null &&
+            MoodRepository.dateKeyFor(storedMood.createdAt) ==
+                MoodRepository.dateKeyFor(widget._nowProvider())
+        ? storedMood
+        : null;
     final latest = MoodV2FeatureFlag.homeRead
         ? moodProvider?.latestMoodForToday(now: widget._nowProvider())
         : null;

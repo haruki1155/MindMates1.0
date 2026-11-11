@@ -45,6 +45,7 @@ class MoodProvider extends ChangeNotifier {
 
   Future<void> loadMoodV2DayNotes(String userId, String dateKey) async {
     if (!isMoodV2ReadEnabled ||
+        _v2History == null ||
         _v2HistoryUserId != userId ||
         (_isBoundToAuthentication && _authenticatedUserId != userId) ||
         _v2NoteLoadingDays.contains(dateKey)) {
