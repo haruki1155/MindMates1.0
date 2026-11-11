@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../domain/mood_v2_analytics.dart';
+import '../../home/widgets/home_dashboard_widgets.dart';
 
 class MoodJourneySummary extends StatefulWidget {
   const MoodJourneySummary({
@@ -48,20 +49,43 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
       ..sort((a, b) => b.value.compareTo(a.value));
     final uniqueTop =
         top.isNotEmpty && (top.length == 1 || top[0].value > top[1].value);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Last 7 days', style: Theme.of(context).textTheme.titleMedium),
-            Text(
-              'Mood Streak: ${streak.currentDays} ${streak.currentDays == 1 ? 'day' : 'days'}',
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFDCEEE5),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.eco_outlined,
+                color: Color(0xFF2F7D6D),
+                size: 30,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Mood streak · ${streak.currentDays} ${streak.currentDays == 1 ? 'day' : 'days'}',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          decoration: HomeDecor.card(),
+          padding: const EdgeInsets.all(6),
+          child: SingleChildScrollView(
+            key: const Key('mood-seven-day-strip'),
+            scrollDirection: Axis.horizontal,
+            child: Row(
               children: [
                 for (var i = 6; i >= 0; i--)
                   Builder(
@@ -70,6 +94,15 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
                       final logged = days.contains(
                         MoodManilaCalendar.dateKeyForDate(day),
                       );
+                      const weekdays = [
+                        'Mon',
+                        'Tue',
+                        'Wed',
+                        'Thu',
+                        'Fri',
+                        'Sat',
+                        'Sun',
+                      ];
                       return Semantics(
                         label:
                             '${day.month}/${day.day}: ${logged
@@ -77,9 +110,38 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
                                 : widget.history.coverage == MoodHistoryCoverage.partial
                                 ? 'no check-in in loaded history'
                                 : 'no mood logged'}',
-                        child: Chip(
-                          label: Text(
-                            '${day.month}/${day.day} ${logged ? '✓' : '–'}',
+                        child: Container(
+                          width: 48,
+                          constraints: const BoxConstraints(minHeight: 76),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: i == 0
+                                ? HomePalette.softGold
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            children: [
+                              Text(
+                                weekdays[day.weekday - 1],
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              Text(
+                                '${day.day}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 17,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Icon(
+                                logged ? Icons.circle : Icons.circle_outlined,
+                                size: 12,
+                                color: logged
+                                    ? const Color(0xFF2F7D6D)
+                                    : HomePalette.muted,
+                              ),
+                            ],
                           ),
                         ),
                       );
@@ -87,32 +149,91 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
                   ),
               ],
             ),
-            Wrap(
-              spacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('This Week'),
-                  selected: !_month,
-                  onSelected: (_) => setState(() => _month = false),
-                ),
-                ChoiceChip(
-                  label: const Text('This Month'),
-                  selected: _month,
-                  onSelected: (_) => setState(() => _month = true),
-                ),
-              ],
-            ),
-            Text(
-              '${filtered.length} check-in${filtered.length == 1 ? '' : 's'} · $active mood-active day${active == 1 ? '' : 's'}',
-            ),
-            if (uniqueTop) Text('Most logged mood: ${top.first.key}'),
-            if (top.length > 1 && top[0].value == top[1].value)
-              const Text('Most logged moods are tied.'),
-            if (widget.history.coverage == MoodHistoryCoverage.partial)
-              const Text('Based on loaded entries'),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: 12),
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: false, label: Text('This Week')),
+            ButtonSegment(value: true, label: Text('This Month')),
+          ],
+          selected: {_month},
+          showSelectedIcon: false,
+          onSelectionChanged: (values) =>
+              setState(() => _month = values.single),
+          style: ButtonStyle(
+            minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
+            backgroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? const Color(0xFF2F7D6D)
+                  : HomePalette.surface,
+            ),
+            foregroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? Colors.white
+                  : const Color(0xFF2F7D6D),
+            ),
+            side: const WidgetStatePropertyAll(
+              BorderSide(color: HomePalette.outlineStrong),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final tiles = [
+              Container(
+                decoration: HomeDecor.card(),
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.event_available_outlined,
+                      color: Color(0xFF2F7D6D),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '${filtered.length} check-in${filtered.length == 1 ? '' : 's'} · $active mood-active day${active == 1 ? '' : 's'}',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                decoration: HomeDecor.card(),
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  uniqueTop
+                      ? 'Most logged mood: ${top.first.key}'
+                      : top.isEmpty
+                      ? 'Your feelings, at your pace'
+                      : 'Most logged moods are tied.',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ];
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: tiles[0]),
+                const SizedBox(width: 12),
+                Expanded(child: tiles[1]),
+              ],
+            );
+          },
+        ),
+        if (widget.history.coverage == MoodHistoryCoverage.partial)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              'Based on loaded entries',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 }

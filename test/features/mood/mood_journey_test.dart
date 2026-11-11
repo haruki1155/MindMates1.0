@@ -6,7 +6,6 @@ import 'package:mind_mates/providers/mood_provider.dart';
 import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/features/mood/widgets/mood_v2_history_panel.dart';
 import 'package:mind_mates/features/mood/screens/mood_journey_screen.dart';
-import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
 import 'package:mind_mates/features/mood/widgets/mood_journey_summary.dart';
 
 void main() {
@@ -25,6 +24,8 @@ void main() {
         ),
       );
       await tester.pump();
+      await tester.tap(find.text('Okay'));
+      await tester.pumpAndSettle();
       expect(find.text('Private account A note'), findsOneWidget);
       auth.switchTo('account-b');
       await tester.pump();
@@ -66,32 +67,86 @@ void main() {
         ),
       ),
     );
+    expect(find.byKey(const Key('mood-seven-day-strip')), findsOneWidget);
     expect(find.text('2 check-ins · 1 mood-active day'), findsOneWidget);
     expect(find.text('Most logged mood: Okay'), findsOneWidget);
     expect(find.text('Based on loaded entries'), findsOneWidget);
   });
-  testWidgets('home check-in card opens logging and journey', (tester) async {
-    var log = 0;
-    var journey = 0;
+
+  for (final width in [320.0, 360.0, 390.0, 430.0]) {
+    testWidgets('journey strip never wraps at $width with large text', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(Size(width, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.utc(2026, 11, 11);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(1.8)),
+            child: Scaffold(
+              body: SingleChildScrollView(
+                child: MoodJourneySummary(
+                  history: const MoodHistoryWindow(
+                    events: [],
+                    coverage: MoodHistoryCoverage.complete,
+                  ),
+                  now: now,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      final strip = find.byKey(const Key('mood-seven-day-strip'));
+      expect(
+        tester.widget<SingleChildScrollView>(strip).scrollDirection,
+        Axis.horizontal,
+      );
+      expect(find.text('Mood streak · 0 days'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+  testWidgets('journey week month changes counts and respects ties', (
+    tester,
+  ) async {
+    final now = DateTime.utc(2026, 11, 11);
+    final events = [
+      for (final (id, day, label) in [
+        ('1', 11, 'Okay'),
+        ('2', 11, 'Great'),
+        ('3', 1, 'Great'),
+      ])
+        NormalizedMoodEvent(
+          id: id,
+          userId: 'synthetic',
+          level: 4,
+          dateKey: '2026-11-${day.toString().padLeft(2, '0')}',
+          occurredAt: DateTime.utc(2026, 11, day),
+          source: MoodEventSource.v2,
+          label: label,
+        ),
+    ];
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: HomeMoodV2SummaryCard(
-            latestLevel: 3,
-            entriesToday: 3,
-            moodStreakDays: 1,
-            isPartial: false,
-            onLogMood: () => log++,
-            onViewJourney: () => journey++,
+          body: MoodJourneySummary(
+            history: MoodHistoryWindow(
+              events: events,
+              coverage: MoodHistoryCoverage.partial,
+            ),
+            now: now,
           ),
         ),
       ),
     );
-    expect(find.text("Today's check-ins: 3"), findsOneWidget);
-    await tester.tap(find.text('Log another mood'));
-    await tester.tap(find.text('My Mood Journey'));
-    expect(log, 1);
-    expect(journey, 1);
+    expect(find.text('Most logged moods are tied.'), findsOneWidget);
+    expect(find.text('2 check-ins · 1 mood-active day'), findsOneWidget);
+    await tester.tap(find.text('This Month'));
+    await tester.pumpAndSettle();
+    expect(find.text('3 check-ins · 2 mood-active days'), findsOneWidget);
+    expect(find.text('Most logged mood: Great'), findsOneWidget);
+    expect(find.text('Based on loaded entries'), findsOneWidget);
   });
   testWidgets('journey has a clear title and an empty state', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: MoodJourneyScreen()));
@@ -140,6 +195,8 @@ void main() {
     );
     expect(find.textContaining('2 check-ins'), findsOneWidget);
     expect(find.textContaining('Okay'), findsNWidgets(2));
+    await tester.tap(find.byType(ExpansionTile).last);
+    await tester.pumpAndSettle();
     expect(find.text('A private note'), findsOneWidget);
     expect(find.text('Based on loaded entries'), findsOneWidget);
   });

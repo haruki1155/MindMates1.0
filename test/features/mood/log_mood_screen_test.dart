@@ -24,6 +24,171 @@ import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('v2 compact picker has summary and full width Excited row', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(_FakeMoodRepository()),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Enabled: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('How are you feeling right now?'), findsOneWidget);
+    expect(find.text('Recorded mood summary'), findsNothing);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('mood-card-Excited'))).width,
+      358,
+    );
+    expect(
+      tester.getSize(find.byKey(const ValueKey('mood-card-Great'))).height,
+      lessThan(120),
+    );
+    for (final label in [
+      'Great',
+      'Okay',
+      'Stressed',
+      'Sad',
+      'Angry',
+      'Tired',
+      'Excited',
+    ]) {
+      expect(find.text(label), findsOneWidget);
+    }
+  });
+
+  for (final width in [320.0, 360.0, 390.0, 430.0]) {
+    testWidgets(
+      'v2 picker, keyboard and reduced motion at $width and 1.8 text',
+      (tester) async {
+        await tester.binding.setSurfaceSize(Size(width, 900));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(
+          MaterialApp(
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: const TextScaler.linear(1.8),
+                disableAnimations: true,
+                viewInsets: const EdgeInsets.only(bottom: 240),
+              ),
+              child: child!,
+            ),
+            home: const LogMoodScreen(moodV2Enabled: true),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Save mood entry').hitTestable(), findsOneWidget);
+        for (final label in [
+          'Great',
+          'Okay',
+          'Stressed',
+          'Sad',
+          'Angry',
+          'Tired',
+          'Excited',
+        ]) {
+          await tester.ensureVisible(find.text(label));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(label));
+          await tester.pumpAndSettle();
+        }
+        expect(
+          tester
+              .widget<ElevatedButton>(
+                find.widgetWithText(ElevatedButton, 'Save mood entry'),
+              )
+              .onPressed,
+          isNotNull,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+  testWidgets('all seven V2 selections preserve exact writer value mapping', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final writer = _FakeMoodV2Writer();
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(_FakeMoodRepository()),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Enabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final label in [
+      'Great',
+      'Okay',
+      'Stressed',
+      'Sad',
+      'Angry',
+      'Tired',
+      'Excited',
+    ]) {
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save mood entry'));
+      await tester.pumpAndSettle();
+      expect(find.text('Your mood is recorded'), findsOneWidget);
+      expect(find.textContaining('Manila time'), findsOneWidget);
+      expect(find.text('Recorded mood summary'), findsNothing);
+      await tester.tap(find.text('Log another mood'));
+      await tester.pumpAndSettle();
+    }
+    expect(writer.levels, [5, 4, 2, 1, 1, 3, 5]);
+    expect(writer.requestIds.toSet(), hasLength(7));
+  });
+  if (MoodV2FeatureFlag.historyRead) {
+    for (final count in [0, 4]) {
+      testWidgets(
+        'v2 summary shows own $count check-ins and distinct mood streak',
+        (tester) async {
+          final now = DateTime.utc(2026, 7, 7, 12);
+          final history = MoodHistoryWindow(
+            coverage: MoodHistoryCoverage.complete,
+            events: [
+              for (var i = 0; i < count; i++)
+                NormalizedMoodEvent(
+                  id: 'entry-$i',
+                  userId: 'user_1',
+                  level: 5,
+                  dateKey: '2026-07-07',
+                  occurredAt: now,
+                  source: MoodEventSource.v2,
+                  label: 'Great',
+                ),
+            ],
+          );
+          await tester.pumpWidget(
+            _logMoodApp(
+              moodProvider: _RecordingMoodProvider(history: history),
+              userProvider: UserProvider(_FakeUserRepository())
+                ..setUser(_user(id: 'user_1')),
+              moodV2Enabled: true,
+              nowProvider: () => now,
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(find.text('$count check-ins today'), findsOneWidget);
+          expect(
+            find.text(
+              count == 0 ? 'Mood streak · 0 days' : 'Mood streak · 1 day',
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('Recorded mood summary'), findsNothing);
+        },
+      );
+    }
+  }
   if (MoodV2FeatureFlag.historyRead) {
     testWidgets('legacy save refreshes combined history when readers enabled', (
       tester,
@@ -71,7 +236,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Save mood entry'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Log another mood entry'));
+      await tester.ensureVisible(find.text('Log another mood'));
       await tester.pumpAndSettle();
       expect(
         find.byKey(const ValueKey('mood-v2-confirmation')),
@@ -106,7 +271,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Save mood entry'));
       await tester.pumpAndSettle();
-      expect(find.text('Mood entry saved.'), findsOneWidget);
+      expect(find.text('Your mood is recorded'), findsOneWidget);
       expect(
         find.text('Unable to save this mood entry. Try again.'),
         findsNothing,
@@ -476,7 +641,7 @@ void main() {
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('mood-v2-confirmation')), findsOneWidget);
-    await tester.tap(find.text('Log another mood entry'));
+    await tester.tap(find.text('Log another mood'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Sad'));
     await tester.pump();
@@ -771,7 +936,7 @@ void main() {
         find.byKey(const ValueKey('mood-v2-confirmation')),
         findsOneWidget,
       );
-      await tester.tap(find.text('Log another mood entry'));
+      await tester.tap(find.text('Log another mood'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Great'));
       await tester.enterText(find.byType(TextField), 'Intentional new entry');
@@ -942,7 +1107,10 @@ UserModel _user({required String id, PopulationRole? populationRole}) {
 }
 
 class _RecordingMoodProvider extends MoodProvider {
-  _RecordingMoodProvider() : super(_FakeMoodRepository());
+  _RecordingMoodProvider({this.history}) : super(_FakeMoodRepository());
+  final MoodHistoryWindow? history;
+  @override
+  MoodHistoryWindow? get v2History => history ?? super.v2History;
   bool throwOnRefresh = false;
   @override
   String? get v2HistoryErrorMessage =>

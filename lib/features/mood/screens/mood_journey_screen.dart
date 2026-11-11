@@ -8,6 +8,7 @@ import '../../../providers/mood_provider.dart';
 import '../../../routes/route_names.dart';
 import '../widgets/mood_v2_history_panel.dart';
 import '../widgets/mood_journey_summary.dart';
+import '../../home/widgets/home_dashboard_widgets.dart';
 
 class MoodJourneyScreen extends StatefulWidget {
   const MoodJourneyScreen({super.key});
@@ -90,7 +91,14 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
         : null;
     return Scaffold(
       backgroundColor: const Color(0xFFF7F1DF),
-      appBar: AppBar(title: const Text('My Mood Journey')),
+      appBar: AppBar(
+        title: const Text(
+          'My Mood Journey',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        backgroundColor: HomePalette.surface,
+        foregroundColor: HomePalette.text,
+      ),
       body: uid == null
           ? const Center(child: Text('Sign in to view your mood journey.'))
           : !((mood?.isMoodV2ReadEnabled) ?? false)
@@ -101,12 +109,22 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 Text(
-                  'Your check-ins, at your own pace.',
-                  style: Theme.of(context).textTheme.titleMedium,
+                  'Your feelings, over time',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Notice your emotional patterns and small shifts throughout your days.',
                 ),
                 const SizedBox(height: 16),
                 if (safeHistory != null)
-                  MoodJourneySummary(history: safeHistory, now: DateTime.now()),
+                  MoodJourneySummary(
+                    key: ValueKey(uid),
+                    history: safeHistory,
+                    now: DateTime.now(),
+                  ),
                 MoodV2HistoryPanel(
                   history: safeHistory,
                   isLoading: mood?.isLoadingV2History ?? false,
@@ -120,13 +138,17 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                 ),
                 const SizedBox(height: 16),
                 const Card(
+                  color: HomePalette.surface,
                   child: ListTile(
                     leading: Icon(Icons.self_improvement),
                     title: Text('Mindful Essentials'),
-                    subtitle: Text('Sleep Quality and Mindful Breathing'),
+                    subtitle: Text(
+                      'Sleep Quality and Mindful Breathing · Coming together soon',
+                    ),
                   ),
                 ),
                 Card(
+                  color: HomePalette.surface,
                   child: ListTile(
                     leading: const Icon(Icons.favorite_outline),
                     title: const Text('Mental Health Support'),

@@ -13,8 +13,6 @@ import '../../../providers/notification_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../mood/config/mood_v2_feature_flag.dart';
-import '../../mood/domain/mood_v2_analytics.dart';
-import '../../mood/screens/mood_journey_screen.dart';
 import '../../../repositories/assessment_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
@@ -222,9 +220,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _watchProviderOrNull<NotificationProvider>(context)?.unreadCount ?? 0;
     final moodProvider = _watchProviderOrNull<MoodProvider>(context);
     final todayMood = moodProvider?.todayMood;
-    final moodV2 = MoodV2FeatureFlag.homeRead
-        ? moodProvider?.v2Analytics
-        : null;
     final todayMoodLabel = todayMood == null
         ? null
         : (todayMood.label?.trim().isNotEmpty ?? false)
@@ -279,42 +274,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                             const SizedBox(height: 12),
-                            if (moodV2 != null) ...[
-                              HomeAnimatedSection(
-                                delay: 76,
-                                child: HomeMoodV2SummaryCard(
-                                  latestLevel: moodV2.daily.isEmpty
-                                      ? null
-                                      : moodV2.daily.last.latestEvent?.level,
-                                  entriesToday: moodV2.daily
-                                      .where(
-                                        (day) =>
-                                            day.dateKey ==
-                                            MoodManilaCalendar.dateKeyForInstant(
-                                              widget._nowProvider(),
-                                            ),
-                                      )
-                                      .fold<int>(
-                                        0,
-                                        (sum, day) => sum + day.events.length,
-                                      ),
-                                  moodStreakDays: moodV2.streak.currentDays,
-                                  isPartial: moodV2.coverage.name == 'partial',
-                                  onLogMood: MoodV2FeatureFlag.enabled
-                                      ? _openLogMood
-                                      : null,
-                                  onViewJourney: MoodV2FeatureFlag.enabled
-                                      ? () => Navigator.of(context).push(
-                                          MaterialPageRoute<void>(
-                                            builder: (_) =>
-                                                const MoodJourneyScreen(),
-                                          ),
-                                        )
-                                      : null,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                            ],
                             HomeAnimatedSection(
                               delay: 74,
                               child: HomeStreakCard(

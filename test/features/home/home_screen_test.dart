@@ -262,6 +262,10 @@ void main() {
       ),
     );
 
+    expect(find.text('Mood check-ins'), findsNothing);
+    if (MoodV2FeatureFlag.enabled) {
+      expect(find.text('Log a mood'), findsOneWidget);
+    }
     await tester.tap(
       find
           .text(MoodV2FeatureFlag.enabled ? 'Log a mood' : 'Log your mood')
@@ -269,9 +273,19 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('How are you feeling?'), findsOneWidget);
-    expect(find.text("What's on your mind today?"), findsOneWidget);
-    expect(find.text('0/300 characters'), findsOneWidget);
+    expect(
+      find.text(
+        MoodV2FeatureFlag.enabled
+            ? 'How are you feeling right now?'
+            : 'How are you feeling?',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byType(TextField), findsOneWidget);
+    expect(
+      find.text(MoodV2FeatureFlag.enabled ? '0/300' : '0/300 characters'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('home assessment banner can be dismissed for the session', (

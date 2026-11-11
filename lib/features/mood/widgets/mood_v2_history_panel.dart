@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../domain/mood_v2_analytics.dart';
+import 'mood_glyph.dart';
+import '../../home/widgets/home_dashboard_widgets.dart';
 
 /// Read-only, gated presentation for multiple Mood V2 events per Manila day.
 /// Personal details are opt-in for an authenticated owner's journey screen.
@@ -270,6 +272,76 @@ class _MoodDayCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    if (showPersonalDetails) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+            child: Text(
+              '${MaterialLocalizations.of(context).formatFullDate(MoodManilaCalendar.dateForKey(day.dateKey))} · ${day.entryCount} check-in${day.entryCount == 1 ? '' : 's'}',
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+            ),
+          ),
+          Container(
+            decoration: HomeDecor.card(),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (final event in day.events.reversed)
+                    ExpansionTile(
+                      key: ValueKey(event.stableIdentity),
+                      tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                      leading: MediaQuery.textScalerOf(context).scale(14) > 19
+                          ? MoodGlyphIcon(label: event.label)
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.circle,
+                                  size: 9,
+                                  color: Color(0xFF2F7D6D),
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  _manilaTime(event.occurredAt).format(context),
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                                const SizedBox(width: 12),
+                                MoodGlyphIcon(label: event.label),
+                              ],
+                            ),
+                      subtitle: MediaQuery.textScalerOf(context).scale(14) > 19
+                          ? Text(_manilaTime(event.occurredAt).format(context))
+                          : null,
+                      title: Text(
+                        event.label?.isNotEmpty == true
+                            ? event.label!
+                            : 'Mood entry',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            event.note?.trim().isNotEmpty == true
+                                ? event.note!
+                                : 'No note added.',
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
     return Card(
       color: colors.surfaceContainerHighest,
       child: Padding(

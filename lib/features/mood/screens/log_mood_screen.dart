@@ -19,6 +19,7 @@ import '../../../repositories/mood_repository.dart';
 import '../../../repositories/mood_v2_repository.dart';
 import '../config/mood_v2_feature_flag.dart';
 import '../widgets/mood_v2_history_panel.dart';
+import '../widgets/mood_glyph.dart';
 import 'mood_journey_screen.dart';
 
 const bool _expressionCheckInEnabled = true;
@@ -45,6 +46,7 @@ class LogMoodScreen extends StatefulWidget {
 
 class _LogMoodScreenState extends State<LogMoodScreen>
     with WidgetsBindingObserver {
+  final ScrollController _scrollController = ScrollController();
   final TextEditingController _noteController = TextEditingController();
   _MoodChoice? _selectedMood;
   ExpressionCue? _expressionCue;
@@ -113,6 +115,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       ..dispose();
     WidgetsBinding.instance.removeObserver(this);
     _midnightTimer?.cancel();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -125,12 +128,38 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: MoodLogPalette.background,
+      bottomNavigationBar: widget.moodV2Enabled && _confirmedV2Entry == null
+          ? SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  8,
+                  16,
+                  12 + MediaQuery.viewInsetsOf(context).bottom,
+                ),
+                child: _SaveMoodButton(
+                  isEnabled:
+                      _selectedMood != null &&
+                      !_isSaving &&
+                      (_expressionCue == null ||
+                          _expressionSuggestionAccepted != null),
+                  isSaving: _isSaving,
+                  onPressed: _saveMood,
+                  label: 'Save mood entry',
+                ),
+              ),
+            )
+          : null,
       body: SafeArea(
         child: CustomScrollView(
+          controller: _scrollController,
           physics: const BouncingScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(
               child: _MoodLogHeader(
+                v2: widget.moodV2Enabled,
+                now: _now,
                 showingResult: widget.moodV2Enabled
                     ? _confirmedV2Entry != null
                     : _todayMood != null,
@@ -166,56 +195,20 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         (moodProvider?.isMoodV2ReadEnabled ?? false);
     if (widget.moodV2Enabled && _confirmedV2Entry != null) {
       final entry = _confirmedV2Entry!;
-      return Column(
-        children: [
-          Card(
-            key: const ValueKey('mood-v2-confirmation'),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  Text(
-                    'Mood entry saved',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    entry.label?.isNotEmpty == true
-                        ? entry.label!
-                        : 'Mood ${entry.level}/5',
-                  ),
-                  Text('Recorded on ${entry.dateKey} (Asia/Manila)'),
-                  Text(
-                    'Time: ${TimeOfDay.fromDateTime(entry.occurredAt.toUtc().add(const Duration(hours: 8))).format(context)} (Manila)',
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const MoodJourneyScreen(),
-                      ),
-                    ),
-                    child: const Text('View My Mood Journey'),
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey('mood-v2-add-entry'),
-                    onPressed: _startAdditionalMoodEntry,
-                    icon: const Icon(Icons.add_circle_outline_rounded),
-                    label: const Text('Log another mood entry'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.of(
-                      context,
-                    ).popUntil((route) => route.isFirst),
-                    child: const Text('Return Home'),
-                  ),
-                  const Text('This is a wellness record, not a diagnosis.'),
-                ],
-              ),
-            ),
-          ),
-          if (showV2History) _buildMoodV2HistoryPanel(moodProvider),
-        ],
+      return _MoodSaved(
+        entry: entry,
+        onAnother: _startAdditionalMoodEntry,
+        onJourney: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const MoodJourneyScreen()),
+        ),
+        onHome: () => Navigator.of(context).popUntil((route) => route.isFirst),
+        historyError: showV2History
+            ? moodProvider?.v2HistoryErrorMessage
+            : null,
+        onRetryHistory: () {
+          final uid = _currentUserId();
+          if (uid != null) moodProvider?.loadMoodV2History(uid, now: _now);
+        },
       );
     }
     if (!widget.moodV2Enabled && _isLoadingToday) {
@@ -249,7 +242,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
               label: const Text('Log another mood entry'),
             ),
           ],
-          if (showV2History) ...[
+          if (showV2History && !widget.moodV2Enabled) ...[
             const SizedBox(height: 20),
             _buildMoodV2HistoryPanel(moodProvider),
           ],
@@ -259,19 +252,64 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _MoodLogIntro(),
+        if (widget.moodV2Enabled && showV2History)
+          Semantics(
+            button: true,
+            label: 'View My Mood Journey',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const MoodJourneyScreen(),
+                ),
+              ),
+              child: _MoodCheckInSummary(
+                history: moodProvider?.v2History,
+                userId: _currentUserId(),
+                now: _now,
+                isLoading: moodProvider?.isLoadingV2History ?? false,
+                error: moodProvider?.v2HistoryErrorMessage,
+              ),
+            ),
+          ),
+        if (widget.moodV2Enabled) ...[
+          const SizedBox(height: 20),
+          Text(
+            'How are you feeling right now?',
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: MoodLogPalette.ink,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Choose the feeling that best matches what you’re experiencing at the moment.',
+          ),
+        ] else
+          const _MoodLogIntro(),
         const SizedBox(height: 16),
         _MoodChoiceGrid(
+          compact: widget.moodV2Enabled,
           selectedMood: _selectedMood,
           isEnabled: !_isSaving,
           onSelected: (mood) => setState(() => _selectedMood = mood),
         ),
+        if (widget.moodV2Enabled) ...[
+          const SizedBox(height: 16),
+          _ThoughtsBox(
+            controller: _noteController,
+            characterCount: _noteLength,
+            compact: true,
+            isEnabled: !_isSaving,
+          ),
+        ],
         if (_expressionCheckInEnabled &&
             !kIsWeb &&
             (defaultTargetPlatform == TargetPlatform.android ||
                 defaultTargetPlatform == TargetPlatform.iOS)) ...[
           const SizedBox(height: 18),
           _ExpressionCheckInEntry(
+            compact: widget.moodV2Enabled,
             enabled: !_isSaving,
             onPressed: _openExpressionCheckIn,
           ),
@@ -292,11 +330,13 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ],
         ],
         const SizedBox(height: 18),
-        _ThoughtsBox(
-          controller: _noteController,
-          characterCount: _noteLength,
-          isEnabled: !_isSaving,
-        ),
+        if (!widget.moodV2Enabled)
+          _ThoughtsBox(
+            controller: _noteController,
+            characterCount: _noteLength,
+            compact: widget.moodV2Enabled,
+            isEnabled: !_isSaving,
+          ),
         if (_moodV2Error != null) ...[
           const SizedBox(height: 12),
           Text(
@@ -306,18 +346,20 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ),
         ],
         const SizedBox(height: 18),
-        _SaveMoodButton(
-          isEnabled:
-              _selectedMood != null &&
-              !_isSaving &&
-              (_expressionCue == null || _expressionSuggestionAccepted != null),
-          isSaving: _isSaving,
-          onPressed: _saveMood,
-          label: widget.moodV2Enabled
-              ? 'Save mood entry'
-              : 'Save mood check-in',
-        ),
-        if (showV2History) ...[
+        if (!widget.moodV2Enabled)
+          _SaveMoodButton(
+            isEnabled:
+                _selectedMood != null &&
+                !_isSaving &&
+                (_expressionCue == null ||
+                    _expressionSuggestionAccepted != null),
+            isSaving: _isSaving,
+            onPressed: _saveMood,
+            label: widget.moodV2Enabled
+                ? 'Save mood entry'
+                : 'Save mood check-in',
+          ),
+        if (showV2History && !widget.moodV2Enabled) ...[
           const SizedBox(height: 20),
           _buildMoodV2HistoryPanel(moodProvider),
         ],
@@ -501,6 +543,12 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     );
   }
 
+  void _scrollToTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scrollController.hasClients) _scrollController.jumpTo(0);
+    });
+  }
+
   void _startAdditionalMoodEntry() {
     setState(() {
       _confirmedV2Entry = null;
@@ -509,6 +557,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _moodV2RetryDraft = null;
       _moodV2Error = null;
     });
+    _scrollToTop();
   }
 
   Future<void> _saveMoodV2(String userId, _MoodChoice mood) async {
@@ -560,7 +609,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _noteController.clear();
       _noteLength = 0;
     });
-    _showSnack('Mood entry saved.');
+    _scrollToTop();
     unawaited(_refreshAfterConfirmedMoodV2Write(userId, requestGeneration));
   }
 
@@ -686,15 +735,39 @@ class _MoodV2Draft {
 
 class _ExpressionCheckInEntry extends StatelessWidget {
   const _ExpressionCheckInEntry({
+    this.compact = false,
     required this.enabled,
     required this.onPressed,
   });
 
+  final bool compact;
   final bool enabled;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
+    if (compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          OutlinedButton.icon(
+            onPressed: enabled ? onPressed : null,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: MoodLogPalette.green,
+              minimumSize: const Size.fromHeight(48),
+            ),
+            icon: const Icon(Icons.camera_alt_outlined),
+            label: const Text('Check expression with camera'),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Optional. Your camera image is not saved.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, color: MoodLogPalette.bodyText),
+          ),
+        ],
+      );
+    }
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -976,7 +1049,13 @@ class _DailyMoodResult extends StatelessWidget {
 }
 
 class _MoodLogHeader extends StatelessWidget {
-  const _MoodLogHeader({required this.showingResult});
+  const _MoodLogHeader({
+    required this.showingResult,
+    required this.v2,
+    required this.now,
+  });
+  final bool v2;
+  final DateTime now;
 
   final bool showingResult;
 
@@ -1007,7 +1086,9 @@ class _MoodLogHeader extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    showingResult ? "Today's mood" : 'Log your mood',
+                    showingResult
+                        ? (v2 ? "Mood saved" : "Today's mood")
+                        : 'Log your mood',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1019,7 +1100,7 @@ class _MoodLogHeader extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    _todayLabel(),
+                    _todayLabel(now),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -1052,8 +1133,8 @@ class _MoodLogHeader extends StatelessWidget {
     );
   }
 
-  static String _todayLabel() {
-    final now = MoodRepository.manilaWallClock(DateTime.now());
+  static String _todayLabel(DateTime instant) {
+    final now = MoodRepository.manilaWallClock(instant);
     const weekdays = [
       'Monday',
       'Tuesday',
@@ -1078,7 +1159,7 @@ class _MoodLogHeader extends StatelessWidget {
       'December',
     ];
 
-    return '${weekdays[now.weekday - 1]}, ${months[now.month - 1]} ${now.day} check-in';
+    return '${weekdays[now.weekday - 1]}, ${months[now.month - 1]} ${now.day}';
   }
 }
 
@@ -1090,7 +1171,7 @@ class _HeaderBackButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox.square(
-      dimension: 44,
+      dimension: 48,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: MoodLogPalette.background,
@@ -1224,7 +1305,9 @@ class _MoodSectionTitle extends StatelessWidget {
 }
 
 class _MoodChoiceGrid extends StatelessWidget {
+  final bool compact;
   const _MoodChoiceGrid({
+    this.compact = false,
     required this.selectedMood,
     required this.onSelected,
     required this.isEnabled,
@@ -1238,7 +1321,7 @@ class _MoodChoiceGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 720 ? 3 : 2;
+        final columns = !compact && constraints.maxWidth >= 720 ? 3 : 2;
         final gap = constraints.maxWidth >= 720 ? 14.0 : 10.0;
         final cardWidth =
             (constraints.maxWidth - (gap * (columns - 1))) / columns;
@@ -1246,7 +1329,7 @@ class _MoodChoiceGrid extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _MoodSectionTitle(),
+            if (!compact) const _MoodSectionTitle(),
             Wrap(
               alignment: WrapAlignment.center,
               runSpacing: gap,
@@ -1254,8 +1337,11 @@ class _MoodChoiceGrid extends StatelessWidget {
               children: [
                 for (final mood in _moodChoices)
                   SizedBox(
-                    width: cardWidth,
+                    width: compact && mood == _moodChoices.last
+                        ? constraints.maxWidth
+                        : cardWidth,
                     child: _MoodChoiceCard(
+                      compact: compact,
                       mood: mood,
                       selected: mood == selectedMood,
                       onTap: isEnabled ? () => onSelected(mood) : null,
@@ -1271,7 +1357,9 @@ class _MoodChoiceGrid extends StatelessWidget {
 }
 
 class _MoodChoiceCard extends StatelessWidget {
+  final bool compact;
   const _MoodChoiceCard({
+    this.compact = false,
     required this.mood,
     required this.selected,
     required this.onTap,
@@ -1285,6 +1373,91 @@ class _MoodChoiceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        if (this.compact) {
+          return Semantics(
+            button: true,
+            selected: selected,
+            label: mood.label,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(16),
+                child: AnimatedContainer(
+                  key: ValueKey('mood-card-${mood.label}'),
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.all(10),
+                  constraints: BoxConstraints(
+                    minHeight: mood == _moodChoices.last ? 60 : 80,
+                  ),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? MoodLogPalette.fieldFill
+                        : const Color(0xFFFFFEFA),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: selected
+                          ? const Color(0xFF2F7D6D)
+                          : MoodLogPalette.softBorder,
+                      width: selected ? 2 : 1.2,
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x0C17120A),
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      ExcludeSemantics(
+                        child: _MoodEmojiBadge(
+                          mood: mood,
+                          selected: selected,
+                          size: 42,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              mood.label,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: MoodLogPalette.ink,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              mood.description,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                height: 1.25,
+                                color: MoodLogPalette.bodyText,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (selected)
+                        const Icon(
+                          Icons.check_circle,
+                          color: Color(0xFF2F7D6D),
+                          size: 18,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
         final compact = constraints.maxWidth < 180;
         final glyphSize = compact ? 52.0 : 62.0;
 
@@ -1295,7 +1468,9 @@ class _MoodChoiceCard extends StatelessWidget {
             onTap: onTap,
             child: AnimatedContainer(
               key: ValueKey('mood-card-${mood.label}'),
-              duration: const Duration(milliseconds: 180),
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
               curve: Curves.easeOutCubic,
               height: compact ? 148 : 158,
               padding: EdgeInsets.fromLTRB(
@@ -1383,7 +1558,9 @@ class _MoodEmojiBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
       width: size,
       height: size,
       decoration: BoxDecoration(
@@ -1402,7 +1579,7 @@ class _MoodEmojiBadge extends StatelessWidget {
         child: SizedBox.square(
           dimension: size * .72,
           child: CustomPaint(
-            painter: _MoodGlyphPainter(
+            painter: MoodGlyphPainter(
               glyph: mood.glyph,
               accentColor: mood.accentColor,
             ),
@@ -1414,7 +1591,9 @@ class _MoodEmojiBadge extends StatelessWidget {
 }
 
 class _ThoughtsBox extends StatelessWidget {
+  final bool compact;
   const _ThoughtsBox({
+    this.compact = false,
     required this.controller,
     required this.characterCount,
     required this.isEnabled,
@@ -1426,6 +1605,25 @@ class _ThoughtsBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (compact) {
+      return TextField(
+        controller: controller,
+        enabled: isEnabled,
+        maxLength: 300,
+        minLines: 1,
+        maxLines: 5,
+        decoration: InputDecoration(
+          hintText: 'Add a note (optional)',
+          prefixIcon: const Icon(Icons.edit_outlined),
+          filled: true,
+          fillColor: MoodLogPalette.fieldFill,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: MoodLogPalette.softBorder),
+          ),
+        ),
+      );
+    }
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
@@ -1719,392 +1917,6 @@ class _CalmCloudPainter extends CustomPainter {
   bool shouldRepaint(covariant _CalmCloudPainter oldDelegate) => false;
 }
 
-class _MoodGlyphPainter extends CustomPainter {
-  const _MoodGlyphPainter({required this.glyph, required this.accentColor});
-
-  final _MoodGlyph glyph;
-  final Color accentColor;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (glyph == _MoodGlyph.excited) {
-      _drawParty(canvas, size);
-      return;
-    }
-
-    final center = size.center(Offset.zero);
-    final radius = math.min(size.width, size.height) * .42;
-    final faceRect = Rect.fromCircle(center: center, radius: radius);
-    final facePaint = Paint()
-      ..shader = RadialGradient(
-        center: const Alignment(-.35, -.35),
-        radius: .9,
-        colors: [
-          const Color(0xFFFFF3AC),
-          accentColor.withValues(alpha: .7),
-          const Color(0xFFFFBC3F),
-        ],
-        stops: const [0, .62, 1],
-      ).createShader(faceRect);
-
-    canvas.drawCircle(center, radius, facePaint);
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = math.max(1.4, size.width * .018)
-        ..color = const Color(0xFFFFB42E),
-    );
-
-    switch (glyph) {
-      case _MoodGlyph.great:
-        _drawGreat(canvas, size, center, radius);
-      case _MoodGlyph.okay:
-        _drawOkay(canvas, size, center, radius);
-      case _MoodGlyph.stressed:
-        _drawStressed(canvas, size, center, radius);
-      case _MoodGlyph.sad:
-        _drawSad(canvas, size, center, radius);
-      case _MoodGlyph.angry:
-        _drawAngry(canvas, size, center, radius);
-      case _MoodGlyph.tired:
-        _drawTired(canvas, size, center, radius);
-      case _MoodGlyph.excited:
-        break;
-    }
-  }
-
-  Paint get _ink => Paint()
-    ..color = MoodLogPalette.ink
-    ..style = PaintingStyle.stroke
-    ..strokeCap = StrokeCap.round
-    ..strokeJoin = StrokeJoin.round;
-
-  void _drawGreat(Canvas canvas, Size size, Offset center, double radius) {
-    final ink = _ink..strokeWidth = size.width * .055;
-    _drawHappyEyes(canvas, center, radius, ink);
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + radius * .2),
-        width: radius * 1.18,
-        height: radius * .82,
-      ),
-      .08,
-      math.pi - .16,
-      false,
-      ink,
-    );
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + radius * .28),
-        width: radius * .92,
-        height: radius * .42,
-      ),
-      .08,
-      math.pi - .16,
-      false,
-      Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = size.width * .04
-        ..strokeCap = StrokeCap.round,
-    );
-  }
-
-  void _drawOkay(Canvas canvas, Size size, Offset center, double radius) {
-    final fill = Paint()..color = MoodLogPalette.ink;
-    canvas.drawCircle(
-      Offset(center.dx - radius * .34, center.dy - radius * .12),
-      radius * .085,
-      fill,
-    );
-    canvas.drawCircle(
-      Offset(center.dx + radius * .34, center.dy - radius * .12),
-      radius * .085,
-      fill,
-    );
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + radius * .17),
-        width: radius * .82,
-        height: radius * .52,
-      ),
-      .12,
-      math.pi - .24,
-      false,
-      _ink..strokeWidth = size.width * .04,
-    );
-  }
-
-  void _drawStressed(Canvas canvas, Size size, Offset center, double radius) {
-    final ink = _ink..strokeWidth = size.width * .048;
-    canvas.drawLine(
-      Offset(center.dx - radius * .54, center.dy - radius * .48),
-      Offset(center.dx - radius * .18, center.dy - radius * .34),
-      ink,
-    );
-    canvas.drawLine(
-      Offset(center.dx + radius * .54, center.dy - radius * .48),
-      Offset(center.dx + radius * .18, center.dy - radius * .34),
-      ink,
-    );
-    _drawDotEyes(canvas, center, radius, radius * .085);
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + radius * .5),
-        width: radius * .86,
-        height: radius * .7,
-      ),
-      math.pi + .2,
-      math.pi - .4,
-      false,
-      ink,
-    );
-  }
-
-  void _drawSad(Canvas canvas, Size size, Offset center, double radius) {
-    _drawDotEyes(canvas, center, radius, radius * .09);
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + radius * .52),
-        width: radius * .86,
-        height: radius * .72,
-      ),
-      math.pi + .2,
-      math.pi - .4,
-      false,
-      _ink..strokeWidth = size.width * .045,
-    );
-  }
-
-  void _drawAngry(Canvas canvas, Size size, Offset center, double radius) {
-    final ink = _ink..strokeWidth = size.width * .052;
-    canvas.drawLine(
-      Offset(center.dx - radius * .54, center.dy - radius * .42),
-      Offset(center.dx - radius * .16, center.dy - radius * .25),
-      ink,
-    );
-    canvas.drawLine(
-      Offset(center.dx + radius * .54, center.dy - radius * .42),
-      Offset(center.dx + radius * .16, center.dy - radius * .25),
-      ink,
-    );
-    _drawDotEyes(canvas, center, radius, radius * .08);
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + radius * .52),
-        width: radius * .72,
-        height: radius * .62,
-      ),
-      math.pi + .14,
-      math.pi - .28,
-      false,
-      ink,
-    );
-  }
-
-  void _drawTired(Canvas canvas, Size size, Offset center, double radius) {
-    final ink = _ink..strokeWidth = size.width * .042;
-    _drawClosedEyes(canvas, center, radius, ink);
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx, center.dy + radius * .46),
-        width: radius * .56,
-        height: radius * .42,
-      ),
-      math.pi + .2,
-      math.pi - .4,
-      false,
-      ink,
-    );
-    _drawZ(
-      canvas,
-      Offset(center.dx + radius * .68, center.dy - radius * .62),
-      size.width * .18,
-    );
-    _drawZ(
-      canvas,
-      Offset(center.dx + radius * .9, center.dy - radius * .88),
-      size.width * .23,
-    );
-  }
-
-  void _drawParty(Canvas canvas, Size size) {
-    final body = Path()
-      ..moveTo(size.width * .28, size.height * .76)
-      ..lineTo(size.width * .52, size.height * .18)
-      ..lineTo(size.width * .72, size.height * .62)
-      ..close();
-    canvas.drawPath(
-      body,
-      Paint()
-        ..shader = const LinearGradient(
-          colors: [Color(0xFF6FA7E8), Color(0xFFFFC24E), Color(0xFFF0808F)],
-        ).createShader(Offset.zero & size),
-    );
-    final stripe = Paint()
-      ..color = Colors.white.withValues(alpha: .72)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = size.width * .035
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(
-      Offset(size.width * .39, size.height * .51),
-      Offset(size.width * .58, size.height * .6),
-      stripe,
-    );
-    canvas.drawLine(
-      Offset(size.width * .45, size.height * .36),
-      Offset(size.width * .62, size.height * .45),
-      stripe,
-    );
-    for (final star in [
-      Offset(size.width * .74, size.height * .22),
-      Offset(size.width * .82, size.height * .42),
-      Offset(size.width * .55, size.height * .1),
-    ]) {
-      _drawStar(canvas, star, size.width * .07, const Color(0xFFF4B844));
-    }
-    final confettiPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = size.width * .025
-      ..strokeCap = StrokeCap.round;
-    for (final item in [
-      (Offset(size.width * .34, size.height * .2), const Color(0xFF78B7AE)),
-      (Offset(size.width * .7, size.height * .12), const Color(0xFFE88EA0)),
-      (Offset(size.width * .26, size.height * .35), const Color(0xFFF6C24B)),
-    ]) {
-      confettiPaint.color = item.$2;
-      canvas.drawLine(
-        item.$1,
-        item.$1 + Offset(size.width * .03, -size.height * .08),
-        confettiPaint,
-      );
-    }
-  }
-
-  void _drawHappyEyes(Canvas canvas, Offset center, double radius, Paint ink) {
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx - radius * .34, center.dy - radius * .18),
-        width: radius * .3,
-        height: radius * .22,
-      ),
-      math.pi,
-      math.pi,
-      false,
-      ink,
-    );
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx + radius * .34, center.dy - radius * .18),
-        width: radius * .3,
-        height: radius * .22,
-      ),
-      math.pi,
-      math.pi,
-      false,
-      ink,
-    );
-  }
-
-  void _drawClosedEyes(Canvas canvas, Offset center, double radius, Paint ink) {
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx - radius * .32, center.dy - radius * .18),
-        width: radius * .34,
-        height: radius * .18,
-      ),
-      0,
-      math.pi,
-      false,
-      ink,
-    );
-    canvas.drawArc(
-      Rect.fromCenter(
-        center: Offset(center.dx + radius * .32, center.dy - radius * .18),
-        width: radius * .34,
-        height: radius * .18,
-      ),
-      0,
-      math.pi,
-      false,
-      ink,
-    );
-  }
-
-  void _drawDotEyes(
-    Canvas canvas,
-    Offset center,
-    double radius,
-    double dotSize,
-  ) {
-    final fill = Paint()..color = MoodLogPalette.ink;
-    canvas.drawCircle(
-      Offset(center.dx - radius * .3, center.dy - radius * .08),
-      dotSize,
-      fill,
-    );
-    canvas.drawCircle(
-      Offset(center.dx + radius * .3, center.dy - radius * .08),
-      dotSize,
-      fill,
-    );
-  }
-
-  void _drawZ(Canvas canvas, Offset topLeft, double size) {
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: 'Z',
-        style: TextStyle(
-          color: const Color(0xFF9D8CC7),
-          fontSize: size,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    textPainter.paint(canvas, topLeft);
-  }
-
-  void _drawStar(Canvas canvas, Offset center, double radius, Color color) {
-    final path = Path()
-      ..moveTo(center.dx, center.dy - radius)
-      ..quadraticBezierTo(
-        center.dx + radius * .18,
-        center.dy - radius * .18,
-        center.dx + radius,
-        center.dy,
-      )
-      ..quadraticBezierTo(
-        center.dx + radius * .18,
-        center.dy + radius * .18,
-        center.dx,
-        center.dy + radius,
-      )
-      ..quadraticBezierTo(
-        center.dx - radius * .18,
-        center.dy + radius * .18,
-        center.dx - radius,
-        center.dy,
-      )
-      ..quadraticBezierTo(
-        center.dx - radius * .18,
-        center.dy - radius * .18,
-        center.dx,
-        center.dy - radius,
-      );
-    canvas.drawPath(path, Paint()..color = color);
-  }
-
-  @override
-  bool shouldRepaint(covariant _MoodGlyphPainter oldDelegate) {
-    return oldDelegate.glyph != glyph || oldDelegate.accentColor != accentColor;
-  }
-}
-
-enum _MoodGlyph { great, okay, stressed, sad, angry, tired, excited }
-
 class _MoodChoice {
   const _MoodChoice({
     required this.label,
@@ -2118,7 +1930,7 @@ class _MoodChoice {
   final String label;
   final String description;
   final int level;
-  final _MoodGlyph glyph;
+  final MoodGlyph glyph;
   final Color auraColor;
   final Color accentColor;
 }
@@ -2128,7 +1940,7 @@ const _moodChoices = [
     label: 'Great',
     description: 'Feeling good and positive',
     level: 5,
-    glyph: _MoodGlyph.great,
+    glyph: MoodGlyph.great,
     auraColor: Color(0xFFE4F3D0),
     accentColor: Color(0xFF78A94E),
   ),
@@ -2136,7 +1948,7 @@ const _moodChoices = [
     label: 'Okay',
     description: "It's a normal, average day",
     level: 4,
-    glyph: _MoodGlyph.okay,
+    glyph: MoodGlyph.okay,
     auraColor: Color(0xFFDCECF7),
     accentColor: Color(0xFF5E95BC),
   ),
@@ -2144,7 +1956,7 @@ const _moodChoices = [
     label: 'Stressed',
     description: 'Feeling overwhelmed or anxious',
     level: 2,
-    glyph: _MoodGlyph.stressed,
+    glyph: MoodGlyph.stressed,
     auraColor: Color(0xFFE4DDF4),
     accentColor: Color(0xFF8F76C2),
   ),
@@ -2152,7 +1964,7 @@ const _moodChoices = [
     label: 'Sad',
     description: 'Feeling down or low',
     level: 1,
-    glyph: _MoodGlyph.sad,
+    glyph: MoodGlyph.sad,
     auraColor: Color(0xFFF4E7C8),
     accentColor: Color(0xFFC89F3A),
   ),
@@ -2160,7 +1972,7 @@ const _moodChoices = [
     label: 'Angry',
     description: 'Frustrated or irritated',
     level: 1,
-    glyph: _MoodGlyph.angry,
+    glyph: MoodGlyph.angry,
     auraColor: Color(0xFFFFDED5),
     accentColor: Color(0xFFE3704D),
   ),
@@ -2168,7 +1980,7 @@ const _moodChoices = [
     label: 'Tired',
     description: 'Mentally or physically drained',
     level: 3,
-    glyph: _MoodGlyph.tired,
+    glyph: MoodGlyph.tired,
     auraColor: Color(0xFFE1DDF0),
     accentColor: Color(0xFF8072A8),
   ),
@@ -2176,7 +1988,7 @@ const _moodChoices = [
     label: 'Excited',
     description: 'Looking forward to something',
     level: 5,
-    glyph: _MoodGlyph.excited,
+    glyph: MoodGlyph.excited,
     auraColor: Color(0xFFFFEBC2),
     accentColor: Color(0xFFD99B20),
   ),
@@ -2196,6 +2008,247 @@ class MoodLogPalette {
   static const gold = Color(0xFFFFC414);
   static const goldSoft = Color(0xFFFFE8A3);
   static const goldText = Color(0xFFB78306);
-  static const green = Color(0xFF4F8A70);
+  static const green = Color(0xFF2F7D6D);
   static const greenSoft = Color(0xFFDCEEE5);
+}
+
+class _MoodCheckInSummary extends StatelessWidget {
+  const _MoodCheckInSummary({
+    required this.history,
+    required this.userId,
+    required this.now,
+    required this.isLoading,
+    this.error,
+  });
+  final MoodHistoryWindow? history;
+  final String? userId;
+  final DateTime now;
+  final bool isLoading;
+  final String? error;
+  @override
+  Widget build(BuildContext context) {
+    final safe =
+        userId != null &&
+            history != null &&
+            history!.events.every((e) => e.userId == userId)
+        ? history
+        : null;
+    final today = MoodManilaCalendar.dateKeyForInstant(now);
+    final count =
+        safe?.uniqueEvents.where((e) => e.dateKey == today).length ?? 0;
+    final streak = safe == null
+        ? 0
+        : MoodAnalytics.streak(safe, referenceInstant: now).currentDays;
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: MoodLogPalette.greenSoft,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.event_available_outlined,
+                color: MoodLogPalette.green,
+                size: 28,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      error != null
+                          ? 'Check-in summary unavailable'
+                          : isLoading && safe == null
+                          ? 'Loading check-ins…'
+                          : '$count check-ins today',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    Text(
+                      'Mood streak · $streak ${streak == 1 ? 'day' : 'days'}',
+                    ),
+                    if (safe?.coverage == MoodHistoryCoverage.partial)
+                      const Text(
+                        'Based on loaded entries',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.eco_outlined, color: MoodLogPalette.green),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'You can check in again whenever you need.',
+          style: TextStyle(fontSize: 12, color: MoodLogPalette.bodyText),
+        ),
+      ],
+    );
+  }
+}
+
+class _MoodSaved extends StatelessWidget {
+  const _MoodSaved({
+    required this.entry,
+    required this.onAnother,
+    required this.onJourney,
+    required this.onHome,
+    this.historyError,
+    required this.onRetryHistory,
+  });
+  final MoodV2Event entry;
+  final VoidCallback onAnother, onJourney, onHome, onRetryHistory;
+  final String? historyError;
+  @override
+  Widget build(BuildContext context) {
+    final choice = _moodChoices
+        .where((m) => m.label == entry.label)
+        .firstOrNull;
+    final time = TimeOfDay.fromDateTime(
+      MoodRepository.manilaWallClock(entry.occurredAt),
+    ).format(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          key: const ValueKey('mood-v2-confirmation'),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFEFA),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: MoodLogPalette.softBorder),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x1017120A),
+                blurRadius: 8,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              const Icon(
+                Icons.check_circle_outline_rounded,
+                size: 56,
+                color: MoodLogPalette.green,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Your mood is recorded',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w900,
+                  color: MoodLogPalette.ink,
+                ),
+              ),
+              const SizedBox(height: 20),
+              if (choice != null)
+                _MoodEmojiBadge(mood: choice, selected: false, size: 80),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: choice?.auraColor ?? MoodLogPalette.greenSoft,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Text(
+                  entry.label ?? 'Mood entry',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Thank you for checking in with yourself.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: MoodLogPalette.bodyText),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '$time · Manila time',
+                style: const TextStyle(color: MoodLogPalette.bodyText),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: MoodLogPalette.greenSoft,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.event_available_outlined, color: MoodLogPalette.green),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text('You can check in again if your feelings change.'),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        FilledButton.icon(
+          key: const ValueKey('mood-v2-add-entry'),
+          onPressed: onAnother,
+          style: FilledButton.styleFrom(
+            backgroundColor: MoodLogPalette.gold,
+            foregroundColor: MoodLogPalette.ink,
+            minimumSize: const Size.fromHeight(52),
+          ),
+          icon: const Icon(Icons.add),
+          label: const Text(
+            'Log another mood',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton(
+          onPressed: onJourney,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: MoodLogPalette.green,
+            side: const BorderSide(color: MoodLogPalette.green, width: 1.5),
+            minimumSize: const Size.fromHeight(52),
+          ),
+          child: const Text(
+            'View My Mood Journey',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+        ),
+        TextButton(
+          onPressed: onHome,
+          style: TextButton.styleFrom(
+            foregroundColor: MoodLogPalette.green,
+            minimumSize: const Size(48, 48),
+          ),
+          child: const Text('Return Home'),
+        ),
+        if (historyError != null) ...[
+          Text(historyError!, textAlign: TextAlign.center),
+          TextButton(
+            onPressed: onRetryHistory,
+            child: const Text('Retry history'),
+          ),
+        ],
+        const Divider(color: MoodLogPalette.softBorder),
+        const Text(
+          'Your check-in is a personal record, not a diagnosis.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: MoodLogPalette.bodyText, fontSize: 12),
+        ),
+      ],
+    );
+  }
 }
