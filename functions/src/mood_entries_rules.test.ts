@@ -8,7 +8,7 @@ import {
   initializeTestEnvironment,
   RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import {collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where} from "firebase/firestore";
+import {collection, deleteDoc, deleteField, doc, getDoc, getDocs, orderBy, query, setDoc, updateDoc, where} from "firebase/firestore";
 
 const projectId = "mind-mates-mood-v2-rules-test";
 let environment: RulesTestEnvironment;
@@ -78,4 +78,22 @@ test("all direct V2 creates, edits, and deletes are denied", async () => {
   await assertFails(deleteDoc(ref));
   const anonymous = environment.unauthenticatedContext().firestore();
   await assertFails(getDoc(doc(anonymous, "moodEntries", entry)));
+});
+
+test("clients cannot create profiles or change any Mood V2 eligibility field", async () => {
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "users", owner), {
+      accessRole: "portalStaff", populationRole: "nonTeaching", declaredRole: "nonTeaching",
+      role: "staff", accountStatus: "suspended", staffAccountStatus: "pending",
+    });
+  });
+  const store = environment.authenticatedContext(owner).firestore();
+  for (const patch of [
+    {accessRole: "appUser"}, {populationRole: "student"}, {declaredRole: "student"},
+    {role: "student"}, {accountStatus: "active"}, {staffAccountStatus: null},
+    {accountStatus: deleteField()}, {staffAccountStatus: deleteField()},
+  ]) {
+    await assertFails(updateDoc(doc(store, "users", owner), patch));
+  }
+  await assertFails(setDoc(doc(store, "users", "new-profile"), {accessRole: "appUser", populationRole: "student"}));
 });
