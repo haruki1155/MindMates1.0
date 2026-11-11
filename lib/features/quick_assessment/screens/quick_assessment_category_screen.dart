@@ -11,6 +11,7 @@ import '../../student_assessment/models/assessment_interpretation_models.dart';
 import '../models/quick_assessment_models.dart';
 import '../services/quick_assessment_action_policy.dart';
 import '../widgets/quick_assessment_widgets.dart';
+import '../widgets/quick_result_visuals.dart';
 
 class QuickAssessmentCategoryScreen extends StatefulWidget {
   const QuickAssessmentCategoryScreen({super.key});
@@ -122,17 +123,6 @@ class _QuickAssessmentCategoryScreenState
       );
     });
   }
-
-  static String iconFor(AssessmentRole role) {
-    switch (role) {
-      case AssessmentRole.student:
-        return 'ST';
-      case AssessmentRole.faculty:
-        return 'FC';
-      case AssessmentRole.staff:
-        return 'SF';
-    }
-  }
 }
 
 class _DecisionContent extends StatelessWidget {
@@ -165,15 +155,16 @@ class _DecisionContent extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          QuickPlaceholderIcon(
-            icon: _QuickAssessmentCategoryScreenState.iconFor(role),
-            size: 20,
-          ),
+          QuickRoleIcon(role: role, size: 30),
           if (provider.quickResult != null) ...[
             const SizedBox(height: 16),
             const Text(
               'Your quick well-being profile',
               style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+            ),
+            const SizedBox(height: 12),
+            QuickResultIllustration(
+              patternCode: provider.quickResult!.responsePatternCode,
             ),
             const SizedBox(height: 7),
             Text(
@@ -254,27 +245,17 @@ class _DecisionContent extends StatelessWidget {
             for (final indicator
                 in provider.quickResult!.interpretation.domainResults)
               Padding(
-                padding: const EdgeInsets.only(top: 5),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        indicator.domain,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        indicator.responsePatternLabel,
-                        textAlign: TextAlign.right,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
+                padding: const EdgeInsets.only(top: 8),
+                child: QuickIndicatorRow(
+                  key: ValueKey('quick-indicator-${indicator.domain}'),
+                  indicator: indicator,
                 ),
               ),
+            const SizedBox(height: 14),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: QuickPatternLegend(),
+            ),
             const Divider(height: 28),
           ],
           const SizedBox(height: 20),

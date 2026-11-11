@@ -14,12 +14,57 @@ import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('signup opens directly on the form without a rules modal', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.text('Email Address'), findsWidgets);
+    expect(_guideText('Email guide'), findsOneWidget);
+    expect(
+      _guideText('Use your personal email or your institutional email.'),
+      findsOneWidget,
+    );
+    expect(_guideContaining('@ucu.edu.ph'), findsNothing);
+    expect(find.text('Student account'), findsNothing);
+  });
+
+  testWidgets('email guide follows the typed email', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
+    await _settleSignup(tester);
+
+    const cases = [
+      ('leo@gmail.com', 'Personal email detected.'),
+      ('  Juan@UCU.edu.ph ', 'Institutional email detected.'),
+      ('juan@ucu.edu.ph.com', 'Personal email detected.'),
+      ('juan@student.ucu.edu.ph', 'Personal email detected.'),
+      ('', 'Use your personal email or your institutional email.'),
+    ];
+    for (final (input, expected) in cases) {
+      await tester.enterText(find.byType(TextFormField).first, input);
+      await tester.pump();
+      expect(_guideText('Email guide'), findsOneWidget, reason: input);
+      expect(_guideText(expected), findsOneWidget, reason: input);
+      expect(_guideContaining('@ucu.edu.ph'), findsNothing, reason: input);
+    }
+    expect(find.text('Student account'), findsNothing);
+    expect(find.text('Teaching personnel account detected'), findsNothing);
+  });
+
   testWidgets('department selection enables related courses', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
-    await _dismissInstructions(tester);
+    await _settleSignup(tester);
 
     expect(find.textContaining('Unofficial'), findsNothing);
     expect(find.text('College or Department'), findsWidgets);
@@ -47,7 +92,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
-    await _dismissInstructions(tester);
+    await _settleSignup(tester);
 
     await _selectDropdownItem(
       tester,
@@ -83,7 +128,7 @@ void main() {
 
     final authProvider = _FakeAuthProvider();
     await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
-    await _dismissInstructions(tester);
+    await _settleSignup(tester);
 
     await _fillRequiredTextFields(tester);
     await _acceptTerms(tester);
@@ -102,7 +147,7 @@ void main() {
 
     final authProvider = _FakeAuthProvider();
     await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
-    await _dismissInstructions(tester);
+    await _settleSignup(tester);
 
     await _fillRequiredTextFields(tester);
     await _selectDropdownItem(
@@ -143,7 +188,7 @@ void main() {
     await tester.pumpWidget(
       _SignupHarness(authProvider: authProvider, role: AssessmentRole.faculty),
     );
-    await _dismissInstructions(tester);
+    await _settleSignup(tester);
 
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Email Address'),
@@ -153,7 +198,7 @@ void main() {
 
     expect(find.text('College or Department'), findsWidgets);
     expect(find.text('Employee ID'), findsWidgets);
-    expect(find.text('Teaching personnel account detected'), findsOneWidget);
+    expect(_guideText('Institutional email detected.'), findsOneWidget);
     expect(find.text('Course or Program'), findsNothing);
     expect(find.text('Year Level'), findsNothing);
     expect(find.text('Position or Designation'), findsWidgets);
@@ -167,7 +212,7 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final authProvider = _FakeAuthProvider();
       await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
-      await _dismissInstructions(tester);
+      await _settleSignup(tester);
 
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Email Address'),
@@ -236,7 +281,7 @@ void main() {
     await tester.pumpWidget(
       _SignupHarness(authProvider: authProvider, role: AssessmentRole.staff),
     );
-    await _dismissInstructions(tester);
+    await _settleSignup(tester);
 
     expect(find.text('Sector'), findsNothing);
     expect(find.text('College or Department'), findsWidgets);
@@ -300,11 +345,20 @@ Future<void> _fillRequiredTextFields(WidgetTester tester) async {
   await tester.pump();
 }
 
-Future<void> _dismissInstructions(WidgetTester tester) async {
+Finder _guideText(String text) => find.descendant(
+  of: find.byKey(const Key('signup-email-guide')),
+  matching: find.text(text),
+);
+
+Finder _guideContaining(String text) => find.descendant(
+  of: find.byKey(const Key('signup-email-guide')),
+  matching: find.textContaining(text),
+);
+
+Future<void> _settleSignup(WidgetTester tester) async {
   await tester.pumpAndSettle();
-  expect(find.text('Before you create an account'), findsOneWidget);
-  await tester.tap(find.text('Continue'));
-  await tester.pumpAndSettle();
+  expect(find.text('Before you create an account'), findsNothing);
+  expect(find.byType(AlertDialog), findsNothing);
 }
 
 Future<void> _acceptTerms(WidgetTester tester) async {

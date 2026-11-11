@@ -82,6 +82,7 @@ class _QuestionPage extends StatelessWidget {
         QuickProgressHeader(
           step: provider.currentQuestionStep,
           label: provider.questionProgressLabel,
+          total: provider.questions.length,
         ),
         Expanded(
           child: SingleChildScrollView(

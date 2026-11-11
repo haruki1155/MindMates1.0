@@ -15,7 +15,6 @@ import '../features/profile/screens/mental_health_insights_screen.dart';
 import '../features/profile/screens/mental_health_report_screen.dart';
 import '../features/profile/screens/profile_screen.dart';
 import '../features/quick_assessment/screens/quick_assessment_category_screen.dart';
-import '../features/quick_assessment/screens/quick_assessment_name_screen.dart';
 import '../features/quick_assessment/screens/quick_assessment_question_screen.dart';
 import '../features/quick_assessment/screens/quick_assessment_role_screen.dart';
 import '../features/secret_chat/pages/secret_chat_page.dart';
@@ -39,7 +38,6 @@ class AppPages {
     RouteNames.profileSetup: (_) => const ProfileSetupScreen(),
     RouteNames.forgotPassword: (_) => const ForgotPasswordScreen(),
     RouteNames.quickAssessmentRole: (_) => const QuickAssessmentRoleScreen(),
-    RouteNames.quickAssessmentName: (_) => const QuickAssessmentNameScreen(),
     RouteNames.quickAssessmentQuestions: (_) =>
         const QuickAssessmentQuestionScreen(),
     RouteNames.quickAssessmentCategory: (_) =>

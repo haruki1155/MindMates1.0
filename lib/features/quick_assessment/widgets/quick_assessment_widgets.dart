@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../models/quick_assessment_models.dart';
+
 class QuickAssessmentPalette {
   const QuickAssessmentPalette._();
 
@@ -129,14 +131,16 @@ class QuickProgressHeader extends StatelessWidget {
     super.key,
     required this.step,
     required this.label,
+    required this.total,
   });
 
   final int step;
   final String label;
+  final int total;
 
   @override
   Widget build(BuildContext context) {
-    final fill = step.clamp(1, 6) / 6;
+    final fill = step.clamp(1, total) / total;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(26, 20, 20, 0),
@@ -229,10 +233,16 @@ class QuickNextButton extends StatelessWidget {
   }
 }
 
-class QuickPlaceholderIcon extends StatelessWidget {
-  const QuickPlaceholderIcon({super.key, required this.icon, this.size = 26});
+IconData quickAssessmentRoleIcon(AssessmentRole role) => switch (role) {
+  AssessmentRole.student => Icons.school_rounded,
+  AssessmentRole.faculty => Icons.co_present_rounded,
+  AssessmentRole.staff => Icons.badge_rounded,
+};
 
-  final String icon;
+class QuickRoleIcon extends StatelessWidget {
+  const QuickRoleIcon({super.key, required this.role, this.size = 28});
+
+  final AssessmentRole role;
   final double size;
 
   @override
@@ -245,7 +255,12 @@ class QuickPlaceholderIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
       ),
       alignment: Alignment.center,
-      child: Text(icon, style: TextStyle(fontSize: size)),
+      child: Icon(
+        quickAssessmentRoleIcon(role),
+        size: size,
+        color: QuickAssessmentPalette.text,
+        semanticLabel: role.label,
+      ),
     );
   }
 }
