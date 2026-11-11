@@ -6,7 +6,8 @@ import 'package:image/image.dart' as img;
 
 import 'expression_scan_logic.dart';
 import 'camera_frame_transformer.dart';
-import 'tflite_expression_classifier.dart';
+import 'tflite_expression_classifier.dart'
+    if (dart.library.js_interop) 'tflite_expression_classifier_web.dart';
 
 /// The only feature class that owns native ML Kit objects.
 class MlKitExpressionAnalyzer
