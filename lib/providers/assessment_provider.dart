@@ -165,8 +165,6 @@ class AssessmentProvider extends ChangeNotifier {
       questions[_currentQuestionIndex];
 
   int get currentQuestionStep => _currentQuestionIndex + 1;
-  String get nameProgressLabel =>
-      QuickAssessmentScoring.progressLabelForStep(1, total: questions.length);
   String get questionProgressLabel =>
       QuickAssessmentScoring.progressLabelForStep(
         currentQuestionStep,
@@ -239,6 +237,25 @@ class AssessmentProvider extends ChangeNotifier {
   void selectRole(AssessmentRole role) {
     _selectedRole = role;
     _quickResult = null;
+    notifyListeners();
+  }
+
+  /// Starts a fresh quick assessment for [role], using the signed-in
+  /// profile's [name] so the user is not asked for it again. The stored name
+  /// is never blank and never longer than the 100 characters the server
+  /// accepts.
+  void beginQuickAssessment({
+    required AssessmentRole role,
+    required String name,
+  }) {
+    final trimmed = name.trim();
+    final resolved = trimmed.isEmpty ? 'MindMate User' : trimmed;
+    _selectedRole = role;
+    _name = resolved.length > 100 ? resolved.substring(0, 100) : resolved;
+    _currentQuestionIndex = 0;
+    _selectedOptions.clear();
+    _quickResult = null;
+    _quickAppointmentPromptedResultIds.clear();
     notifyListeners();
   }
 

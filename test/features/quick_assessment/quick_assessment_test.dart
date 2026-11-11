@@ -572,6 +572,109 @@ void main() {
 
     expect(find.text('home target'), findsOneWidget);
   });
+
+  group('Quick assessment uses the profile name', () {
+    test('beginQuickAssessment uses profile name and starts fresh', () {
+      final provider = _readyProvider()
+        ..selectAnswer(
+          QuickAssessmentQuestions.questions.first.options.first,
+        );
+
+      provider.beginQuickAssessment(
+        role: AssessmentRole.faculty,
+        name: '  Leo Cruz ',
+      );
+
+      expect(provider.selectedRole, AssessmentRole.faculty);
+      expect(provider.name, 'Leo Cruz');
+      expect(provider.currentQuestionIndex, 0);
+      expect(provider.hasSelectedAnswer, isFalse);
+      expect(provider.quickResult, isNull);
+    });
+
+    test('beginQuickAssessment falls back and caps the name for the server', () {
+      final provider = AssessmentProvider(AssessmentRepository());
+
+      provider.beginQuickAssessment(role: AssessmentRole.student, name: '   ');
+      expect(provider.name, 'MindMate User');
+
+      provider.beginQuickAssessment(
+        role: AssessmentRole.student,
+        name: 'a' * 150,
+      );
+      expect(provider.name.length, 100);
+    });
+
+    testWidgets('choosing a role skips the name step and uses the profile name', (
+      tester,
+    ) async {
+      final assessmentProvider = AssessmentProvider(AssessmentRepository());
+      await _pumpRoleScreen(
+        tester,
+        assessmentProvider: assessmentProvider,
+        user: const UserModel(
+          id: 'u1',
+          email: 'leo@example.com',
+          firstName: 'Leo',
+          lastName: 'Cruz',
+        ),
+      );
+
+      await tester.tap(find.text('Student'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('questions target'), findsOneWidget);
+      expect(assessmentProvider.name, 'Leo Cruz');
+      expect(assessmentProvider.selectedRole, AssessmentRole.student);
+    });
+
+    testWidgets('stored role redirects straight to questions', (tester) async {
+      final assessmentProvider = AssessmentProvider(AssessmentRepository());
+      await _pumpRoleScreen(
+        tester,
+        assessmentProvider: assessmentProvider,
+        user: const UserModel(
+          id: 'u1',
+          email: 'leo@example.com',
+          firstName: 'Leo',
+          lastName: 'Cruz',
+          role: 'faculty',
+        ),
+      );
+
+      expect(find.text('questions target'), findsOneWidget);
+      expect(assessmentProvider.selectedRole, AssessmentRole.faculty);
+      expect(assessmentProvider.name, 'Leo Cruz');
+    });
+  });
+}
+
+Future<void> _pumpRoleScreen(
+  WidgetTester tester, {
+  required AssessmentProvider assessmentProvider,
+  required UserModel user,
+}) async {
+  await tester.binding.setSurfaceSize(const Size(900, 1400));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  final userProvider = UserProvider(_FakeUserRepository())..setUser(user);
+  await tester.pumpWidget(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+        ChangeNotifierProvider<AssessmentProvider>.value(
+          value: assessmentProvider,
+        ),
+      ],
+      child: MaterialApp(
+        routes: {
+          RouteNames.quickAssessmentQuestions: (_) =>
+              const _RouteMarker('questions target'),
+        },
+        home: const QuickAssessmentRoleScreen(),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
 }
 
 AssessmentProvider _readyProvider({

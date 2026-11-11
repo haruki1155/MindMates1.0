@@ -71,10 +71,13 @@ class _StoredRoleRedirectState extends State<_StoredRoleRedirect> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<AssessmentProvider>().selectRole(widget.role);
+      context.read<AssessmentProvider>().beginQuickAssessment(
+        role: widget.role,
+        name: _profileName(context),
+      );
       Navigator.of(
         context,
-      ).pushReplacementNamed(RouteNames.quickAssessmentName);
+      ).pushReplacementNamed(RouteNames.quickAssessmentQuestions);
     });
   }
 
@@ -176,8 +179,21 @@ class _RoleContent extends StatelessWidget {
   }
 
   void _selectRole(BuildContext context, AssessmentRole role) {
-    context.read<AssessmentProvider>().selectRole(role);
-    Navigator.of(context).pushNamed(RouteNames.quickAssessmentName);
+    context.read<AssessmentProvider>().beginQuickAssessment(
+      role: role,
+      name: _profileName(context),
+    );
+    Navigator.of(context).pushNamed(RouteNames.quickAssessmentQuestions);
+  }
+}
+
+/// The signed-in user's name from their profile; empty in standalone
+/// previews without a [UserProvider].
+String _profileName(BuildContext context) {
+  try {
+    return context.read<UserProvider>().user?.displayName ?? '';
+  } on ProviderNotFoundException {
+    return '';
   }
 }
 

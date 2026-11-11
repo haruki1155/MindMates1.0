@@ -9,7 +9,6 @@ class RouteNames {
   static const profileSetup = '/profile-setup';
   static const forgotPassword = '/forgot-password';
   static const quickAssessmentRole = '/quick-assessment/role';
-  static const quickAssessmentName = '/quick-assessment/name';
   static const quickAssessmentQuestions = '/quick-assessment/questions';
   static const quickAssessmentCategory = '/quick-assessment/category';
   static const studentAssessment = '/student-assessment';

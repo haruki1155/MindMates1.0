@@ -129,14 +129,16 @@ class QuickProgressHeader extends StatelessWidget {
     super.key,
     required this.step,
     required this.label,
+    required this.total,
   });
 
   final int step;
   final String label;
+  final int total;
 
   @override
   Widget build(BuildContext context) {
-    final fill = step.clamp(1, 6) / 6;
+    final fill = step.clamp(1, total) / total;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(26, 20, 20, 0),
