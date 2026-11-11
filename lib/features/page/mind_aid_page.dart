@@ -1,19 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '/providers/mind_aid_provider.dart';
-import '/providers/assessment_provider.dart';
-import '/providers/auth_provider.dart';
-import '/providers/insights_provider.dart';
-import '/providers/report_provider.dart';
-import '/providers/user_provider.dart';
-import '/features/counseling/screens/mind_aid_screen.dart';
-import '/features/mind_aid/domain/mind_aid_context.dart';
-import '/features/mind_aid/domain/mind_aid_integration_models.dart';
-import '/features/counseling/screens/pacc_counseling_screen.dart';
-import '/repositories/mind_aid_context_repository.dart';
-import '/repositories/mood_combined_history_repository.dart';
-import '/routes/route_names.dart';
+import '../../providers/mind_aid_provider.dart';
+import '../../providers/assessment_provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/insights_provider.dart';
+import '../../providers/report_provider.dart';
+import '../../providers/user_provider.dart';
+import '../../features/counseling/screens/mind_aid_screen.dart';
+import '../../features/mind_aid/domain/mind_aid_context.dart';
+import '../../features/mind_aid/domain/mind_aid_integration_models.dart';
+import '../../features/counseling/screens/pacc_counseling_screen.dart';
+import '../../repositories/mind_aid_context_repository.dart';
+import '../../repositories/mood_combined_history_repository.dart';
+import '../../routes/route_names.dart';
 
 class MindAidPage extends StatefulWidget {
   const MindAidPage({super.key});
