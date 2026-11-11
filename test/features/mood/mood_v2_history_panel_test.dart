@@ -4,28 +4,61 @@ import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/features/mood/widgets/mood_v2_history_panel.dart';
 
 void main() {
-  testWidgets('personal days start collapsed and reveal full date and entries', (tester) async {
-    final window = MoodHistoryWindow(events: [_event('one', DateTime.utc(2026, 11, 12), 3, MoodEventSource.v2)], coverage: MoodHistoryCoverage.complete);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: MoodV2HistoryPanel(history: window, showPersonalDetails: true))));
-    expect(find.text('Thursday'), findsOneWidget);
-    expect(find.byKey(const ValueKey('v2:one')), findsNothing);
-    await tester.tap(find.text('Thursday'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('v2:one')), findsOneWidget);
-    expect(find.textContaining('November 12, 2026'), findsOneWidget);
-  });
-  testWidgets('personal detail shows saved note instead of false empty placeholder', (tester) async {
-    final window = MoodHistoryWindow(events: [_event('saved', DateTime.utc(2026, 11, 12), 3, MoodEventSource.v2)], coverage: MoodHistoryCoverage.complete);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: MoodV2HistoryPanel(
-      history: window, showPersonalDetails: true, v2PersonalNotes: const {'v2:saved': 'A persisted reflection'},
-    ))));
-    await tester.tap(find.byType(ExpansionTile).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('v2:saved')));
-    await tester.pumpAndSettle();
-    expect(find.text('A persisted reflection'), findsOneWidget);
-    expect(find.text('No note added.'), findsNothing);
-  });
+  testWidgets(
+    'personal days start collapsed and reveal full date and entries',
+    (tester) async {
+      final window = MoodHistoryWindow(
+        events: [
+          _event('one', DateTime.utc(2026, 11, 12), 3, MoodEventSource.v2),
+        ],
+        coverage: MoodHistoryCoverage.complete,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MoodV2HistoryPanel(
+              history: window,
+              showPersonalDetails: true,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Thursday'), findsOneWidget);
+      expect(find.byKey(const ValueKey('v2:one')), findsNothing);
+      await tester.tap(find.text('Thursday'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('v2:one')), findsOneWidget);
+      expect(find.textContaining('November 12, 2026'), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'personal detail shows saved note instead of false empty placeholder',
+    (tester) async {
+      final window = MoodHistoryWindow(
+        events: [
+          _event('saved', DateTime.utc(2026, 11, 12), 3, MoodEventSource.v2),
+        ],
+        coverage: MoodHistoryCoverage.complete,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MoodV2HistoryPanel(
+              history: window,
+              showPersonalDetails: true,
+              v2PersonalNotes: const {'v2:saved': 'A persisted reflection'},
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byType(ExpansionTile).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('v2:saved')));
+      await tester.pumpAndSettle();
+      expect(find.text('A persisted reflection'), findsOneWidget);
+      expect(find.text('No note added.'), findsNothing);
+    },
+  );
   testWidgets(
     'summary separates entries from days and labels windowed streak',
     (tester) async {
@@ -64,7 +97,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Level 2: 1'), findsOneWidget);
-    expect(find.text('Latest recorded level: 4/5'), findsOneWidget);
+      expect(find.text('Latest recorded level: 4/5'), findsOneWidget);
       expect(find.text('Level 4: 1'), findsOneWidget);
       expect(
         find.text('Summary uses incomplete recorded history.'),

@@ -1,0 +1,16 @@
+# Mood V2 student manual test guide
+
+Use the installed **staging** app and your student test account. Saving moods adds real staging records; leave them in place. No production changes are part of this update.
+
+1. **Latest mood:** Open Log your mood, choose Okay, and tap Skip on the reflection prompt. Save the entry. Return Home: Today's mood should say Okay. Log another mood, choose Excited, tap Add note, and enter `Manual check: excited about today`. Save, return Home, and confirm Excited is now shown. Close/reopen the app and confirm the latest mood still appears.
+2. **Optional reflection:** The prompt should appear once per new unsaved entry. Skip should keep the chosen mood and any draft note. Choosing a different mood before saving should not repeat the prompt. Add note should focus the existing note field. Saving without a note should work. A confirmed save allows the prompt again for the next entry.
+3. **Journey access:** Tap the white card with the yellow glow and My Mood Journey label/chevron. Also try View My Mood Journey after saving. Both should open the same Journey screen.
+4. **Day dropdowns:** Check-ins should start as one collapsed weekday row per date, with an entry count and chevron. Tap a day: its complete date appears beneath the heading, followed by its check-ins, newest first. Tap an individual mood to view its note. The Excited entry should show the exact text entered above. An entry actually saved without a note should show No note added. Collapse the day to hide all its entries.
+5. **Week/month:** Switch This Week and This Month. Confirm the selection/checkmark and date range change. Both the summary and visible days should use that range. Counts may legitimately be identical when all saved entries fall in this week. Older days this month should appear only in the appropriate range. If coverage is incomplete, the screen must say so and keep Load more available.
+6. **Appearance:** Journey navigation and Mood Streak should have white backgrounds, soft yellow glowing edges and dark text. Period selection and Check expression should use yellow rather than green. Check-in glyphs/accents should vary by mood. Check spacing and alignment in portrait, landscape, with the keyboard open and with larger system text. Scroll to reach all actions.
+7. **Expression:** Tap the yellow Check expression with camera action. Exercise permission/camera/back navigation, then explicitly accept or reject the suggestion. An accepted suggestion can offer the optional note prompt. Save a mood and check the result normally; a camera suggestion alone must never save automatically.
+8. **Errors and account safety:** If a save fails, keep the app open and retry; the draft should remain. If notes fail to load, use Retry rather than expecting No note added. If you switch test accounts, the prior account's notes must immediately disappear.
+
+When reporting a problem, include the screen, exact steps, expected/actual behavior, whether you tapped Save, selected week/month, and a screenshot or error message with personal information hidden. Do not share passwords or App Check tokens.
+
+Automated tests and a successful installation do not establish that a hosted student save succeeded. That final acceptance is the manual check above.

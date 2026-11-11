@@ -392,20 +392,21 @@ class MoodGlyphIcon extends StatelessWidget {
   const MoodGlyphIcon({super.key, required this.label, this.size = 36});
   final String? label;
   final double size;
+  static Color accentForLabel(String? label) => switch (label?.toLowerCase()) {
+    'great' => const Color(0xFF78A94E),
+    'okay' => const Color(0xFF5E95BC),
+    'stressed' => const Color(0xFF8F76C2),
+    'sad' => const Color(0xFFC89F3A),
+    'angry' => const Color(0xFFE3704D),
+    'tired' => const Color(0xFF8072A8),
+    _ => const Color(0xFFD99B20),
+  };
   @override
   Widget build(BuildContext context) {
     final glyph = MoodGlyph.values
         .where((g) => g.name == label?.toLowerCase())
         .firstOrNull;
-    final color = switch (glyph) {
-      MoodGlyph.great => const Color(0xFF78A94E),
-      MoodGlyph.okay => const Color(0xFF5E95BC),
-      MoodGlyph.stressed => const Color(0xFF8F76C2),
-      MoodGlyph.sad => const Color(0xFFC89F3A),
-      MoodGlyph.angry => const Color(0xFFE3704D),
-      MoodGlyph.tired => const Color(0xFF8072A8),
-      _ => const Color(0xFFD99B20),
-    };
+    final color = accentForLabel(label);
     return ExcludeSemantics(
       child: Container(
         width: size,

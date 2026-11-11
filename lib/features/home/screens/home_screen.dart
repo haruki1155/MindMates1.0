@@ -224,7 +224,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ? moodProvider?.latestMoodForToday(now: widget._nowProvider())
         : null;
     final todayMoodLabel = latest != null
-        ? (latest.label?.trim().isNotEmpty == true ? latest.label!.trim() : 'Mood logged')
+        ? (latest.label?.trim().isNotEmpty == true
+              ? latest.label!.trim()
+              : 'Mood logged')
         : todayMood == null
         ? null
         : (todayMood.label?.trim().isNotEmpty ?? false)

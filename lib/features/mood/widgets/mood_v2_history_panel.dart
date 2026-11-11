@@ -333,9 +333,11 @@ class _MoodDayCard extends StatelessWidget {
       return Card(
         color: HomePalette.surface,
         child: ExpansionTile(
-          key: ValueKey(
-            'mood-day-${day.events.first.userId}-${day.dateKey}',
-          ),
+          textColor: HomePalette.text,
+          collapsedTextColor: HomePalette.text,
+          iconColor: HomePalette.gold,
+          collapsedIconColor: HomePalette.text,
+          key: ValueKey('mood-day-${day.events.first.userId}-${day.dateKey}'),
           onExpansionChanged: (open) {
             if (open) onExpandDay?.call(day.dateKey);
           },
@@ -372,6 +374,15 @@ class _MoodDayCard extends StatelessWidget {
                     for (final event in day.events.reversed)
                       ExpansionTile(
                         key: ValueKey(event.stableIdentity),
+                        textColor: HomePalette.text,
+                        collapsedTextColor: HomePalette.text,
+                        iconColor: HomePalette.gold,
+                        backgroundColor: MoodGlyphIcon.accentForLabel(
+                          event.label,
+                        ).withValues(alpha: .08),
+                        collapsedBackgroundColor: MoodGlyphIcon.accentForLabel(
+                          event.label,
+                        ).withValues(alpha: .04),
                         onExpansionChanged: (open) {
                           if (open) onExpandDay?.call(day.dateKey);
                         },
@@ -381,10 +392,12 @@ class _MoodDayCard extends StatelessWidget {
                             : Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(
+                                  Icon(
                                     Icons.circle,
                                     size: 9,
-                                    color: Color(0xFF2F7D6D),
+                                    color: MoodGlyphIcon.accentForLabel(
+                                      event.label,
+                                    ),
                                   ),
                                   const SizedBox(width: 10),
                                   Text(

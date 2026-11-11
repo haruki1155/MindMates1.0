@@ -38,23 +38,35 @@ class MoodProvider extends ChangeNotifier {
   final Set<String> _v2NoteLoadingDays = {};
   final Set<String> _v2NoteErrorDays = {};
   int _noteGeneration = 0;
-  Map<String, String?> get v2PersonalNotes => Map.unmodifiable(_v2PersonalNotes);
+  Map<String, String?> get v2PersonalNotes =>
+      Map.unmodifiable(_v2PersonalNotes);
   Set<String> get v2NoteLoadingDays => Set.unmodifiable(_v2NoteLoadingDays);
   Set<String> get v2NoteErrorDays => Set.unmodifiable(_v2NoteErrorDays);
 
   Future<void> loadMoodV2DayNotes(String userId, String dateKey) async {
-    if (!isMoodV2ReadEnabled || _v2HistoryUserId != userId ||
+    if (!isMoodV2ReadEnabled ||
+        _v2HistoryUserId != userId ||
         (_isBoundToAuthentication && _authenticatedUserId != userId) ||
-        _v2NoteLoadingDays.contains(dateKey)) return;
-    final events = _v2History!.uniqueEvents.where((e) => e.dateKey == dateKey &&
-      !_v2PersonalNotes.containsKey(e.stableIdentity)).toList();
+        _v2NoteLoadingDays.contains(dateKey)) {
+      return;
+    }
+    final events = _v2History!.uniqueEvents
+        .where(
+          (e) =>
+              e.dateKey == dateKey &&
+              !_v2PersonalNotes.containsKey(e.stableIdentity),
+        )
+        .toList();
     if (events.isEmpty) return;
     final generation = _noteGeneration;
     _v2NoteLoadingDays.add(dateKey);
     _v2NoteErrorDays.remove(dateKey);
     notifyListeners();
     try {
-      final notes = await _combinedHistoryRepository!.fetchOwnerNotes(userId: userId, events: events);
+      final notes = await _combinedHistoryRepository!.fetchOwnerNotes(
+        userId: userId,
+        events: events,
+      );
       if (generation != _noteGeneration || _v2HistoryUserId != userId) return;
       _v2PersonalNotes.addAll(notes);
     } catch (_) {
@@ -69,7 +81,9 @@ class MoodProvider extends ChangeNotifier {
   }
 
   void recordConfirmedMoodV2Entry(MoodV2Event entry) {
-    if (_isBoundToAuthentication && entry.userId != _authenticatedUserId) return;
+    if (_isBoundToAuthentication && entry.userId != _authenticatedUserId) {
+      return;
+    }
     final normalized = entry.toNormalized();
     if (_confirmedV2Mood == null ||
         !normalized.occurredAt.isBefore(_confirmedV2Mood!.occurredAt)) {
@@ -80,17 +94,25 @@ class MoodProvider extends ChangeNotifier {
 
   NormalizedMoodEvent? latestMoodForToday({DateTime? now}) {
     final date = MoodManilaCalendar.dateKeyForInstant(now ?? _nowProvider());
-    final owner = _isBoundToAuthentication ? _authenticatedUserId : _v2HistoryUserId;
+    final owner = _isBoundToAuthentication
+        ? _authenticatedUserId
+        : _v2HistoryUserId;
     if (owner == null) return null;
-    final candidates = MoodHistoryWindow(events: [
-      ...?_v2History?.events,
-      if (_confirmedV2Mood != null) _confirmedV2Mood!,
-      if (_todayMood != null) NormalizedMoodEvent.fromLegacy(_todayMood!),
-    ], coverage: MoodHistoryCoverage.partial).uniqueEvents.where(
-      (e) => e.userId == owner && e.dateKey == date,
-    ).toList();
+    final candidates =
+        MoodHistoryWindow(
+              events: [
+                ...?_v2History?.events,
+                ?_confirmedV2Mood,
+                if (_todayMood != null)
+                  NormalizedMoodEvent.fromLegacy(_todayMood!),
+              ],
+              coverage: MoodHistoryCoverage.partial,
+            ).uniqueEvents
+            .where((e) => e.userId == owner && e.dateKey == date)
+            .toList();
     return candidates.isEmpty ? null : candidates.last;
   }
+
   DailyMoodSaveResult? _dailySaveResult;
   MoodHistoryWindow? _v2History;
   MoodAnalyticsSnapshot? _v2Analytics;

@@ -9,13 +9,50 @@ import 'package:mind_mates/features/mood/screens/mood_journey_screen.dart';
 import 'package:mind_mates/features/mood/widgets/mood_journey_summary.dart';
 
 void main() {
-  testWidgets('week month filters summary and collapsed days together', (tester) async {
+  testWidgets(
+    'streak is a white card with yellow edge and readable dark text',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MoodJourneySummary(
+              history: const MoodHistoryWindow(
+                events: [],
+                coverage: MoodHistoryCoverage.complete,
+              ),
+              now: DateTime.utc(2026, 11, 12),
+            ),
+          ),
+        ),
+      );
+      final card = tester.widget<Container>(
+        find.byKey(const Key('mood-streak-card')),
+      );
+      final decoration = card.decoration! as BoxDecoration;
+      expect(decoration.color, Colors.white);
+      expect((decoration.border! as Border).top.color, const Color(0xFFFFC414));
+      expect(decoration.boxShadow, isNotEmpty);
+      expect(find.text('Mood Streak'), findsOneWidget);
+    },
+  );
+  testWidgets('week month filters summary and collapsed days together', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(MultiProvider(providers: [
-      ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
-      ChangeNotifierProvider<MoodProvider>.value(value: _PeriodMood()),
-    ], child: MaterialApp(home: MoodJourneyScreen(nowProvider: () => DateTime.utc(2026, 11, 12)))));
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+          ChangeNotifierProvider<MoodProvider>.value(value: _PeriodMood()),
+        ],
+        child: MaterialApp(
+          home: MoodJourneyScreen(
+            nowProvider: () => DateTime.utc(2026, 11, 12),
+          ),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(find.text('1 check-in · 1 mood-active day'), findsOneWidget);
     expect(find.text('Sunday'), findsNothing);
@@ -122,7 +159,7 @@ void main() {
         tester.widget<SingleChildScrollView>(strip).scrollDirection,
         Axis.horizontal,
       );
-      expect(find.text('Mood streak · 0 days'), findsOneWidget);
+      expect(find.text('0 days'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }
@@ -239,7 +276,9 @@ class _JourneyAuth extends ChangeNotifier implements AuthProvider {
 
 class _JourneyMood extends ChangeNotifier implements MoodProvider {
   @override
-  Map<String, String?> get v2PersonalNotes => const {'v2:one': 'Private account A note'};
+  Map<String, String?> get v2PersonalNotes => const {
+    'v2:one': 'Private account A note',
+  };
   @override
   Set<String> get v2NoteLoadingDays => const {};
   @override
@@ -282,8 +321,19 @@ class _JourneyMood extends ChangeNotifier implements MoodProvider {
 
 class _PeriodMood extends _JourneyMood {
   @override
-  MoodHistoryWindow get v2History => MoodHistoryWindow(coverage: MoodHistoryCoverage.complete, events: [
-    for (final day in [1, 11]) NormalizedMoodEvent(id: '$day', userId: 'account-a', level: 3,
-      dateKey: '2026-11-${day.toString().padLeft(2, '0')}', occurredAt: DateTime.utc(2026, 11, day), source: MoodEventSource.v2, label: 'Okay'),
-  ]);
+  MoodHistoryWindow get v2History => MoodHistoryWindow(
+    coverage: MoodHistoryCoverage.complete,
+    events: [
+      for (final day in [1, 11])
+        NormalizedMoodEvent(
+          id: '$day',
+          userId: 'account-a',
+          level: 3,
+          dateKey: '2026-11-${day.toString().padLeft(2, '0')}',
+          occurredAt: DateTime.utc(2026, 11, day),
+          source: MoodEventSource.v2,
+          label: 'Okay',
+        ),
+    ],
+  );
 }

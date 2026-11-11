@@ -58,26 +58,49 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
+          key: const Key('mood-streak-card'),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFFDCEEE5),
+            color: Colors.white,
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: HomePalette.sun, width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: HomePalette.sun.withValues(alpha: .24),
+                blurRadius: 16,
+                spreadRadius: 1,
+              ),
+            ],
           ),
           child: Row(
             children: [
               const Icon(
-                Icons.eco_outlined,
-                color: Color(0xFF2F7D6D),
+                Icons.local_fire_department_rounded,
+                color: HomePalette.orange,
                 size: 30,
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  'Mood streak · ${streak.currentDays} ${streak.currentDays == 1 ? 'day' : 'days'}',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Mood Streak',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: HomePalette.text,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      '${streak.currentDays} ${streak.currentDays == 1 ? 'day' : 'days'}',
+                      style: const TextStyle(
+                        fontSize: 26,
+                        color: HomePalette.text,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -143,7 +166,7 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
                                 logged ? Icons.circle : Icons.circle_outlined,
                                 size: 12,
                                 color: logged
-                                    ? const Color(0xFF2F7D6D)
+                                    ? HomePalette.gold
                                     : HomePalette.muted,
                               ),
                             ],
@@ -178,13 +201,13 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
             minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
             backgroundColor: WidgetStateProperty.resolveWith(
               (states) => states.contains(WidgetState.selected)
-                  ? const Color(0xFF2F7D6D)
+                  ? HomePalette.sun
                   : HomePalette.surface,
             ),
             foregroundColor: WidgetStateProperty.resolveWith(
               (states) => states.contains(WidgetState.selected)
-                  ? Colors.white
-                  : const Color(0xFF2F7D6D),
+                  ? HomePalette.text
+                  : HomePalette.text,
             ),
             side: const WidgetStatePropertyAll(
               BorderSide(color: HomePalette.outlineStrong),
@@ -202,7 +225,7 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
                   children: [
                     const Icon(
                       Icons.event_available_outlined,
-                      color: Color(0xFF2F7D6D),
+                      color: HomePalette.gold,
                     ),
                     const SizedBox(width: 10),
                     Expanded(

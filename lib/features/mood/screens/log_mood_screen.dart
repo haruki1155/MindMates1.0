@@ -58,33 +58,67 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   void _dismissReflection() {
     final route = _reflectionRoute;
     _reflectionRoute = null;
-    if (route != null) WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (route.isActive) route.navigator?.removeRoute(route);
-    });
+    if (route != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (route.isActive) route.navigator?.removeRoute(route);
+      });
+    }
   }
 
   Future<void> _offerMoodReflection() async {
-    if (!widget.moodV2Enabled || _reflectionOffered || !mounted || _isSaving) return;
+    if (!widget.moodV2Enabled || _reflectionOffered || !mounted || _isSaving) {
+      return;
+    }
     _reflectionOffered = true;
     final owner = _currentUserId();
     final generation = _moodV2RequestGeneration;
-    final route = DialogRoute<bool>(context: context, builder: (dialogContext) => AlertDialog(
-      backgroundColor: MoodLogPalette.surface,
-      title: const Text('Why do you feel this way?'),
-      content: const Text("You can share a little insight in the note below. It's optional."),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Skip', style: TextStyle(color: MoodLogPalette.ink))),
-        FilledButton(style: FilledButton.styleFrom(backgroundColor: MoodLogPalette.gold, foregroundColor: MoodLogPalette.ink), onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Add note')),
-      ],
-    ));
+    final route = DialogRoute<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: MoodLogPalette.surface,
+        title: const Text('Why do you feel this way?'),
+        content: const Text(
+          "You can share a little insight in the note below. It's optional.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text(
+              'Skip',
+              style: TextStyle(color: MoodLogPalette.ink),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: MoodLogPalette.gold,
+              foregroundColor: MoodLogPalette.ink,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Add note'),
+          ),
+        ],
+      ),
+    );
     _reflectionRoute = route;
     final addNote = await Navigator.of(context).push(route);
     if (_reflectionRoute == route) _reflectionRoute = null;
-    if (!mounted || owner != _currentUserId() || generation != _moodV2RequestGeneration || addNote != true) return;
+    if (!mounted ||
+        owner != _currentUserId() ||
+        generation != _moodV2RequestGeneration ||
+        addNote != true) {
+      return;
+    }
     _noteFocus.requestFocus();
     final field = _noteFieldKey.currentContext;
-    if (field != null) await Scrollable.ensureVisible(field, duration: const Duration(milliseconds: 200), alignment: .3);
+    if (field != null && field.mounted) {
+      await Scrollable.ensureVisible(
+        field,
+        duration: const Duration(milliseconds: 200),
+        alignment: .3,
+      );
+    }
   }
+
   _MoodChoice? _selectedMood;
   ExpressionCue? _expressionCue;
   ExpressionCueSource? _expressionCueSource;
@@ -799,14 +833,20 @@ class _ExpressionCheckInEntry extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          OutlinedButton.icon(
+          FilledButton.icon(
             onPressed: enabled ? onPressed : null,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: MoodLogPalette.green,
+            style: FilledButton.styleFrom(
+              backgroundColor: MoodLogPalette.gold,
+              foregroundColor: MoodLogPalette.ink,
               minimumSize: const Size.fromHeight(48),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             ),
             icon: const Icon(Icons.camera_alt_outlined),
-            label: const Text('Check expression with camera'),
+            label: const Text(
+              'Check expression with camera',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
           ),
           const SizedBox(height: 4),
           const Text(
@@ -860,7 +900,7 @@ class _ExpressionCueCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: MoodLogPalette.greenSoft,
+        color: MoodLogPalette.goldSoft,
         borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
@@ -1311,12 +1351,12 @@ class _MoodLogIntro extends StatelessWidget {
                           width: 26,
                           height: 26,
                           decoration: const BoxDecoration(
-                            color: MoodLogPalette.greenSoft,
+                            color: MoodLogPalette.goldSoft,
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(
                             Icons.favorite_rounded,
-                            color: MoodLogPalette.green,
+                            color: MoodLogPalette.goldText,
                             size: 15,
                           ),
                         ),
@@ -1448,7 +1488,7 @@ class _MoodChoiceCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: selected
-                          ? const Color(0xFF2F7D6D)
+                          ? MoodLogPalette.goldText
                           : MoodLogPalette.softBorder,
                       width: selected ? 2 : 1.2,
                     ),
@@ -1497,7 +1537,7 @@ class _MoodChoiceCard extends StatelessWidget {
                       if (selected)
                         const Icon(
                           Icons.check_circle,
-                          color: Color(0xFF2F7D6D),
+                          color: MoodLogPalette.goldText,
                           size: 18,
                         ),
                     ],
@@ -1529,18 +1569,20 @@ class _MoodChoiceCard extends StatelessWidget {
                 compact ? 10 : 12,
               ),
               decoration: BoxDecoration(
-                color: selected ? mood.auraColor : MoodLogPalette.surface,
+                color: selected
+                    ? MoodLogPalette.goldSoft
+                    : MoodLogPalette.surface,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                   color: selected
-                      ? mood.accentColor
+                      ? MoodLogPalette.gold
                       : MoodLogPalette.softBorder,
                   width: selected ? 2 : 1.2,
                 ),
                 boxShadow: [
                   BoxShadow(
                     color: selected
-                        ? mood.accentColor.withValues(alpha: 0.2)
+                        ? MoodLogPalette.gold.withValues(alpha: 0.2)
                         : const Color(0x10000000),
                     blurRadius: selected ? 16 : 10,
                     offset: const Offset(0, 6),
@@ -2097,14 +2139,22 @@ class _MoodCheckInSummary extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: MoodLogPalette.greenSoft,
+            color: MoodLogPalette.surface,
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: MoodLogPalette.gold, width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: MoodLogPalette.gold.withValues(alpha: .24),
+                blurRadius: 16,
+                spreadRadius: 1,
+              ),
+            ],
           ),
           child: Row(
             children: [
               const Icon(
                 Icons.event_available_outlined,
-                color: MoodLogPalette.green,
+                color: MoodLogPalette.goldText,
                 size: 28,
               ),
               const SizedBox(width: 16),
@@ -2112,6 +2162,15 @@ class _MoodCheckInSummary extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    const Text(
+                      'My Mood Journey',
+                      style: TextStyle(
+                        fontSize: 18,
+                        color: MoodLogPalette.ink,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
                     Text(
                       error != null
                           ? 'Check-in summary unavailable'
@@ -2131,7 +2190,10 @@ class _MoodCheckInSummary extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.eco_outlined, color: MoodLogPalette.green),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: MoodLogPalette.ink,
+              ),
             ],
           ),
         ),
@@ -2188,7 +2250,7 @@ class _MoodSaved extends StatelessWidget {
               const Icon(
                 Icons.check_circle_outline_rounded,
                 size: 56,
-                color: MoodLogPalette.green,
+                color: MoodLogPalette.goldText,
               ),
               const SizedBox(height: 16),
               const Text(
@@ -2210,7 +2272,7 @@ class _MoodSaved extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: choice?.auraColor ?? MoodLogPalette.greenSoft,
+                  color: choice?.auraColor ?? MoodLogPalette.goldSoft,
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: Text(
@@ -2239,12 +2301,15 @@ class _MoodSaved extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: MoodLogPalette.greenSoft,
+            color: MoodLogPalette.goldSoft,
             borderRadius: BorderRadius.circular(16),
           ),
           child: const Row(
             children: [
-              Icon(Icons.event_available_outlined, color: MoodLogPalette.green),
+              Icon(
+                Icons.event_available_outlined,
+                color: MoodLogPalette.goldText,
+              ),
               SizedBox(width: 12),
               Expanded(
                 child: Text('You can check in again if your feelings change.'),
@@ -2271,8 +2336,8 @@ class _MoodSaved extends StatelessWidget {
         OutlinedButton(
           onPressed: onJourney,
           style: OutlinedButton.styleFrom(
-            foregroundColor: MoodLogPalette.green,
-            side: const BorderSide(color: MoodLogPalette.green, width: 1.5),
+            foregroundColor: MoodLogPalette.goldText,
+            side: const BorderSide(color: MoodLogPalette.goldText, width: 1.5),
             minimumSize: const Size.fromHeight(52),
           ),
           child: const Text(
@@ -2283,7 +2348,7 @@ class _MoodSaved extends StatelessWidget {
         TextButton(
           onPressed: onHome,
           style: TextButton.styleFrom(
-            foregroundColor: MoodLogPalette.green,
+            foregroundColor: MoodLogPalette.goldText,
             minimumSize: const Size(48, 48),
           ),
           child: const Text('Return Home'),
