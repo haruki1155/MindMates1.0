@@ -1,6 +1,15 @@
 class MoodV2FeatureFlag {
   const MoodV2FeatureFlag._();
 
+  static String actionLabel({
+    required bool hasCheckedInToday,
+    bool writerEnabled = enabled,
+  }) => writerEnabled
+      ? 'Log a mood'
+      : hasCheckedInToday
+      ? 'View today’s mood'
+      : 'Log your mood';
+
   /// Persistence remains disabled until the reader/UI rollout is approved.
   static const enabled = bool.fromEnvironment(
     'ENABLE_MOOD_V2',

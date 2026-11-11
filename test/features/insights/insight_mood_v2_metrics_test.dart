@@ -1,8 +1,39 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/mood/config/mood_v2_feature_flag.dart';
 import 'package:mind_mates/features/insights/models/insights_models.dart';
 import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 
 void main() {
+  test('writer action copy never locks an enabled logger', () {
+    expect(
+      MoodV2FeatureFlag.actionLabel(
+        hasCheckedInToday: true,
+        writerEnabled: true,
+      ),
+      'Log a mood',
+    );
+    expect(
+      MoodV2FeatureFlag.actionLabel(
+        hasCheckedInToday: false,
+        writerEnabled: true,
+      ),
+      'Log a mood',
+    );
+    expect(
+      MoodV2FeatureFlag.actionLabel(
+        hasCheckedInToday: true,
+        writerEnabled: false,
+      ),
+      'View today’s mood',
+    );
+    expect(
+      MoodV2FeatureFlag.actionLabel(
+        hasCheckedInToday: false,
+        writerEnabled: false,
+      ),
+      'Log your mood',
+    );
+  });
   test('V2 insight metrics keep entry count separate from active days', () {
     final snapshot = MoodAnalytics.summarize(
       MoodHistoryWindow(

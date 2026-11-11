@@ -1,7 +1,7 @@
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
-import {defineString} from "firebase-functions/params";
+import {defineBoolean, defineString} from "firebase-functions/params";
 
 if (!getApps().length) initializeApp();
 
@@ -12,6 +12,7 @@ const EXPRESSION_MODEL_VERSION = "justinshenk_fer_tflite_v1";
 // This deployment parameter is intentionally empty by default. Only a
 // staging deployer may set it, and callable clients cannot override it.
 const moodV2StagingPilotUids = defineString("MOOD_V2_STAGING_PILOT_UIDS", {default: ""});
+const moodV2StagingStudentRolloutEnabled = defineBoolean("MOOD_V2_STAGING_STUDENT_ROLLOUT_ENABLED", {default: false});
 const ALLOWED_FIELDS = new Set([
   "level",
   "label",
@@ -37,6 +38,7 @@ type MoodEntryInput = {
 export type MoodV2RolloutGate = {
   projectId: string;
   pilotUserIds: ReadonlySet<string>;
+  studentRolloutEnabled?: boolean;
 };
 
 function currentProjectId(): string {
@@ -46,6 +48,7 @@ function currentProjectId(): string {
 export function moodV2RolloutGate(): MoodV2RolloutGate {
   return {
     projectId: currentProjectId(),
+    studentRolloutEnabled: moodV2StagingStudentRolloutEnabled.value(),
     pilotUserIds: new Set(
       moodV2StagingPilotUids.value().split(",").map((value) => value.trim()).filter(Boolean),
     ),
@@ -163,7 +166,7 @@ function matchingCanonicalPayload(existing: FirebaseFirestore.DocumentData, inpu
   return Object.entries(expected).every(([key, value]) => (existing[key] ?? null) === value);
 }
 
-async function requireEligibleAppUser(uid: string): Promise<void> {
+async function requireEligibleAppUser(uid: string): Promise<FirebaseFirestore.DocumentData> {
   const profile = await db.collection("users").doc(uid).get();
   const data = profile.data();
   const role = String(data?.populationRole ?? data?.declaredRole ?? data?.role ?? "");
@@ -172,6 +175,7 @@ async function requireEligibleAppUser(uid: string): Promise<void> {
       !["student", "teaching", "nonTeaching"].includes(role) || accountStatus !== "active") {
     throw new HttpsError("failed-precondition", "An active app-user profile is required.");
   }
+  return data!;
 }
 
 function response(document: FirebaseFirestore.DocumentSnapshot): Record<string, unknown> {
@@ -204,9 +208,30 @@ export async function createMoodEntryForUser(
   input: MoodEntryInput,
   trustedInstant: Timestamp = Timestamp.now(),
   gate: MoodV2RolloutGate = moodV2RolloutGate(),
+  allowStudentRollout = false,
 ): Promise<Record<string, unknown>> {
-  await requireEligibleAppUser(uid);
-  requireMoodV2StagingPilot(uid, gate);
+  const profile = await requireEligibleAppUser(uid);
+  // This capability is selected by server code, never request data. The Dev
+  // handler deliberately uses the default pilot-only path.
+  if (gate.projectId === "mindmate-staging" && gate.pilotUserIds.has(uid)) {
+    requireMoodV2StagingPilot(uid, gate);
+  } else {
+    const role = profile.populationRole ?? profile.declaredRole ?? profile.role;
+    const legacyRoles = role === "student" ? ["student"] :
+      role === "teaching" ? ["faculty", "teaching"] :
+        role === "nonTeaching" ? ["staff", "nonTeaching"] : [];
+    const hasCanonicalRole = profile.populationRole !== undefined || profile.declaredRole !== undefined;
+    const consistentRole = legacyRoles.length > 0 &&
+      (hasCanonicalRole || role === "student") &&
+      (profile.populationRole === undefined || profile.populationRole === role) &&
+      (profile.declaredRole === undefined || profile.declaredRole === role) &&
+      (profile.role === undefined || legacyRoles.includes(profile.role));
+    const active = profile.accountStatus === undefined || profile.accountStatus === "active";
+    if (gate.projectId !== "mindmate-staging" || !allowStudentRollout ||
+        gate.studentRolloutEnabled !== true || !active || !consistentRole) {
+      throw new HttpsError("permission-denied", "Mood V2 is not enabled for this account.");
+    }
+  }
   const entryRef = moodEntries.doc(moodEntryDocumentId(uid, input.clientRequestId));
   // One trusted instant is retained on first creation. Retries never recompute
   // the timestamp or Manila day, even if they arrive after midnight.
@@ -236,8 +261,13 @@ export async function createMoodEntryForUser(
 
 export async function createMoodEntryHandler(request: CallableRequest): Promise<Record<string, unknown>> {
   const uid = requireUid(request);
+  return createMoodEntryForUser(uid, parseMoodEntryInput(request.data), Timestamp.now(), moodV2RolloutGate(), true);
+}
+
+export async function createMoodEntryDevHandler(request: CallableRequest): Promise<Record<string, unknown>> {
+  const uid = requireUid(request);
   return createMoodEntryForUser(uid, parseMoodEntryInput(request.data));
 }
 
 export const createMoodEntry = onCall({enforceAppCheck: true}, createMoodEntryHandler);
-export const createMoodEntryDev = onCall({enforceAppCheck: false}, createMoodEntryHandler);
+export const createMoodEntryDev = onCall({enforceAppCheck: false}, createMoodEntryDevHandler);

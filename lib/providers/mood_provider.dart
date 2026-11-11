@@ -23,6 +23,11 @@ class MoodProvider extends ChangeNotifier {
   final MoodCombinedHistoryRepository? _combinedHistoryRepository;
   final bool _useMoodV2Read;
 
+  int _legacySessionGeneration = 0;
+  bool _isLegacySessionCurrent(String uid, int generation) =>
+      generation == _legacySessionGeneration &&
+      (!_isBoundToAuthentication || _authenticatedUserId == uid);
+
   List<MoodModel> _moods = [];
   bool _isLoading = false;
   bool _isLoadingToday = false;
@@ -68,6 +73,13 @@ class MoodProvider extends ChangeNotifier {
     if (_isBoundToAuthentication && _authenticatedUserId == normalized) return;
     _isBoundToAuthentication = true;
     _authenticatedUserId = normalized;
+    _legacySessionGeneration++;
+    _moods = [];
+    _todayMood = null;
+    _dailySaveResult = null;
+    _errorMessage = null;
+    _isLoading = false;
+    _isLoadingToday = false;
     clearMoodV2History();
   }
 
@@ -220,26 +232,35 @@ class MoodProvider extends ChangeNotifier {
   }
 
   Future<void> loadRecentMoods(String userId, {DateTime? now}) async {
+    final generation = _legacySessionGeneration;
+    if (!_isLegacySessionCurrent(userId, generation)) return;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
       final referenceNow = now ?? _nowProvider();
-      _moods = await _repository.fetchRecentMoods(userId);
+      final fetchedMoods = await _repository.fetchRecentMoods(userId);
+      if (!_isLegacySessionCurrent(userId, generation)) return;
+      _moods = fetchedMoods;
       if (_todayMood == null ||
           !_matchesToday(_todayMood!, now: referenceNow)) {
         _todayMood = _moodForToday(_moods, now: referenceNow);
       }
     } catch (error) {
+      if (!_isLegacySessionCurrent(userId, generation)) return;
       _errorMessage = 'Unable to load moods.';
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (_isLegacySessionCurrent(userId, generation)) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> loadTodayMood(String userId, {DateTime? now}) async {
+    final generation = _legacySessionGeneration;
+    if (!_isLegacySessionCurrent(userId, generation)) return;
     final referenceNow = now ?? _nowProvider();
     if (_todayMood != null && !_matchesToday(_todayMood!, now: referenceNow)) {
       _todayMood = null;
@@ -253,15 +274,19 @@ class MoodProvider extends ChangeNotifier {
         userId,
         now: referenceNow,
       );
+      if (!_isLegacySessionCurrent(userId, generation)) return;
       _todayMood = fetched != null && _matchesToday(fetched, now: referenceNow)
           ? fetched
           : null;
       if (_todayMood != null) _insertMood(_todayMood!);
     } catch (_) {
+      if (!_isLegacySessionCurrent(userId, generation)) return;
       _errorMessage = 'Unable to load today\'s mood.';
     } finally {
-      _isLoadingToday = false;
-      notifyListeners();
+      if (_isLegacySessionCurrent(userId, generation)) {
+        _isLoadingToday = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -276,6 +301,8 @@ class MoodProvider extends ChangeNotifier {
     String? expressionModelVersion,
     DateTime? now,
   }) async {
+    final generation = _legacySessionGeneration;
+    if (!_isLegacySessionCurrent(userId, generation)) return false;
     final referenceNow = now ?? _nowProvider();
     _errorMessage = null;
     try {
@@ -290,12 +317,14 @@ class MoodProvider extends ChangeNotifier {
         expressionModelVersion: expressionModelVersion,
         now: referenceNow,
       );
+      if (!_isLegacySessionCurrent(userId, generation)) return false;
       _dailySaveResult = result;
       _todayMood = result.mood;
       _insertMood(result.mood);
       notifyListeners();
       return true;
     } catch (_) {
+      if (!_isLegacySessionCurrent(userId, generation)) return false;
       _errorMessage = 'Unable to save mood.';
       notifyListeners();
       return false;

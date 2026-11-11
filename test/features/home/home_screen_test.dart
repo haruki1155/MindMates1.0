@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/mood/config/mood_v2_feature_flag.dart';
 import 'package:mind_mates/features/home/data/daily_affirmation_quotes.dart';
 import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
@@ -261,12 +262,30 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('Log your mood').first);
+    expect(find.text('Mood check-ins'), findsNothing);
+    if (MoodV2FeatureFlag.enabled) {
+      expect(find.text('Log a mood'), findsOneWidget);
+    }
+    await tester.tap(
+      find
+          .text(MoodV2FeatureFlag.enabled ? 'Log a mood' : 'Log your mood')
+          .first,
+    );
     await tester.pumpAndSettle();
 
-    expect(find.text('How are you feeling?'), findsOneWidget);
-    expect(find.text("What's on your mind today?"), findsOneWidget);
-    expect(find.text('0/300 characters'), findsOneWidget);
+    expect(
+      find.text(
+        MoodV2FeatureFlag.enabled
+            ? 'How are you feeling right now?'
+            : 'How are you feeling?',
+      ),
+      findsOneWidget,
+    );
+    expect(find.byType(TextField), findsOneWidget);
+    expect(
+      find.text(MoodV2FeatureFlag.enabled ? '0/300' : '0/300 characters'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('home assessment banner can be dismissed for the session', (

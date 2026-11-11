@@ -915,7 +915,9 @@ class _WeeklyGlanceCard extends StatelessWidget {
                   shape: const StadiumBorder(),
                 ),
                 child: Text(
-                  actionLabel.startsWith('View')
+                  MoodV2FeatureFlag.enabled
+                      ? 'Log a mood'
+                      : actionLabel.startsWith('View')
                       ? "View today's mood"
                       : 'Log mood',
                   style: const TextStyle(
