@@ -14,6 +14,7 @@ import '../../../providers/mood_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../../models/mood_model.dart';
+import '../domain/mood_v2_analytics.dart';
 import '../../../repositories/mood_repository.dart';
 import '../../../repositories/mood_v2_repository.dart';
 import '../config/mood_v2_feature_flag.dart';
@@ -53,6 +54,8 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   bool _isLoadingToday = false;
   String? _todayError;
   MoodModel? _todayMood;
+  MoodV2Event? _confirmedV2Entry;
+  int _todayLoadGeneration = 0;
   String? _loadedUserId;
   String? _moodV2RequestId;
   _MoodV2Draft? _moodV2RetryDraft;
@@ -77,6 +80,16 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     if (_loadedUserId == userId) return;
     _invalidateMoodV2Request();
     _loadedUserId = userId;
+    _todayLoadGeneration++;
+    _todayMood = null;
+    _todayError = null;
+    _isLoadingToday = false;
+    _confirmedV2Entry = null;
+    _selectedMood = null;
+    _expressionCue = null;
+    _expressionCueSource = null;
+    _expressionSuggestionAccepted = null;
+    _noteController.clear();
     if (userId == null || userId.isEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _currentUserId() == userId) _loadTodayMood(userId);
@@ -116,7 +129,11 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           physics: const BouncingScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(
-              child: _MoodLogHeader(showingResult: _todayMood != null),
+              child: _MoodLogHeader(
+                showingResult: widget.moodV2Enabled
+                    ? _confirmedV2Entry != null
+                    : _todayMood != null,
+              ),
             ),
             SliverPadding(
               padding: EdgeInsets.fromLTRB(
@@ -146,13 +163,50 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     final showV2History =
         MoodV2FeatureFlag.historyRead &&
         (moodProvider?.isMoodV2ReadEnabled ?? false);
-    if (_isLoadingToday) {
+    if (widget.moodV2Enabled && _confirmedV2Entry != null) {
+      final entry = _confirmedV2Entry!;
+      return Column(
+        children: [
+          Card(
+            key: const ValueKey('mood-v2-confirmation'),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  Text(
+                    'Mood entry saved',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    entry.label?.isNotEmpty == true
+                        ? entry.label!
+                        : 'Mood ${entry.level}/5',
+                  ),
+                  Text('Recorded on ${entry.dateKey} (Asia/Manila)'),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    key: const ValueKey('mood-v2-add-entry'),
+                    onPressed: _startAdditionalMoodEntry,
+                    icon: const Icon(Icons.add_circle_outline_rounded),
+                    label: const Text('Log another mood entry'),
+                  ),
+                  const Text('This is a wellness record, not a diagnosis.'),
+                ],
+              ),
+            ),
+          ),
+          if (showV2History) _buildMoodV2HistoryPanel(moodProvider),
+        ],
+      );
+    }
+    if (!widget.moodV2Enabled && _isLoadingToday) {
       return const SizedBox(
         height: 360,
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    if (_todayError != null) {
+    if (!widget.moodV2Enabled && _todayError != null) {
       return _MoodLoadError(
         message: _todayError!,
         onRetry: () {
@@ -161,7 +215,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         },
       );
     }
-    if (_todayMood != null) {
+    if (!widget.moodV2Enabled && _todayMood != null) {
       return Column(
         children: [
           _DailyMoodResult(
@@ -241,6 +295,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
               (_expressionCue == null || _expressionSuggestionAccepted != null),
           isSaving: _isSaving,
           onPressed: _saveMood,
+          label: widget.moodV2Enabled
+              ? 'Save mood entry'
+              : 'Save mood check-in',
         ),
         if (showV2History) ...[
           const SizedBox(height: 20),
@@ -274,6 +331,8 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       );
 
   Future<void> _openExpressionCheckIn() async {
+    final userId = _currentUserId();
+    final generation = _moodV2RequestGeneration;
     final result = await Navigator.of(context).push<ExpressionCheckInResult>(
       MaterialPageRoute(
         builder:
@@ -281,7 +340,13 @@ class _LogMoodScreenState extends State<LogMoodScreen>
             (_) => const ExpressionCheckInScreen(),
       ),
     );
-    if (!mounted || result?.completed != true || result?.cue == null) return;
+    if (!mounted ||
+        _currentUserId() != userId ||
+        generation != _moodV2RequestGeneration ||
+        result?.completed != true ||
+        result?.cue == null) {
+      return;
+    }
     setState(() {
       _expressionCue = result!.cue;
       _expressionCueSource = result.source;
@@ -300,6 +365,16 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   }
 
   Future<void> _loadTodayMood(String userId) async {
+    final generation = ++_todayLoadGeneration;
+    if (widget.moodV2Enabled) {
+      if (MoodV2FeatureFlag.historyRead) {
+        await _readProviderOrNull<MoodProvider>()?.loadMoodV2History(
+          userId,
+          now: _now,
+        );
+      }
+      return;
+    }
     final provider = _readProviderOrNull<MoodProvider>();
     if (provider == null) return;
     setState(() {
@@ -310,7 +385,11 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     if (MoodV2FeatureFlag.historyRead) {
       await provider.loadMoodV2History(userId, now: _now);
     }
-    if (!mounted) return;
+    if (!mounted ||
+        generation != _todayLoadGeneration ||
+        _currentUserId() != userId) {
+      return;
+    }
     setState(() {
       _isLoadingToday = false;
       _todayMood = provider.todayMood;
@@ -340,6 +419,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       return;
     }
     final referenceNow = _now;
+    final generation = _moodV2RequestGeneration;
 
     final success = await moodProvider.logDailyMood(
       userId: userId,
@@ -357,7 +437,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       now: referenceNow,
     );
 
-    if (!mounted) return;
+    if (!_isCurrentMoodV2Request(userId, generation)) return;
 
     if (!success) {
       setState(() => _isSaving = false);
@@ -368,8 +448,15 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     var reportRefreshed = true;
     try {
       await _readProviderOrNull<UserProvider>()?.loadProfile(userId);
+      if (!_isCurrentMoodV2Request(userId, generation)) return;
       await moodProvider.loadRecentMoods(userId, now: referenceNow);
+      if (!_isCurrentMoodV2Request(userId, generation)) return;
+      if (MoodV2FeatureFlag.historyRead && moodProvider.isMoodV2ReadEnabled) {
+        await moodProvider.loadMoodV2History(userId, now: referenceNow);
+      }
+      if (!_isCurrentMoodV2Request(userId, generation)) return;
       await _readProviderOrNull<ReportProvider>()?.refreshWeeklyReport(userId);
+      if (!_isCurrentMoodV2Request(userId, generation)) return;
       await _readProviderOrNull<InsightsProvider>()?.refreshLoadedContext(
         userId,
       );
@@ -377,7 +464,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       reportRefreshed = false;
     }
 
-    if (!mounted) return;
+    if (!_isCurrentMoodV2Request(userId, generation)) return;
     setState(() {
       _isSaving = false;
       _todayMood = moodProvider.todayMood;
@@ -398,6 +485,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
 
   void _startAdditionalMoodEntry() {
     setState(() {
+      _confirmedV2Entry = null;
       _todayMood = null;
       _moodV2RequestId = null;
       _moodV2RetryDraft = null;
@@ -421,7 +509,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     );
     final requestGeneration = _moodV2RequestGeneration;
     try {
-      await writer.create(
+      final entry = await writer.create(
         level: draft.level,
         label: draft.label,
         note: draft.note,
@@ -431,6 +519,8 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         expressionModelVersion: draft.expressionModelVersion,
         clientRequestId: requestId,
       );
+      if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
+      _confirmedV2Entry = entry;
     } catch (_) {
       if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
       setState(() {
@@ -508,15 +598,19 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     final delay = nextMidnight.difference(manila) + const Duration(seconds: 1);
     _midnightTimer = Timer(delay, () {
       if (!mounted) return;
-      setState(() {
-        _todayMood = null;
-        _selectedMood = null;
-        _expressionCue = null;
-        _expressionCueSource = null;
-        _expressionSuggestionAccepted = null;
-        _invalidateMoodV2Request();
-        _noteController.clear();
-      });
+      // V2 requests represent intentional events, not daily check-ins. Keep
+      // their draft, frozen retry payload and pending response valid overnight.
+      if (!widget.moodV2Enabled) {
+        setState(() {
+          _todayMood = null;
+          _selectedMood = null;
+          _expressionCue = null;
+          _expressionCueSource = null;
+          _expressionSuggestionAccepted = null;
+          _invalidateMoodV2Request();
+          _noteController.clear();
+        });
+      }
       final userId = _currentUserId();
       if (userId != null) _loadTodayMood(userId);
       _scheduleMidnightRefresh();
@@ -1409,11 +1503,13 @@ class _SaveMoodButton extends StatelessWidget {
     required this.isEnabled,
     required this.isSaving,
     required this.onPressed,
+    required this.label,
   });
 
   final bool isEnabled;
   final bool isSaving;
   final VoidCallback onPressed;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -1439,7 +1535,7 @@ class _SaveMoodButton extends StatelessWidget {
                 dimension: 20,
                 child: CircularProgressIndicator(strokeWidth: 2.4),
               )
-            : const Text('Save mood check-in'),
+            : Text(label),
       ),
     );
   }

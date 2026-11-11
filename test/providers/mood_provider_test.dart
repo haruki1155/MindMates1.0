@@ -8,6 +8,47 @@ import 'package:mind_mates/repositories/mood_combined_history_repository.dart';
 import 'package:mind_mates/repositories/mood_repository.dart';
 
 void main() {
+  test(
+    'legacy pending load cannot enter a new authenticated session',
+    () async {
+      final repo = _PendingLegacyRepository();
+      final provider = MoodProvider(repo);
+      provider.bindAuthenticatedUser('old');
+      final load = provider.loadTodayMood('old');
+      provider.bindAuthenticatedUser('new');
+      repo.pending.complete(
+        MoodModel(
+          id: 'old-record',
+          userId: 'old',
+          level: 2,
+          createdAt: DateTime.now(),
+        ),
+      );
+      await load;
+      expect(provider.todayMood, isNull);
+      expect(provider.isLoadingToday, isFalse);
+    },
+  );
+  test('legacy pending save cannot enter a logged-out session', () async {
+    final repo = _PendingLegacyRepository();
+    final provider = MoodProvider(repo);
+    provider.bindAuthenticatedUser('old');
+    final save = provider.logDailyMood(userId: 'old', level: 2);
+    provider.bindAuthenticatedUser(null);
+    repo.save.complete(
+      DailyMoodSaveResult(
+        mood: MoodModel(
+          id: 'old-record',
+          userId: 'old',
+          level: 2,
+          createdAt: DateTime.now(),
+        ),
+        created: true,
+      ),
+    );
+    expect(await save, isFalse);
+    expect(provider.todayMood, isNull);
+  });
   test('preserves a saved same-day mood during refresh', () async {
     final now = DateTime(2026, 7, 7, 12);
     final repository = _FakeMoodRepository(
@@ -662,4 +703,24 @@ class _FakeMoodRepository extends MoodRepository {
     createdNow = now;
     return 'mood_1';
   }
+}
+
+class _PendingLegacyRepository extends MoodRepository {
+  final pending = Completer<MoodModel?>();
+  final save = Completer<DailyMoodSaveResult>();
+  @override
+  Future<MoodModel?> fetchTodayMood(String userId, {DateTime? now}) =>
+      pending.future;
+  @override
+  Future<DailyMoodSaveResult> saveDailyMood({
+    required String userId,
+    required int level,
+    String? label,
+    String? note,
+    String? entryMethod,
+    bool? expressionAssistUsed,
+    bool? expressionSuggestionAccepted,
+    String? expressionModelVersion,
+    DateTime? now,
+  }) => save.future;
 }
