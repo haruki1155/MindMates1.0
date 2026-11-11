@@ -146,19 +146,16 @@ class _RoleContent extends StatelessWidget {
         const SizedBox(height: 28),
         _RoleCard(
           role: AssessmentRole.student,
-          icon: '🎓',
           onTap: () => _selectRole(context, AssessmentRole.student),
         ),
         const SizedBox(height: 16),
         _RoleCard(
           role: AssessmentRole.faculty,
-          icon: '👩‍🏫',
           onTap: () => _selectRole(context, AssessmentRole.faculty),
         ),
         const SizedBox(height: 16),
         _RoleCard(
           role: AssessmentRole.staff,
-          icon: '🧑‍🤝‍🧑',
           onTap: () => _selectRole(context, AssessmentRole.staff),
         ),
         const SizedBox(height: 48),
@@ -198,14 +195,9 @@ String _profileName(BuildContext context) {
 }
 
 class _RoleCard extends StatelessWidget {
-  const _RoleCard({
-    required this.role,
-    required this.icon,
-    required this.onTap,
-  });
+  const _RoleCard({required this.role, required this.onTap});
 
   final AssessmentRole role;
-  final String icon;
   final VoidCallback onTap;
 
   @override
@@ -225,7 +217,7 @@ class _RoleCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              QuickPlaceholderIcon(icon: icon, size: 28),
+              QuickRoleIcon(role: role),
               const SizedBox(width: 13),
               Expanded(
                 child: Column(

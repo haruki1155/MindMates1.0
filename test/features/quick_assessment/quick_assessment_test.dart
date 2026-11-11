@@ -647,6 +647,27 @@ void main() {
       expect(assessmentProvider.name, 'Leo Cruz');
     });
   });
+
+  testWidgets('role choices use Material role icons, not emoji', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AssessmentProvider>(
+        create: (_) => AssessmentProvider(AssessmentRepository()),
+        child: const MaterialApp(home: QuickAssessmentRoleScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.school_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.co_present_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.badge_rounded), findsOneWidget);
+    for (final emoji in ['🎓', '👩‍🏫', '🧑‍🤝‍🧑']) {
+      expect(find.text(emoji), findsNothing);
+    }
+  });
 }
 
 Future<void> _pumpRoleScreen(

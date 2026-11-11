@@ -122,17 +122,6 @@ class _QuickAssessmentCategoryScreenState
       );
     });
   }
-
-  static String iconFor(AssessmentRole role) {
-    switch (role) {
-      case AssessmentRole.student:
-        return 'ST';
-      case AssessmentRole.faculty:
-        return 'FC';
-      case AssessmentRole.staff:
-        return 'SF';
-    }
-  }
 }
 
 class _DecisionContent extends StatelessWidget {
@@ -165,10 +154,7 @@ class _DecisionContent extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          QuickPlaceholderIcon(
-            icon: _QuickAssessmentCategoryScreenState.iconFor(role),
-            size: 20,
-          ),
+          QuickRoleIcon(role: role, size: 30),
           if (provider.quickResult != null) ...[
             const SizedBox(height: 16),
             const Text(
