@@ -498,6 +498,21 @@ test("revokeStudentActivation tolerates a missing Auth user and users doc", asyn
   assert.equal(await storedCodeVerifies("RV2", out.code.code), true);
 });
 
+/** Runs the backfill and asserts exactly one audit for this call, matched by actor, action and a time window. */
+async function backfillAudited(): Promise<{flagged: number; notInRoster: number}> {
+  const since = Date.now() - 1000;
+  const out = await backfill.run({auth, data: {}}) as {flagged: number; notInRoster: number};
+  const until = Date.now() + 1000;
+  const mine = (await auditsFor("STUDENT_INFO_REQUIREMENT_BACKFILLED")).filter((a) => {
+    const at = (a.createdAt as Timestamp).toMillis();
+    return at >= since && at <= until && a.metadata?.flagged === out.flagged && a.metadata?.notInRoster === out.notInRoster;
+  });
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].category, "USER_MANAGEMENT");
+  assert.deepEqual(mine[0].metadata, {flagged: out.flagged, notInRoster: out.notInRoster});
+  return out;
+}
+
 test("backfillStudentInfoRequirement flags students without personal info, idempotently", async () => {
   const missing = `${run}-bf-missing`;
   const has = `${run}-bf-has`;
@@ -506,14 +521,14 @@ test("backfillStudentInfoRequirement flags students without personal info, idemp
   await put(db.collection("users").doc(has), {populationRole: "student", schoolId: `${run}-BF2`, rosterLinked: true});
   await put(db.collection("student_personal_info").doc(has), {sex: "Male"});
   await put(db.collection("users").doc(teacher), {populationRole: "teaching"});
-  const out = await backfill.run({auth, data: {}}) as {flagged: number; notInRoster: number};
+  const out = await backfillAudited();
   assert.ok(out.flagged >= 1);
   assert.ok(out.notInRoster >= 1);
   assert.equal((await db.collection("users").doc(missing).get()).data()!.personalInfoRequired, true);
   assert.equal((await db.collection("users").doc(has).get()).data()!.personalInfoRequired, undefined);
   assert.equal((await db.collection("users").doc(teacher).get()).data()!.personalInfoRequired, undefined);
   const snapshot = (await db.collection("users").doc(missing).get()).updateTime;
-  await backfill.run({auth, data: {}});
+  await backfillAudited();
   assert.deepEqual((await db.collection("users").doc(missing).get()).updateTime, snapshot);
 
   const legacy = await listLegacy.run({auth, data: {}}) as {rows: {userId: string; schoolId: string; name: string}[]};

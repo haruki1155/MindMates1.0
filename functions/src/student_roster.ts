@@ -662,7 +662,8 @@ export const listStudentRosterImports = onCall(async (request) => {
 });
 
 export const backfillStudentInfoRequirement = onCall({timeoutSeconds: 540}, async (request) => {
-  await requireAdmin(requireUid(request));
+  const actorId = requireUid(request);
+  const actor = await requireAdmin(actorId);
   const db = database();
   const students = (await db.collection("users").where("populationRole", "==", "student")
     .select("personalInfoRequired", "rosterLinked", "accountStatus").get()).docs
@@ -670,9 +671,16 @@ export const backfillStudentInfoRequirement = onCall({timeoutSeconds: 540}, asyn
   const candidates = students.filter((d) => d.data().personalInfoRequired !== true);
   const infos = await getAllChunked(candidates.map((d) => db.collection("student_personal_info").doc(d.id)));
   const toFlag = candidates.filter((_, i) => !infos[i].exists);
-  await commitOps(toFlag.map((d) => (b: WriteBatch) =>
-    b.update(d.ref, {personalInfoRequired: true, updatedAt: FieldValue.serverTimestamp()})));
-  return {flagged: toFlag.length, notInRoster: students.filter((d) => d.data().rosterLinked !== true).length};
+  const counts = {flagged: toFlag.length, notInRoster: students.filter((d) => d.data().rosterLinked !== true).length};
+  const ops: ((b: WriteBatch) => void)[] = toFlag.map((d) => (b: WriteBatch) =>
+    b.update(d.ref, {personalInfoRequired: true, updatedAt: FieldValue.serverTimestamp()}));
+  // One audit per call, written even when nothing was flagged; it lands in the last batch.
+  ops.push((b) => writeAuditBatch(b, db, {
+    actorId, ...adminMeta(actor), action: "STUDENT_INFO_REQUIREMENT_BACKFILLED", category: AUDIT_CATEGORIES.userManagement,
+    targetType: "student_roster", metadata: counts,
+  }));
+  await commitOps(ops);
+  return counts;
 });
 
 export const issueStudentActivationCodes = onCall(async (request) => {
