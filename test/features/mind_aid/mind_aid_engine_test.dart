@@ -496,7 +496,8 @@ void main() {
             mindfulBreathingMinutes: 6,
             recommendedNextActions: const ['Talk to PACC'],
           ),
-          user: const {'dayStreak': 5},
+          user: const {'dayStreak': 5, 'lastActivityDateKey': '2026-07-04'},
+          now: DateTime(2026, 7, 4, 12),
         );
 
         expect(snapshot, isNotNull);
@@ -510,6 +511,16 @@ void main() {
         expect(snapshot.breathingSessionCount, 2);
       },
     );
+
+    test('streak drops to 0 when the last mood check-in is stale', () {
+      final snapshot = MindAidContextRepository.buildSnapshot(
+        user: const {'dayStreak': 5, 'lastActivityDateKey': '2026-07-01'},
+        now: DateTime(2026, 7, 4, 12),
+      );
+
+      expect(snapshot, isNotNull);
+      expect(snapshot!.currentStreak, 0);
+    });
 
     test('returns null when no wellness signals are available', () {
       final snapshot = MindAidContextRepository.buildSnapshot();
