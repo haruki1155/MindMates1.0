@@ -4,7 +4,8 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {importStudentRoster, previewStudentRosterImport} from "./index";
-import {issueCodesFor} from "./student_roster";
+import {issueCodesFor, rosterTestHooks} from "./student_roster";
+import {verifyActivationCode} from "./student_roster_domain";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
 
@@ -189,4 +190,41 @@ test("issueCodesFor overwrites codes only for active unactivated rows", async ()
   const after = (await roster("I2").get()).data()!;
   assert.notEqual(after.activationCode.hash, before.activationCode.hash);
   assert.ok(!JSON.stringify(after).includes(codes[0].code));
+});
+
+test("successful import reports complete on response and record", async () => {
+  const out = await commit.run({auth, data: {fileName: "r.xlsx", rows: [row("C1")]}}) as Imported & {status: string};
+  assert.equal(out.status, "complete");
+  const rec = (await db.collection("student_roster_imports").doc(out.importId).get()).data()!;
+  assert.equal(rec.status, "complete");
+  assert.deepEqual(rec.counts, {new: 1, updated: 0, linked: 0});
+});
+
+test("a failing later batch yields a partial result with codes only for committed rows", async () => {
+  rosterTestHooks.batchLimit = 1;
+  rosterTestHooks.afterClassify = async () => {
+    await roster("P2").set({studentKey: keyOf(`${run}-P2`), concurrent: true});
+  };
+  try {
+    const out = await commit.run({auth, data: {fileName: "r.xlsx", rows: [row("P1"), row("P2"), row("P3")]}}) as
+      Imported & {status: string; failedRows: {studentNo: string}[]; message: string};
+    assert.equal(out.status, "partial");
+    assert.deepEqual(out.counts, {new: 1, updated: 0, linked: 0});
+    assert.deepEqual(out.codes.map((c) => c.studentNo), [`${run}-P1`]);
+    assert.deepEqual(out.failedRows.map((f) => f.studentNo), [`${run}-P2`, `${run}-P3`]);
+    const stored = (await roster("P1").get()).data()!.activationCode;
+    assert.ok(await verifyActivationCode(out.codes[0].code, {
+      hash: stored.hash, salt: stored.salt, issuedAt: stored.issuedAt.toDate(), expiresAt: stored.expiresAt.toDate()}));
+    assert.equal((await roster("P3").get()).exists, false);
+    const rec = (await db.collection("student_roster_imports").doc(out.importId).get()).data()!;
+    assert.equal(rec.status, "partial");
+    assert.deepEqual(rec.counts, {new: 1, updated: 0, linked: 0});
+    const audit = (await db.collection("admin_audit_logs").where("targetId", "==", out.importId).get()).docs[0].data();
+    assert.deepEqual(audit.metadata.counts, {new: 1, updated: 0, linked: 0});
+    assert.equal(audit.metadata.partial, true);
+    assert.ok(!JSON.stringify([rec, audit]).includes(out.codes[0].code));
+  } finally {
+    rosterTestHooks.batchLimit = undefined;
+    rosterTestHooks.afterClassify = undefined;
+  }
 });

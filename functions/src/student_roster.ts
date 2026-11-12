@@ -13,7 +13,10 @@ if (!getApps().length) initializeApp();
 
 const MAX_ROWS = 1000;
 const GET_ALL_CHUNK = 300;
-const BATCH_LIMIT = 450;
+const batchLimit = 450;
+
+/** Test seam only: shrink batches and run code after classification. */
+export const rosterTestHooks: {batchLimit?: number; afterClassify?: () => Promise<void>} = {};
 
 export type IssuedCode = {studentNo: string; name: string; college: string; course: string; yearLevel: string;
   code: string; expiresAt: string};
@@ -198,9 +201,9 @@ export async function issueCodesFor(keys: string[], actorId: string): Promise<Is
 
 async function commitOps(ops: ((b: WriteBatch) => void)[]): Promise<void> {
   const db = database();
-  for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
+  for (let i = 0; i < ops.length; i += batchLimit) {
     const batch = db.batch();
-    for (const op of ops.slice(i, i + BATCH_LIMIT)) op(batch);
+    for (const op of ops.slice(i, i + batchLimit)) op(batch);
     await batch.commit();
   }
 }
@@ -230,6 +233,9 @@ function userAcademicFields(v: OfficialFields): Record<string, unknown> {
 const PREVIOUS_FIELDS = ["schoolId", "dateOfBirthKey", "collegeId", "courseId", "departmentId", "department", "course", "yearLevel",
   "populationRole"];
 
+type Unit = {ops: ((b: WriteBatch) => void)[]; kind: "new" | "updated" | "linked"; index: number; studentNo: string;
+  code?: IssuedCode; previous?: Record<string, unknown>};
+
 export const importStudentRoster = onCall(async (request) => {
   const actorId = requireUid(request);
   const actor = await requireAdmin(actorId);
@@ -241,64 +247,100 @@ export const importStudentRoster = onCall(async (request) => {
     throw new HttpsError("invalid-argument", `${bad.length} row(s) have errors. Fix them and try again.`,
       {rows: bad.map((c) => ({index: c.index, studentNo: c.studentNo, errors: c.errors}))});
   }
+  if (rosterTestHooks.afterClassify) await rosterTestHooks.afterClassify();
 
   const db = database();
   const importRef = db.collection("student_roster_imports").doc();
   const newRows = classified.filter((c) => c.kind === "new");
   const minted = await Promise.all(newRows.map(() => mintCode()));
-  const codes: IssuedCode[] = [];
-  const counts = {new: 0, updated: 0, linked: 0};
-  const previous: Record<string, unknown>[] = [];
-  const ops: ((b: WriteBatch) => void)[] = [];
   const actorMeta = {actorNameSnapshot: String(actor.name ?? "") || (await actorSnapshot(actorId)).actorNameSnapshot,
     actorRoleSnapshot: roleOf(actor) || "admin"};
 
-  for (const c of classified) {
+  const units: Unit[] = classified.map((c) => {
     const v = c.value as OfficialFields;
     const rosterRef = db.collection("student_roster").doc(v.studentKey);
+    const base = {index: c.index, studentNo: v.studentNo};
     if (c.kind === "new") {
       const m = minted[newRows.indexOf(c)];
-      counts.new += 1;
-      codes.push(issued(v as unknown as Doc, m));
-      ops.push((b) => b.create(rosterRef, {
+      return {...base, kind: "new", code: issued(v as unknown as Doc, m), ops: [(b: WriteBatch) => b.create(rosterRef, {
         ...officialFields(v), status: "active", activated: false, userId: null,
         activationCode: storedCodeField(m.stored), importId: importRef.id,
         createdBy: actorId, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-      }));
-    } else if (c.kind === "link") {
-      counts.linked += 1;
+      })]};
+    }
+    if (c.kind === "link") {
       const uid = c.linkUid as string;
       const prev = c.linkUser ?? {};
-      previous.push({studentNo: v.studentNo, userId: uid,
-        previous: Object.fromEntries(PREVIOUS_FIELDS.map((f) => [f, prev[f] === undefined ? null : prev[f]]))});
-      ops.push((b) => b.set(rosterRef, {
-        ...officialFields(v), status: c.existing?.status ?? "active", activated: true, userId: uid, activationCode: null,
-        linkedAt: FieldValue.serverTimestamp(), importId: importRef.id,
-        ...(c.existing ? {} : {createdBy: actorId, createdAt: FieldValue.serverTimestamp()}),
-        updatedAt: FieldValue.serverTimestamp(),
-      }, {merge: true}));
-      ops.push((b) => b.set(db.collection("users").doc(uid), {
-        ...userAcademicFields(v), rosterLinked: true, personalInfoRequired: !c.personalInfoExists,
-      }, {merge: true}));
-    } else {
-      counts.updated += 1;
-      ops.push((b) => b.update(rosterRef, {...officialFields(v), importId: importRef.id, updatedAt: FieldValue.serverTimestamp()}));
-      const uid = c.existing?.activated === true ? String(c.existing.userId ?? "") : "";
-      if (uid) ops.push((b) => b.set(db.collection("users").doc(uid), userAcademicFields(v), {merge: true}));
+      return {...base, kind: "linked", previous: {studentNo: v.studentNo, userId: uid,
+        previous: Object.fromEntries(PREVIOUS_FIELDS.map((f) => [f, prev[f] === undefined ? null : prev[f]]))},
+      ops: [
+        (b: WriteBatch) => b.set(rosterRef, {
+          ...officialFields(v), status: c.existing?.status ?? "active", activated: true, userId: uid, activationCode: null,
+          linkedAt: FieldValue.serverTimestamp(), importId: importRef.id,
+          ...(c.existing ? {} : {createdBy: actorId, createdAt: FieldValue.serverTimestamp()}),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, {merge: true}),
+        (b: WriteBatch) => b.set(db.collection("users").doc(uid), {
+          ...userAcademicFields(v), rosterLinked: true, personalInfoRequired: !c.personalInfoExists,
+        }, {merge: true}),
+      ]};
+    }
+    const uid = c.existing?.activated === true ? String(c.existing.userId ?? "") : "";
+    return {...base, kind: "updated", ops: [
+      (b: WriteBatch) => b.update(rosterRef, {...officialFields(v), importId: importRef.id, updatedAt: FieldValue.serverTimestamp()}),
+      ...(uid ? [(b: WriteBatch) => b.set(db.collection("users").doc(uid), userAcademicFields(v), {merge: true})] : []),
+    ]};
+  });
+
+  // Never split a row across batches.
+  const limit = rosterTestHooks.batchLimit ?? batchLimit;
+  const groups: Unit[][] = [];
+  let size = 0;
+  for (const u of units) {
+    if (!groups.length || size + u.ops.length > limit) {
+      groups.push([]);
+      size = 0;
+    }
+    groups[groups.length - 1].push(u);
+    size += u.ops.length;
+  }
+
+  await importRef.create({fileName, status: "pending", rowCount: rows.length, actorId,
+    counts: {new: 0, updated: 0, linked: 0}, createdAt: FieldValue.serverTimestamp()});
+
+  const counts = {new: 0, updated: 0, linked: 0};
+  const codes: IssuedCode[] = [];
+  const previous: Record<string, unknown>[] = [];
+  let failedRows: {index: number; studentNo: string}[] = [];
+  for (let g = 0; g < groups.length; g++) {
+    const batch = db.batch();
+    for (const u of groups[g]) for (const op of u.ops) op(batch);
+    try {
+      await batch.commit();
+    } catch {
+      failedRows = groups.slice(g).flat().map((u) => ({index: u.index, studentNo: u.studentNo}));
+      break;
+    }
+    for (const u of groups[g]) {
+      counts[u.kind] += 1;
+      if (u.code) codes.push(u.code);
+      if (u.previous) previous.push(u.previous);
     }
   }
 
-  // The import record and audit entry go into the first batch.
-  const header: ((b: WriteBatch) => void)[] = [
-    (b) => b.create(importRef, {
-      fileName, counts, rowCount: rows.length, actorId, createdAt: FieldValue.serverTimestamp(),
-    }),
-    (b) => writeAuditBatch(b, db, {
-      actorId, ...actorMeta, action: "STUDENT_ROSTER_IMPORTED", category: AUDIT_CATEGORIES.userManagement,
-      targetType: "student_roster_import", targetId: importRef.id,
-      metadata: {fileName, counts, rowCount: rows.length, linkedPreviousValues: previous},
-    }),
-  ];
-  await commitOps([...header, ...ops]);
-  return {importId: importRef.id, counts, codes};
+  const partial = failedRows.length > 0;
+  const final = db.batch();
+  final.update(importRef, {status: partial ? "partial" : "complete", counts, ...(partial ? {failedRows} : {}),
+    completedAt: FieldValue.serverTimestamp()});
+  writeAuditBatch(final, db, {
+    actorId, ...actorMeta, action: "STUDENT_ROSTER_IMPORTED", category: AUDIT_CATEGORIES.userManagement,
+    targetType: "student_roster_import", targetId: importRef.id,
+    metadata: {fileName, counts, rowCount: rows.length, linkedPreviousValues: previous, ...(partial ? {partial: true} : {})},
+  });
+  await final.commit();
+  if (partial) {
+    return {status: "partial", importId: importRef.id, counts, codes, failedRows,
+      message: "Import stopped partway. Rows saved so far are listed; fix the file and re-import the rest."};
+  }
+  return {status: "complete", importId: importRef.id, counts, codes};
 });
