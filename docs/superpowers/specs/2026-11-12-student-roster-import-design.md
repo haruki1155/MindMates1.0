@@ -1,6 +1,6 @@
 # Student roster import, activation and self-maintained Student Information
 
-Status: approved in brainstorming; awaiting written-spec review.
+Status: approved; amended by the pre-implementation security review (see "Security review amendments").
 
 ## Purpose
 Replace student self-registration with an administrator-imported roster. Students claim (activate) their pre-imported record, then complete and maintain the school's Student Information form inside the app. Teaching and Non-Teaching personnel keep self-registering through an employee-only Sign Up. Accounts underpin every feature and the form contains sensitive personal data (addresses, family, guardian, civil status), so authorization is enforced server-side and in Firestore rules, never only in UI.
@@ -8,7 +8,7 @@ Replace student self-registration with an administrator-imported roster. Student
 ## Decisions (agreed)
 | Topic | Decision |
 |---|---|
-| First access | Activation/claim: no pre-created logins, no default passwords. |
+| First access | Activation/claim: no pre-created logins, no default passwords. Proof of identity = Student No. + one-time activation code (issued at import, distributed by the school) + date of birth. |
 | Import contents | Registrar roster only: Student No., Surname, First, Middle Name, Date of Birth, College, Course, Year Level. Students fill in the rest. |
 | Existing (self-registered) students | Keep and link by Student No.; refresh official fields; require the new form at next login; unmatched accounts flagged "Legacy – not in roster", not blocked. |
 | Student editing | Official fields read-only with "Request correction" (admin approves); personal fields freely editable. |
@@ -17,12 +17,20 @@ Replace student self-registration with an administrator-imported roster. Student
 | Data layout | Three stores: `student_roster` (server-only), `users/{uid}` (unchanged shape), `student_personal_info/{uid}` (sensitive). |
 
 ## Data model
-- `student_roster/{studentNo}` — doc ID is `canonicalLoginId(studentNo)` (same canonicalization as Student ID login). Fields: `studentNo` (as entered), `surname`, `firstName`, `middleName`, `dateOfBirth` (Timestamp, date only), `collegeId`, `college`, `courseId`, `course`, `departmentId`, `department`, `yearLevel`, `activated` (bool), `userId` (string|null), `status` (`active`|`deactivated`), `lastImportId`, `createdAt`, `updatedAt`, `updatedBy`. Rules: `read, write: if false`.
+- `student_roster/{studentNo}` — doc ID is `canonicalLoginId(studentNo)` (same canonicalization as Student ID login). Fields: `studentNo` (as entered), `surname`, `firstName`, `middleName`, `dateOfBirth` (Timestamp, date only), `collegeId`, `college`, `courseId`, `course`, `departmentId`, `department`, `yearLevel`, `activated` (bool), `userId` (string|null), `status` (`active`|`deactivated`), `activationCode {hash, salt, issuedAt, expiresAt} | null`, `revokedUserIds` (string[]), `lastImportId`, `createdAt`, `updatedAt`, `updatedBy`. Rules: `read, write: if false`. The roster is the authoritative home of the official name.
 - `student_roster_imports/{importId}` — `fileName`, `counts {new, updated, linked}`, `rowCount`, `importedBy`, `importedAt`. Rules: `false`.
 - `student_activation_attempts/{studentNo}` — `failedCount`, `lockedUntil`, `updatedAt`. Rules: `false`.
-- `users/{uid}` — existing shape. Official fields are written from the roster (`firstName`, `middleName`, `lastName`, `name`, `schoolId`, `dateOfBirth`, `collegeId`, `courseId`, `departmentId`, `department`, `course`, `yearLevel`, `populationRole: student`). New server-owned fields: `personalInfoRequired` (bool), `rosterLinked` (bool). None of these are added to `validSelfProfileUpdate`.
+- `users/{uid}` — existing shape. Name fields (`firstName`, `middleName`, `lastName`, `name`) are written from the roster **only when the profile is created at activation**; afterwards they remain the student's editable display/nickname fields and imports never touch them. Academic fields are written from the roster on activation, link and every import (`schoolId`, `dateOfBirth`, `collegeId`, `courseId`, `departmentId`, `department`, `course`, `yearLevel`, `populationRole: student`). New server-owned fields: `personalInfoRequired` (bool), `rosterLinked` (bool). None of these are added to `validSelfProfileUpdate`.
 - `student_personal_info/{uid}` — `sex`, `civilStatus`, `spouse`, `nationality`, `placeOfBirth`, `cityAddress {number, street, barangay, cityTown, province, zipCode}`, `homeAddress {…same}`, `father`, `fatherOccupation`, `mother`, `motherOccupation`, `guardian`, `guardianRelationship`, `guardianAddress`, `telephone`, `cellphone`, `privacyConsent {acceptedAt, policyVersion}`, `createdAt`, `updatedAt`. Rules: `get` only if `isOwner(uid)`; `list, write: if false`.
 - `student_correction_requests/{requestId}` — `userId`, `studentNo`, `field` (one of `surname|firstName|middleName|dateOfBirth|college|course|yearLevel`), `currentValue`, `requestedValue`, `reason`, `status` (`pending|approved|rejected`), `reviewedBy`, `reviewReason`, `createdAt`, `reviewedAt`. Rules: owner may `read` own; writes `false`.
+
+## Security review amendments
+Agreed after the pre-implementation security and compatibility review; these override any conflicting text below.
+1. **Activation code.** `importStudentRoster` issues a one-time code for every new, unlinked row (never re-issued on re-import, so distributed slips stay valid). Format: 10 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789`, shown as `XXXXX-XXXXX`. Stored only as a scrypt hash with a per-row random salt; expires 60 days after issue; cleared on successful activation. Plain codes are returned once in the import response (and by `issueStudentActivationCodes` for regeneration), are never logged or persisted in plain text, and the admin downloads them as an activation-slip file. Activation input becomes **Student No. + activation code + date of birth** (surname no longer used). Any mismatch, unknown Student No., deactivated row or missing code returns the generic mismatch error and counts toward the lockout; an expired code returns `This activation code has expired. Ask the PACC office for a new one.` only after Student No., code and date of birth all match.
+2. **Official name source.** The official name lives in `student_roster`. The Student Information screen and the counselor view read official fields from the roster. `users` name fields are seeded once at activation and then belong to the student (nickname/profile editing keeps working). Linking a legacy account and re-importing never overwrite `users` name fields.
+3. **Gender preservation.** Saving the form writes `users.gender` from Sex only when `gender` is empty.
+4. **Revoke wrongful activation.** Admin action `revokeStudentActivation({studentNo, reason})`: disables the claimed Auth user, sets that `users` doc `accountStatus: "revoked"`, `rosterLinked: false`, deletes the `student_id_reservations` entry, sets the roster row `activated: false, userId: null`, appends the uid to `revokedUserIds`, issues a fresh activation code (returned once), and writes audit `STUDENT_ACTIVATION_REVOKED`. Data is retained, never deleted.
+5. **Hardening.** Linking records previous academic values in the audit metadata. Counselor reads return an explicit field allowlist. `.xlsx` files using the 1904 date system are corrected; text dates accept only `MM/DD/YYYY` and `YYYY-MM-DD`; the preview shows every date spelled out (e.g. "Feb 3, 2005").
 
 ## 1. Admin roster import
 - New admin-only "Student Roster" page in the admin portal next to User Management.
@@ -37,13 +45,13 @@ Replace student self-registration with an administrator-imported roster. Student
 
 ## 2. Student activation
 - Login screen: "Activate student account" link; "Sign up" becomes "Employee sign up".
-- Step 1: Student No., Surname, Date of Birth. Step 2: email + password (existing password rules). Step 3: existing `EmailVerificationScreen`; the app stays locked until verified.
-- `activateStudentAccount({studentNo, surname, dateOfBirth, email, password})`, App Check enforced (plus a `…Dev` variant without enforcement, matching existing convention):
+- Step 1: Student No., Activation code, Date of Birth. Step 2: email + password (existing password rules). Step 3: existing `EmailVerificationScreen`; the app stays locked until verified.
+- `activateStudentAccount({studentNo, activationCode, dateOfBirth, email, password})`, App Check enforced (plus a `…Dev` variant without enforcement, matching existing convention):
   1. Check lockout in `student_activation_attempts`; if locked, return the generic mismatch error.
-  2. Load roster row; require `status: active`, surname match (case-, accent- and whitespace-insensitive), and exact date-of-birth match. Any mismatch or missing row increments `failedCount` and returns one generic error: "Those details don't match our records." 5 failures lock the Student No. for 30 minutes; success resets the counter.
+  2. Load roster row; require `status: active`, a matching unexpired activation code (constant-time hash comparison), and exact date-of-birth match. Any mismatch or missing row increments `failedCount` and returns one generic error: "Those details don't match our records." 5 failures lock the Student No. for 30 minutes; success resets the counter.
   3. If already `activated`, return "This account is already activated. Sign in or use Forgot password." (only reachable after a correct identity match).
   4. Create the Firebase Auth user with the Admin SDK (`email-already-exists` → existing "email already registered" message).
-  5. Transaction: re-read roster row (must still be unactivated) and reservation (must not exist for another user); create `users/{uid}` with official fields, `accessRole: appUser`, `verificationStatus: verified`, `verifiedBy: "roster-activation"`, `personalInfoRequired: true`, `rosterLinked: true`, and the same default activity/assessment fields `provisionAppUserProfile` sets today; create `student_id_reservations/{studentNo}`; mark roster `activated: true, userId`; write audit `STUDENT_ACCOUNT_ACTIVATED`.
+  5. Transaction: re-read roster row (must still be unactivated) and reservation (must not exist for another user); create `users/{uid}` with official fields (name seeded once), `accessRole: appUser`, `verificationStatus: verified`, `verifiedBy: "roster-activation"`, `personalInfoRequired: true`, `rosterLinked: true`, and the same default activity/assessment fields `provisionAppUserProfile` sets today; create `student_id_reservations/{studentNo}`; mark roster `activated: true, userId`; write audit `STUDENT_ACCOUNT_ACTIVATED`.
   6. If the transaction fails, delete the Auth user created in step 4, then rethrow.
 - Client then signs in with the new credentials and sends the verification email. Thereafter login (Student No. + password via `resolveSchoolIdAuthEmail`) and Forgot Password work unchanged.
 

@@ -19,10 +19,13 @@
 - Civil Status options: `Single`, `Married`, `Widowed`, `Separated`. Spouse required iff `Married`, cleared otherwise.
 - Cellphone: accept `09XXXXXXXXX`, `+639XXXXXXXXX`, `639XXXXXXXXX` (spaces/dashes ignored); store `09XXXXXXXXX`. Zip: exactly 4 digits when present. Text fields trimmed, max 160 chars.
 - Privacy consent `policyVersion` constant: `"2026-11-ra10173-v1"`.
+- Activation code (spec "Security review amendments" §1): alphabet `ABCDEFGHJKMNPQRSTUVWXYZ23456789`, 10 chars, displayed `XXXXX-XXXXX`; input normalized by uppercasing and removing spaces/dashes; generated with `crypto.randomInt`; stored as `{hash, salt, issuedAt, expiresAt}` using `crypto.scrypt` (N=16384, keylen 32, 16-byte random salt, base64); compared with `crypto.timingSafeEqual`; expiry 60 days; issued only for new unlinked rows and by explicit regeneration/revoke; plain codes never logged or stored. Expired copy (exact): `This activation code has expired. Ask the PACC office for a new one.`
+- Official name lives in `student_roster`; `users` name fields are written only when activation creates the profile. Imports and links never write `firstName`, `middleName`, `lastName`, `name` on `users`.
+- `users.gender` is written from Sex only when currently empty.
 - Activation lockout: 5 failures → locked 30 minutes. Generic mismatch copy exactly: `Those details don't match our records.`
 - Copy (exact): already activated → `This account is already activated. Sign in or use Forgot password.`; student blocked at provisioning → `Students activate accounts through the roster. Tap 'Activate student account'.`
 - Import: max 1,000 rows per call; all-or-nothing on any error row.
-- Every security-relevant write goes through `writeAudit` (`functions/src/audit.ts`) with category `AUDIT_CATEGORIES.userManagement`, except views which use `AUDIT_CATEGORIES.security`. Action names: `STUDENT_ROSTER_IMPORTED`, `STUDENT_ACCOUNT_ACTIVATED`, `STUDENT_PERSONAL_INFO_VIEWED`, `STUDENT_CORRECTION_APPROVED`, `STUDENT_CORRECTION_REJECTED`, `STUDENT_ROSTER_RECORD_UPDATED`, `STUDENT_ROSTER_STATUS_CHANGED`, `STUDENT_ACTIVATION_LOCK_RESET`.
+- Every security-relevant write goes through `writeAudit` (`functions/src/audit.ts`) with category `AUDIT_CATEGORIES.userManagement`, except views which use `AUDIT_CATEGORIES.security`. Action names: `STUDENT_ROSTER_IMPORTED`, `STUDENT_ACCOUNT_ACTIVATED`, `STUDENT_PERSONAL_INFO_VIEWED`, `STUDENT_CORRECTION_APPROVED`, `STUDENT_CORRECTION_REJECTED`, `STUDENT_ROSTER_RECORD_UPDATED`, `STUDENT_ROSTER_STATUS_CHANGED`, `STUDENT_ACTIVATION_LOCK_RESET`, `STUDENT_ACTIVATION_CODES_ISSUED` (metadata: count only), `STUDENT_ACTIVATION_REVOKED`.
 - Admin = `requireSuperAdmin` semantics from `functions/src/index.ts` (move it to an exported helper in `functions/src/access.ts` if needed; do not duplicate role logic). Clinical = role in `counselor | admin` (`canAccessClinicalData`).
 - Activation callable follows the existing pair convention: `activateStudentAccount` (`enforceAppCheck: true`) and `activateStudentAccountDev` (`false`), both wrapping one handler.
 - No production deploy, real-data import, or push is part of this plan.
@@ -30,7 +33,7 @@
 ## Review Focus
 1. **Excel date cells** — `excel_plus` yields `DateCellValue`/numeric serials as well as `"MM/DD/YYYY"` text; all three must produce the same `YYYY-MM-DD` key, otherwise every activation for that file fails. Pinned in Task 10 (`parseRosterDate` tests).
 2. **Student No. formatting** — `2021-00123`, `2021 00123`, `202100123` must hit the same roster doc and the same `student_id_reservations` key used by login. Pinned in Task 1 and Task 4.
-3. **Surname variants** — compound surnames, accents, `ñ`, and casing must match on activation. Pinned in Task 1 (`normalizeName`) and Task 4.
+3. **Typed activation codes** — lowercase, spaces, missing/extra dash, and confusable characters (`0`/`O`, `1`/`I`) are how real students type slips; normalization must accept case/spacing/dash variants, and the alphabet excludes confusables so they cannot occur. Pinned in Task 1 and Task 4.
 4. **Two devices activating the same Student No. simultaneously** — exactly one succeeds, the loser's Auth user is deleted. Pinned in Task 4.
 5. **Blank trailing rows / duplicate Student No. across import chunks** — blank rows ignored; duplicates detected over the whole file client-side before chunking. Pinned in Task 10.
 
@@ -98,6 +101,12 @@ export function validatePersonalInfo(input: unknown): {ok: true; value: Personal
 export function normalizeCellphone(value: unknown): string | null;
 export const CORRECTABLE_FIELDS: readonly ["surname","firstName","middleName","dateOfBirth","college","course","yearLevel"];
 export const PRIVACY_POLICY_VERSION = "2026-11-ra10173-v1";
+export const ACTIVATION_CODE_TTL_DAYS = 60;
+export type StoredActivationCode = {hash: string; salt: string; issuedAt: Date; expiresAt: Date};
+export function generateActivationCode(): string;                       // "XXXXX-XXXXX"
+export function normalizeActivationCode(value: unknown): string | null; // 10 valid chars or null
+export async function hashActivationCode(code: string, now?: Date): Promise<StoredActivationCode>;
+export async function verifyActivationCode(input: unknown, stored: StoredActivationCode | null | undefined): Promise<boolean>; // false for null/invalid; ignores expiry
 ```
 
 - [ ] **Step 1: Write failing tests** covering:
@@ -105,6 +114,7 @@ export const PRIVACY_POLICY_VERSION = "2026-11-ra10173-v1";
   - `normalizeYearLevel` maps `"1"`, `"1st"`, `"1st year"`, `"Year 1"`, `"First Year"` → `"1st Year"`; `"5"` → `"5th Year"`; `"6"` and `""` → `null`.
   - `parseDateKey("2005-02-29") === null`, `parseDateKey("2004-02-29") === "2004-02-29"`, `parseDateKey("02/15/2005") === null` (client converts), future date → `null`.
   - `validateRosterRows`: a valid row returns `studentKey` equal to `canonicalLoginId(studentNo)`; college matched by name or code case-insensitively; course whose `collegeId` differs from matched college → error `"Course is not under the selected college."`; duplicate `studentKey` in the same call → both rows error `"Duplicate Student No. in file."`; missing surname → error mentioning `Surname`; middleName optional.
+  - activation codes: 1,000 generated codes all match `/^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/` and contain no `0 O 1 I L`; `normalizeActivationCode(" abcde fghjk ")` === `"ABCDEFGHJK"`; `"ABCDE-FGHJ"` (9 chars) and `"ABCDE-FGHJ0"` → `null`; `verifyActivationCode` true for the issued code typed lowercase without dash, false for another code, false for `null` stored; `hashActivationCode` sets `expiresAt` exactly 60 days after `now` and two hashes of the same code differ (salted).
   - `validatePersonalInfo`: Married without spouse → `errors.spouse`; Single with spouse → value has `spouse: ""`; homeAddress missing barangay → `errors["homeAddress.barangay"]`; cityAddress all-empty → `cityAddress: null`; cityAddress with only street → errors for barangay, cityTown, province; zip `"240"` → error; cellphone `"+63 917 123 4567"` → `"09171234567"`; cellphone `"0817..."` → error; guardian missing → error; 161-char field → error; unknown keys ignored.
 - [ ] **Step 2:** Run `npm --prefix functions run test:roster-unit` — expect FAIL (module missing).
 - [ ] **Step 3:** Implement `student_roster_domain.ts`. Import `canonicalLoginId` from `./account_recovery` (wrap its throw into a row error). No Firestore imports.
@@ -164,7 +174,9 @@ match /student_correction_requests/{id} { allow get: if signedIn() && resource.d
 ```ts
 export async function loadAcademicIndex(): Promise<AcademicIndex>;  // active colleges/courses + department names
 export const previewStudentRosterImport: CallableFunction; // data {fileName, rows: RosterRowInput[]} -> {rows: PreviewRow[], counts: {new, update, link, error}}
-export const importStudentRoster: CallableFunction;        // same input -> {importId, counts: {new, updated, linked}}
+export const importStudentRoster: CallableFunction;        // same input -> {importId, counts: {new, updated, linked}, codes: IssuedCode[]}
+type IssuedCode = {studentNo: string; name: string; college: string; course: string; yearLevel: string; code: string; expiresAt: string};
+export async function issueCodesFor(keys: string[], actorId: string): Promise<IssuedCode[]>; // reused by Task 6
 type PreviewRow = {index: number; studentNo: string; kind: "new"|"update"|"link"|"error"; changes?: Record<string,{from:string;to:string}>; errors?: string[]};
 ```
 
@@ -173,10 +185,12 @@ type PreviewRow = {index: number; studentNo: string; kind: "new"|"update"|"link"
   - preview classifies: unseen Student No. → `new`; existing roster row with changed year level → `update` with `changes.yearLevel = {from:"2nd Year", to:"3rd Year"}`; reservation exists → `link`; bad course → `error`. Preview writes nothing (roster count unchanged).
   - import with one error row → `invalid-argument`, nothing written.
   - successful import: roster doc at canonical key with `activated:false, userId:null, status:"active"`, Timestamp `dateOfBirth` + `dateOfBirthKey`; import record with counts; one `admin_audit_logs` entry `STUDENT_ROSTER_IMPORTED`.
-  - link case: roster `activated:true, userId`; `users/{uid}` gets official fields, `rosterLinked:true`, `personalInfoRequired:true`; if `student_personal_info/{uid}` already exists then `personalInfoRequired` stays `false`.
+  - new rows: response `codes` has one entry per new row; roster doc has `activationCode.hash/salt` and no plain code anywhere in the doc, the import record, or the audit metadata (assert by JSON-searching each for the returned code).
+  - link case: roster `activated:true, userId`, `activationCode: null`, no code returned for it; `users/{uid}` gets academic fields, `rosterLinked:true`, `personalInfoRequired:true`, and its existing `firstName`/`lastName`/`name` are unchanged; audit metadata holds the previous academic values; if `student_personal_info/{uid}` already exists then `personalInfoRequired` stays `false`.
+  - re-import of a still-unactivated row keeps the same `activationCode.hash` and returns no new code for it.
   - re-import of an activated row changes only official fields; `activated`, `userId`, `status`, and `student_personal_info` untouched; linked `users` doc gets new `yearLevel`.
 - [ ] **Step 2:** Run the callables command — expect FAIL.
-- [ ] **Step 3:** Implement. Shared `classify(rows)` reads existing roster docs and reservations with `db.getAll` (chunks of 300) and is used by both callables. `importStudentRoster` writes in batches of ≤ 450 operations; the audit entry goes in the first batch via a transaction-free `admin_audit_logs` doc with the same shape `writeAudit` produces (add a `writeAuditBatch(batch, db, event)` sibling in `audit.ts`). Official fields written to `users`: `firstName`, `middleName`, `lastName` (=surname), `name`, `schoolId` (=studentNo as entered), `dateOfBirth`, `dateOfBirthKey`, `collegeId`, `courseId`, `departmentId`, `department`, `course`, `yearLevel`, `populationRole:"student"`, `updatedAt`. Roster docs additionally store `studentKey` and `surnameNormalized: normalizeName(surname)` (used by Task 6 search).
+- [ ] **Step 3:** Implement. Shared `classify(rows)` reads existing roster docs and reservations with `db.getAll` (chunks of 300) and is used by both callables. `importStudentRoster` writes in batches of ≤ 450 operations; the audit entry goes in the first batch via a transaction-free `admin_audit_logs` doc with the same shape `writeAudit` produces (add a `writeAuditBatch(batch, db, event)` sibling in `audit.ts`). Academic fields written to linked `users` (never name fields): `schoolId` (=studentNo as entered), `dateOfBirth`, `dateOfBirthKey`, `collegeId`, `courseId`, `departmentId`, `department`, `course`, `yearLevel`, `populationRole:"student"`, `updatedAt`. Roster docs additionally store `studentKey` and `surnameNormalized: normalizeName(surname)` (used by Task 6 search).
 - [ ] **Step 4:** Run — expect PASS.
 - [ ] **Step 5:** Commit `feat(roster): add admin roster import preview and commit`.
 
@@ -190,13 +204,15 @@ type PreviewRow = {index: number; studentNo: string; kind: "new"|"update"|"link"
 - Modify: `functions/src/index.ts` (export both)
 
 **Interfaces:**
-- Consumes: Task 1 `normalizeName`, `parseDateKey`; `canonicalLoginId`; roster docs from Task 3.
-- Produces: `activateStudentAccount`, `activateStudentAccountDev`; data `{studentNo, surname, dateOfBirth: "YYYY-MM-DD", email, password}` → `{ok: true, email}`. Errors: `not-found` + mismatch copy; `already-exists` + already-activated copy; `already-exists` "This email address is already registered."; `invalid-argument` for bad email / password shorter than 8.
+- Consumes: Task 1 `verifyActivationCode`, `parseDateKey`; `canonicalLoginId`; roster docs from Task 3.
+- Produces: `activateStudentAccount`, `activateStudentAccountDev`; data `{studentNo, activationCode, dateOfBirth: "YYYY-MM-DD", email, password}` → `{ok: true, email}`. Errors: `not-found` + mismatch copy; `deadline-exceeded` + expired copy; `already-exists` + already-activated copy; `already-exists` "This email address is already registered."; `invalid-argument` for bad email / password shorter than 8.
 
 - [ ] **Step 1: Write failing emulator tests** (seed roster rows directly with Admin SDK):
   - success: Auth user exists with email; `users/{uid}` has roster official fields, `accessRole:"appUser"`, `verificationStatus:"verified"`, `verifiedBy:"roster-activation"`, `personalInfoRequired:true`, `rosterLinked:true`, `profileVersion:3`, `quickAssessmentCompleted:false`, `profileSetupCompleted:false`; `student_id_reservations/{key}.userId === uid`; roster `activated:true, userId`; audit `STUDENT_ACCOUNT_ACTIVATED`.
-  - studentNo `"2021-00123"` activates roster key `202100123`; surname `"dela cruz"` matches `"Dela Cruz"`.
-  - wrong surname, wrong DOB, unknown Student No., and `status:"deactivated"` all reject with the identical message; attempts doc `failedCount` increments (not for unknown IDs: key the attempts doc by canonical key regardless of existence).
+  - `users/{uid}` name fields equal the roster names (seeded once); roster `activationCode` is `null` after success.
+  - studentNo `"2021-00123"` activates roster key `202100123`; code typed lowercase without dash is accepted.
+  - wrong code, wrong DOB, unknown Student No., roster row with `activationCode: null`, and `status:"deactivated"` all reject with the identical message and identical error code;
+  - expired code with correct Student No. + DOB → expired copy; expired code with wrong DOB → generic mismatch (expiry never revealed before a full match). attempts doc `failedCount` increments (not for unknown IDs: key the attempts doc by canonical key regardless of existence).
   - 5 failures then correct details → still mismatch error; set `lockedUntil` to the past → correct details succeed and attempts doc is deleted.
   - already activated → already-activated copy.
   - email used by another Auth user → email error, no roster change.
@@ -230,11 +246,13 @@ type CorrectionView = {id, userId, studentNo, studentName, field, currentValue, 
 (`getMyStudentInformation` exists so the client reads official + personal + corrections in one call instead of three listeners.)
 
 - [ ] **Step 1: Write failing emulator tests:**
-  - save: non-student `populationRole` → `permission-denied`; first save without `privacyConsent:true` → `failed-precondition`; invalid payload → `invalid-argument` with `details.errors` from `validatePersonalInfo`; valid save writes doc with `privacyConsent.policyVersion === "2026-11-ra10173-v1"`, sets `users.personalInfoRequired:false` and `users.gender:"Female"`; second save keeps `createdAt` and original `privacyConsent`.
+  - save: non-student `populationRole` → `permission-denied`; first save without `privacyConsent:true` → `failed-precondition`; invalid payload → `invalid-argument` with `details.errors` from `validatePersonalInfo`; valid save writes doc with `privacyConsent.policyVersion === "2026-11-ra10173-v1"`, sets `users.personalInfoRequired:false` and `users.gender:"Female"` when gender was empty; a user whose `gender` is `"Prefer not to say"` keeps it; second save keeps `createdAt` and original `privacyConsent`.
+  - `getMyStudentInformation` and `getStudentPersonalInfo` take official name fields from `student_roster` (seed `users.firstName` with a nickname and assert the response still shows the roster first name); for a legacy student with no roster row, official fields fall back to `users`.
+  - counselor response contains only allowlisted keys (assert exact key set of `official` and `personal`; no `privacyConsent` internals, no `activationCode`, no `revokedUserIds`).
   - get (clinical): portalStaff caller → `permission-denied`; counselor gets data and exactly one `STUDENT_PERSONAL_INFO_VIEWED` audit with `targetId === userId`; audit is written even when `personal` is `null`.
   - corrections: `field:"studentNo"` → `invalid-argument`; second pending request for same field → `already-exists`; admin approve of `yearLevel:"4"` updates roster and `users` to `"4th Year"` and writes `STUDENT_CORRECTION_APPROVED`; approve of a college/course pair not under one another → `failed-precondition`, request stays pending; reject stores `reviewReason` and writes `STUDENT_CORRECTION_REJECTED`; non-admin review → `permission-denied`.
 - [ ] **Step 2:** Run — expect FAIL.
-- [ ] **Step 3:** Implement. College/course corrections: `requestedValue` is the record id; validate with `loadAcademicIndex()` from Task 3. Approval writes roster + users + request + audit in one transaction.
+- [ ] **Step 3:** Implement. College/course corrections: `requestedValue` is the record id; validate with `loadAcademicIndex()` from Task 3. Approval writes roster + users + request + audit in one transaction; name-field corrections (`surname`, `firstName`, `middleName`) update the roster only, never `users` name fields (add a test asserting this).
 - [ ] **Step 4:** Run — expect PASS.
 - [ ] **Step 5:** Commit `feat(roster): add student information and correction callables`.
 
@@ -255,6 +273,8 @@ setStudentRosterStatus     // {studentNo, status: "active"|"deactivated"} -> {ok
 resetStudentActivationLock // {studentNo} -> {ok}
 listStudentRosterImports   // {} -> {imports: {id, fileName, counts, importedByName, importedAt: string}[]}
 backfillStudentInfoRequirement // {} -> {flagged: number, notInRoster: number}
+issueStudentActivationCodes // {studentNos: string[]} (1..1000, unactivated active rows only) -> {codes: IssuedCode[], skipped: {studentNo, reason}[]}
+revokeStudentActivation    // {studentNo, reason} -> {code: IssuedCode}
 type RosterRowView = {studentNo, name, college, course, yearLevel, activated: boolean, status, personalInfoComplete: boolean, userId: string|null};
 ```
 
@@ -264,6 +284,8 @@ type RosterRowView = {studentNo, name, college, course, yearLevel, activated: bo
   - `setStudentRosterStatus` deactivated → `getAuth().getUser(uid).disabled === true`, then active → `false`; audit `STUDENT_ROSTER_STATUS_CHANGED`. Deactivated row with no user still succeeds.
   - `updateStudentRosterRecord` validates via `validateRosterRows`, syncs linked `users`, audits.
   - `backfillStudentInfoRequirement`: student user without `student_personal_info` gets `personalInfoRequired:true`; one with it is untouched; teaching user untouched; returns counts; idempotent on second run.
+  - `issueStudentActivationCodes`: replaces the hash (old code no longer verifies, new one does); activated rows land in `skipped`; audit metadata has the count only.
+  - `revokeStudentActivation`: Auth user disabled; `users/{uid}` has `accountStatus:"revoked"`, `rosterLinked:false` and is otherwise retained; reservation deleted; roster `activated:false, userId:null`, `revokedUserIds` contains uid; a new code is returned and activating with it creates a different uid; `resolveSchoolIdAuthEmail` for that Student No. then returns the new user's email; revoking an unactivated row → `failed-precondition`; reason required.
   - `account_integrity.test.ts`: export `assertSelfProvisioningAllowed(role)`; `"student"` throws `failed-precondition` with the exact blocked copy; `"teaching"` passes.
 - [ ] **Step 2:** Run unit + callables commands — expect FAIL.
 - [ ] **Step 3:** Implement. Call `assertSelfProvisioningAllowed(assignedRole)` at the top of `provisionAppUserProfileHandler` after role resolution. Search: query by `surnameNormalized` prefix (written by Task 3) or exact `studentKey`; add the needed composite indexes to `firestore.indexes.json`.
@@ -288,16 +310,19 @@ class StudentCorrection { final String id, field, currentValue, requestedValue, 
 class StudentInformation { final StudentOfficialInfo official; final StudentPersonalInfo? personal; final List<StudentCorrection> corrections; }
 class RosterPreviewRow { final int index; final String studentNo; final RosterPreviewKind kind; final Map<String, ({String from, String to})> changes; final List<String> errors; }
 enum RosterPreviewKind { newRow, update, link, error }
+class IssuedActivationCode { final String studentNo, name, college, course, yearLevel, code; final DateTime expiresAt; }
 class RosterRowView { ... per Task 6 ... }
 class StudentRosterRepository {
   StudentRosterRepository({FirebaseFunctions? functions});
-  Future<String> activate({required String studentNo, required String surname, required String dateOfBirthKey, required String email, required String password}); // returns email
+  Future<String> activate({required String studentNo, required String activationCode, required String dateOfBirthKey, required String email, required String password}); // returns email
   Future<StudentInformation> getMyInformation();
   Future<void> savePersonalInfo(StudentPersonalInfo info, {required bool privacyConsent});
   Future<String> requestCorrection({required String field, required String requestedValue, required String reason});
   Future<({StudentOfficialInfo official, StudentPersonalInfo? personal})> getStudentPersonalInfo(String userId);
   Future<({List<RosterPreviewRow> rows, Map<String,int> counts})> previewImport(String fileName, List<Map<String, String>> rows);
-  Future<Map<String,int>> commitImport(String fileName, List<Map<String, String>> rows);
+  Future<({Map<String,int> counts, List<IssuedActivationCode> codes})> commitImport(String fileName, List<Map<String, String>> rows);
+  Future<({List<IssuedActivationCode> codes, List<({String studentNo, String reason})> skipped})> issueActivationCodes(List<String> studentNos);
+  Future<IssuedActivationCode> revokeActivation(String studentNo, String reason);
   Future<({List<RosterRowView> rows, String? nextPageToken})> listRoster({String? search, String? collegeId, String? courseId, String? yearLevel, String? status, String? pageToken});
   // plus thin wrappers for every remaining Task 5/6 callable, same names minus the "Student" noise:
   // listLegacyNotInRoster, updateRosterRecord, setRosterStatus, resetActivationLock, listImports, listCorrections, reviewCorrection, backfillInfoRequirement
@@ -321,7 +346,8 @@ Activation uses `routedCallable('activateStudentAccount')` (the router picks the
 - Test: `test/features/authentication/student_activation_screen_test.dart`, extend existing signup screen test
 
 - [ ] **Step 1: Write failing widget tests:**
-  - Step 1 form requires Student No., Surname, Date of Birth (date picker, stored as `YYYY-MM-DD`); Continue disabled until all present.
+  - Step 1 form requires Student No., Activation code (hint `XXXXX-XXXXX`, auto-uppercase), Date of Birth (date picker, stored as `YYYY-MM-DD`); Continue disabled until all present. Helper text: `Your activation code is on the slip from the PACC office.`
+  - repository throwing `deadline-exceeded` shows the expired copy.
   - Step 2 requires valid email and matching passwords (≥ 8 chars).
   - repository throwing `not-found` shows exactly `Those details don't match our records.`; `already-exists` with the activated copy shows that copy plus a "Sign in" button.
   - success navigates to `RouteNames.emailVerification`.
@@ -373,12 +399,18 @@ class StudentInfoValidator { static Map<String, String> validate(StudentPersonal
 ```dart
 class RosterParseResult { final List<Map<String, String>> rows; final List<String> fileErrors; final Map<String, List<int>> duplicateStudentNos; }
 RosterParseResult parseRosterFile(String fileName, List<int> bytes); // .xlsx via excel_plus, .csv via simple RFC-4180 parser
-String? parseRosterDate(Object? cell); // DateTime / DateCellValue / Excel serial (num) / "MM/DD/YYYY" / "YYYY-MM-DD" -> "YYYY-MM-DD"
+String? parseRosterDate(Object? cell, {bool date1904 = false}); // DateTime / DateCellValue / Excel serial (num) / "MM/DD/YYYY" / "YYYY-MM-DD" -> "YYYY-MM-DD"; 1904 adds 1,462 days to serials and to DateTimes excel_plus decoded with the 1900 epoch
+bool workbookUses1904(List<int> xlsxBytes); // reads `date1904` on <workbookPr> in xl/workbook.xml via package:archive
+String spelledDate(String dateKey); // "2005-02-03" -> "Feb 3, 2005" (preview display)
+List<int> buildActivationSlipsXlsx(List<IssuedActivationCode> codes); // columns: Student No., Name, College, Course, Year Level, Activation Code, Expires
 List<List<Map<String, String>>> chunkRows(List<Map<String, String>> rows, {int size = 1000});
 const rosterTemplateHeaders = ['Student No.', 'Surname', 'First Name', 'Middle Name', 'Date of Birth (MM/DD/YYYY)', 'College', 'Course', 'Year Level'];
 ```
 
 - [ ] **Step 1: Write failing tests:**
+  - 1904: `workbookUses1904` true for a fixture workbook.xml with `<workbookPr date1904="1"/>`, false without; `parseRosterDate(36926, date1904: true)` === `parseRosterDate(38388)` (both `"2005-02-03"`); `spelledDate("2005-02-03") == "Feb 3, 2005"`.
+  - slips: after import the page shows "Download activation slips (N)" and warns `Codes are shown only once. Download them before leaving this page.`; leaving with undownloaded codes asks for confirmation; slips xlsx contains every issued code exactly once across all chunks; codes are never written to debug logs.
+  - row actions include "Issue new activation code" (unactivated rows; bulk via selection) and "Revoke activation" (activated rows; requires reason + confirm; shows the new code with a download).
   - parser: headers matched case-insensitively and in any order; missing header → `fileErrors` names it; fully blank rows skipped; `parseRosterDate` returns `"2005-02-15"` for `DateTime(2005,2,15)`, Excel serial `38398`, `"02/15/2005"`, `"2005-02-15"`; `"13/01/2005"` → `null`; duplicate canonical Student No. (`"2021-001"` and `"2021001"`) reported in `duplicateStudentNos` with both row numbers; 2,500 rows → 3 chunks.
   - page: file with duplicates or `fileErrors` shows them and disables Preview; preview table shows New / Update / Links account / Error counts and per-row changes; any error row disables Import; Import calls `commitImport` once per chunk and shows the summary `N new · N updated · N linked`; roster list filters call `listRoster` with the chosen status; row actions (Edit, Reset activation lock, Deactivate/Reactivate with confirm dialog) call their repository methods; Corrections tab approve/reject requires a reason for reject; Import history tab lists imports; "Legacy – not in roster" tab lists `listLegacyNotInRoster` results; "Download template" produces a file with `rosterTemplateHeaders`.
 - [ ] **Step 2:** Run — FAIL.
