@@ -58,6 +58,25 @@ void main() {
     expect(authProvider.schoolId, 'UCU 2026-0001');
     expect(find.text('home target'), findsOneWidget);
   });
+
+  testWidgets(
+    'login offers activation and employee sign up, not Create account',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(_LoginHarness(authProvider: _FakeAuthProvider()));
+
+      expect(find.text('Activate student account'), findsOneWidget);
+      expect(find.text('Employee sign up'), findsOneWidget);
+      expect(find.text('Create account'), findsNothing);
+
+      await tester.ensureVisible(find.text('Activate student account'));
+      await tester.tap(find.text('Activate student account'));
+      await tester.pumpAndSettle();
+      expect(find.text('activation target'), findsOneWidget);
+    },
+  );
 }
 
 class _LoginHarness extends StatelessWidget {
@@ -82,6 +101,8 @@ class _LoginHarness extends StatelessWidget {
         routes: {
           RouteNames.onboarding: (_) =>
               const Scaffold(body: Center(child: Text('onboarding target'))),
+          RouteNames.studentActivation: (_) =>
+              const Scaffold(body: Center(child: Text('activation target'))),
           RouteNames.home: (_) =>
               const Scaffold(body: Center(child: Text('home target'))),
         },

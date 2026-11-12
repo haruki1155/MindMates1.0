@@ -175,6 +175,10 @@ class _LoginBodyState extends State<_LoginBody> {
     Navigator.of(context).pushNamed(RouteNames.signup);
   }
 
+  void _openStudentActivation() {
+    Navigator.of(context).pushNamed(RouteNames.studentActivation);
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
@@ -209,7 +213,8 @@ class _LoginBodyState extends State<_LoginBody> {
                           passwordController: _passwordController,
                           isLoading: authProvider.isLoading,
                           onForgotPassword: _openForgotPassword,
-                          onCreateAccount: _openSignup,
+                          onEmployeeSignUp: _openSignup,
+                          onActivateStudent: _openStudentActivation,
                           onSignIn: _handleSignIn,
                           onGoogleSignIn: _handleGoogleSignIn,
                         );
@@ -292,7 +297,8 @@ class _LoginFormCard extends StatelessWidget {
     required this.passwordController,
     required this.isLoading,
     required this.onForgotPassword,
-    required this.onCreateAccount,
+    required this.onEmployeeSignUp,
+    required this.onActivateStudent,
     required this.onSignIn,
     required this.onGoogleSignIn,
   });
@@ -301,7 +307,8 @@ class _LoginFormCard extends StatelessWidget {
   final TextEditingController passwordController;
   final bool isLoading;
   final VoidCallback onForgotPassword;
-  final VoidCallback onCreateAccount;
+  final VoidCallback onEmployeeSignUp;
+  final VoidCallback onActivateStudent;
   final Future<void> Function() onSignIn;
   final Future<void> Function() onGoogleSignIn;
 
@@ -377,12 +384,27 @@ class _LoginFormCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 18),
+          FilledButton.tonalIcon(
+            onPressed: onActivateStudent,
+            icon: const Icon(Icons.school_outlined, size: 18),
+            label: const Text('Activate student account'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(46),
+              foregroundColor: _LoginColors.text,
+              backgroundColor: _LoginColors.softGreen.withAlpha(110),
+              textStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Flexible(
                 child: Text(
-                  'New to MindMate?',
+                  'School employee?',
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: _LoginColors.mutedText,
@@ -392,7 +414,7 @@ class _LoginFormCard extends StatelessWidget {
                 ),
               ),
               TextButton(
-                onPressed: onCreateAccount,
+                onPressed: onEmployeeSignUp,
                 style: TextButton.styleFrom(
                   foregroundColor: _LoginColors.text,
                   minimumSize: const Size(0, 36),
@@ -403,7 +425,7 @@ class _LoginFormCard extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                child: const Text('Create account'),
+                child: const Text('Employee sign up'),
               ),
             ],
           ),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../features/authentication/screens/forgot_password_screen.dart';
 import '../features/authentication/screens/login_screen.dart';
 import '../features/authentication/screens/signup_screen.dart';
+import '../features/authentication/screens/student_activation_screen.dart';
 import '../features/authentication/screens/email_verification_screen.dart';
 import '../features/authentication/screens/profile_setup_screen.dart';
 import '../features/breathing/screens/mindful_breathing_screen.dart';
@@ -34,6 +35,7 @@ class AppPages {
     RouteNames.onboarding: (_) => const OnboardingScreen(),
     RouteNames.login: (_) => const LoginScreen(),
     RouteNames.signup: (_) => const SignupScreen(),
+    RouteNames.studentActivation: (_) => const StudentActivationScreen(),
     RouteNames.emailVerification: (_) => const EmailVerificationScreen(),
     RouteNames.profileSetup: (_) => const ProfileSetupScreen(),
     RouteNames.forgotPassword: (_) => const ForgotPasswordScreen(),
