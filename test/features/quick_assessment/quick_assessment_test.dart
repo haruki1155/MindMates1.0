@@ -473,6 +473,26 @@ void main() {
   });
 
   group('QuickAssessmentCategoryScreen', () {
+    testWidgets('question screen explains why the item is asked', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final provider = _readyProvider(
+        repository: _RecordingQuickAssessmentRepository(
+          _FakeFirestoreService(),
+        ),
+      )..resetQuestions();
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AssessmentProvider>.value(
+          value: provider,
+          child: const MaterialApp(home: QuickAssessmentQuestionScreen()),
+        ),
+      );
+      expect(find.textContaining('Why we ask'), findsOneWidget);
+      expect(find.textContaining('Feeling calm is a sign'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
     testWidgets('quick assessment completion opens optional full assessment', (
       tester,
     ) async {
