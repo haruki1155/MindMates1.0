@@ -21,6 +21,7 @@ import 'report_generation_page.dart';
 import 'admin_notifications_page.dart';
 import 'admin_change_password_screen.dart';
 import 'academic_structure_page.dart';
+import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
 import 'staff_operations_dashboard.dart';
 import 'staff_appointments_page.dart';
@@ -44,6 +45,7 @@ String _headerRoleLabel(AccessRole role) => switch (role) {
 enum AdminPortalPage {
   dashboard,
   users,
+  studentRoster,
   academicStructure,
   profiling,
   appointments,
@@ -61,6 +63,7 @@ extension on AdminPortalPage {
   String get label => switch (this) {
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
+    AdminPortalPage.studentRoster => 'Student Roster',
     AdminPortalPage.academicStructure => 'Academic Structure',
     AdminPortalPage.profiling => 'Profiling Management',
     AdminPortalPage.appointments => 'Appointments',
@@ -84,6 +87,7 @@ extension on AdminPortalPage {
   IconData get icon => switch (this) {
     AdminPortalPage.dashboard => Icons.home_outlined,
     AdminPortalPage.users => Icons.group_outlined,
+    AdminPortalPage.studentRoster => Icons.school_outlined,
     AdminPortalPage.academicStructure => Icons.account_tree_outlined,
     AdminPortalPage.profiling => Icons.badge_outlined,
     AdminPortalPage.appointments => Icons.calendar_month_outlined,
@@ -385,6 +389,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   late final AdminPortalRepository _repository =
       widget.repository ?? AdminPortalRepository();
   AdminPortalPage _page = AdminPortalPage.dashboard;
+  final _rosterLeaveGuard = StudentRosterLeaveGuard();
   bool _navCollapsed = false;
   late final Stream<List<AppNotificationModel>> _notifications;
   final PaccScheduleEditorController _scheduleController =
@@ -474,6 +479,12 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
         !await _scheduleController.confirmLeave(context)) {
       return;
     }
+    if (!mounted) return;
+    if (_page == AdminPortalPage.studentRoster &&
+        page != AdminPortalPage.studentRoster &&
+        !await _rosterLeaveGuard.confirmLeave(context)) {
+      return;
+    }
     if (!mounted) {
       return;
     }
@@ -501,6 +512,9 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
       onOpenAcademicStructure: () =>
           _setPage(AdminPortalPage.academicStructure),
+    ),
+    AdminPortalPage.studentRoster => StudentRosterPage(
+      leaveGuard: _rosterLeaveGuard,
     ),
     AdminPortalPage.academicStructure => AcademicStructurePage(
       repository: _repository,
@@ -560,6 +574,7 @@ class _Nav extends StatelessWidget {
 
   bool _allowed(AdminPortalPage page) => switch (page) {
     AdminPortalPage.users => isSuperAdmin,
+    AdminPortalPage.studentRoster => isSuperAdmin,
     AdminPortalPage.academicStructure => isSuperAdmin,
     // Counselor case/profile access must come through an assigned-case
     // surface. The legacy organization-wide profiling screen is admin-only.
@@ -583,6 +598,7 @@ class _Nav extends StatelessWidget {
       const _NavSection('Overview', [AdminPortalPage.dashboard]),
       const _NavSection('People', [
         AdminPortalPage.users,
+        AdminPortalPage.studentRoster,
         AdminPortalPage.profiling,
         AdminPortalPage.academicStructure,
       ]),
