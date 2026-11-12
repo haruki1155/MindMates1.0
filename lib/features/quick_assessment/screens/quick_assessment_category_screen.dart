@@ -446,8 +446,18 @@ class _DecisionContent extends StatelessWidget {
       builder: (context) => AlertDialog(
         backgroundColor: QuickAssessmentPalette.card,
         title: const Text('Assessment limit reached'),
-        content: Text(
-          'You can take the full assessment up to 2 times in 7 days, with 2 days between attempts. $nextEligibleText',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'You can take the full assessment up to 2 times in 7 days, with 2 school days between attempts. $nextEligibleText',
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'School days are Monday to Friday, so weekends are not counted.',
+            ),
+          ],
         ),
         actions: [
           FilledButton(
@@ -485,10 +495,6 @@ class _DecisionContent extends StatelessWidget {
     ];
 
     final local = date.toLocal();
-    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
-    final minute = local.minute.toString().padLeft(2, '0');
-    final period = local.hour >= 12 ? 'PM' : 'AM';
-
-    return '${weekdays[local.weekday - 1]}, ${months[local.month - 1]} ${local.day}, ${local.year} at $hour:$minute $period';
+    return '${weekdays[local.weekday - 1]}, ${months[local.month - 1]} ${local.day}, ${local.year}';
   }
 }

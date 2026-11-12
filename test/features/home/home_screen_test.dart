@@ -1004,6 +1004,15 @@ void main() {
 
     expect(find.text('Assessment limit reached'), findsOneWidget);
     expect(find.textContaining('up to 2 times in 7 days'), findsOneWidget);
+    expect(
+      find.textContaining('2 school days between attempts'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('School days are Monday to Friday'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('at 9:00 AM'), findsNothing);
     expect(find.text('Start Assessment?'), findsNothing);
   });
 

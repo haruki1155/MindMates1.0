@@ -14,10 +14,11 @@ import '../services/firebase/callable_request_timeout.dart';
 import '../services/firebase/firestore_service.dart';
 import '../services/firebase/firebase_runtime_diagnostics.dart';
 
-typedef StagingQuickAssessmentSubmitter = Future<Map<String, Object>> Function({
-  required String userId,
-  required QuickAssessmentResult result,
-});
+typedef StagingQuickAssessmentSubmitter =
+    Future<Map<String, Object>> Function({
+      required String userId,
+      required QuickAssessmentResult result,
+    });
 
 typedef QuickAssessmentCompletionChecker = Future<bool> Function(String userId);
 
@@ -471,6 +472,25 @@ class AssessmentRepository {
 
 enum FullAssessmentBlockReason { minimumInterval, rollingLimit }
 
+DateTime nextSchoolDay(DateTime date) {
+  var day = DateTime(date.year, date.month, date.day);
+  while (day.weekday == DateTime.saturday || day.weekday == DateTime.sunday) {
+    day = DateTime(day.year, day.month, day.day + 1);
+  }
+  return day;
+}
+
+DateTime addSchoolDays(DateTime from, int days) {
+  var day = DateTime(from.year, from.month, from.day);
+  for (var remaining = days; remaining > 0;) {
+    day = DateTime(day.year, day.month, day.day + 1);
+    if (day.weekday != DateTime.saturday && day.weekday != DateTime.sunday) {
+      remaining -= 1;
+    }
+  }
+  return nextSchoolDay(day);
+}
+
 class FullAssessmentEligibility {
   const FullAssessmentEligibility({
     required this.canStart,
@@ -490,8 +510,9 @@ class FullAssessmentEligibility {
       return const FullAssessmentEligibility(canStart: true);
     }
 
-    final latestEligibleAt = fullAssessmentDates.last.add(
-      AssessmentRepository.fullAssessmentMinimumInterval,
+    final latestEligibleAt = addSchoolDays(
+      fullAssessmentDates.last,
+      AssessmentRepository.fullAssessmentMinimumInterval.inDays,
     );
     DateTime? nextEligibleAt;
     var reason = FullAssessmentBlockReason.minimumInterval;
@@ -502,9 +523,13 @@ class FullAssessmentEligibility {
 
     if (fullAssessmentDates.length >=
         AssessmentRepository.fullAssessmentLimit) {
-      final rollingEligibleAt = fullAssessmentDates.first.add(
+      final rollingExpiry = fullAssessmentDates.first.add(
         AssessmentRepository.fullAssessmentWindow,
       );
+      var rollingEligibleAt = nextSchoolDay(rollingExpiry);
+      if (rollingEligibleAt.isBefore(rollingExpiry)) {
+        rollingEligibleAt = addSchoolDays(rollingExpiry, 1);
+      }
       if (nextEligibleAt == null || rollingEligibleAt.isAfter(nextEligibleAt)) {
         nextEligibleAt = rollingEligibleAt;
         reason = FullAssessmentBlockReason.rollingLimit;

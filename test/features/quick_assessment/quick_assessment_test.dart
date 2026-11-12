@@ -293,101 +293,101 @@ void main() {
       expect(firestore.setDocumentData?['quickAssessmentCompleted'], isTrue);
     });
 
-    test('quick submission timeout ends loading without a duplicate call',
-        () async {
-      final pending = Completer<Map<String, Object>>();
-      var submitCalls = 0;
-      final repository = AssessmentRepository(
-        stagingQuickAssessmentSubmitter: ({
-          required userId,
-          required result,
-        }) {
-          submitCalls += 1;
-          return pending.future;
-        },
-        quickAssessmentCompletionChecker: (_) async => false,
-        callableTimeout: const Duration(milliseconds: 1),
-      );
-      final provider = _readyProvider(repository: repository);
+    test(
+      'quick submission timeout ends loading without a duplicate call',
+      () async {
+        final pending = Completer<Map<String, Object>>();
+        var submitCalls = 0;
+        final repository = AssessmentRepository(
+          stagingQuickAssessmentSubmitter:
+              ({required userId, required result}) {
+                submitCalls += 1;
+                return pending.future;
+              },
+          quickAssessmentCompletionChecker: (_) async => false,
+          callableTimeout: const Duration(milliseconds: 1),
+        );
+        final provider = _readyProvider(repository: repository);
 
-      for (final question in QuickAssessmentQuestions.questions) {
-        provider.selectAnswer(question.options.first);
-        provider.moveToNextQuestion();
-      }
+        for (final question in QuickAssessmentQuestions.questions) {
+          provider.selectAnswer(question.options.first);
+          provider.moveToNextQuestion();
+        }
 
-      await expectLater(
-        provider.saveQuickAssessmentForUser('user_1'),
-        throwsA(isA<CallableRequestTimeoutException>()),
-      );
-      expect(provider.isSavingQuickAssessment, isFalse);
+        await expectLater(
+          provider.saveQuickAssessmentForUser('user_1'),
+          throwsA(isA<CallableRequestTimeoutException>()),
+        );
+        expect(provider.isSavingQuickAssessment, isFalse);
 
-      await expectLater(
-        provider.saveQuickAssessmentForUser('user_1'),
-        throwsA(isA<QuickAssessmentSubmissionPendingException>()),
-      );
-      expect(submitCalls, 1);
-      pending.complete(<String, Object>{'saved': true});
-    });
+        await expectLater(
+          provider.saveQuickAssessmentForUser('user_1'),
+          throwsA(isA<QuickAssessmentSubmissionPendingException>()),
+        );
+        expect(submitCalls, 1);
+        pending.complete(<String, Object>{'saved': true});
+      },
+    );
 
-    test('reconciles server completion after an uncertain quick timeout',
-        () async {
-      final pending = Completer<Map<String, Object>>();
-      var completionChecks = 0;
-      final repository = AssessmentRepository(
-        stagingQuickAssessmentSubmitter: ({
-          required userId,
-          required result,
-        }) => pending.future,
-        quickAssessmentCompletionChecker: (_) async {
-          completionChecks += 1;
-          return completionChecks >= 2;
-        },
-        callableTimeout: const Duration(milliseconds: 1),
-      );
-      final provider = _readyProvider(repository: repository);
+    test(
+      'reconciles server completion after an uncertain quick timeout',
+      () async {
+        final pending = Completer<Map<String, Object>>();
+        var completionChecks = 0;
+        final repository = AssessmentRepository(
+          stagingQuickAssessmentSubmitter:
+              ({required userId, required result}) => pending.future,
+          quickAssessmentCompletionChecker: (_) async {
+            completionChecks += 1;
+            return completionChecks >= 2;
+          },
+          callableTimeout: const Duration(milliseconds: 1),
+        );
+        final provider = _readyProvider(repository: repository);
 
-      for (final question in QuickAssessmentQuestions.questions) {
-        provider.selectAnswer(question.options.first);
-        provider.moveToNextQuestion();
-      }
+        for (final question in QuickAssessmentQuestions.questions) {
+          provider.selectAnswer(question.options.first);
+          provider.moveToNextQuestion();
+        }
 
-      await expectLater(
-        provider.saveQuickAssessmentForUser('user_1'),
-        throwsA(isA<CallableRequestTimeoutException>()),
-      );
+        await expectLater(
+          provider.saveQuickAssessmentForUser('user_1'),
+          throwsA(isA<CallableRequestTimeoutException>()),
+        );
 
-      final recovered = await provider.saveQuickAssessmentForUser('user_1');
-      expect(recovered, <String, Object>{'reconciled': true});
-      pending.complete(<String, Object>{'saved': true});
-    });
+        final recovered = await provider.saveQuickAssessmentForUser('user_1');
+        expect(recovered, <String, Object>{'reconciled': true});
+        pending.complete(<String, Object>{'saved': true});
+      },
+    );
 
-    test('late quick submission cannot update a different authenticated session',
-        () async {
-      final pending = Completer<Map<String, Object>>();
-      final repository = AssessmentRepository(
-        stagingQuickAssessmentSubmitter: ({
-          required userId,
-          required result,
-        }) => pending.future,
-        callableTimeout: const Duration(seconds: 1),
-      );
-      final provider = AssessmentProvider(repository)
-        ..bindAuthenticatedUser('student_a')
-        ..selectRole(AssessmentRole.student)
-        ..updateName('Leo');
+    test(
+      'late quick submission cannot update a different authenticated session',
+      () async {
+        final pending = Completer<Map<String, Object>>();
+        final repository = AssessmentRepository(
+          stagingQuickAssessmentSubmitter:
+              ({required userId, required result}) => pending.future,
+          callableTimeout: const Duration(seconds: 1),
+        );
+        final provider = AssessmentProvider(repository)
+          ..bindAuthenticatedUser('student_a')
+          ..selectRole(AssessmentRole.student)
+          ..updateName('Leo');
 
-      for (final question in QuickAssessmentQuestions.questions) {
-        provider.selectAnswer(question.options.first);
-        provider.moveToNextQuestion();
-      }
+        for (final question in QuickAssessmentQuestions.questions) {
+          provider.selectAnswer(question.options.first);
+          provider.moveToNextQuestion();
+        }
 
-      final saving = provider.saveQuickAssessmentForUser('student_a');
-      provider.bindAuthenticatedUser('student_b');
-      pending.complete(<String, Object>{'saved': true});
+        final saving = provider.saveQuickAssessmentForUser('student_a');
+        provider.bindAuthenticatedUser('student_b');
+        pending.complete(<String, Object>{'saved': true});
 
-      expect(await saving, isNull);
-      expect(provider.isSavingQuickAssessment, isFalse);
-    });
+        expect(await saving, isNull);
+        expect(provider.isSavingQuickAssessment, isFalse);
+      },
+    );
   });
 
   group('QuickAssessmentCategoryScreen', () {
@@ -489,6 +489,14 @@ void main() {
 
       expect(find.text('Assessment limit reached'), findsOneWidget);
       expect(find.textContaining('up to 2 times in 7 days'), findsOneWidget);
+      expect(
+        find.textContaining('2 school days between attempts'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('School days are Monday to Friday'),
+        findsOneWidget,
+      );
       expect(find.text('student assessment target'), findsNothing);
     });
 
@@ -576,9 +584,7 @@ void main() {
   group('Quick assessment uses the profile name', () {
     test('beginQuickAssessment uses profile name and starts fresh', () {
       final provider = _readyProvider()
-        ..selectAnswer(
-          QuickAssessmentQuestions.questions.first.options.first,
-        );
+        ..selectAnswer(QuickAssessmentQuestions.questions.first.options.first);
 
       provider.beginQuickAssessment(
         role: AssessmentRole.faculty,
@@ -592,41 +598,48 @@ void main() {
       expect(provider.quickResult, isNull);
     });
 
-    test('beginQuickAssessment falls back and caps the name for the server', () {
-      final provider = AssessmentProvider(AssessmentRepository());
+    test(
+      'beginQuickAssessment falls back and caps the name for the server',
+      () {
+        final provider = AssessmentProvider(AssessmentRepository());
 
-      provider.beginQuickAssessment(role: AssessmentRole.student, name: '   ');
-      expect(provider.name, 'MindMate User');
+        provider.beginQuickAssessment(
+          role: AssessmentRole.student,
+          name: '   ',
+        );
+        expect(provider.name, 'MindMate User');
 
-      provider.beginQuickAssessment(
-        role: AssessmentRole.student,
-        name: 'a' * 150,
-      );
-      expect(provider.name.length, 100);
-    });
+        provider.beginQuickAssessment(
+          role: AssessmentRole.student,
+          name: 'a' * 150,
+        );
+        expect(provider.name.length, 100);
+      },
+    );
 
-    testWidgets('choosing a role skips the name step and uses the profile name', (
-      tester,
-    ) async {
-      final assessmentProvider = AssessmentProvider(AssessmentRepository());
-      await _pumpRoleScreen(
-        tester,
-        assessmentProvider: assessmentProvider,
-        user: const UserModel(
-          id: 'u1',
-          email: 'leo@example.com',
-          firstName: 'Leo',
-          lastName: 'Cruz',
-        ),
-      );
+    testWidgets(
+      'choosing a role skips the name step and uses the profile name',
+      (tester) async {
+        final assessmentProvider = AssessmentProvider(AssessmentRepository());
+        await _pumpRoleScreen(
+          tester,
+          assessmentProvider: assessmentProvider,
+          user: const UserModel(
+            id: 'u1',
+            email: 'leo@example.com',
+            firstName: 'Leo',
+            lastName: 'Cruz',
+          ),
+        );
 
-      await tester.tap(find.text('Student'));
-      await tester.pumpAndSettle();
+        await tester.tap(find.text('Student'));
+        await tester.pumpAndSettle();
 
-      expect(find.text('questions target'), findsOneWidget);
-      expect(assessmentProvider.name, 'Leo Cruz');
-      expect(assessmentProvider.selectedRole, AssessmentRole.student);
-    });
+        expect(find.text('questions target'), findsOneWidget);
+        expect(assessmentProvider.name, 'Leo Cruz');
+        expect(assessmentProvider.selectedRole, AssessmentRole.student);
+      },
+    );
 
     testWidgets('stored role redirects straight to questions', (tester) async {
       final assessmentProvider = AssessmentProvider(AssessmentRepository());
