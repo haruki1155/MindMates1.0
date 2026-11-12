@@ -23,6 +23,21 @@ void main() {
     );
     expect(find.text('What the colors mean'), findsOneWidget);
     expect(find.text('Your strengths'), findsNothing);
+    final card = find.byKey(const Key('quick-next-step-card'));
+    expect(card, findsOneWidget);
+    expect(
+      find.descendant(of: card, matching: find.text('Get a fuller picture')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: card, matching: find.text('Take Full Assessment')),
+      findsOneWidget,
+    );
+    final cardBottom = tester.getBottomLeft(card).dy;
+    expect(
+      cardBottom,
+      lessThan(tester.getTopLeft(find.text("What's going well")).dy),
+    );
   });
   testWidgets(
     'low shows supportive guidance without full assessment or PACC actions',

@@ -64,6 +64,53 @@ test("quick v3 server interpretation matches personal focus copy", () => {
   ]);
 });
 
+test("quick v3 keeps the 30-point stored threshold but uses 40 for focus text", () => {
+  const answers: QuickAnswer[] = QUICK_QUESTIONS.map((question) => ({
+    questionId: question.id, optionId: question.options[0].id, value: question.options[0].value,
+  }));
+  answers[3] = {questionId: "little_interest", optionId: "several_days", value: 2};
+  const result = calculateQuick("student", "Test User", answers);
+  const interpretation = result.interpretation as Record<string, unknown>;
+  assert.deepEqual(result.topConcernAreas, ["Motivation and interest"]);
+  assert.deepEqual(interpretation.rationale, ["None of your answers stood out as needing attention right now."]);
+  assert.deepEqual(interpretation.focusInsights, []);
+  assert.equal(interpretation.supportPriority, "routine");
+});
+
+test("quick v3 focus ranks tied scores alphabetically and joins three names", () => {
+  const answers: QuickAnswer[] = QUICK_QUESTIONS.map((question) => ({
+    questionId: question.id, optionId: question.options[0].id, value: question.options[0].value,
+  }));
+  answers[1] = {questionId: "overwhelmed", optionId: "fairly_often", value: 4};
+  answers[2] = {questionId: "connected", optionId: "neutral", value: 3};
+  answers[4] = {questionId: "stress_affecting_life", optionId: "often", value: 4};
+  const result = calculateQuick("student", "Test User", answers);
+  const interpretation = result.interpretation as Record<string, unknown>;
+  assert.deepEqual(interpretation.rationale, [
+    "Areas worth a closer look: daily coping, stress load, and social connection.",
+  ]);
+  assert.deepEqual(result.topConcernAreas, ["Daily coping", "Stress load", "Social connection"]);
+});
+
+test("quick v3 provides exact summaries for all four response patterns", () => {
+  const cases: Array<[number, string, string]> = [
+    [0, "wellBeingSupported", "Your answers show healthy patterns in most areas. Keep doing what helps you feel well."],
+    [1, "generallySteady", "Your answers show a generally steady balance, with a few areas worth keeping an eye on."],
+    [2, "someStrain", "Your answers show some areas that may be adding strain right now. Take a closer look at them below."],
+    [4, "supportMayHelp", "Your answers show several areas where things may feel hard right now. Support can help, and you do not have to handle this alone."],
+  ];
+  for (const [index, pattern, summary] of cases) {
+    const answers: QuickAnswer[] = QUICK_QUESTIONS.map((question) => {
+      const option = question.options[Math.min(index, question.options.length - 1)];
+      return {questionId: question.id, optionId: option.id, value: option.value};
+    });
+    const result = calculateQuick("student", "Test User", answers);
+    assert.equal(result.responsePatternCode, pattern);
+    assert.equal(result.summary, summary);
+    assert.ok(String((result.interpretation as Record<string, unknown>).userSummary).startsWith(summary));
+  }
+});
+
 test("full assessment preserves the intended student domain sequence", () => {
   const sections = QUESTIONS_BY_ROLE.student
     .filter((question) => !question.conditional)

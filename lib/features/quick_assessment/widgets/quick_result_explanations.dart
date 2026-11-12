@@ -7,6 +7,33 @@ import '../../student_assessment/models/assessment_interpretation_models.dart';
 import 'quick_result_visuals.dart';
 import 'quick_assessment_widgets.dart';
 
+List<AssessmentDomainResult> orderedQuickDomains(
+  List<AssessmentDomainResult> domains,
+) {
+  final ordered = [...domains];
+  ordered.sort((a, b) {
+    final score = b.score.compareTo(a.score);
+    return score != 0 ? score : a.domain.compareTo(b.domain);
+  });
+  return ordered;
+}
+
+String quickAnswerLabel(
+  QuickAssessmentQuestion? question,
+  QuickAssessmentResponse? response,
+  String questionSetVersion,
+) {
+  if (questionSetVersion != 'quick_v3' ||
+      question == null ||
+      response == null) {
+    return 'Saved response';
+  }
+  for (final option in question.options) {
+    if (option.id == response.optionId) return option.label;
+  }
+  return 'Saved response';
+}
+
 class QuickResultExplanations extends StatelessWidget {
   const QuickResultExplanations({super.key, required this.result});
 
@@ -14,7 +41,7 @@ class QuickResultExplanations extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final domains = result.interpretation.domainResults;
+    final domains = orderedQuickDomains(result.interpretation.domainResults);
     final good = domains.where((d) => d.score <= 40).toList();
     final closer = domains.where((d) => d.score > 40).toList();
     return Column(
@@ -63,13 +90,11 @@ class _IndicatorExplanation extends StatelessWidget {
     final copy = question == null
         ? null
         : QuickIndicatorCopy.forQuestionId(question.id);
-    final option = question?.options
-        .where((o) => o.id == response?.optionId)
-        .firstOrNull;
-    final answer =
-        result.interpretation.questionSetVersion == 'quick_v3' && option != null
-        ? option.label
-        : 'Saved response';
+    final answer = quickAnswerLabel(
+      question,
+      response,
+      result.interpretation.questionSetVersion,
+    );
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Container(

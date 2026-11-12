@@ -191,104 +191,123 @@ class _DecisionContent extends StatelessWidget {
                 height: 1.45,
               ),
             ),
-            const SizedBox(height: 18),
-            const Text(
-              'What to do next',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
           ],
           const SizedBox(height: 20),
-          Text(
-            actionPolicy?.heading ?? 'Full Assessment Optional',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: QuickAssessmentPalette.text,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              height: 1.08,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            actionPolicy?.guidance ?? _messageFor(provider, role),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: QuickAssessmentPalette.secondaryText,
-              fontSize: 14.5,
-              fontWeight: FontWeight.w700,
-              height: 1.42,
-            ),
-          ),
-          if (provider.quickResult != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Support level: ${provider.quickResult!.interpretation.supportPriority.label}',
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: QuickAssessmentPalette.secondaryText,
+          Container(
+            key: const Key('quick-next-step-card'),
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: QuickAssessmentPalette.cream,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: QuickAssessmentPalette.primary,
+                width: 1.5,
               ),
             ),
-          ],
-          const SizedBox(height: 18),
-          if (actionPolicy?.showsFullAssessmentAction ?? true)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: QuickAssessmentPalette.cream,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: QuickAssessmentPalette.softBorder),
-              ),
-              child: Text(
-                'You can take the full ${role.label.toLowerCase()} assessment now for deeper insights, or later from your dashboard.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: QuickAssessmentPalette.mutedText,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  height: 1.36,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'What to do next',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                 ),
-              ),
-            ),
-          const SizedBox(height: 26),
-          if (actionPolicy?.showsFullAssessmentAction ?? true) ...[
-            SizedBox(
-              width: double.infinity,
-              height: 46,
-              child: ElevatedButton(
-                onPressed: () => _openFullAssessment(context),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: QuickAssessmentPalette.primary,
-                  foregroundColor: QuickAssessmentPalette.text,
-                  elevation: 4,
-                  shadowColor: QuickAssessmentPalette.shadow,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
+                const SizedBox(height: 8),
+                Text(
+                  actionPolicy?.heading ?? 'Full Assessment Optional',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: QuickAssessmentPalette.text,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    height: 1.08,
                   ),
                 ),
-                child: const Text('Take Full Assessment'),
-              ),
+                const SizedBox(height: 10),
+                Text(
+                  actionPolicy?.guidance ?? _messageFor(provider, role),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: QuickAssessmentPalette.secondaryText,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.42,
+                  ),
+                ),
+                if (provider.quickResult != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Support level: ${provider.quickResult!.interpretation.supportPriority.label}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: QuickAssessmentPalette.secondaryText,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                if (actionPolicy?.showsFullAssessmentAction ?? true)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: QuickAssessmentPalette.cream,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: QuickAssessmentPalette.softBorder,
+                      ),
+                    ),
+                    child: Text(
+                      'You can take the full ${role.label.toLowerCase()} assessment now for deeper insights, or later from your dashboard.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: QuickAssessmentPalette.mutedText,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        height: 1.36,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 26),
+                if (actionPolicy?.showsFullAssessmentAction ?? true) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton(
+                      onPressed: () => _openFullAssessment(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: QuickAssessmentPalette.primary,
+                        foregroundColor: QuickAssessmentPalette.text,
+                        elevation: 4,
+                        shadowColor: QuickAssessmentPalette.shadow,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      child: const Text('Take Full Assessment'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (actionPolicy?.showsAppointmentAction ?? false) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 44,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _openPaccBooking(context),
+                      icon: const Icon(Icons.calendar_month_outlined),
+                      label: const Text('Book a PACC appointment'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ],
             ),
-            const SizedBox(height: 12),
-          ],
-          if (actionPolicy?.showsAppointmentAction ?? false) ...[
-            SizedBox(
-              width: double.infinity,
-              height: 44,
-              child: OutlinedButton.icon(
-                onPressed: () => _openPaccBooking(context),
-                icon: const Icon(Icons.calendar_month_outlined),
-                label: const Text('Book a PACC appointment'),
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
+          ),
           if (provider.quickResult != null) ...[
             const SizedBox(height: 18),
             QuickResultExplanations(result: provider.quickResult!),

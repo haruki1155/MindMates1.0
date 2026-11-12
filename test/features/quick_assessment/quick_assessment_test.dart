@@ -104,6 +104,24 @@ void main() {
       'Areas worth a closer look: daily coping, emotional calm, and stress load.',
     );
   });
+  test('quick v3 has exact summaries for all four patterns', () {
+    expect(
+      QuickAssessmentScoring.summaryForScore(0),
+      'Your answers show healthy patterns in most areas. Keep doing what helps you feel well.',
+    );
+    expect(
+      QuickAssessmentScoring.summaryForScore(25),
+      'Your answers show a generally steady balance, with a few areas worth keeping an eye on.',
+    );
+    expect(
+      QuickAssessmentScoring.summaryForScore(50),
+      'Your answers show some areas that may be adding strain right now. Take a closer look at them below.',
+    );
+    expect(
+      QuickAssessmentScoring.summaryForScore(100),
+      'Your answers show several areas where things may feel hard right now. Support can help, and you do not have to handle this alone.',
+    );
+  });
   group('QuickAssessmentScoring', () {
     test('returns progress labels from 1/5 through 5/5', () {
       expect(QuickAssessmentScoring.progressLabelForStep(1), '1/5');
@@ -473,6 +491,40 @@ void main() {
   });
 
   group('QuickAssessmentCategoryScreen', () {
+    testWidgets('long connectedness choice fits and advances at 360px', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final provider = _readyProvider(
+        repository: _RecordingQuickAssessmentRepository(
+          _FakeFirestoreService(),
+        ),
+      )..resetQuestions();
+      for (var i = 0; i < 2; i++) {
+        provider.selectAnswer(
+          QuickAssessmentQuestions.questions[i].options.first,
+        );
+        provider.moveToNextQuestion();
+      }
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AssessmentProvider>.value(
+          value: provider,
+          child: const MaterialApp(home: QuickAssessmentQuestionScreen()),
+        ),
+      );
+      final longLabel = find.text('Neither connected nor disconnected');
+      expect(longLabel, findsOneWidget);
+      expect(tester.widget<Text>(longLabel).maxLines, 2);
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(longLabel);
+      await tester.tap(longLabel);
+      await tester.pump();
+      await tester.ensureVisible(find.text('Next'));
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      expect(provider.currentQuestion.id, 'little_interest');
+    });
     testWidgets('question screen explains why the item is asked', (
       tester,
     ) async {

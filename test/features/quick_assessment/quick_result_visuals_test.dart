@@ -5,12 +5,43 @@ import 'package:mind_mates/features/quick_assessment/models/quick_assessment_mod
 import 'package:mind_mates/features/quick_assessment/screens/quick_assessment_category_screen.dart';
 import 'package:mind_mates/features/quick_assessment/services/quick_assessment_scoring.dart';
 import 'package:mind_mates/features/quick_assessment/widgets/quick_result_visuals.dart';
+import 'package:mind_mates/features/quick_assessment/widgets/quick_result_explanations.dart';
 import 'package:mind_mates/features/student_assessment/models/assessment_interpretation_models.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  test('server indicators are ordered by concern then name', () {
+    final domains = [
+      AssessmentDomainResult.fromJson({'domain': 'Stress load', 'score': 75}),
+      AssessmentDomainResult.fromJson({'domain': 'Daily coping', 'score': 75}),
+      AssessmentDomainResult.fromJson({
+        'domain': 'Emotional calm',
+        'score': 25,
+      }),
+    ];
+    expect(orderedQuickDomains(domains).map((d) => d.domain), [
+      'Daily coping',
+      'Stress load',
+      'Emotional calm',
+    ]);
+    expect(domains.first.domain, 'Stress load');
+  });
+  test('saved v2 answer is not relabeled with v3 choice text', () {
+    final question = QuickAssessmentQuestions.questions[2];
+    final response = QuickAssessmentResponse(
+      questionId: question.id,
+      optionId: 'neutral',
+      value: 3,
+      concernScore: 50,
+    );
+    expect(quickAnswerLabel(question, response, 'quick_v2'), 'Saved response');
+    expect(
+      quickAnswerLabel(question, response, 'quick_v3'),
+      'Neither connected nor disconnected',
+    );
+  });
   test('QuickPatternVisual maps every code and falls back', () {
     expect(
       QuickPatternVisual.forCode('wellBeingSupported').icon,
@@ -58,7 +89,10 @@ void main() {
         final row = find.byKey(ValueKey('quick-indicator-$domain'));
         expect(row, findsOneWidget, reason: domain);
         expect(
-          find.descendant(of: row, matching: find.byIcon(quickDomainIcon(domain))),
+          find.descendant(
+            of: row,
+            matching: find.byIcon(quickDomainIcon(domain)),
+          ),
           findsOneWidget,
           reason: domain,
         );
