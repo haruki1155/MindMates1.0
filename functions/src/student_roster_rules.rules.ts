@@ -2,7 +2,7 @@ import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 import {after, before, beforeEach, test} from "node:test";
 import {assertFails, assertSucceeds, initializeTestEnvironment, RulesTestEnvironment} from "@firebase/rules-unit-testing";
-import {collection, doc, getDoc, getDocs, setDoc, Timestamp, updateDoc} from "firebase/firestore";
+import {collection, doc, getDoc, getDocs, query, setDoc, Timestamp, updateDoc, where} from "firebase/firestore";
 
 let environment: RulesTestEnvironment;
 before(async () => {
@@ -73,6 +73,18 @@ test("student_correction_requests are readable only by their requester and never
   await assertFails(setDoc(doc(owner, "student_correction_requests/r1"), {userId: "u1", status: "approved"}));
   await assertFails(updateDoc(doc(owner, "student_correction_requests/r1"), {status: "approved"}));
   await assertFails(setDoc(doc(owner, "student_correction_requests/r2"), {userId: "u1"}));
+});
+
+test("correction request lists must be constrained to the caller", async () => {
+  await seed();
+  const owner = environment.authenticatedContext("u1").firestore();
+  const requests = collection(owner, "student_correction_requests");
+  await assertSucceeds(getDocs(query(requests, where("userId", "==", "u1"))));
+  await assertFails(getDocs(requests));
+  await assertFails(getDocs(query(requests, where("userId", "==", "u2"))));
+  for (const uid of ["staff", "counselor"]) {
+    await assertFails(getDoc(doc(environment.authenticatedContext(uid).firestore(), "student_correction_requests/r1")));
+  }
 });
 
 test("owners cannot write roster-managed profile fields", async () => {

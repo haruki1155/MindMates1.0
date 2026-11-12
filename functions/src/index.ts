@@ -2348,3 +2348,7 @@ export const expireStaleAppointmentRequests = onSchedule(
 
 export {importStudentRoster, previewStudentRosterImport} from "./student_roster";
 export {activateStudentAccount, activateStudentAccountDev} from "./student_activation";
+export {
+  getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
+  reviewStudentCorrection, saveStudentPersonalInfo,
+} from "./student_personal_info";
