@@ -401,7 +401,8 @@ void main() {
         },
         'interpretation': {
           'userSummary': 'Saved teaching assessment summary.',
-          'overallResponseSummary': 'Saved overall response pattern.',
+          'overallResponseSummary':
+              'Saved overall response pattern. You answered 50 of 50 questions, giving this result high response completeness.',
           'domainSummaries': [
             {
               'domainId': 'teachingWorkloadDemands',
@@ -449,6 +450,7 @@ void main() {
       expect(find.text('Saved teaching assessment summary.'), findsOneWidget);
       expect(find.text('What Your Responses Suggest Overall'), findsOneWidget);
       expect(find.text('Saved overall response pattern.'), findsOneWidget);
+      expect(find.textContaining('response completeness'), findsNothing);
       expect(find.text('Teaching Workload & Role Demands'), findsOneWidget);
       expect(find.text('Saved workload reflection.'), findsOneWidget);
       expect(find.text('Saved focus insight.'), findsOneWidget);

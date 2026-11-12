@@ -14,6 +14,7 @@ import '../../../services/firebase/firebase_runtime_diagnostics.dart';
 import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
 import '../../counseling/screens/pacc_counseling_screen.dart';
 import '../models/student_assessment_models.dart';
+import '../services/assessment_summary_text.dart';
 import '../models/assessment_interpretation_models.dart';
 import '../widgets/v4_assessment_response_review.dart';
 import '../widgets/assessment_presentation.dart';
@@ -483,9 +484,10 @@ class _StudentV4ProfileView extends StatelessWidget {
         _v4NonEmptyText(interpretation['userSummary']) ??
         _v4NonEmptyText(interpretation['studentSummary']) ??
         'This is a snapshot of the past 7 days based on the areas you answered.';
-    final overallResponseSummary =
-        _v4NonEmptyText(interpretation['overallResponseSummary']) ??
-        'Your responses are considered across five well-being areas.';
+    final overallResponseSummary = withoutResponseCompleteness(
+      _v4NonEmptyText(interpretation['overallResponseSummary']) ??
+          'Your responses are considered across five well-being areas.',
+    );
     final disclaimer =
         _v4NonEmptyText(interpretation['disclaimer']) ??
         'This is a non-clinical well-being reflection, not a diagnosis.';
@@ -1157,14 +1159,6 @@ class _SummaryCards extends StatelessWidget {
         _InfoCard(
           title: 'Your well-being at a glance',
           body: result.interpretation.userSummary,
-        ),
-        const SizedBox(height: 10),
-        _InfoCard(
-          title: 'Response confidence',
-          body:
-              '${result.interpretation.responseQuality.confidence.label} '
-              '(${result.interpretation.responseQuality.completionPercent.round()}% answered). '
-              'This summary uses only the questions you answered.',
         ),
         const SizedBox(height: 10),
         _InfoCard(

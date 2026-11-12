@@ -254,6 +254,7 @@ void main() {
       await _expectTextVisible(tester, 'Overall Well-Being Status');
       await _expectTextVisible(tester, 'Assessment Summary');
       await _expectTextVisible(tester, 'What Your Responses Suggest Overall');
+      expect(find.textContaining('response completeness'), findsNothing);
       await _expectTextVisible(tester, 'Strengths & Focus Areas');
       await _expectTextVisible(tester, 'Strengths');
       await _expectTextVisible(tester, 'Focus Areas');
@@ -675,7 +676,7 @@ class _V4Repository extends AssessmentRepository with _PreviewingV4Repository {
       else
         'userSummary': 'Verified workplace V4 result.',
       'overallResponseSummary':
-          'Five well-being areas were considered using your completed responses.',
+          'Five well-being areas were considered using your completed responses. You answered 50 of 50 questions, giving this result high response completeness.',
       'domainSummaries': _domainSummariesFor(instrumentVersion),
       'focusInsights': const ['One area may benefit from attention.'],
       'strengthInsights': const ['One supportive pattern was identified.'],
