@@ -353,3 +353,25 @@ test("R6: legacy (non-roster) student cancellation is unchanged and never touche
   assert.equal(rosterData.activated, true);
   assert.equal(rosterData.userId, uid);
 });
+
+test("cancelling a roster-linked legacy student resets the roster row for reissue", async () => {
+  const studentNo = `${run}-LG1`;
+  const key = keyOf(studentNo);
+  const address = email("lg1");
+  const uid = (await getAuth().createUser({email: address, password: PASSWORD})).uid;
+  extraUids.push(uid);
+  extraDocs.push(db.collection("pending_registration_cancellations").doc(uid));
+  await db.collection("users").doc(uid).set({accessRole: "appUser", populationRole: "student", schoolId: studentNo,
+    profileSetupCompleted: false, quickAssessmentCompleted: false, verifiedBy: "automatic-registration", rosterLinked: true});
+  await db.collection("student_id_reservations").doc(key).set({userId: uid, studentId: studentNo});
+  await rosterRef(key).set({studentNo, studentKey: key, status: "active", activated: true, userId: uid, activationCode: null});
+
+  assert.deepEqual(await cancel.run({auth: {uid}, data: {}}), {ok: true});
+  assert.equal(await authUserExists(address), false);
+  assert.equal((await db.collection("users").doc(uid).get()).exists, false);
+  assert.equal((await db.collection("student_id_reservations").doc(key).get()).exists, false);
+  const rosterData = (await rosterRef(key).get()).data() ?? {};
+  assert.equal(rosterData.activated, false);
+  assert.equal(rosterData.userId, null);
+  assert.equal(rosterData.activationCode, null);
+});

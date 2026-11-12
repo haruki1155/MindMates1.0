@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import {after, before, test} from "node:test";
 import {getApps, initializeApp} from "firebase-admin/app";
+import {getAuth} from "firebase-admin/auth";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
-import {importStudentRoster, previewStudentRosterImport} from "./index";
+import {
+  activateStudentAccountDev, backfillStudentInfoRequirement, importStudentRoster, issueStudentActivationCodes,
+  listLegacyStudentsNotInRoster, listStudentRoster, listStudentRosterImports, previewStudentRosterImport,
+  resetStudentActivationLock, resolveSchoolIdAuthEmailDev, revokeStudentActivation, setStudentRosterStatus,
+  updateStudentRosterRecord,
+} from "./index";
 import {issueCodesFor, rosterTestHooks} from "./student_roster";
 import {verifyActivationCode} from "./student_roster_domain";
 
@@ -226,5 +232,300 @@ test("a failing later batch yields a partial result with codes only for committe
   } finally {
     rosterTestHooks.batchLimit = undefined;
     rosterTestHooks.afterClassify = undefined;
+  }
+});
+
+// ------------------------------------------------------------------ management (Task 6)
+
+const asCallable = (fn: unknown) => fn as Callable;
+const listRoster = asCallable(listStudentRoster);
+const listLegacy = asCallable(listLegacyStudentsNotInRoster);
+const updateRecord = asCallable(updateStudentRosterRecord);
+const setStatus = asCallable(setStudentRosterStatus);
+const resetLock = asCallable(resetStudentActivationLock);
+const listImports = asCallable(listStudentRosterImports);
+const backfill = asCallable(backfillStudentInfoRequirement);
+const issueCodes = asCallable(issueStudentActivationCodes);
+const revoke = asCallable(revokeStudentActivation);
+const activate = asCallable(activateStudentAccountDev);
+const resolveEmail = asCallable(resolveSchoolIdAuthEmailDev);
+const counselorUid = `${run}-counselor`;
+const authUids: string[] = [];
+type RowView = {studentNo: string; name: string; college: string; course: string; yearLevel: string; activated: boolean;
+  status: string; personalInfoComplete: boolean; userId: string | null};
+type Page = {rows: RowView[]; nextPageToken: string | null};
+
+async function put(ref: FirebaseFirestore.DocumentReference, data: Record<string, unknown>) {
+  await ref.set(data);
+  created.push(ref);
+  return ref;
+}
+
+async function importOne(n: string, extra: Record<string, unknown> = {}): Promise<string> {
+  const out = await commit.run({auth, data: {fileName: `${run}-m.xlsx`, rows: [row(n, extra)]}}) as Imported;
+  return out.codes[0].code;
+}
+
+async function activateRow(n: string, tag: string, code: string): Promise<{uid: string; email: string}> {
+  const address = `${run.toLowerCase()}-${tag}@example.com`;
+  await activate.run({data: {studentNo: `${run}-${n}`, activationCode: code, dateOfBirth: "2004-05-06", email: address,
+    password: "Str0ngPass!"}});
+  const uid = (await getAuth().getUserByEmail(address)).uid;
+  authUids.push(uid);
+  created.push(db.collection("users").doc(uid), db.collection("student_id_reservations").doc(keyOf(`${run}-${n}`)),
+    db.collection("student_activation_attempts").doc(keyOf(`${run}-${n}`)));
+  return {uid, email: address};
+}
+
+async function storedCodeVerifies(n: string, code: string): Promise<boolean> {
+  const stored = (await roster(n).get()).data()!.activationCode;
+  return verifyActivationCode(code, {hash: stored.hash, salt: stored.salt, issuedAt: stored.issuedAt.toDate(),
+    expiresAt: stored.expiresAt.toDate()});
+}
+
+async function auditsFor(action: string): Promise<FirebaseFirestore.DocumentData[]> {
+  const snap = await db.collection("admin_audit_logs").where("actorId", "==", adminUid).get();
+  return snap.docs.map((d) => d.data()).filter((d) => d.action === action);
+}
+
+test("management callables are admin-only", async () => {
+  await put(db.collection("users").doc(counselorUid), {accessRole: "counselor", role: "counselor", name: "C"});
+  const c = {uid: counselorUid};
+  await denied(listRoster.run({auth: c, data: {}}), "permission-denied");
+  await denied(listLegacy.run({auth: c, data: {}}), "permission-denied");
+  await denied(updateRecord.run({auth: c, data: {studentNo: `${run}-I1`, fields: {yearLevel: "1"}}}), "permission-denied");
+  await denied(setStatus.run({auth: c, data: {studentNo: `${run}-I1`, status: "deactivated"}}), "permission-denied");
+  await denied(resetLock.run({auth: c, data: {studentNo: `${run}-I1`}}), "permission-denied");
+  await denied(listImports.run({auth: c, data: {}}), "permission-denied");
+  await denied(backfill.run({auth: c, data: {}}), "permission-denied");
+  await denied(issueCodes.run({auth: c, data: {studentNos: [`${run}-I1`]}}), "permission-denied");
+  await denied(revoke.run({auth: c, data: {studentNo: `${run}-I1`, reason: "x"}}), "permission-denied");
+});
+
+test("listStudentRoster searches by surname prefix and Student No., filters infoIncomplete, never returns codes", async () => {
+  await importOne("S1");
+  await importOne("S2");
+  const page = await listRoster.run({auth, data: {search: "dela", collegeId}}) as Page;
+  const nos = page.rows.map((r) => r.studentNo);
+  assert.ok(nos.includes(`${run}-S1`) && nos.includes(`${run}-S2`));
+  assert.ok(page.rows.length <= 50);
+  const s1 = page.rows.find((r) => r.studentNo === `${run}-S1`)!;
+  assert.deepEqual(Object.keys(s1).sort(),
+    ["activated", "college", "course", "name", "personalInfoComplete", "status", "studentNo", "userId", "yearLevel"]);
+  assert.equal(s1.activated, false);
+  assert.equal(s1.personalInfoComplete, false);
+  assert.equal(s1.userId, null);
+  assert.equal(s1.name, "Juan Santos Dela CruzS1");
+  assert.ok(!JSON.stringify(page).includes("hash"));
+
+  const exact = await listRoster.run({auth, data: {search: `${run.toLowerCase()} s1`}}) as Page;
+  assert.deepEqual(exact.rows.map((r) => r.studentNo), [`${run}-S1`]);
+  const none = await listRoster.run({auth, data: {search: "zzzz-no-such-surname"}}) as Page;
+  assert.equal(none.rows.length, 0);
+
+  // infoIncomplete: activated rows whose linked user still needs personal info
+  const incomplete = `${run}-incomplete`;
+  const complete = `${run}-complete`;
+  await put(db.collection("users").doc(incomplete), {populationRole: "student", personalInfoRequired: true});
+  await put(db.collection("users").doc(complete), {populationRole: "student", personalInfoRequired: false});
+  await roster("S1").update({activated: true, userId: incomplete, activationCode: null});
+  await roster("S2").update({activated: true, userId: complete, activationCode: null});
+  const info = await listRoster.run({auth, data: {collegeId, status: "infoIncomplete"}}) as Page;
+  const infoNos = info.rows.map((r) => r.studentNo);
+  assert.ok(infoNos.includes(`${run}-S1`) && !infoNos.includes(`${run}-S2`));
+  assert.ok(info.rows.every((r) => r.activated && !r.personalInfoComplete));
+  const activated = await listRoster.run({auth, data: {collegeId, status: "activated", search: "delacruzs"}}) as Page;
+  const s2 = activated.rows.find((r) => r.studentNo === `${run}-S2`)!;
+  assert.equal(s2.personalInfoComplete, true);
+  assert.equal(s2.userId, complete);
+  const notActivated = await listRoster.run({auth, data: {collegeId, status: "notActivated"}}) as Page;
+  assert.ok(!notActivated.rows.some((r) => r.studentNo === `${run}-S1` || r.studentNo === `${run}-S2`));
+  await denied(listRoster.run({auth, data: {status: "bogus"}}), "invalid-argument");
+  await roster("S1").update({activated: false, userId: null});
+  await roster("S2").update({activated: false, userId: null});
+});
+
+test("listStudentRoster paginates 50 at a time", async () => {
+  const rows = Array.from({length: 55}, (_, i) => row(`PG${String(i).padStart(2, "0")}`));
+  await commit.run({auth, data: {fileName: `${run}-pg.xlsx`, rows}});
+  const first = await listRoster.run({auth, data: {search: "delacruzpg", collegeId}}) as Page;
+  assert.equal(first.rows.length, 50);
+  assert.ok(first.nextPageToken);
+  const second = await listRoster.run({auth, data: {search: "delacruzpg", collegeId, pageToken: first.nextPageToken}}) as Page;
+  assert.equal(second.rows.length, 5);
+  assert.equal(second.nextPageToken, null);
+  const all = new Set([...first.rows, ...second.rows].map((r) => r.studentNo));
+  assert.equal(all.size, 55);
+  const unsearched = await listRoster.run({auth, data: {collegeId}}) as Page;
+  assert.equal(unsearched.rows.length, 50);
+  assert.ok(unsearched.nextPageToken);
+});
+
+test("setStudentRosterStatus disables and re-enables the linked Auth user and audits", async () => {
+  const code = await importOne("ST1");
+  const {uid} = await activateRow("ST1", "st1", code);
+  assert.deepEqual(await setStatus.run({auth, data: {studentNo: `${run}-ST1`, status: "deactivated"}}), {ok: true});
+  assert.equal((await getAuth().getUser(uid)).disabled, true);
+  assert.equal((await roster("ST1").get()).data()!.status, "deactivated");
+  await setStatus.run({auth, data: {studentNo: `${run}-ST1`, status: "active"}});
+  assert.equal((await getAuth().getUser(uid)).disabled, false);
+  assert.equal((await roster("ST1").get()).data()!.status, "active");
+  const audits = (await auditsFor("STUDENT_ROSTER_STATUS_CHANGED")).filter((a) => a.targetId === keyOf(`${run}-ST1`));
+  assert.equal(audits.length, 2);
+  assert.equal(audits[0].category, "USER_MANAGEMENT");
+
+  await importOne("ST2");
+  await setStatus.run({auth, data: {studentNo: `${run}-ST2`, status: "deactivated"}});
+  assert.equal((await roster("ST2").get()).data()!.status, "deactivated");
+  // A linked uid without an Auth user is tolerated.
+  await roster("ST2").update({activated: true, userId: `${run}-ghost`});
+  await setStatus.run({auth, data: {studentNo: `${run}-ST2`, status: "active"}});
+  await denied(setStatus.run({auth, data: {studentNo: `${run}-ST2`, status: "bogus"}}), "invalid-argument");
+  await denied(setStatus.run({auth, data: {studentNo: `${run}-NOPE`, status: "active"}}), "not-found");
+});
+
+test("updateStudentRosterRecord validates, syncs linked users academic fields only, and audits", async () => {
+  await importOne("UP1");
+  const uid = `${run}-up1user`;
+  await put(db.collection("users").doc(uid), {firstName: "Nick", lastName: "Name", yearLevel: "2nd Year", populationRole: "student"});
+  await roster("UP1").update({activated: true, userId: uid});
+  await denied(updateRecord.run({auth, data: {studentNo: `${run}-UP1`, fields: {yearLevel: "9"}}}), "invalid-argument");
+  await denied(updateRecord.run({auth, data: {studentNo: `${run}-UP1`, fields: {course: "Nope"}}}), "invalid-argument");
+  await denied(updateRecord.run({auth, data: {studentNo: `${run}-NOPE`, fields: {yearLevel: "1"}}}), "not-found");
+  assert.deepEqual(await updateRecord.run({auth, data: {studentNo: `${run}-UP1`,
+    fields: {yearLevel: "4", firstName: "Juanito", dateOfBirth: "2004-07-08"}}}), {ok: true});
+  const r = (await roster("UP1").get()).data()!;
+  assert.equal(r.yearLevel, "4th Year");
+  assert.equal(r.firstName, "Juanito");
+  assert.equal(r.dateOfBirthKey, "2004-07-08");
+  assert.equal(r.activated, true);
+  assert.equal(r.userId, uid);
+  const u = (await db.collection("users").doc(uid).get()).data()!;
+  assert.equal(u.yearLevel, "4th Year");
+  assert.equal(u.dateOfBirthKey, "2004-07-08");
+  assert.equal(u.firstName, "Nick");
+  const audits = (await auditsFor("STUDENT_ROSTER_RECORD_UPDATED")).filter((a) => a.targetId === keyOf(`${run}-UP1`));
+  assert.equal(audits.length, 1);
+  assert.deepEqual(audits[0].metadata.changes.yearLevel, {from: "2nd Year", to: "4th Year"});
+});
+
+test("resetStudentActivationLock clears attempts and audits", async () => {
+  await importOne("LK1");
+  const attempts = db.collection("student_activation_attempts").doc(keyOf(`${run}-LK1`));
+  await put(attempts, {failedCount: 5, lockedUntil: Timestamp.fromMillis(Date.now() + 60000)});
+  assert.deepEqual(await resetLock.run({auth, data: {studentNo: `${run}-LK1`}}), {ok: true});
+  assert.equal((await attempts.get()).exists, false);
+  assert.equal((await auditsFor("STUDENT_ACTIVATION_LOCK_RESET")).filter((a) => a.targetId === keyOf(`${run}-LK1`)).length, 1);
+});
+
+test("listStudentRosterImports returns history with actor name", async () => {
+  const out = await listImports.run({auth, data: {}}) as {imports: {id: string; fileName: string; counts: Record<string, number>;
+    importedByName: string; importedAt: string}[]};
+  const mine = out.imports.find((i) => i.fileName === `${run}-pg.xlsx`);
+  assert.ok(mine);
+  assert.deepEqual(mine.counts, {new: 55, updated: 0, linked: 0});
+  assert.ok(mine.importedByName.length > 0);
+  assert.ok(!Number.isNaN(Date.parse(mine.importedAt)));
+});
+
+test("issueStudentActivationCodes replaces the hash and skips ineligible rows", async () => {
+  const oldCode = await importOne("IC1");
+  await importOne("IC2");
+  await roster("IC2").update({activated: true, userId: `${run}-ic2`});
+  await importOne("IC3");
+  await roster("IC3").update({status: "deactivated"});
+  await denied(issueCodes.run({auth, data: {studentNos: []}}), "invalid-argument");
+  await denied(issueCodes.run({auth, data: {studentNos: Array.from({length: 1001}, (_, i) => `${run}-${i}`)}}), "invalid-argument");
+  const before = (await auditsFor("STUDENT_ACTIVATION_CODES_ISSUED")).length;
+  const out = await issueCodes.run({auth, data: {studentNos: [`${run} ic1`, `${run}-IC2`, `${run}-IC3`, `${run}-NOPE`]}}) as
+    {codes: {studentNo: string; code: string}[]; skipped: {studentNo: string; reason: string}[]};
+  assert.deepEqual(out.codes.map((c) => c.studentNo), [`${run}-IC1`]);
+  assert.deepEqual(out.skipped.map((s) => s.studentNo).sort(), [`${run}-IC2`, `${run}-IC3`, `${run}-NOPE`].sort());
+  assert.ok(out.skipped.every((s) => s.reason.length > 0));
+  assert.equal(await storedCodeVerifies("IC1", oldCode), false);
+  assert.equal(await storedCodeVerifies("IC1", out.codes[0].code), true);
+  const audits = await auditsFor("STUDENT_ACTIVATION_CODES_ISSUED");
+  assert.equal(audits.length, before + 1);
+  assert.ok(audits.some((a) => a.metadata?.count === 1 && Object.keys(a.metadata).length === 1));
+  assert.ok(!JSON.stringify(audits).includes(out.codes[0].code));
+});
+
+test("revokeStudentActivation disables the claimant, frees the Student No., and issues a new code", async () => {
+  const code = await importOne("RV1");
+  const first = await activateRow("RV1", "rv1a", code);
+  await denied(revoke.run({auth, data: {studentNo: `${run}-RV1`, reason: "  "}}), "invalid-argument");
+  await denied(revoke.run({auth, data: {studentNo: `${run}-RV1`, reason: "x".repeat(501)}}), "invalid-argument");
+  const out = await revoke.run({auth, data: {studentNo: `${run}-RV1`, reason: "Claimed by the wrong person"}}) as
+    {code: {studentNo: string; code: string}};
+  assert.equal(out.code.studentNo, `${run}-RV1`);
+  assert.equal((await getAuth().getUser(first.uid)).disabled, true);
+  const u = (await db.collection("users").doc(first.uid).get()).data()!;
+  assert.equal(u.accountStatus, "revoked");
+  assert.equal(u.rosterLinked, false);
+  assert.equal(u.firstName, "Juan");
+  assert.equal(u.email, first.email);
+  assert.equal((await db.collection("student_id_reservations").doc(keyOf(`${run}-RV1`)).get()).exists, false);
+  const r = (await roster("RV1").get()).data()!;
+  assert.equal(r.activated, false);
+  assert.equal(r.userId, null);
+  assert.equal(r.consumedActivationCode, null);
+  assert.ok(r.revokedUserIds.includes(first.uid));
+  assert.ok(!JSON.stringify(r).includes(out.code.code.replace("-", "")));
+  const audits = (await auditsFor("STUDENT_ACTIVATION_REVOKED")).filter((a) => a.targetId === keyOf(`${run}-RV1`));
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0].metadata.reason, "Claimed by the wrong person");
+  assert.ok(!JSON.stringify(audits[0]).includes(out.code.code.replace("-", "")));
+
+  const second = await activateRow("RV1", "rv1b", out.code.code);
+  assert.notEqual(second.uid, first.uid);
+  assert.deepEqual(await resolveEmail.run({data: {schoolId: `${run}-RV1`}}), {email: second.email});
+
+  await denied(revoke.run({auth, data: {studentNo: `${run}-S1`, reason: "nope"}}), "failed-precondition");
+});
+
+test("revokeStudentActivation tolerates a missing Auth user and users doc", async () => {
+  await importOne("RV2");
+  const ghost = `${run}-ghostuid`;
+  const reservation = await put(db.collection("student_id_reservations").doc(keyOf(`${run}-RV2`)), {userId: ghost});
+  await roster("RV2").update({activated: true, userId: ghost, activationCode: null});
+  const out = await revoke.run({auth, data: {studentNo: `${run}-RV2`, reason: "Orphaned"}}) as {code: {code: string}};
+  assert.ok(out.code.code);
+  assert.equal((await reservation.get()).exists, false);
+  assert.equal((await db.collection("users").doc(ghost).get()).exists, false);
+  const r = (await roster("RV2").get()).data()!;
+  assert.equal(r.activated, false);
+  assert.ok(r.revokedUserIds.includes(ghost));
+  assert.equal(await storedCodeVerifies("RV2", out.code.code), true);
+});
+
+test("backfillStudentInfoRequirement flags students without personal info, idempotently", async () => {
+  const missing = `${run}-bf-missing`;
+  const has = `${run}-bf-has`;
+  const teacher = `${run}-bf-teacher`;
+  await put(db.collection("users").doc(missing), {populationRole: "student", schoolId: `${run}-BF1`, firstName: "Leo", lastName: "Legacy"});
+  await put(db.collection("users").doc(has), {populationRole: "student", schoolId: `${run}-BF2`, rosterLinked: true});
+  await put(db.collection("student_personal_info").doc(has), {sex: "Male"});
+  await put(db.collection("users").doc(teacher), {populationRole: "teaching"});
+  const out = await backfill.run({auth, data: {}}) as {flagged: number; notInRoster: number};
+  assert.ok(out.flagged >= 1);
+  assert.ok(out.notInRoster >= 1);
+  assert.equal((await db.collection("users").doc(missing).get()).data()!.personalInfoRequired, true);
+  assert.equal((await db.collection("users").doc(has).get()).data()!.personalInfoRequired, undefined);
+  assert.equal((await db.collection("users").doc(teacher).get()).data()!.personalInfoRequired, undefined);
+  const snapshot = (await db.collection("users").doc(missing).get()).updateTime;
+  await backfill.run({auth, data: {}});
+  assert.deepEqual((await db.collection("users").doc(missing).get()).updateTime, snapshot);
+
+  const legacy = await listLegacy.run({auth, data: {}}) as {rows: {userId: string; schoolId: string; name: string}[]};
+  const leo = legacy.rows.find((r) => r.userId === missing);
+  assert.deepEqual(leo, {userId: missing, schoolId: `${run}-BF1`, name: "Leo Legacy"});
+  assert.ok(!legacy.rows.some((r) => r.userId === has || r.userId === teacher));
+});
+
+after(async () => {
+  for (const uid of authUids) {
+    await getAuth().deleteUser(uid).catch(() => undefined);
+    const audits = await db.collection("admin_audit_logs").where("actorId", "==", uid).get();
+    await Promise.all(audits.docs.map((d) => d.ref.delete()));
   }
 });

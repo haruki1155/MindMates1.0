@@ -271,3 +271,9 @@ test("course correction within the college updates academic fields in roster and
   assert.equal(user.courseId, course2);
   assert.equal(user.course, "BS Testing Two");
 });
+
+test("save rejects a revoked student account", async () => {
+  const {uid} = await seedStudent("11", {user: {accountStatus: "revoked", rosterLinked: false}});
+  await rejects(save.run({auth: {uid}, data: {info: INFO, privacyConsent: true}}), "permission-denied");
+  assert.equal((await db.doc(`student_personal_info/${uid}`).get()).exists, false);
+});

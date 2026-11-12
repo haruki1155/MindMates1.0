@@ -81,6 +81,14 @@ function canonicalEmployeeId(value: string): string {
   return employeeId;
 }
 
+export const STUDENT_SELF_PROVISIONING_BLOCKED =
+  "Students activate accounts through the roster. Tap 'Activate student account'.";
+
+/** Students may no longer self-register; they activate through the roster instead. */
+export function assertSelfProvisioningAllowed(role: string): void {
+  if (role === "student") throw new HttpsError("failed-precondition", STUDENT_SELF_PROVISIONING_BLOCKED);
+}
+
 export function canonicalStudentId(value: string): string {
   const id = value.trim().toUpperCase();
   if (!STUDENT_ID_PATTERN.test(id)) {
@@ -203,11 +211,15 @@ async function cancelPendingRegistrationHandler(request: CallableRequest) {
     // Roster activations reserve by the roster key (canonicalLoginId), not the legacy signup allowlist.
     const rosterActivated = registrationType === "standard" && profileData.populationRole === "student" &&
       profileData.verifiedBy === "roster-activation";
-    const rosterKey = rosterActivated ? canonicalLoginId(String(profileData.schoolId ?? "")) : "";
-    const rosterRef = rosterActivated ? db.collection("student_roster").doc(rosterKey) : null;
+    // Legacy students linked by a roster import also reserve by the roster key.
+    const rosterLinkedLegacy = registrationType === "standard" && profileData.populationRole === "student" &&
+      !rosterActivated && profileData.rosterLinked === true;
+    const rosterKeyed = rosterActivated || rosterLinkedLegacy;
+    const rosterKey = rosterKeyed ? canonicalLoginId(String(profileData.schoolId ?? "")) : "";
+    const rosterRef = rosterKeyed ? db.collection("student_roster").doc(rosterKey) : null;
     const reservationRef = registrationType === "staff" || profileData.populationRole === "teaching"
       ? db.collection("employee_id_reservations").doc(canonicalEmployeeId(String(profileData.employeeId ?? "")))
-      : db.collection("student_id_reservations").doc(rosterActivated
+      : db.collection("student_id_reservations").doc(rosterKeyed
         ? rosterKey
         : canonicalStudentId(String(profileData.schoolId ?? "")));
     const accessRequestId = registrationType === "staff" ? String(profileData.accessRequestId ?? "").trim() : "";
@@ -237,7 +249,12 @@ async function cancelPendingRegistrationHandler(request: CallableRequest) {
         }
         transaction.delete(requestRef);
       }
-      if (rosterRef && roster?.exists && roster.data()?.userId === uid) {
+      if (rosterLinkedLegacy && rosterRef && roster?.exists && roster.data()?.userId === uid) {
+        // No slip was ever issued for a linked legacy account; an admin reissues a code.
+        transaction.update(rosterRef, {
+          activated: false, userId: null, activationCode: null, updatedAt: FieldValue.serverTimestamp(),
+        });
+      } else if (rosterRef && roster?.exists && roster.data()?.userId === uid) {
         // Give the slip back so the student can activate again with the same code.
         const consumed = roster.data()?.consumedActivationCode;
         transaction.update(rosterRef, {
@@ -307,6 +324,7 @@ async function provisionAppUserProfileHandler(request: CallableRequest) {
     const authUser = await getAuth().getUser(uid);
     const input = validatedProfileInput(request.data);
     const assignedRole = registrationRoleForEmail(authUser.email);
+    assertSelfProvisioningAllowed(assignedRole);
     if (input.populationRole !== assignedRole) {
       throw new HttpsError(
         "failed-precondition",

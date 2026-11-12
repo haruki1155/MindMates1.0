@@ -1,12 +1,14 @@
 import {getApps, initializeApp} from "firebase-admin/app";
-import {FieldValue, getFirestore, Timestamp, WriteBatch} from "firebase-admin/firestore";
+import {getAuth} from "firebase-admin/auth";
+import {FieldPath, FieldValue, getFirestore, Timestamp, WriteBatch} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {requireAdmin, requireUid, roleOf} from "./access";
-import {AUDIT_CATEGORIES, actorName, writeAuditBatch} from "./audit";
+import {canonicalLoginId} from "./account_recovery";
+import {AUDIT_CATEGORIES, actorName, writeAudit, writeAuditBatch} from "./audit";
 import {
   AcademicIndex, OfficialFields, RosterRowInput, StoredActivationCode, generateActivationCode, hashActivationCode,
-  normalizeName, validateRosterRows,
+  normalizeName, normalizeYearLevel, validateRosterRows,
 } from "./student_roster_domain";
 
 if (!getApps().length) initializeApp();
@@ -343,4 +345,428 @@ export const importStudentRoster = onCall(async (request) => {
       message: "Import stopped partway. Rows saved so far are listed; fix the file and re-import the rest."};
   }
   return {status: "complete", importId: importRef.id, counts, codes};
+});
+
+// ------------------------------------------------------------------ management
+
+const PAGE_SIZE = 50;
+const INFO_SCAN_CHUNK = 100;
+const INFO_SCAN_LIMIT = 1000;
+const MAX_REASON = 500;
+const LIST_STATUSES = ["notActivated", "activated", "infoIncomplete", "deactivated"] as const;
+type ListStatus = typeof LIST_STATUSES[number];
+const EDITABLE_FIELDS = ["surname", "firstName", "middleName", "dateOfBirth", "college", "course", "yearLevel"] as const;
+
+export type RosterRowView = {studentNo: string; name: string; college: string; course: string; yearLevel: string;
+  activated: boolean; status: string; personalInfoComplete: boolean; userId: string | null};
+
+function payload(data: unknown): Record<string, unknown> {
+  return data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : {};
+}
+
+function optionalString(raw: Record<string, unknown>, key: string, max = 200): string {
+  const value = raw[key];
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string" || value.trim().length > max) throw new HttpsError("invalid-argument", `${key} is invalid.`);
+  return value.trim();
+}
+
+function canonicalOrNull(value: unknown): string | null {
+  try {
+    return canonicalLoginId(value);
+  } catch {
+    return null;
+  }
+}
+
+function requireStudentKey(raw: Record<string, unknown>): string {
+  const key = canonicalOrNull(raw.studentNo);
+  if (!key) throw new HttpsError("invalid-argument", "Enter a valid Student No.");
+  return key;
+}
+
+function adminMeta(actor: Doc): {actorNameSnapshot: string; actorRoleSnapshot: string} {
+  return {actorNameSnapshot: actorName(actor), actorRoleSnapshot: roleOf(actor) || "admin"};
+}
+
+function isoOf(value: unknown): string {
+  return value instanceof Timestamp ? value.toDate().toISOString() : "";
+}
+
+function rowView(data: Doc, user: Doc | undefined): RosterRowView {
+  const userId = typeof data.userId === "string" && data.userId ? data.userId : null;
+  const activated = data.activated === true;
+  return {
+    studentNo: String(data.studentNo ?? ""),
+    name: [data.firstName, data.middleName, data.surname].map((v) => String(v ?? "").trim()).filter(Boolean).join(" "),
+    college: String(data.college ?? ""), course: String(data.course ?? ""), yearLevel: String(data.yearLevel ?? ""),
+    activated, status: String(data.status ?? ""),
+    personalInfoComplete: Boolean(activated && userId && user && user.personalInfoRequired !== true),
+    userId,
+  };
+}
+
+async function linkedUsers(rows: Doc[]): Promise<Map<string, Doc>> {
+  const db = database();
+  const uids = [...new Set(rows.map((r) => (r.activated === true && typeof r.userId === "string" ? r.userId : "")).filter(Boolean))];
+  const snaps = await getAllChunked(uids.map((uid) => db.collection("users").doc(uid)));
+  return new Map(snaps.filter((s) => s.exists).map((s) => [s.id, s.data() as Doc]));
+}
+
+type ListFilters = {collegeId: string; courseId: string; yearLevel: string; status: ListStatus | ""};
+
+function matchesFilters(data: Doc, f: ListFilters): boolean {
+  if (f.collegeId && data.collegeId !== f.collegeId) return false;
+  if (f.courseId && data.courseId !== f.courseId) return false;
+  if (f.yearLevel && data.yearLevel !== f.yearLevel) return false;
+  if (f.status === "notActivated") return data.status === "active" && data.activated !== true;
+  if (f.status === "activated" || f.status === "infoIncomplete") return data.status === "active" && data.activated === true;
+  if (f.status === "deactivated") return data.status === "deactivated";
+  return true;
+}
+
+function encodeToken(values: string[]): string {
+  return Buffer.from(JSON.stringify(values), "utf8").toString("base64url");
+}
+
+function decodeToken(token: string, length: number): string[] {
+  try {
+    const values = JSON.parse(Buffer.from(token, "base64url").toString("utf8")) as unknown;
+    if (Array.isArray(values) && values.length === length && values.every((v) => typeof v === "string")) return values;
+  } catch {
+    // fall through
+  }
+  throw new HttpsError("invalid-argument", "The page token is invalid.");
+}
+
+export const listStudentRoster = onCall(async (request) => {
+  await requireAdmin(requireUid(request));
+  const raw = payload(request.data);
+  const search = optionalString(raw, "search", 100);
+  const rawYear = optionalString(raw, "yearLevel", 40);
+  const yearLevel = rawYear ? normalizeYearLevel(rawYear) : "";
+  if (yearLevel === null) throw new HttpsError("invalid-argument", "yearLevel is invalid.");
+  const status = optionalString(raw, "status", 40);
+  if (status && !(LIST_STATUSES as readonly string[]).includes(status)) {
+    throw new HttpsError("invalid-argument", "status is invalid.");
+  }
+  const filters: ListFilters = {collegeId: optionalString(raw, "collegeId"), courseId: optionalString(raw, "courseId"),
+    yearLevel, status: status as ListStatus | ""};
+  const pageToken = optionalString(raw, "pageToken", 2000);
+  const db = database();
+  const collection = db.collection("student_roster");
+
+  // An exact Student No. hit wins over a surname search.
+  const exactKey = search ? canonicalOrNull(search) : null;
+  if (exactKey && !pageToken) {
+    const snap = await collection.doc(exactKey).get();
+    if (snap.exists) {
+      const data = snap.data() as Doc;
+      if (!matchesFilters(data, filters)) return {rows: [], nextPageToken: null};
+      const users = await linkedUsers([data]);
+      const view = rowView(data, users.get(String(data.userId ?? "")));
+      if (filters.status === "infoIncomplete" && view.personalInfoComplete) return {rows: [], nextPageToken: null};
+      return {rows: [view], nextPageToken: null};
+    }
+  }
+
+  let query: FirebaseFirestore.Query = collection;
+  if (filters.collegeId) query = query.where("collegeId", "==", filters.collegeId);
+  if (filters.courseId) query = query.where("courseId", "==", filters.courseId);
+  if (filters.yearLevel) query = query.where("yearLevel", "==", filters.yearLevel);
+  if (filters.status === "notActivated") query = query.where("status", "==", "active").where("activated", "==", false);
+  if (filters.status === "activated" || filters.status === "infoIncomplete") {
+    query = query.where("status", "==", "active").where("activated", "==", true);
+  }
+  if (filters.status === "deactivated") query = query.where("status", "==", "deactivated");
+
+  const prefix = search ? normalizeName(search) : "";
+  let cursorOf: (snap: FirebaseFirestore.QueryDocumentSnapshot) => string[];
+  if (prefix) {
+    query = query.where("surnameNormalized", ">=", prefix).where("surnameNormalized", "<", `${prefix}`)
+      .orderBy("surnameNormalized").orderBy(FieldPath.documentId());
+    cursorOf = (s) => [String(s.data().surnameNormalized ?? ""), s.id];
+  } else {
+    query = query.orderBy(FieldPath.documentId());
+    cursorOf = (s) => [s.id];
+  }
+  let cursor = pageToken ? decodeToken(pageToken, prefix ? 2 : 1) : null;
+
+  if (filters.status !== "infoIncomplete") {
+    const page = await (cursor ? query.startAfter(...cursor) : query).limit(PAGE_SIZE + 1).get();
+    const docs = page.docs.slice(0, PAGE_SIZE);
+    const users = await linkedUsers(docs.map((d) => d.data()));
+    return {
+      rows: docs.map((d) => rowView(d.data(), users.get(String(d.data().userId ?? "")))),
+      nextPageToken: page.docs.length > PAGE_SIZE ? encodeToken(cursorOf(docs[docs.length - 1])) : null,
+    };
+  }
+
+  // infoIncomplete depends on the linked user, so scan activated rows in bounded chunks.
+  const matches: {view: RosterRowView; cursor: string[]}[] = [];
+  let scanned = 0;
+  let exhausted = false;
+  while (matches.length <= PAGE_SIZE && scanned < INFO_SCAN_LIMIT) {
+    const chunk = await (cursor ? query.startAfter(...cursor) : query).limit(INFO_SCAN_CHUNK).get();
+    const users = await linkedUsers(chunk.docs.map((d) => d.data()));
+    for (const d of chunk.docs) {
+      scanned += 1;
+      cursor = cursorOf(d);
+      const user = users.get(String(d.data().userId ?? ""));
+      if (user?.personalInfoRequired === true) {
+        matches.push({view: rowView(d.data(), user), cursor});
+        if (matches.length > PAGE_SIZE) break;
+      }
+    }
+    if (chunk.docs.length < INFO_SCAN_CHUNK) {
+      exhausted = matches.length <= PAGE_SIZE;
+      break;
+    }
+  }
+  if (matches.length > PAGE_SIZE) {
+    return {rows: matches.slice(0, PAGE_SIZE).map((m) => m.view), nextPageToken: encodeToken(matches[PAGE_SIZE - 1].cursor)};
+  }
+  return {rows: matches.map((m) => m.view), nextPageToken: exhausted || !cursor ? null : encodeToken(cursor)};
+});
+
+export const listLegacyStudentsNotInRoster = onCall(async (request) => {
+  await requireAdmin(requireUid(request));
+  const snap = await database().collection("users").where("populationRole", "==", "student")
+    .select("schoolId", "name", "firstName", "lastName", "rosterLinked", "accountStatus").get();
+  const rows = snap.docs
+    .filter((d) => d.data().rosterLinked !== true && d.data().accountStatus !== "revoked")
+    .map((d) => {
+      const data = d.data();
+      const name = String(data.name ?? "").trim() ||
+        [data.firstName, data.lastName].map((v) => String(v ?? "").trim()).filter(Boolean).join(" ");
+      return {userId: d.id, schoolId: String(data.schoolId ?? ""), name};
+    })
+    .sort((a, b) => a.schoolId.localeCompare(b.schoolId));
+  return {rows};
+});
+
+export const updateStudentRosterRecord = onCall(async (request) => {
+  const actorId = requireUid(request);
+  const actor = await requireAdmin(actorId);
+  const raw = payload(request.data);
+  const key = requireStudentKey(raw);
+  const fields = payload(raw.fields);
+  const names = Object.keys(fields);
+  if (!names.length || names.some((n) => !(EDITABLE_FIELDS as readonly string[]).includes(n))) {
+    throw new HttpsError("invalid-argument", `Only ${EDITABLE_FIELDS.join(", ")} can be edited.`);
+  }
+  const db = database();
+  const rosterRef = db.collection("student_roster").doc(key);
+  const index = await loadAcademicIndex();
+
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(rosterRef);
+    if (!snap.exists) throw new HttpsError("not-found", "That Student No. is not in the roster.");
+    const live = snap.data() as Doc;
+    const merged: RosterRowInput = {
+      studentNo: live.studentNo, surname: live.surname, firstName: live.firstName, middleName: live.middleName,
+      dateOfBirth: live.dateOfBirthKey, college: live.college, course: live.course, yearLevel: live.yearLevel,
+      ...fields,
+    };
+    const [result] = validateRosterRows([merged], index);
+    if (!result.ok) throw new HttpsError("invalid-argument", "Please correct the record.", {errors: result.errors});
+    const v = result.value;
+    const uid = live.activated === true && typeof live.userId === "string" ? live.userId : "";
+    const userRef = uid ? db.collection("users").doc(uid) : null;
+    const user = userRef ? await transaction.get(userRef) : null;
+    const changes = diff(v, live);
+    transaction.update(rosterRef, {...officialFields(v), updatedAt: FieldValue.serverTimestamp(), updatedBy: actorId});
+    if (userRef && user?.exists) transaction.set(userRef, userAcademicFields(v), {merge: true});
+    writeAudit(transaction, db, {
+      actorId, ...adminMeta(actor), action: "STUDENT_ROSTER_RECORD_UPDATED", category: AUDIT_CATEGORIES.userManagement,
+      targetType: "student_roster", targetId: key, metadata: {studentNo: v.studentNo, userId: uid || null, changes},
+    });
+  });
+  return {ok: true};
+});
+
+function authErrorCode(error: unknown): string {
+  return String((error as {code?: string})?.code ?? "");
+}
+
+/** Disables or enables an Auth user; returns false when the user does not exist. */
+async function setAuthDisabled(uid: string, disabled: boolean): Promise<boolean> {
+  try {
+    await getAuth().updateUser(uid, {disabled});
+    if (disabled) await getAuth().revokeRefreshTokens(uid);
+    return true;
+  } catch (error) {
+    if (authErrorCode(error) === "auth/user-not-found") return false;
+    throw error;
+  }
+}
+
+export const setStudentRosterStatus = onCall(async (request) => {
+  const actorId = requireUid(request);
+  const actor = await requireAdmin(actorId);
+  const raw = payload(request.data);
+  const key = requireStudentKey(raw);
+  const status = raw.status;
+  if (status !== "active" && status !== "deactivated") throw new HttpsError("invalid-argument", "status is invalid.");
+  const db = database();
+  const rosterRef = db.collection("student_roster").doc(key);
+  const uid = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(rosterRef);
+    if (!snap.exists) throw new HttpsError("not-found", "That Student No. is not in the roster.");
+    const live = snap.data() as Doc;
+    const linked = live.activated === true && typeof live.userId === "string" ? live.userId : "";
+    transaction.update(rosterRef, {status, updatedAt: FieldValue.serverTimestamp(), updatedBy: actorId});
+    writeAudit(transaction, db, {
+      actorId, ...adminMeta(actor), action: "STUDENT_ROSTER_STATUS_CHANGED", category: AUDIT_CATEGORIES.userManagement,
+      targetType: "student_roster", targetId: key,
+      metadata: {studentNo: String(live.studentNo ?? key), from: String(live.status ?? ""), to: status, userId: linked || null},
+    });
+    return linked;
+  });
+  if (uid) await setAuthDisabled(uid, status === "deactivated");
+  return {ok: true};
+});
+
+export const resetStudentActivationLock = onCall(async (request) => {
+  const actorId = requireUid(request);
+  const actor = await requireAdmin(actorId);
+  const key = requireStudentKey(payload(request.data));
+  const db = database();
+  const batch = db.batch();
+  batch.delete(db.collection("student_activation_attempts").doc(key));
+  writeAuditBatch(batch, db, {
+    actorId, ...adminMeta(actor), action: "STUDENT_ACTIVATION_LOCK_RESET", category: AUDIT_CATEGORIES.userManagement,
+    targetType: "student_roster", targetId: key, metadata: {studentKey: key},
+  });
+  await batch.commit();
+  return {ok: true};
+});
+
+export const listStudentRosterImports = onCall(async (request) => {
+  await requireAdmin(requireUid(request));
+  const db = database();
+  const snap = await db.collection("student_roster_imports").orderBy("createdAt", "desc").limit(100).get();
+  const actorIds = [...new Set(snap.docs.map((d) => String(d.data().actorId ?? "")).filter(Boolean))];
+  const actors = new Map((await getAllChunked(actorIds.map((id) => db.collection("users").doc(id))))
+    .map((s) => [s.id, s.exists ? actorName(s.data() as Doc) : "Administrator"]));
+  return {imports: snap.docs.map((d) => {
+    const data = d.data();
+    const counts = (data.counts ?? {}) as Record<string, unknown>;
+    return {
+      id: d.id, fileName: String(data.fileName ?? ""),
+      counts: {new: Number(counts.new ?? 0), updated: Number(counts.updated ?? 0), linked: Number(counts.linked ?? 0)},
+      importedByName: actors.get(String(data.actorId ?? "")) ?? "Administrator",
+      importedAt: isoOf(data.createdAt),
+    };
+  })};
+});
+
+export const backfillStudentInfoRequirement = onCall({timeoutSeconds: 540}, async (request) => {
+  await requireAdmin(requireUid(request));
+  const db = database();
+  const students = (await db.collection("users").where("populationRole", "==", "student")
+    .select("personalInfoRequired", "rosterLinked", "accountStatus").get()).docs
+    .filter((d) => d.data().accountStatus !== "revoked");
+  const candidates = students.filter((d) => d.data().personalInfoRequired !== true);
+  const infos = await getAllChunked(candidates.map((d) => db.collection("student_personal_info").doc(d.id)));
+  const toFlag = candidates.filter((_, i) => !infos[i].exists);
+  await commitOps(toFlag.map((d) => (b: WriteBatch) =>
+    b.update(d.ref, {personalInfoRequired: true, updatedAt: FieldValue.serverTimestamp()})));
+  return {flagged: toFlag.length, notInRoster: students.filter((d) => d.data().rosterLinked !== true).length};
+});
+
+export const issueStudentActivationCodes = onCall(async (request) => {
+  const actorId = requireUid(request);
+  await requireAdmin(actorId);
+  const list = payload(request.data).studentNos;
+  if (!Array.isArray(list) || list.length < 1 || list.length > MAX_ROWS) {
+    throw new HttpsError("invalid-argument", `Choose 1 to ${MAX_ROWS} Student Nos.`);
+  }
+  const db = database();
+  const skipped: {studentNo: string; reason: string}[] = [];
+  const keyed = new Map<string, string>();
+  for (const entry of list) {
+    const key = canonicalOrNull(entry);
+    if (!key) skipped.push({studentNo: typeof entry === "string" ? entry.trim().slice(0, 60) : "", reason: "Invalid Student No."});
+    else if (!keyed.has(key)) keyed.set(key, String(entry).trim());
+  }
+  const keys = [...keyed.keys()];
+  const snaps = await getAllChunked(keys.map((k) => db.collection("student_roster").doc(k)));
+  const eligible: string[] = [];
+  snaps.forEach((s, i) => {
+    const data = s.data();
+    if (!s.exists || !data) skipped.push({studentNo: keyed.get(keys[i]) ?? keys[i], reason: "Not in the roster."});
+    else if (data.activated === true) skipped.push({studentNo: String(data.studentNo ?? keys[i]), reason: "Already activated."});
+    else if (data.status !== "active") skipped.push({studentNo: String(data.studentNo ?? keys[i]), reason: "Deactivated."});
+    else eligible.push(keys[i]);
+  });
+  const codes = eligible.length ? await issueCodesFor(eligible, actorId) : [];
+  // Rows that changed between the check and the write.
+  const issuedNos = new Set(codes.map((c) => canonicalOrNull(c.studentNo)));
+  for (const key of eligible) {
+    if (!issuedNos.has(key)) skipped.push({studentNo: keyed.get(key) ?? key, reason: "No longer eligible."});
+  }
+  return {codes, skipped};
+});
+
+export const revokeStudentActivation = onCall(async (request) => {
+  const actorId = requireUid(request);
+  const actor = await requireAdmin(actorId);
+  const raw = payload(request.data);
+  const key = requireStudentKey(raw);
+  const reason = typeof raw.reason === "string" ? raw.reason.trim() : "";
+  if (!reason || reason.length > MAX_REASON) {
+    throw new HttpsError("invalid-argument", `A reason of at most ${MAX_REASON} characters is required.`);
+  }
+  const db = database();
+  const rosterRef = db.collection("student_roster").doc(key);
+  const reservationRef = db.collection("student_id_reservations").doc(key);
+  const pre = (await rosterRef.get()).data();
+  if (!pre) throw new HttpsError("not-found", "That Student No. is not in the roster.");
+  if (pre.activated !== true) throw new HttpsError("failed-precondition", "This Student No. has not been activated.");
+  const uid = typeof pre.userId === "string" ? pre.userId : "";
+
+  // Cut off the claimant first so a failure later never leaves them signed in.
+  let wasEnabled = false;
+  if (uid) {
+    try {
+      wasEnabled = !(await getAuth().getUser(uid)).disabled;
+    } catch (error) {
+      if (authErrorCode(error) !== "auth/user-not-found") throw error;
+    }
+    await setAuthDisabled(uid, true);
+  }
+
+  const minted = await mintCode();
+  try {
+    await db.runTransaction(async (transaction) => {
+      const userRef = uid ? db.collection("users").doc(uid) : null;
+      const [snap, reservation, user] = await Promise.all([
+        transaction.get(rosterRef), transaction.get(reservationRef), userRef ? transaction.get(userRef) : Promise.resolve(null),
+      ]);
+      const live = snap.data();
+      if (!live || live.activated !== true || String(live.userId ?? "") !== uid) {
+        throw new HttpsError("failed-precondition", "The roster row changed. Refresh and try again.");
+      }
+      transaction.update(rosterRef, {
+        activated: false, userId: null, consumedActivationCode: null, activationCode: storedCodeField(minted.stored),
+        ...(uid ? {revokedUserIds: FieldValue.arrayUnion(uid)} : {}),
+        revokedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), updatedBy: actorId,
+      });
+      if (uid && reservation.exists && reservation.data()?.userId === uid) transaction.delete(reservationRef);
+      if (userRef && user?.exists) {
+        transaction.update(userRef, {accountStatus: "revoked", rosterLinked: false,
+          revokedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()});
+      }
+      writeAudit(transaction, db, {
+        actorId, ...adminMeta(actor), action: "STUDENT_ACTIVATION_REVOKED", category: AUDIT_CATEGORIES.userManagement,
+        targetType: "student_roster", targetId: key,
+        metadata: {studentNo: String(live.studentNo ?? key), userId: uid || null, reason},
+      });
+    });
+  } catch (error) {
+    if (uid && wasEnabled) await setAuthDisabled(uid, false).catch(() => undefined);
+    throw error;
+  }
+  return {code: issued(pre, minted)};
 });

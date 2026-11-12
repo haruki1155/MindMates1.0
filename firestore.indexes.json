@@ -248,6 +248,47 @@
         { "fieldPath": "userId", "order": "ASCENDING" },
         { "fieldPath": "updatedAt", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "student_roster",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "collegeId", "order": "ASCENDING" },
+        { "fieldPath": "surnameNormalized", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "student_roster",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "courseId", "order": "ASCENDING" },
+        { "fieldPath": "surnameNormalized", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "student_roster",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearLevel", "order": "ASCENDING" },
+        { "fieldPath": "surnameNormalized", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "student_roster",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "surnameNormalized", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "student_roster",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "activated", "order": "ASCENDING" },
+        { "fieldPath": "surnameNormalized", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

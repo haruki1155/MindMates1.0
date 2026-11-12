@@ -116,6 +116,9 @@ export const saveStudentPersonalInfo = onCall(async (request) => {
   if (!userPeek.exists || userPeek.data()?.populationRole !== "student") {
     throw new HttpsError("permission-denied", "Only students can save Student Information.");
   }
+  if (userPeek.data()?.accountStatus === "revoked") {
+    throw new HttpsError("permission-denied", "This account has been revoked.");
+  }
   const validated = validatePersonalInfo(data.info);
   if (!validated.ok) {
     throw new HttpsError("invalid-argument", "Please correct the highlighted fields.", {errors: validated.errors});
@@ -125,6 +128,9 @@ export const saveStudentPersonalInfo = onCall(async (request) => {
     const [user, existing] = await Promise.all([transaction.get(userRef), transaction.get(infoRef)]);
     if (user.data()?.populationRole !== "student") {
       throw new HttpsError("permission-denied", "Only students can save Student Information.");
+    }
+    if (user.data()?.accountStatus === "revoked") {
+      throw new HttpsError("permission-denied", "This account has been revoked.");
     }
     const hasConsent = Boolean(existing.exists && existing.data()?.privacyConsent?.policyVersion);
     if (!hasConsent && data.privacyConsent !== true) {
