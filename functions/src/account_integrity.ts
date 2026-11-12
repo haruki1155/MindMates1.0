@@ -267,6 +267,18 @@ export const cancelPendingRegistrationDev = onCall(
   cancelPendingRegistrationHandler,
 );
 
+/** Default activity/assessment fields every newly created app-user profile starts with. */
+export function defaultActivityFields(): Record<string, unknown> {
+  return {
+    dayStreak: 0, longestStreak: 0,
+    lastActivityDateKey: "", activeDateKeys: [], avatarAssetName: "",
+    quickAssessmentCompleted: false, quickAssessmentCompletedAt: null,
+    profileSetupCompleted: false,
+    lastActiveAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+}
+
 async function provisionAppUserProfileHandler(request: CallableRequest) {
   const correlationId = randomUUID();
   const uid = requireUid(request);
@@ -330,12 +342,7 @@ async function provisionAppUserProfileHandler(request: CallableRequest) {
         declaredRole: input.populationRole,
         accessRole: "appUser", verificationStatus: "verified", profileVersion: 3,
         verifiedAt: FieldValue.serverTimestamp(), verifiedBy: "automatic-registration",
-        dayStreak: 0, longestStreak: 0,
-        lastActivityDateKey: "", activeDateKeys: [], avatarAssetName: "",
-        quickAssessmentCompleted: false, quickAssessmentCompletedAt: null,
-        profileSetupCompleted: false,
-        lastActiveAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
+        ...defaultActivityFields(),
       });
     });
     console.info("profile_provisioned", {correlationId, created});
