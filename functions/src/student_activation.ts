@@ -147,7 +147,12 @@ async function activateStudentAccountHandler(request: CallableRequest) {
   // 2. Identity: active row + matching code + exact date of birth.
   const rosterRef = db.collection("student_roster").doc(key);
   const row = (await rosterRef.get()).data();
-  const stored = row?.status === "active" ? usableStoredCode(row.activationCode) : null;
+  // An unredeemed code is checked first; otherwise the redeemed (consumed) one, so a student re-entering their
+  // slip after activating learns it is already activated. Still exactly one scrypt on every path.
+  const active = row?.status === "active";
+  const pending = active ? usableStoredCode(row?.activationCode) : null;
+  const consumed = active && !pending ? usableStoredCode(row?.consumedActivationCode) : null;
+  const stored = pending ?? consumed;
   const codeOk = await codeMatches(input.activationCode, stored);
   const dobOk = row?.dateOfBirthKey === input.dateOfBirthKey;
   if (!row || !stored || !codeOk || !dobOk) {
@@ -157,6 +162,10 @@ async function activateStudentAccountHandler(request: CallableRequest) {
 
   // Full identity match: the attempt counter no longer protects anything.
   await clearAttempts(key);
+  if (!pending) {
+    console.info("student_activation_rejected", {correlationId, reason: "already-activated"});
+    throw activationError("already-activated");
+  }
   const expiresAt = (row.activationCode as {expiresAt?: unknown}).expiresAt;
   if (!(expiresAt instanceof Timestamp) || expiresAt.toMillis() <= Date.now()) {
     console.info("student_activation_rejected", {correlationId, reason: "expired"});
@@ -191,10 +200,10 @@ async function activateStudentAccountHandler(request: CallableRequest) {
     await db.runTransaction(async (transaction) => {
       const [current, reservation] = await Promise.all([transaction.get(rosterRef), transaction.get(reservationRef)]);
       const live = current.data();
+      if (live?.activated === true) throw activationError("already-activated");
       if (!live || live.status !== "active" || live.activationCode?.hash !== verifiedHash) {
         throw activationError("mismatch");
       }
-      if (live.activated === true) throw activationError("already-activated");
       if (reservation.exists && reservation.data()?.userId !== uid) throw activationError("already-activated");
 
       const studentNo = String(live.studentNo ?? key);
@@ -220,6 +229,12 @@ async function activateStudentAccountHandler(request: CallableRequest) {
       }
       transaction.update(rosterRef, {
         activated: true, userId: uid, activationCode: null,
+        // Kept (hash only, never the plain code) so a cancelled unverified activation can restore the slip.
+        consumedActivationCode: {
+          hash: live.activationCode.hash, salt: live.activationCode.salt,
+          issuedAt: live.activationCode.issuedAt ?? null, expiresAt: live.activationCode.expiresAt ?? null,
+          consumedAt: FieldValue.serverTimestamp(), userId: uid,
+        },
         activatedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
       });
       writeAudit(transaction, db, {

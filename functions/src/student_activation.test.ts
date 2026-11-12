@@ -4,7 +4,7 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
-import {activateStudentAccountDev} from "./index";
+import {activateStudentAccountDev, cancelPendingRegistrationDev} from "./index";
 import {generateActivationCode, hashActivationCode} from "./student_roster_domain";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
@@ -14,6 +14,8 @@ type Err = {code?: string; message?: string; details?: {reason?: string}};
 
 const db = getFirestore();
 const activate = activateStudentAccountDev as unknown as Callable;
+const cancel = cancelPendingRegistrationDev as unknown as Callable;
+const extraUids: string[] = [];
 const run = `SA${Date.now()}`;
 const runLower = run.toLowerCase();
 const MISMATCH = "Those details don't match our records.";
@@ -83,7 +85,7 @@ before(() => {
 });
 
 after(async () => {
-  const uids: string[] = [];
+  const uids: string[] = [...extraUids];
   for (const address of emails) {
     try {
       const user = await getAuth().getUserByEmail(address);
@@ -268,4 +270,86 @@ test("two simultaneous activations: exactly one wins and the loser's Auth user i
   assert.equal(await authUserExists(loser), false);
   const winnerUser = await getAuth().getUserByEmail(winner);
   assert.equal((await rosterRef(s.key).get()).data()?.userId, winnerUser.uid);
+});
+
+test("R6: redeemed code is kept as consumedActivationCode; re-entering the slip says already activated", async () => {
+  const s = await seed("C1");
+  const data = {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: email("c1"), password: PASSWORD};
+  await activate.run({data});
+  const rosterData = (await rosterRef(s.key).get()).data() ?? {};
+  assert.equal(rosterData.activationCode, null);
+  assert.equal(typeof rosterData.consumedActivationCode?.hash, "string");
+  assert.equal(typeof rosterData.consumedActivationCode?.salt, "string");
+  assert.ok(rosterData.consumedActivationCode?.consumedAt instanceof Timestamp);
+  assert.equal(rosterData.consumedActivationCode?.userId, (await getAuth().getUserByEmail(data.email)).uid);
+  assert.ok(!JSON.stringify(rosterData).includes(s.code.replace("-", "")));
+
+  await mismatch(activate.run({data: {...data, email: email("c1b"), dateOfBirth: "2004-05-07"}}));
+  assert.equal((await attemptsRef(s.key).get()).data()?.failedCount, 1);
+  await rejectsWith(activate.run({data: {...data, email: email("c1c")}}), "already-exists", "already-activated", ACTIVATED);
+  assert.equal((await attemptsRef(s.key).get()).exists, false);
+  assert.equal(await authUserExists(`${runLower}-c1c@example.com`), false);
+});
+
+test("R6: cancelling an unverified activation resets the roster row so the same slip works again", async () => {
+  const s = await seed("X1");
+  const first = email("x1a");
+  await activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: first, password: PASSWORD}});
+  const firstUid = (await getAuth().getUserByEmail(first)).uid;
+  extraUids.push(firstUid);
+
+  assert.deepEqual(await cancel.run({auth: {uid: firstUid}, data: {}}), {ok: true});
+  assert.equal(await authUserExists(first), false);
+  assert.equal((await db.collection("users").doc(firstUid).get()).exists, false);
+  assert.equal((await db.collection("student_id_reservations").doc(s.key).get()).exists, false);
+  const reset = (await rosterRef(s.key).get()).data() ?? {};
+  assert.equal(reset.activated, false);
+  assert.equal(reset.userId, null);
+  assert.equal(reset.consumedActivationCode, null);
+  assert.equal(typeof reset.activationCode?.hash, "string");
+  assert.ok(reset.activationCode?.expiresAt instanceof Timestamp);
+  assert.equal(reset.activationCode?.consumedAt, undefined);
+  assert.equal(reset.activationCode?.userId, undefined);
+
+  const second = email("x1b");
+  await activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: second, password: PASSWORD}});
+  const secondUid = (await getAuth().getUserByEmail(second)).uid;
+  assert.notEqual(secondUid, firstUid);
+  assert.equal((await rosterRef(s.key).get()).data()?.userId, secondUid);
+});
+
+test("R6: cancelling leaves a roster row owned by someone else untouched", async () => {
+  const s = await seed("X2");
+  const address = email("x2");
+  await activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address, password: PASSWORD}});
+  const uid = (await getAuth().getUserByEmail(address)).uid;
+  extraUids.push(uid);
+  await rosterRef(s.key).update({userId: `${run}-other`});
+  await cancel.run({auth: {uid}, data: {}});
+  const rosterData = (await rosterRef(s.key).get()).data() ?? {};
+  assert.equal(rosterData.activated, true);
+  assert.equal(rosterData.userId, `${run}-other`);
+  assert.equal(rosterData.activationCode, null);
+});
+
+test("R6: legacy (non-roster) student cancellation is unchanged and never touches the roster", async () => {
+  const schoolId = `2026${String(Math.floor(Math.random() * 10000)).padStart(4, "0")}`;
+  const address = email("legacy");
+  const uid = (await getAuth().createUser({email: address, password: PASSWORD})).uid;
+  extraUids.push(uid);
+  const reservation = db.collection("student_id_reservations").doc(schoolId);
+  const roster = rosterRef(schoolId);
+  extraDocs.push(reservation, roster, db.collection("pending_registration_cancellations").doc(uid));
+  await db.collection("users").doc(uid).set({accessRole: "appUser", populationRole: "student", schoolId,
+    profileSetupCompleted: false, quickAssessmentCompleted: false, verifiedBy: "automatic-registration"});
+  await reservation.set({userId: uid, studentId: schoolId});
+  await roster.set({studentKey: schoolId, status: "active", activated: true, userId: uid, activationCode: null});
+
+  assert.deepEqual(await cancel.run({auth: {uid}, data: {}}), {ok: true});
+  assert.equal(await authUserExists(address), false);
+  assert.equal((await db.collection("users").doc(uid).get()).exists, false);
+  assert.equal((await reservation.get()).exists, false);
+  const rosterData = (await roster.get()).data() ?? {};
+  assert.equal(rosterData.activated, true);
+  assert.equal(rosterData.userId, uid);
 });
