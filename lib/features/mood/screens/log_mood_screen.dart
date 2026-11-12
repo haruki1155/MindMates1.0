@@ -671,6 +671,12 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _confirmedV2Entry = entry;
       _reflectionOffered = false;
       _readProviderOrNull<MoodProvider>()?.recordConfirmedMoodV2Entry(entry);
+      // Keep the stored day streak (reports, MindAid) in step with V2
+      // check-ins. Never blocks or fails the confirmed save.
+      unawaited(
+        _readProviderOrNull<UserProvider>()?.markMoodCheckIn(userId) ??
+            Future<void>.value(),
+      );
     } catch (_) {
       if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
       setState(() {
@@ -1069,7 +1075,7 @@ class _DailyMoodResult extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      '$currentStreak-day activity streak',
+                      '$currentStreak-day mood streak',
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ],
