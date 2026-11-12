@@ -285,7 +285,7 @@ class HomeAssessmentBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: HomeDecor.card(
         color: const Color(0xFFF1F3FF),
         borderColor: const Color(0x665C7CFF),
