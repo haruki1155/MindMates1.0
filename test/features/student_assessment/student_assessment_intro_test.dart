@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/student_assessment/screens/student_assessment_screen.dart';
+import 'package:mind_mates/features/student_assessment/models/student_assessment_models.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
 import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
@@ -55,6 +56,25 @@ void main() {
     await tester.pump();
     expect(find.text('Before you start'), findsNothing);
     expect(assessment.v4SubmissionId, originalSession);
+  });
+
+  testWidgets('saved session requires a new acknowledgement and starts fresh', (
+    tester,
+  ) async {
+    final assessment = AssessmentProvider(_SavedAssessmentRepository());
+    assessment.bindAuthenticatedUser('student-1');
+    assessment.startStudentAssessment(userId: 'student-1');
+    final oldSubmissionId = assessment.v4SubmissionId;
+    await assessment.saveStudentAssessmentForUser('student-1');
+    await tester.pumpWidget(_app(assessment));
+    await tester.pump();
+    expect(find.text('Before you start'), findsOneWidget);
+    await tester.ensureVisible(find.text('I understand, start assessment'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('I understand, start assessment'));
+    await tester.pump();
+    expect(assessment.v4SubmissionId, isNot(oldSubmissionId));
+    expect(assessment.studentQuestionIndex, 0);
   });
 
   testWidgets('Not now returns home when assessment is the only route', (
@@ -132,4 +152,14 @@ class _AuthRepository extends AuthRepository {
 
   @override
   String? get currentUserId => 'student-1';
+}
+
+class _SavedAssessmentRepository extends AssessmentRepository {
+  @override
+  Future<Map<String, Object>> saveV4FullAssessment({
+    required String userId,
+    required String instrumentVersion,
+    required List<StudentAssessmentAnswer> answers,
+    required String submissionId,
+  }) async => {'submissionId': submissionId};
 }

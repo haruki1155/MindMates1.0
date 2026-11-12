@@ -604,13 +604,14 @@ void main() {
       expect(eligibility.reason, FullAssessmentBlockReason.minimumInterval);
     });
 
-    test('allows full assessment 2 days after one completion', () {
+    test('waits for the next school-day start after an afternoon minimum', () {
       final eligibility = FullAssessmentEligibility.fromCompletedDates(
         completedAt: [DateTime(2026, 7, 1, 9)],
         now: DateTime(2026, 7, 3, 9),
       );
 
-      expect(eligibility.canStart, isTrue);
+      expect(eligibility.canStart, isFalse);
+      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 6));
     });
 
     test('blocks after 2 full assessments in a rolling 7-day period', () {
@@ -647,6 +648,15 @@ void main() {
       expect(eligibility.canStart, isFalse);
     });
 
+    test('weekday afternoon cannot reopen before server minimum interval', () {
+      final eligibility = FullAssessmentEligibility.fromCompletedDates(
+        completedAt: [DateTime(2026, 7, 6, 16, 32)],
+        now: DateTime(2026, 7, 8, 8),
+      );
+      expect(eligibility.canStart, isFalse);
+      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 9));
+    });
+
     test('never opens a rolling window before the exact seven days end', () {
       final eligibility = FullAssessmentEligibility.fromCompletedDates(
         completedAt: [DateTime(2026, 6, 29, 9), DateTime(2026, 7, 1, 9)],
@@ -664,6 +674,29 @@ void main() {
       expect(eligibility.canStart, isFalse);
       expect(eligibility.nextEligibleAt, DateTime(2026, 7, 6));
       expect(eligibility.reason, FullAssessmentBlockReason.rollingLimit);
+    });
+
+    test('keeps advertised Monday deadline after raw rolling expiry', () {
+      final completedAt = [DateTime(2026, 6, 27, 9), DateTime(2026, 7, 1, 9)];
+      for (final now in [
+        DateTime(2026, 7, 4, 8, 59),
+        DateTime(2026, 7, 4, 9),
+        DateTime(2026, 7, 5, 23, 59),
+      ]) {
+        final eligibility = FullAssessmentEligibility.fromCompletedDates(
+          completedAt: completedAt,
+          now: now,
+        );
+        expect(eligibility.canStart, isFalse);
+        expect(eligibility.nextEligibleAt, DateTime(2026, 7, 6));
+      }
+      expect(
+        FullAssessmentEligibility.fromCompletedDates(
+          completedAt: completedAt,
+          now: DateTime(2026, 7, 6),
+        ).canStart,
+        isTrue,
+      );
     });
   });
 

@@ -502,18 +502,22 @@ class FullAssessmentEligibility {
     required List<DateTime> completedAt,
     required DateTime now,
   }) {
-    final windowStart = now.subtract(AssessmentRepository.fullAssessmentWindow);
-    final fullAssessmentDates =
-        completedAt.where((date) => date.isAfter(windowStart)).toList()..sort();
+    final fullAssessmentDates = [...completedAt]..sort();
 
     if (fullAssessmentDates.isEmpty) {
       return const FullAssessmentEligibility(canStart: true);
     }
 
-    final latestEligibleAt = addSchoolDays(
+    var latestEligibleAt = addSchoolDays(
       fullAssessmentDates.last,
       AssessmentRepository.fullAssessmentMinimumInterval.inDays,
     );
+    final serverMinimum = fullAssessmentDates.last.add(
+      AssessmentRepository.fullAssessmentMinimumInterval,
+    );
+    if (latestEligibleAt.isBefore(serverMinimum)) {
+      latestEligibleAt = addSchoolDays(latestEligibleAt, 1);
+    }
     DateTime? nextEligibleAt;
     var reason = FullAssessmentBlockReason.minimumInterval;
 
@@ -521,16 +525,18 @@ class FullAssessmentEligibility {
       nextEligibleAt = latestEligibleAt;
     }
 
-    if (fullAssessmentDates.length >=
-        AssessmentRepository.fullAssessmentLimit) {
-      final rollingExpiry = fullAssessmentDates.first.add(
+    for (var i = 0; i < fullAssessmentDates.length - 1; i += 1) {
+      final rollingExpiry = fullAssessmentDates[i].add(
         AssessmentRepository.fullAssessmentWindow,
       );
+      if (!fullAssessmentDates[i + 1].isBefore(rollingExpiry)) continue;
       var rollingEligibleAt = nextSchoolDay(rollingExpiry);
       if (rollingEligibleAt.isBefore(rollingExpiry)) {
         rollingEligibleAt = addSchoolDays(rollingExpiry, 1);
       }
-      if (nextEligibleAt == null || rollingEligibleAt.isAfter(nextEligibleAt)) {
+      if (now.isBefore(rollingEligibleAt) &&
+          (nextEligibleAt == null ||
+              !rollingEligibleAt.isBefore(nextEligibleAt))) {
         nextEligibleAt = rollingEligibleAt;
         reason = FullAssessmentBlockReason.rollingLimit;
       }

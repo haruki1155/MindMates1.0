@@ -177,6 +177,11 @@ class AssessmentProvider extends ChangeNotifier {
       _selectedOptions.containsKey(currentQuestion.id);
   bool get isLastQuestion => _currentQuestionIndex == questions.length - 1;
   bool get hasStudentAssessmentStarted => _studentQuestions.isNotEmpty;
+  bool get hasResumableStudentAssessment =>
+      hasStudentAssessmentStarted &&
+      _studentResult == null &&
+      _savedV4Payload == null &&
+      _flowStage != AssessmentFlowStage.submitting;
   bool get isLastStudentQuestion =>
       _studentQuestionIndex == _studentQuestions.length - 1;
   bool get canGoBackStudentQuestion => _studentQuestionIndex > 0;

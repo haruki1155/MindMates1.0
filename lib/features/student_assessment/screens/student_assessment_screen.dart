@@ -44,7 +44,7 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
       }
       final assessment = context.read<AssessmentProvider>();
       if (userId != null &&
-          assessment.hasStudentAssessmentStarted &&
+          assessment.hasResumableStudentAssessment &&
           assessment.assessmentSessionOwnerId == userId) {
         setState(() => _showIntro = false);
       }
@@ -54,9 +54,7 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
   void _acceptIntro() {
     final userId = context.read<AuthProvider>().authenticatedUserId;
     if (userId == null || userId.isEmpty) return;
-    context.read<AssessmentProvider>().ensureStudentAssessmentStarted(
-      userId: userId,
-    );
+    context.read<AssessmentProvider>().startStudentAssessment(userId: userId);
     setState(() => _showIntro = false);
   }
 
