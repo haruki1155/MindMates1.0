@@ -5,6 +5,7 @@ import 'package:mind_mates/features/home/data/daily_affirmation_quotes.dart';
 import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
+import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
 import 'package:mind_mates/models/mood_model.dart';
 import 'package:mind_mates/models/report_model.dart';
@@ -21,6 +22,7 @@ import 'package:mind_mates/repositories/assessment_repository.dart';
 import 'package:mind_mates/repositories/auth_repository.dart';
 import 'package:mind_mates/repositories/breathing_repository.dart';
 import 'package:mind_mates/repositories/insights_repository.dart';
+import 'package:mind_mates/repositories/mood_combined_history_repository.dart';
 import 'package:mind_mates/repositories/mood_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
@@ -236,6 +238,89 @@ void main() {
     expect(find.text('Log your mood today to start a streak.'), findsOneWidget);
     expect(find.text('Log mood'), findsOneWidget);
   });
+
+  for (final owner in ['user_1', 'someone_else']) {
+    testWidgets(
+      'home V2 streak uses owned mood history over a stale counter ($owner)',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(900, 1400));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        // Noon in Manila on 2026-11-12.
+        final now = DateTime.utc(2026, 11, 12, 4);
+        final userProvider = UserProvider(_FakeUserRepository())
+          ..setUser(
+            UserModel(
+              id: 'user_1',
+              email: 'leo@example.com',
+              role: 'student',
+              dayStreak: 9,
+              lastActivityDateKey: StreakCalculator.dateKey(now),
+            ),
+          );
+        final history = _V2History([
+          for (final day in [10, 11, 12])
+            NormalizedMoodEvent(
+              id: 'v2-$day',
+              userId: owner,
+              level: 4,
+              dateKey: '2026-11-$day',
+              occurredAt: DateTime.utc(2026, 11, day, 2),
+              source: MoodEventSource.v2,
+              label: 'Okay',
+            ),
+        ]);
+        final moodProvider = MoodProvider(
+          _FakeMoodRepository(),
+          nowProvider: () => now,
+          combinedHistoryRepository: history,
+          useMoodV2Read: true,
+        );
+        await moodProvider.loadMoodV2History('user_1', now: now);
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+              ChangeNotifierProvider<MoodProvider>.value(value: moodProvider),
+              ChangeNotifierProvider<ReportProvider>(
+                create: (_) => ReportProvider(_FakeReportRepository()),
+              ),
+              ChangeNotifierProvider<InsightsProvider>(
+                create: (_) => InsightsProvider(InsightsRepository()),
+              ),
+              ChangeNotifierProvider(
+                create: (_) => AssessmentProvider(AssessmentRepository()),
+              ),
+              ChangeNotifierProvider(
+                create: (_) => BreathingProvider(_FakeBreathingRepository()),
+              ),
+            ],
+            child: MaterialApp(
+              theme: ThemeData(splashFactory: NoSplash.splashFactory),
+              routes: _testRoutes(),
+              home: HomeScreen(nowProvider: () => now),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        final card = find.byType(HomeStreakCard);
+        final days = owner == 'user_1' ? '3' : '9';
+        expect(
+          find.descendant(of: card, matching: find.text(days)),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: card,
+            matching: find.text('Done for today. See you tomorrow!'),
+          ),
+          findsOneWidget,
+        );
+      },
+      skip: !MoodV2FeatureFlag.homeRead || !MoodV2FeatureFlag.providerRead,
+    );
+  }
 
   testWidgets('home Services destination opens the services screen', (
     tester,
@@ -945,4 +1030,25 @@ class _FakeAssessmentRepository extends AssessmentRepository {
     }
     return eligibility;
   }
+}
+
+class _V2History implements MoodCombinedHistoryRepository {
+  _V2History(this.events);
+
+  final List<NormalizedMoodEvent> events;
+
+  @override
+  Future<MoodCombinedHistoryPage> fetch(
+    MoodCombinedHistoryRequest request,
+  ) async => MoodCombinedHistoryPage(
+    window: MoodHistoryWindow(
+      events: events,
+      coverage: MoodHistoryCoverage.complete,
+    ),
+    nextCursor: null,
+    failedSources: const {},
+  );
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

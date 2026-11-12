@@ -8,8 +8,11 @@ enum MoodTipKind { breathing, talk, rest, keepGoing }
 class MoodWeekRecap {
   const MoodWeekRecap({required this.bestDay, required this.tip});
 
+  /// Levels below this (Stressed 2, Sad/Angry 1) never count as a best day.
+  static const _lowestBestDayLevel = 3;
+
   /// The highest-level check-in of the week; ties go to the latest one.
-  /// Null when the week has no check-ins.
+  /// Null when the week has no check-ins or only low (level 1–2) moods.
   final NormalizedMoodEvent? bestDay;
   final MoodTipKind tip;
 
@@ -38,6 +41,8 @@ class MoodWeekRecap {
     } else {
       tip = MoodTipKind.keepGoing;
     }
-    return MoodWeekRecap(bestDay: best, tip: tip);
+    // Never call a stressed, sad or angry check-in a "good day".
+    final goodEnough = best != null && best.level >= _lowestBestDayLevel;
+    return MoodWeekRecap(bestDay: goodEnough ? best : null, tip: tip);
   }
 }

@@ -33,6 +33,21 @@ void main() {
     expect(recap.bestDay, same(saturday));
   });
 
+  test('a week with only low moods has no "best day"', () {
+    final recap = MoodWeekRecap.from([
+      event('Sad', level: 1, day: 9),
+      event('Stressed', level: 2, day: 10),
+    ]);
+    expect(recap.bestDay, isNull);
+    expect(recap.tip, MoodTipKind.keepGoing);
+  });
+
+  test('a neutral day can still be the best day', () {
+    final tired = event('Tired', level: 3, day: 11);
+    final recap = MoodWeekRecap.from([event('Sad', level: 1, day: 9), tired]);
+    expect(recap.bestDay, same(tired));
+  });
+
   test('stress or anger twice suggests breathing', () {
     expect(
       MoodWeekRecap.from([

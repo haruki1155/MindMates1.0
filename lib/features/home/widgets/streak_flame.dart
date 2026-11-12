@@ -45,7 +45,7 @@ class StreakFlame extends StatefulWidget {
 }
 
 class _StreakFlameState extends State<StreakFlame>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const _flickerPeriod = Duration(milliseconds: 2400);
 
   /// Flicker loops each time the flame appears or the streak changes; the
