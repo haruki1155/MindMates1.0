@@ -51,6 +51,59 @@ void main() {
       expect(questions[3].options[2].label, 'More than half the days');
     },
   );
+  test('quick v3 interpretation uses answer-specific focus and copy', () {
+    final result = QuickAssessmentScoring.interpretationFor([
+      const QuickAssessmentResponse(
+        questionId: 'overwhelmed',
+        optionId: 'sometimes',
+        value: 3,
+        concernScore: 50,
+      ),
+      const QuickAssessmentResponse(
+        questionId: 'little_interest',
+        optionId: 'several_days',
+        value: 2,
+        concernScore: 33.3,
+      ),
+    ]);
+    expect(result.questionSetVersion, 'quick_v3');
+    expect(result.rationale.single, 'Areas worth a closer look: stress load.');
+    expect(
+      result.focusInsights.single,
+      startsWith('Stress load: Your tasks have felt overwhelming.'),
+    );
+    expect(
+      result.strengthInsights.single,
+      startsWith('Motivation and interest: You are still enjoying'),
+    );
+    expect(result.userSummary, startsWith('Your answers show'));
+  });
+  test('quick v3 focus orders tied areas by name', () {
+    final result = QuickAssessmentScoring.interpretationFor([
+      const QuickAssessmentResponse(
+        questionId: 'overwhelmed',
+        optionId: 'very_often',
+        value: 5,
+        concernScore: 75,
+      ),
+      const QuickAssessmentResponse(
+        questionId: 'stress_affecting_life',
+        optionId: 'often',
+        value: 4,
+        concernScore: 75,
+      ),
+      const QuickAssessmentResponse(
+        questionId: 'calm_relaxed',
+        optionId: 'less_than_half',
+        value: 2,
+        concernScore: 75,
+      ),
+    ]);
+    expect(
+      result.rationale.single,
+      'Areas worth a closer look: daily coping, emotional calm, and stress load.',
+    );
+  });
   group('QuickAssessmentScoring', () {
     test('returns progress labels from 1/5 through 5/5', () {
       expect(QuickAssessmentScoring.progressLabelForStep(1), '1/5');
