@@ -99,12 +99,11 @@ class _LoginBodyState extends State<_LoginBody> {
       if (!profileLoaded || userProvider.user == null) {
         throw StateError('Your profile could not be loaded.');
       }
-      if (userProvider.user!.profileVersion >= 3 &&
-          (!userProvider.user!.isProfileComplete ||
-              !userProvider.user!.profileSetupCompleted)) {
+      final gateRoute = gateRouteForUser(userProvider.user!);
+      if (gateRoute != null) {
         Navigator.of(
           context,
-        ).pushNamedAndRemoveUntil(RouteNames.profileSetup, (route) => false);
+        ).pushNamedAndRemoveUntil(gateRoute, (route) => false);
         return;
       }
       final hasCompletedQuickAssessment = await assessmentProvider

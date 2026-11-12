@@ -9,6 +9,7 @@ import 'package:mind_mates/features/profile/screens/profile_screen.dart';
 import 'package:mind_mates/models/mental_health_activity_summary.dart';
 import 'package:mind_mates/models/assessment_explanation_model.dart';
 import 'package:mind_mates/models/report_model.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/providers/mental_health_activity_provider.dart';
@@ -144,10 +145,8 @@ void main() {
     await tester.pumpWidget(
       _profileApp(
         provider,
-        imagePicker: () async => EditProfileImage(
-          bytes: imageBytes,
-          contentType: 'image/png',
-        ),
+        imagePicker: () async =>
+            EditProfileImage(bytes: imageBytes, contentType: 'image/png'),
       ),
     );
     await tester.tap(find.byTooltip('Edit profile'));
@@ -207,6 +206,33 @@ void main() {
     expect(find.textContaining('Data Privacy Act of 2012'), findsOneWidget);
     expect(find.byKey(const Key('terms-close')), findsOneWidget);
   });
+
+  for (final student in [true, false]) {
+    testWidgets(
+      'Student Information tile is ${student ? 'shown' : 'hidden'} for ${student ? 'students' : 'employees'}',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(800, 4000));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final userProvider = UserProvider(_FakeUserRepository())
+          ..setUser(
+            UserModel(
+              id: 'user_1',
+              email: 'leo@example.com',
+              populationRole: student
+                  ? PopulationRole.student
+                  : PopulationRole.teaching,
+            ),
+          );
+        await tester.pumpWidget(
+          _profileApp(userProvider, data: _dataFrom(userProvider.user!)),
+        );
+        expect(
+          find.text('Student Information'),
+          student ? findsOneWidget : findsNothing,
+        );
+      },
+    );
+  }
 
   testWidgets('profile Log Out confirms, signs out, and opens login', (
     tester,
