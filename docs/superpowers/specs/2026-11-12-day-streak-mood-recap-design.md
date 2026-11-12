@@ -30,16 +30,22 @@ Panel item 38: "Home > Day streak > Fix counting of streaks." The user wants:
 
 ### Build used for development and on-device checks
 
+This is the team's Mood V2 build from PR #12 (haruki1155; see `docs/superpowers/plans/2026-11-12-mood-v2-correctness-and-clarity.md`), with all six Mood V2 switches on:
+
 ```
---flavor staging --dart-define=APP_ENV=staging
+--flavor staging --dart-define=APP_ENV=staging --dart-define=ENABLE_MOOD_V2=true
 --dart-define=ENABLE_MOOD_V2_PROVIDER_READ=true --dart-define=ENABLE_MOOD_V2_HOME_READ=true
 --dart-define=ENABLE_MOOD_V2_PROFILE_READ=true  --dart-define=ENABLE_MOOD_V2_HISTORY_READ=true
 --dart-define=ENABLE_MOOD_V2_INSIGHTS_READ=true
 ```
 
-- These switches only control how the app reads mood data.
-- The V2 *writer* (`ENABLE_MOOD_V2`) only saves for server-allowlisted pilot accounts (`MOOD_V2_STAGING_PILOT_UIDS`). Item 38 does not change that, so it must work with either writer.
-- Verified on the Infinix X6880 on 2026-11-12: the app starts cleanly with these switches, and My Mood Journey loads.
+- Saving through the V2 writer also needs `ENABLE_STAGING_APP_CHECK=true` and the team's private, registered `APP_CHECK_DEBUG_TOKEN` define file. That file is not in git and not on this machine.
+  - Without it, the server rejects V2 saves, but every V2 screen still renders and reads history.
+- Item 38 changes none of these switches.
+- Verified on the Infinix X6880 on 2026-11-12 (same account throughout):
+  - Home shows "Log a mood".
+  - Log Mood shows the My Mood Journey card ("0 check-ins today · Mood streak · 0 days"), "How are you feeling right now?" and "Save mood entry".
+  - The Home "Day streak" card shows **1** day. That mismatch is the bug item 38 fixes.
 
 ## 2. How it works today (verified on `0d0b7c9`)
 
