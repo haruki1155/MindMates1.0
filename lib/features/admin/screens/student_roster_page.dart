@@ -20,7 +20,14 @@ typedef RosterFilePicker = Future<AdminImportFile?> Function();
 /// Tracks whether freshly issued activation codes have been downloaded so the
 /// portal shell can ask before navigating away.
 class StudentRosterLeaveGuard {
-  bool hasUndownloadedCodes = false;
+  bool _undownloaded = false;
+
+  /// An import or code-issuing call is running: codes may arrive at any
+  /// moment and would be lost with the page.
+  bool codesInFlight = false;
+
+  bool get hasUndownloadedCodes => _undownloaded || codesInFlight;
+  set hasUndownloadedCodes(bool value) => _undownloaded = value;
 
   Future<bool> confirmLeave(BuildContext context) async {
     if (!hasUndownloadedCodes) return true;
@@ -28,9 +35,13 @@ class StudentRosterLeaveGuard {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Leave without downloading?'),
-        content: const Text(
-          'Activation codes from this import have not been downloaded and '
-          'cannot be shown again. $codesShownOnceWarning',
+        content: Text(
+          codesInFlight
+              ? 'Activation codes are still being created. Leaving now '
+                    'stops the import and the codes cannot be shown again. '
+                    '$codesShownOnceWarning'
+              : 'Activation codes from this import have not been downloaded '
+                    'and cannot be shown again. $codesShownOnceWarning',
         ),
         actions: [
           TextButton(
@@ -127,6 +138,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   Map<String, int> _previewCounts = const {};
   bool _previewing = false;
   bool _importing = false;
+  int _codeCalls = 0;
   String _progress = '';
   String? _importError;
   Map<String, int>? _importCounts;
@@ -154,12 +166,14 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   @override
   void dispose() {
     _guard.hasUndownloadedCodes = false;
+    _guard.codesInFlight = false;
     _search.dispose();
     super.dispose();
   }
 
   void _syncGuard() {
     _guard.hasUndownloadedCodes = _codes.isNotEmpty && !_codesDownloaded;
+    _guard.codesInFlight = _importing || _codeCalls > 0;
   }
 
   void _toast(String message) {
@@ -581,6 +595,16 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
 
   Future<void> _issueSelected() => _issueCodes(_selected.toList());
 
+  void _codeCallStarted() {
+    _codeCalls++;
+    _syncGuard();
+  }
+
+  void _codeCallEnded() {
+    if (_codeCalls > 0) _codeCalls--;
+    _syncGuard();
+  }
+
   Future<void> _issueCodes(List<String> studentNos) async {
     final multiple = studentNos.length > 1;
     final ok = await _confirm(
@@ -592,14 +616,18 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
                 'Any earlier code stops working.',
       confirmLabel: 'Issue',
     );
-    if (!ok) return;
-    setState(() => _busyRows.addAll(studentNos));
+    if (!ok || !mounted) return;
+    setState(() {
+      _busyRows.addAll(studentNos);
+      _codeCallStarted();
+    });
     try {
       final result = await _repo.issueActivationCodes(studentNos);
       if (!mounted) return;
       setState(() {
         _selected.removeAll(studentNos);
         _busyRows.removeAll(studentNos);
+        _codeCallEnded();
       });
       await _showCodesDialog(
         title: 'Activation codes issued',
@@ -608,9 +636,13 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         skipped: result.skipped,
       );
     } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busyRows.removeAll(studentNos);
+          _codeCallEnded();
+        });
+      }
       _toast(_errorText(e));
-    } finally {
-      if (mounted) setState(() => _busyRows.removeAll(studentNos));
     }
   }
 
@@ -624,11 +656,17 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
       confirmLabel: 'Revoke activation',
     );
     if (reason == null || !mounted) return;
-    setState(() => _busyRows.add(row.studentNo));
+    setState(() {
+      _busyRows.add(row.studentNo);
+      _codeCallStarted();
+    });
     try {
       final code = await _repo.revokeActivation(row.studentNo, reason);
       if (!mounted) return;
-      setState(() => _busyRows.remove(row.studentNo));
+      setState(() {
+        _busyRows.remove(row.studentNo);
+        _codeCallEnded();
+      });
       await _showCodesDialog(
         title: 'Activation revoked',
         codes: [code],
@@ -636,9 +674,13 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
       );
       if (mounted) await _loadRoster();
     } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busyRows.remove(row.studentNo);
+          _codeCallEnded();
+        });
+      }
       _toast(_errorText(e));
-    } finally {
-      if (mounted) setState(() => _busyRows.remove(row.studentNo));
     }
   }
 
@@ -801,9 +843,34 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         _importing) {
       return;
     }
+    if (_codes.isNotEmpty && !_codesDownloaded) {
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Discard undownloaded codes?'),
+          content: const Text(
+            'Activation codes from the previous import have not been '
+            'downloaded. Starting a new import removes them for good. '
+            '$codesShownOnceWarning',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Go back'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Discard and import'),
+            ),
+          ],
+        ),
+      );
+      if (discard != true || !mounted) return;
+    }
     final chunks = chunkRows(parsed.rows);
     setState(() {
       _importing = true;
+      _syncGuard();
       _importError = null;
       _importCounts = null;
       _partial = null;
@@ -813,12 +880,14 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
     final totals = <String, int>{};
     try {
       for (var i = 0; i < chunks.length; i++) {
+        if (!mounted) break;
         if (mounted) {
           setState(
             () => _progress = 'Importing part ${i + 1} of ${chunks.length}…',
           );
         }
         final result = await _repo.commitImport(file.name, chunks[i]);
+        if (!mounted) break;
         for (final e in result.counts.entries) {
           totals[e.key] = (totals[e.key] ?? 0) + e.value;
         }
@@ -897,6 +966,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         if (_importError != null) _error(_importError!),
         if (_partial != null) _partialBanner(_partial!),
         if (_importCounts != null) _summaryCard(),
+        if (_codes.isNotEmpty && !_importing) _slipsCard(),
         if (parsed != null && file != null) ...[
           const SizedBox(height: 16),
           _fileCard(file, parsed),
@@ -954,24 +1024,33 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
             _countsLine(_importCounts!),
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
           ),
-          if (_codes.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              codesShownOnceWarning,
-              style: const TextStyle(color: AdminColors.danger),
+        ],
+      ),
+    ),
+  );
+
+  Widget _slipsCard() => Card(
+    margin: const EdgeInsets.only(top: 16),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            codesShownOnceWarning,
+            style: const TextStyle(color: AdminColors.danger),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: _downloadImportSlips,
+            icon: const Icon(Icons.download),
+            label: Text('Download activation slips (${_codes.length})'),
+          ),
+          if (_codesDownloaded)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Activation slips downloaded.'),
             ),
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: _downloadImportSlips,
-              icon: const Icon(Icons.download),
-              label: Text('Download activation slips (${_codes.length})'),
-            ),
-            if (_codesDownloaded)
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text('Activation slips downloaded.'),
-              ),
-          ],
         ],
       ),
     ),

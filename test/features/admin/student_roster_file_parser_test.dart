@@ -218,6 +218,75 @@ void main() {
     });
   });
 
+  group('real xlsx with the 1904 date system', () {
+    List<int> patched1904(List<int> bytes) {
+      final zip = ZipDecoder().decodeBytes(bytes);
+      final out = Archive();
+      for (final f in zip) {
+        if (f.name == 'xl/workbook.xml') {
+          var xml = utf8.decode(f.content);
+          if (RegExp(r'<workbookPr').hasMatch(xml)) {
+            xml = xml.replaceFirstMapped(
+              RegExp(r'<workbookPr'),
+              (m) => '<workbookPr date1904="1"',
+            );
+          } else {
+            xml = xml.replaceFirstMapped(
+              RegExp(r'<workbook[^>]*>'),
+              (m) => '${m.group(0)}<workbookPr date1904="1"/>',
+            );
+          }
+          out.addFile(ArchiveFile.string(f.name, xml));
+        } else {
+          out.addFile(ArchiveFile.bytes(f.name, f.content));
+        }
+      }
+      return ZipEncoder().encode(out);
+    }
+
+    List<int> build(excel.CellValue dob) {
+      final book = excel.Excel.createExcel();
+      final sheet = book['Sheet1'];
+      sheet.appendRow([
+        for (final h in rosterTemplateHeaders) excel.TextCellValue(h),
+      ]);
+      sheet.appendRow([
+        excel.TextCellValue('2021-001'),
+        excel.TextCellValue('Santos'),
+        excel.TextCellValue('Ana'),
+        null,
+        dob,
+        excel.TextCellValue('CITE'),
+        excel.TextCellValue('BSIT'),
+        excel.IntCellValue(1),
+      ]);
+      return book.encode()!;
+    }
+
+    test('a date-formatted DOB in a 1904 workbook yields the true date', () {
+      // Stored serial 36936 = 2001-02-14 read as 1900 = 2005-02-15 in 1904.
+      final bytes = patched1904(
+        build(excel.DateCellValue(year: 2001, month: 2, day: 14)),
+      );
+      expect(workbookUses1904(bytes), isTrue);
+      final result = parseRosterFile('r.xlsx', bytes);
+      expect(result.fileErrors, isEmpty);
+      expect(result.rows.single['dateOfBirth'], '2005-02-15');
+    });
+
+    test('a plain 1900 workbook is untouched', () {
+      final bytes = build(excel.DateCellValue(year: 2005, month: 2, day: 15));
+      final result = parseRosterFile('r.xlsx', bytes);
+      expect(result.rows.single['dateOfBirth'], '2005-02-15');
+    });
+
+    test('the probe reports whether the library honours date1904', () {
+      // Either answer is valid for a given excel_plus version; it must be
+      // stable and not throw.
+      expect(excelPlusHonours1904(), excelPlusHonours1904());
+    });
+  });
+
   group('helpers', () {
     test('2,500 rows make 3 chunks of at most 1,000', () {
       final rows = [

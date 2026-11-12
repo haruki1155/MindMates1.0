@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -63,6 +64,7 @@ class _Repo extends StudentRosterRepository {
   ];
   List<StudentCorrection> corrections = [];
   RosterImportResult? Function(int callIndex)? commitOverride;
+  Future<void> Function(int callIndex)? beforeCommit;
   var _commitCalls = 0;
   var _codeSeq = 0;
   Map<String, String>? lastUpdateFields;
@@ -113,6 +115,7 @@ class _Repo extends StudentRosterRepository {
     calls.add('commit');
     commitSizes.add(rows.length);
     final index = _commitCalls++;
+    await beforeCommit?.call(index);
     final override = commitOverride?.call(index);
     if (override != null) return override;
     final codes = [
@@ -423,6 +426,81 @@ void main() {
     await tester.pumpAndSettle();
     debugPrint = original;
     expect(logged.where((l) => l.contains('CODE0')), isEmpty);
+  });
+
+  testWidgets('an in-flight import counts as codes at risk for leaving', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    final repo = _Repo()..beforeCommit = (i) => gate.future;
+    final guard = StudentRosterLeaveGuard();
+    await _pump(tester, repo, guard: guard, file: _csvFile([_csvRow('S-1')]));
+    await _chooseAndPreview(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
+    await tester.pump();
+    expect(guard.hasUndownloadedCodes, isTrue);
+    final context = tester.element(find.byType(StudentRosterPage));
+    final pending = guard.confirmLeave(context);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Leave without downloading?'), findsOneWidget);
+    await tester.tap(find.text('Stay on page'));
+    await tester.pump();
+    expect(await pending, isFalse);
+    gate.complete();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('no further chunks are sent once the page is disposed', (
+    tester,
+  ) async {
+    final gate = Completer<void>();
+    final repo = _Repo()
+      ..beforeCommit = (i) => i == 0 ? gate.future : Future.value();
+    await _pump(
+      tester,
+      repo,
+      file: _csvFile([for (var i = 0; i < 1500; i++) _csvRow('S-$i')]),
+    );
+    await _chooseAndPreview(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(repo.commitSizes, [1000]);
+  });
+
+  testWidgets('slips stay available after choosing a new file and a new '
+      'import asks before discarding undownloaded codes', (tester) async {
+    final repo = _Repo();
+    final guard = StudentRosterLeaveGuard();
+    await _pump(tester, repo, guard: guard, file: _csvFile([_csvRow('S-1')]));
+    await _chooseAndPreview(tester);
+    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
+    await tester.pumpAndSettle();
+    expect(find.text('Download activation slips (1)'), findsOneWidget);
+
+    await tester.tap(find.text('Choose roster file'));
+    await tester.pumpAndSettle();
+    expect(find.text('Download activation slips (1)'), findsOneWidget);
+    expect(guard.hasUndownloadedCodes, isTrue);
+
+    await tester.tap(find.text('Preview'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
+    await tester.pumpAndSettle();
+    expect(find.text('Discard undownloaded codes?'), findsOneWidget);
+    await tester.tap(find.text('Go back'));
+    await tester.pumpAndSettle();
+    expect(repo.commitSizes, [1]);
+    expect(find.text('Download activation slips (1)'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Discard and import'));
+    await tester.pumpAndSettle();
+    expect(repo.commitSizes, [1, 1]);
   });
 
   testWidgets('a partial result stops, warns and still offers the slips', (

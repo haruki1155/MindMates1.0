@@ -235,6 +235,52 @@ List<List<Object?>> _parseCsv(String input) {
   return rows;
 }
 
+bool? _honours1904;
+
+/// Whether the installed excel_plus already applies `date1904` when decoding
+/// date cells. 2.20.0 ignores it; later 2.x releases may honour it, and
+/// shifting again would move every date four years. Probed once by encoding a
+/// known date, patching `date1904="1"` into the workbook with archive and
+/// decoding it back.
+bool excelPlusHonours1904() => _honours1904 ??= _probeHonours1904();
+
+bool _probeHonours1904() {
+  try {
+    final book = excel.Excel.createExcel();
+    final sheet = book[book.getDefaultSheet() ?? 'Sheet1'];
+    sheet.appendRow([excel.DateCellValue(year: 2005, month: 2, day: 15)]);
+    final zip = ZipDecoder().decodeBytes(book.encode()!);
+    final patched = Archive();
+    for (final f in zip) {
+      if (f.name == 'xl/workbook.xml') {
+        var xml = utf8.decode(f.content);
+        xml = RegExp(r'<workbookPr').hasMatch(xml)
+            ? xml.replaceFirst('<workbookPr', '<workbookPr date1904="1"')
+            : xml.replaceFirstMapped(
+                RegExp(r'<workbook[^>]*>'),
+                (m) => '${m.group(0)}<workbookPr date1904="1"/>',
+              );
+        patched.addFile(ArchiveFile.string(f.name, xml));
+      } else {
+        patched.addFile(ArchiveFile.bytes(f.name, f.content));
+      }
+    }
+    final decoded = excel.Excel.decodeBytes(ZipEncoder().encode(patched));
+    final value = decoded.tables.values.first.rows.first.first?.value;
+    DateTime? read;
+    if (value is excel.DateCellValue) {
+      read = DateTime.utc(value.year, value.month, value.day);
+    } else if (value is excel.DateTimeCellValue) {
+      read = DateTime.utc(value.year, value.month, value.day);
+    }
+    if (read == null) return false;
+    // Unchanged -> the flag was ignored (we must shift); changed -> honoured.
+    return read != DateTime.utc(2005, 2, 15);
+  } catch (_) {
+    return false;
+  }
+}
+
 /// Converts a spreadsheet date cell to `YYYY-MM-DD`, or null when it cannot be
 /// read. Accepts DateTime, excel_plus date cells, Excel serial numbers,
 /// `MM/DD/YYYY` and `YYYY-MM-DD` text. When [date1904] is set, serials are
@@ -248,17 +294,17 @@ String? parseRosterDate(Object? cell, {bool date1904 = false}) {
     case excel.DateCellValue():
       return _fromDate(
         DateTime.utc(cell.year, cell.month, cell.day),
-        date1904 ? shift : Duration.zero,
+        date1904 && !excelPlusHonours1904() ? shift : Duration.zero,
       );
     case excel.DateTimeCellValue():
       return _fromDate(
         DateTime.utc(cell.year, cell.month, cell.day),
-        date1904 ? shift : Duration.zero,
+        date1904 && !excelPlusHonours1904() ? shift : Duration.zero,
       );
     case DateTime():
       return _fromDate(
         DateTime.utc(cell.year, cell.month, cell.day),
-        date1904 ? shift : Duration.zero,
+        date1904 && !excelPlusHonours1904() ? shift : Duration.zero,
       );
     case excel.IntCellValue():
       return parseRosterDate(cell.value, date1904: date1904);
