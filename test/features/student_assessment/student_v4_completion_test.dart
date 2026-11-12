@@ -327,7 +327,12 @@ void main() {
       await _expectTextVisible(tester, 'A practical next step');
       await _expectTextVisible(tester, 'Reflection prompt');
       await _expectTextVisible(tester, 'Suggested Next Steps');
-      await _expectTextVisible(tester, 'Assessment Responses');
+      expect(find.text('Assessment Responses'), findsNothing);
+      await _expectTextVisible(tester, 'Review Responses');
+      await tester.tap(find.text('Review Responses'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.text('Your responses'), findsOneWidget);
       final responseGroup = find.byKey(
         const ValueKey('v4-response-group-domain_0'),
       );
@@ -335,6 +340,10 @@ void main() {
       await tester.tap(responseGroup);
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('1. Saved review question 1.'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.text('Review Responses'), findsOneWidget);
       expect(find.text('Response Completeness'), findsNothing);
       expect(find.text('How This Result Was Created'), findsNothing);
       await _expectTextVisible(tester, 'About This Result');
@@ -521,7 +530,10 @@ void main() {
 
     expect(find.text('Legacy student V4 result.'), findsOneWidget);
     expect(find.text('Response Completeness'), findsNothing);
-    await _expectTextVisible(tester, 'Assessment Responses');
+    await _expectTextVisible(tester, 'Review Responses');
+    await tester.tap(find.text('Review Responses'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     await _expectTextVisible(
       tester,
       'Saved assessment responses are unavailable for this result.',

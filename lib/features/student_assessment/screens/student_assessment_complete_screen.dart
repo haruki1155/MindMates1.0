@@ -16,9 +16,9 @@ import '../../counseling/screens/pacc_counseling_screen.dart';
 import '../models/student_assessment_models.dart';
 import '../services/assessment_summary_text.dart';
 import '../models/assessment_interpretation_models.dart';
-import '../widgets/v4_assessment_response_review.dart';
 import '../widgets/assessment_presentation.dart';
 import '../widgets/assessment_domain_illustration.dart';
+import 'assessment_saved_responses_screen.dart';
 
 class StudentAssessmentCompleteScreen extends StatefulWidget {
   const StudentAssessmentCompleteScreen({super.key});
@@ -593,19 +593,6 @@ class _StudentV4ProfileView extends StatelessWidget {
                     ),
             ),
             const SizedBox(height: 12),
-            Text(
-              'Assessment Responses',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
-            V4AssessmentResponseReview(
-              itemSnapshot: _maps(payload['itemSnapshot']),
-              responses: _maps(payload['responses']),
-              domainSummaries: domainSummaries,
-            ),
-            const SizedBox(height: 12),
             const _V4TransparencySection(
               title: 'References & Resources',
               child: Column(
@@ -643,6 +630,21 @@ class _StudentV4ProfileView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
+            OutlinedButton.icon(
+              style: AssessmentPresentation.outlinedButtonStyle(context),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => AssessmentSavedResponsesScreen(
+                    itemSnapshot: _maps(payload['itemSnapshot']),
+                    responses: _maps(payload['responses']),
+                    domainSummaries: domainSummaries,
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.checklist_rounded),
+              label: const Text('Review Responses'),
+            ),
+            const SizedBox(height: 10),
             OutlinedButton.icon(
               style: AssessmentPresentation.outlinedButtonStyle(context),
               onPressed: () => Navigator.of(context).push(
