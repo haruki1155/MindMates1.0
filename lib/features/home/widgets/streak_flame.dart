@@ -47,6 +47,10 @@ class StreakFlame extends StatefulWidget {
 class _StreakFlameState extends State<StreakFlame>
     with SingleTickerProviderStateMixin {
   static const _flickerPeriod = Duration(milliseconds: 2400);
+
+  /// Flicker loops each time the flame appears or the streak changes; the
+  /// flame then rests (scale 1, steady glow) so screens can settle.
+  static const _flickerLoops = 3;
   static const _colorDuration = Duration(milliseconds: 600);
 
   static final _scale = TweenSequence<double>([
@@ -66,13 +70,20 @@ class _StreakFlameState extends State<StreakFlame>
 
   bool get _shouldAnimate => widget.days > 0 && !_reduceMotion;
 
-  void _syncController() {
-    if (_shouldAnimate) {
-      _controller ??= AnimationController(vsync: this, duration: _flickerPeriod)
-        ..repeat();
-    } else {
+  void _syncController({bool restart = false}) {
+    if (!_shouldAnimate) {
       _controller?.dispose();
       _controller = null;
+      return;
+    }
+    final controller = _controller;
+    if (controller == null) {
+      _controller = AnimationController(vsync: this, duration: _flickerPeriod)
+        ..repeat(count: _flickerLoops);
+    } else if (restart) {
+      controller
+        ..reset()
+        ..repeat(count: _flickerLoops);
     }
   }
 
@@ -85,7 +96,7 @@ class _StreakFlameState extends State<StreakFlame>
   @override
   void didUpdateWidget(covariant StreakFlame oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _syncController();
+    _syncController(restart: oldWidget.days != widget.days);
   }
 
   @override

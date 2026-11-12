@@ -12,8 +12,11 @@ import '../domain/mood_journey_period.dart';
 import '../../home/widgets/home_dashboard_widgets.dart';
 
 class MoodJourneyScreen extends StatefulWidget {
-  const MoodJourneyScreen({super.key, this.nowProvider});
+  const MoodJourneyScreen({super.key, this.nowProvider, this.milestoneDays});
   final DateTime Function()? nowProvider;
+
+  /// Set when opened from the Home milestone "View recap" (item 38).
+  final int? milestoneDays;
 
   @override
   State<MoodJourneyScreen> createState() => _MoodJourneyScreenState();

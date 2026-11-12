@@ -50,6 +50,26 @@ void main() {
       expect(tester.binding.transientCallbackCount, greaterThan(0));
     });
 
+    testWidgets('flickers for three loops then rests so screens can settle', (
+      tester,
+    ) async {
+      await tester.pumpWidget(host(5));
+      await tester.pump(const Duration(seconds: 7));
+      expect(tester.binding.transientCallbackCount, greaterThan(0));
+      await tester.pumpAndSettle();
+      expect(tester.binding.transientCallbackCount, 0);
+      expect(find.byKey(const Key('streak-flame')), findsOneWidget);
+    });
+
+    testWidgets('a new streak length flickers again', (tester) async {
+      await tester.pumpWidget(host(5));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(host(6));
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(tester.binding.transientCallbackCount, greaterThan(0));
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('stays still when animations are disabled', (tester) async {
       await tester.pumpWidget(host(5, disableAnimations: true));
       await tester.pump(const Duration(milliseconds: 700));

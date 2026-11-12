@@ -64,3 +64,20 @@ HomeStreakSnapshot resolveHomeStreak({
     },
   );
 }
+
+/// The Home streak card message for each state (exact copy from the spec).
+String homeStreakDescription(
+  HomeStreakState state, {
+  required int days,
+  required bool canViewRecap,
+}) {
+  return switch (state) {
+    HomeStreakState.notStarted => 'Log your mood today to start a streak.',
+    HomeStreakState.activeNotToday => 'Check in today to keep your streak.',
+    HomeStreakState.doneToday => 'Done for today. See you tomorrow!',
+    HomeStreakState.milestone =>
+      canViewRecap
+          ? 'Your week in moods is ready'
+          : 'Milestone reached: $days days!',
+  };
+}

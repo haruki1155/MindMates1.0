@@ -104,13 +104,14 @@ void main() {
 
     final userProvider = UserProvider(_FakeUserRepository())
       ..setUser(
-        const UserModel(
+        UserModel(
           id: 'user_1',
           email: 'leo@example.com',
           firstName: 'Leonardo',
           lastName: 'Molar',
           role: 'student',
           dayStreak: 5,
+          lastActivityDateKey: StreakCalculator.dateKey(DateTime.now()),
           profilePhotoUrl: 'https://example.com/profile.png',
         ),
       );
@@ -162,6 +163,7 @@ void main() {
     expect(find.text('Day streak'), findsOneWidget);
     expect(find.text('View ->'), findsNothing);
     expect(find.text('5'), findsWidgets);
+    expect(find.text('Done for today. See you tomorrow!'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('View Summary'),
       500,
@@ -185,6 +187,54 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Mental Health Summary'), findsOneWidget);
+  });
+
+  testWidgets('home day streak shows 0 after a missed day', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final userProvider = UserProvider(_FakeUserRepository())
+      ..setUser(
+        const UserModel(
+          id: 'user_1',
+          email: 'leo@example.com',
+          role: 'student',
+          dayStreak: 5,
+          lastActivityDateKey: '2000-01-01',
+        ),
+      );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+          ChangeNotifierProvider<MoodProvider>(
+            create: (_) => MoodProvider(_FakeMoodRepository()),
+          ),
+          ChangeNotifierProvider<ReportProvider>(
+            create: (_) => ReportProvider(_FakeReportRepository()),
+          ),
+          ChangeNotifierProvider<InsightsProvider>(
+            create: (_) => InsightsProvider(InsightsRepository()),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => AssessmentProvider(AssessmentRepository()),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => BreathingProvider(_FakeBreathingRepository()),
+          ),
+        ],
+        child: MaterialApp(
+          theme: ThemeData(splashFactory: NoSplash.splashFactory),
+          routes: _testRoutes(),
+          home: const HomeScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Day streak'), findsOneWidget);
+    expect(find.text('Log your mood today to start a streak.'), findsOneWidget);
+    expect(find.text('Log mood'), findsOneWidget);
   });
 
   testWidgets('home Services destination opens the services screen', (

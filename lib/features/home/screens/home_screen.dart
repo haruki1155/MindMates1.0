@@ -14,6 +14,9 @@ import '../../../providers/notification_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../mood/config/mood_v2_feature_flag.dart';
+import '../../mood/domain/mood_v2_analytics.dart';
+import '../../mood/screens/mood_journey_screen.dart';
+import '../domain/home_streak_source.dart';
 import '../../../repositories/assessment_repository.dart';
 import '../../../repositories/mood_repository.dart';
 import '../../../repositories/user_repository.dart';
@@ -322,7 +325,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               delay: 74,
                               child: HomeStreakCard(
                                 data: data.streak,
-                                onTap: _openLogMood,
+                                onTap: () => _onStreakTap(data.streak),
+                                onViewRecap: () => _openMoodJourney(
+                                  milestoneDays: data.streak?.days,
+                                ),
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -490,8 +496,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final moodProvider = _watchProviderOrNull<MoodProvider>(context);
     final moods = moodProvider?.moods ?? const [];
 
+    final streakSnapshot = user == null
+        ? null
+        : resolveHomeStreak(
+            v2History: _ownedV2History(moodProvider, user.id),
+            storedStreak: user.dayStreak,
+            lastActivityDateKey: user.lastActivityDateKey,
+            activeDateKeys: user.activeDateKeys,
+            now: widget._nowProvider(),
+          );
+    final canViewRecap =
+        MoodV2FeatureFlag.historyRead &&
+        (moodProvider?.isMoodV2ReadEnabled ?? false);
     final backendActivityDates =
-        user?.activeDateKeys
+        streakSnapshot?.activeDateKeys
             .map(_dateFromActivityKey)
             .whereType<DateTime>()
             .toList(growable: false) ??
@@ -533,16 +551,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               nextAvailableAt: base.assessment.nextAvailableAt,
               canTakeAssessment: base.assessment.canTakeAssessment,
             ),
-      streak: user == null
+      streak: user == null || streakSnapshot == null
           ? base.streak
           : HomeStreakData(
               title: 'Day streak',
-              days: user.dayStreak,
-              description: user.dayStreak == 0
-                  ? 'Start with one check-in today'
-                  : 'Keep your wellness rhythm going',
+              days: streakSnapshot.days,
+              description: homeStreakDescription(
+                streakSnapshot.state,
+                days: streakSnapshot.days,
+                canViewRecap: canViewRecap,
+              ),
               linkLabel: '',
               lastActiveAt: user.lastActiveAt,
+              state: streakSnapshot.state,
+              canViewRecap: canViewRecap,
             ),
       days: activityDates.isEmpty
           ? base.days
@@ -563,6 +585,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               actionLabel: 'View Summary',
             ),
     );
+  }
+
+  /// Mood V2 history for Home, only when it is enabled, loaded and belongs
+  /// to the signed-in user (never a previous account's history).
+  MoodHistoryWindow? _ownedV2History(MoodProvider? moodProvider, String uid) {
+    if (!MoodV2FeatureFlag.homeRead || moodProvider == null) return null;
+    if (!moodProvider.isMoodV2ReadEnabled || uid.isEmpty) return null;
+    final history = moodProvider.v2History;
+    if (history == null) return null;
+    return history.events.every((event) => event.userId == uid)
+        ? history
+        : null;
+  }
+
+  void _openMoodJourney({int? milestoneDays}) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MoodJourneyScreen(milestoneDays: milestoneDays),
+      ),
+    );
+  }
+
+  void _onStreakTap(HomeStreakData? streak) {
+    final done =
+        streak?.state == HomeStreakState.doneToday ||
+        streak?.state == HomeStreakState.milestone;
+    if (done && (streak?.canViewRecap ?? false)) {
+      _openMoodJourney();
+    } else {
+      _openLogMood();
+    }
   }
 
   DateTime? _dateFromActivityKey(String key) {
