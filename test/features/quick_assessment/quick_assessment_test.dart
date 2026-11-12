@@ -22,6 +22,35 @@ import 'package:mind_mates/services/firebase/firestore_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  test(
+    'quick v3 catalog explains every question without changing answer IDs',
+    () {
+      final questions = QuickAssessmentQuestions.questions;
+      expect(questions, hasLength(5));
+      expect(questions.map((q) => q.id), [
+        'calm_relaxed',
+        'overwhelmed',
+        'connected',
+        'little_interest',
+        'stress_affecting_life',
+      ]);
+      expect(
+        questions.first.prompt,
+        'In the past two weeks, how often have you felt calm and relaxed?',
+      );
+      expect(
+        questions.first.purpose,
+        'Feeling calm is a sign that your mind has room to rest and recover. It is one of the clearest everyday signs of overall well-being.',
+      );
+      expect(questions[2].options[2].id, 'neutral');
+      expect(
+        questions[2].options[2].label,
+        'Neither connected nor disconnected',
+      );
+      expect(questions[3].options[2].value, 3);
+      expect(questions[3].options[2].label, 'More than half the days');
+    },
+  );
   group('QuickAssessmentScoring', () {
     test('returns progress labels from 1/5 through 5/5', () {
       expect(QuickAssessmentScoring.progressLabelForStep(1), '1/5');

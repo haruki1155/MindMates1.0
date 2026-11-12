@@ -42,7 +42,7 @@ test("quick assessment emits response-pattern labels for one-item indicators", (
   const interpretation = result.interpretation as Record<string, unknown>;
   const domains = interpretation.domainResults as Record<string, unknown>[];
 
-  assert.equal(result.questionSetVersion, "quick_v2");
+  assert.equal(result.questionSetVersion, "quick_v3");
   assert.equal(result.responsePatternLabel, "Support may be useful");
   assert.equal(domains[0].presentedCount, 1);
   assert.match(String(domains[0].bandLabel), /Well-being|strain|support|responses/i);

@@ -222,7 +222,7 @@ export const QUICK_QUESTIONS: QuickQuestion[] = [
 // product rules retained for compatibility and requiring professional review.
 export const ALGORITHM_VERSION = "internal_wellness_policy_v2";
 export const FULL_QUESTION_SET_VERSION = "experimental_role_based_v3";
-export const QUICK_QUESTION_SET_VERSION = "quick_v2";
+export const QUICK_QUESTION_SET_VERSION = "quick_v3";
 export const POLICY_SOURCE = "internally_defined_product_rule";
 export const POLICY_VALIDATION_STATUS = "requires_professional_review";
 export const MIN_DOMAIN_ANSWERS = 3;

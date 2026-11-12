@@ -9,7 +9,9 @@ class QuickAssessmentQuestions {
     QuickAssessmentQuestion(
       id: 'calm_relaxed',
       prompt:
-          'Over the last two weeks, how often have you felt calm and relaxed?',
+          'In the past two weeks, how often have you felt calm and relaxed?',
+      purpose:
+          'Feeling calm is a sign that your mind has room to rest and recover. It is one of the clearest everyday signs of overall well-being.',
       direction: QuickQuestionDirection.protective,
       options: [
         QuickAssessmentOption(
@@ -26,13 +28,13 @@ class QuickAssessmentQuestions {
         ),
         QuickAssessmentOption(
           id: 'more_than_half',
-          label: 'More than half the time',
+          label: 'More than half of the time',
           value: 3,
           iconAssetPath: '$basePath/QUESTION 1/neutral.png',
         ),
         QuickAssessmentOption(
           id: 'less_than_half',
-          label: 'Less than half the time',
+          label: 'Less than half of the time',
           value: 2,
           iconAssetPath: '$basePath/QUESTION 1/worried.png',
         ),
@@ -47,7 +49,9 @@ class QuickAssessmentQuestions {
     QuickAssessmentQuestion(
       id: 'overwhelmed',
       prompt:
-          'Over the last two weeks, how often have you felt overwhelmed by the number of things you need to do?',
+          'In the past two weeks, how often have you felt overwhelmed by everything you had to do?',
+      purpose:
+          'Feeling that tasks are piling up is an early sign of stress. Noticing it early makes it easier to plan, prioritize, or ask for help.',
       direction: QuickQuestionDirection.risk,
       options: [
         QuickAssessmentOption(
@@ -85,7 +89,9 @@ class QuickAssessmentQuestions {
     QuickAssessmentQuestion(
       id: 'connected',
       prompt:
-          'Over the last two weeks, how connected have you felt to the people around you at school or at work?',
+          'In the past two weeks, how connected have you felt to the people around you at school or work?',
+      purpose:
+          'Feeling supported by others protects against stress and loneliness. Strong connections make hard days easier to get through.',
       direction: QuickQuestionDirection.protective,
       options: [
         QuickAssessmentOption(
@@ -102,7 +108,7 @@ class QuickAssessmentQuestions {
         ),
         QuickAssessmentOption(
           id: 'neutral',
-          label: 'Neutral',
+          label: 'Neither connected nor disconnected',
           value: 3,
           iconAssetPath: '$basePath/QUESTION 3/neutral.png',
         ),
@@ -123,7 +129,9 @@ class QuickAssessmentQuestions {
     QuickAssessmentQuestion(
       id: 'little_interest',
       prompt:
-          'Over the last two weeks, how often have you had little interest or pleasure in doing things you usually enjoy?',
+          'In the past two weeks, how often have you had little interest or pleasure in doing things you usually enjoy?',
+      purpose:
+          'Losing interest in things you usually enjoy can be a sign that your mood or energy is running low. It is an important signal to notice early.',
       direction: QuickQuestionDirection.risk,
       options: [
         QuickAssessmentOption(
@@ -140,7 +148,7 @@ class QuickAssessmentQuestions {
         ),
         QuickAssessmentOption(
           id: 'more_than_half',
-          label: 'More than half the time',
+          label: 'More than half the days',
           value: 3,
           iconAssetPath: '$basePath/QUESTION 4/neutral.png',
         ),
@@ -155,7 +163,9 @@ class QuickAssessmentQuestions {
     QuickAssessmentQuestion(
       id: 'stress_affecting_life',
       prompt:
-          'Over the last two weeks, how often has stress from academics or work affected your ability to cope with daily life?',
+          'In the past two weeks, how often has stress from school or work made it hard to handle your daily life?',
+      purpose:
+          'This shows whether stress is starting to affect everyday things like sleep, studies, or work, which is when extra support helps most.',
       direction: QuickQuestionDirection.risk,
       options: [
         QuickAssessmentOption(
