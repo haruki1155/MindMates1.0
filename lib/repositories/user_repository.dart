@@ -94,6 +94,27 @@ class StreakCalculator {
     );
   }
 
+  /// Only a mood check-in keeps the day streak alive. Other activity types
+  /// are still logged for analytics but never move the streak.
+  static bool countsTowardStreak(UserActivityType type) =>
+      type == UserActivityType.moodCheckIn;
+
+  /// The streak to show now: the stored value while the last check-in was
+  /// today or yesterday (local dates), otherwise 0 because a day was missed.
+  static int effectiveStreak({
+    required int storedStreak,
+    required String? lastActivityDateKey,
+    required DateTime now,
+  }) {
+    if (storedStreak <= 0) return 0;
+    final last = parseDateKey(lastActivityDateKey);
+    if (last == null) return 0;
+    final local = now.toLocal();
+    final today = DateTime(local.year, local.month, local.day);
+    final yesterday = DateTime(local.year, local.month, local.day - 1);
+    return last == today || last == yesterday ? storedStreak : 0;
+  }
+
   static String dateKey(DateTime date) {
     final local = date.toLocal();
     return '${local.year.toString().padLeft(4, '0')}-'
@@ -196,6 +217,19 @@ class UserRepository {
     return _firestoreService.firestore.runTransaction((transaction) async {
       final snapshot = await transaction.get(ref);
       final data = snapshot.data();
+      if (!StreakCalculator.countsTowardStreak(type)) {
+        transaction.set(activityRef, {
+          'userId': uid,
+          'type': type.storedValue,
+          'dateKey': todayKey,
+          'occurredAt': Timestamp.fromDate(activityAt),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        transaction.set(ref, {
+          'lastActiveAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        return UserModel.fromJson({...?data, 'id': uid}, id: uid);
+      }
       final update = StreakCalculator.calculate(
         occurredAt: activityAt,
         previousDateKey:
