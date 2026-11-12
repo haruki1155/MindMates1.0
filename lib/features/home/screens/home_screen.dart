@@ -317,6 +317,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 unreadNotificationCount: unreadNotifications,
                                 onCalendarTap: _openAppointmentCalendar,
                                 onProfileTap: _openProfile,
+                                onViewTodaysMood: _openTodaysMood,
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -587,6 +588,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         builder: (_) => MoodJourneyScreen(milestoneDays: milestoneDays),
       ),
     );
+  }
+
+  /// Item 40: today's check-ins live in My Mood Journey; without Mood V2
+  /// reading, Log Mood shows today's legacy entry instead.
+  void _openTodaysMood() {
+    final moodProvider = _readProviderOrNull<MoodProvider>(context);
+    if (MoodV2FeatureFlag.historyRead &&
+        (moodProvider?.isMoodV2ReadEnabled ?? false)) {
+      _openMoodJourney();
+    } else {
+      _openLogMood();
+    }
   }
 
   void _onStreakTap(HomeStreakData? streak) {
