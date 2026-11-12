@@ -1,4 +1,4 @@
-import {FieldValue, Transaction} from "firebase-admin/firestore";
+import {FieldValue, Transaction, WriteBatch} from "firebase-admin/firestore";
 
 export const AUDIT_CATEGORIES = {
   authentication: "AUTHENTICATION",
@@ -41,14 +41,16 @@ export const AUDIT_ACTIONS = [
   "REPORT_GENERATED", "REPORT_EXPORTED_PDF", "REPORT_EXPORTED_CSV", "REPORT_EXPORTED_XLSX",
   "ACADEMIC_YEAR_CREATED", "ACADEMIC_YEAR_CLOSED", "ACADEMIC_YEAR_CHANGED",
   "POPULATION_SNAPSHOT_CREATED", "POPULATION_SNAPSHOT_UPDATED",
+  "STUDENT_ROSTER_IMPORTED", "STUDENT_ACCOUNT_ACTIVATED", "STUDENT_PERSONAL_INFO_VIEWED",
+  "STUDENT_CORRECTION_APPROVED", "STUDENT_CORRECTION_REJECTED", "STUDENT_ROSTER_RECORD_UPDATED",
+  "STUDENT_ROSTER_STATUS_CHANGED", "STUDENT_ACTIVATION_LOCK_RESET", "STUDENT_ACTIVATION_CODES_ISSUED",
+  "STUDENT_ACTIVATION_REVOKED",
 ] as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[number];
 
-/** Server-authoritative, append-only audit record writer. Never accept actor data from clients. */
-export function writeAudit(transaction: Transaction, db: FirebaseFirestore.Firestore, event: AuditWrite): void {
-  const ref = db.collection("admin_audit_logs").doc();
-  transaction.create(ref, {
+function auditDocument(event: AuditWrite): Record<string, unknown> {
+  return {
     actorId: event.actorId,
     actorNameSnapshot: event.actorNameSnapshot,
     actorRoleSnapshot: event.actorRoleSnapshot,
@@ -61,7 +63,17 @@ export function writeAudit(transaction: Transaction, db: FirebaseFirestore.Fires
     timestamp: FieldValue.serverTimestamp(),
     createdAt: FieldValue.serverTimestamp(),
     targetUserId: event.targetType === "staff" ? event.targetId : null,
-  });
+  };
+}
+
+/** Server-authoritative, append-only audit record writer. Never accept actor data from clients. */
+export function writeAudit(transaction: Transaction, db: FirebaseFirestore.Firestore, event: AuditWrite): void {
+  transaction.create(db.collection("admin_audit_logs").doc(), auditDocument(event));
+}
+
+/** Same document as writeAudit, for transaction-free WriteBatch flows. */
+export function writeAuditBatch(batch: WriteBatch, db: FirebaseFirestore.Firestore, event: AuditWrite): void {
+  batch.create(db.collection("admin_audit_logs").doc(), auditDocument(event));
 }
 
 export function actorName(data: FirebaseFirestore.DocumentData): string {

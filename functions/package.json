@@ -9,6 +9,7 @@
     "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
     "build": "npm run clean && tsc",
     "test": "npm run build && node --test --test-concurrency=1 lib/**/*.test.js",
+    "test:roster": "npm run build && node --test --test-concurrency=1 lib/student_roster.test.js",
     "test:roster-unit": "npm run build && node --test lib/student_roster_domain.test.js",
     "test:mood-v2":"npm run build && node --test --test-concurrency=1 lib/mood_entries.test.js lib/mood_entries_rules.test.js",
     "test:mood-v2-callable": "npm run build && node --test --test-concurrency=1 lib/mood_entries_callable_emulator.test.js",

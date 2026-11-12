@@ -2345,3 +2345,5 @@ export const expireStaleAppointmentRequests = onSchedule(
     }));
   },
 );
+
+export {importStudentRoster, previewStudentRosterImport} from "./student_roster";
