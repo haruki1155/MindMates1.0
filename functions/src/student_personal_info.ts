@@ -105,6 +105,12 @@ function correctionView(id: string, data: Doc): CorrectionView {
 
 // ------------------------------------------------------------------ save
 
+// Mirrors the client's effectivePopulationRole: populationRole, then declaredRole, then the legacy role.
+function isStudentProfile(user: Record<string, unknown> | undefined): boolean {
+  const effective = user?.populationRole || user?.declaredRole || user?.role;
+  return effective === "student";
+}
+
 export const saveStudentPersonalInfo = onCall(async (request) => {
   const uid = requireUid(request);
   const data = (request.data ?? {}) as {info?: unknown; privacyConsent?: unknown};
@@ -113,7 +119,7 @@ export const saveStudentPersonalInfo = onCall(async (request) => {
   const infoRef = db.collection("student_personal_info").doc(uid);
 
   const userPeek = await userRef.get();
-  if (!userPeek.exists || userPeek.data()?.populationRole !== "student") {
+  if (!userPeek.exists || !isStudentProfile(userPeek.data())) {
     throw new HttpsError("permission-denied", "Only students can save Student Information.");
   }
   if (userPeek.data()?.accountStatus === "revoked") {
@@ -126,7 +132,7 @@ export const saveStudentPersonalInfo = onCall(async (request) => {
 
   await db.runTransaction(async (transaction) => {
     const [user, existing] = await Promise.all([transaction.get(userRef), transaction.get(infoRef)]);
-    if (user.data()?.populationRole !== "student") {
+    if (!isStudentProfile(user.data())) {
       throw new HttpsError("permission-denied", "Only students can save Student Information.");
     }
     if (user.data()?.accountStatus === "revoked") {
@@ -244,7 +250,7 @@ export const requestStudentCorrection = onCall(async (request) => {
   await db.runTransaction(async (transaction) => {
     const userSnap = await transaction.get(userRef);
     const user = userSnap.data() ?? {};
-    if (user.populationRole !== "student") throw new HttpsError("permission-denied", "Only students can request corrections.");
+    if (!isStudentProfile(user)) throw new HttpsError("permission-denied", "Only students can request corrections.");
     const {roster} = await findRoster(uid, user, (ref) => transaction.get(ref));
     if (!roster) throw new HttpsError("failed-precondition", "Your account is not linked to the student roster.");
     const pending = await transaction.get(

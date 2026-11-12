@@ -44,6 +44,7 @@ Future<bool> showCorrectionRequestSheet(
   required String fieldKey,
   required String label,
   required String currentValue,
+  String currentCollege = '',
 }) async {
   final submitted = await showModalBottomSheet<bool>(
     context: context,
@@ -54,6 +55,7 @@ Future<bool> showCorrectionRequestSheet(
       fieldKey: fieldKey,
       label: label,
       currentValue: currentValue,
+      currentCollege: currentCollege,
     ),
   );
   return submitted ?? false;
@@ -66,8 +68,11 @@ class CorrectionRequestSheet extends StatefulWidget {
     required this.fieldKey,
     required this.label,
     required this.currentValue,
+    this.currentCollege = '',
   });
 
+  /// Name of the student's current college; narrows the course list.
+  final String currentCollege;
   final StudentRosterRepository repository;
   final String fieldKey;
   final String label;
@@ -82,6 +87,9 @@ class _CorrectionRequestSheetState extends State<CorrectionRequestSheet> {
   final _reasonController = TextEditingController();
   String _dateKey = '';
   String? _yearLevel;
+  String? _optionId;
+  List<AcademicOption> _options = const [];
+  bool _optionsLoading = false;
   String? _error;
   bool _submitting = false;
 
@@ -90,6 +98,41 @@ class _CorrectionRequestSheetState extends State<CorrectionRequestSheet> {
     super.initState();
     _valueController.addListener(_refresh);
     _reasonController.addListener(_refresh);
+    if (_isAcademic) _loadOptions();
+  }
+
+  bool get _isAcademic =>
+      widget.fieldKey == 'college' || widget.fieldKey == 'course';
+
+  Future<void> _loadOptions() async {
+    setState(() => _optionsLoading = true);
+    try {
+      final all = await widget.repository.listAcademicOptions();
+      if (!mounted) return;
+      var options = widget.fieldKey == 'college' ? all.colleges : all.courses;
+      if (widget.fieldKey == 'course') {
+        final college = all.colleges.where(
+          (c) =>
+              c.name.trim().toLowerCase() ==
+              widget.currentCollege.trim().toLowerCase(),
+        );
+        if (college.isNotEmpty) {
+          options = options
+              .where((c) => c.collegeId == college.first.id)
+              .toList();
+        }
+      }
+      setState(() {
+        _options = options;
+        _optionsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _optionsLoading = false;
+        _error = 'We could not load the list. Try again later.';
+      });
+    }
   }
 
   void _refresh() => setState(() {});
@@ -104,6 +147,7 @@ class _CorrectionRequestSheetState extends State<CorrectionRequestSheet> {
   String get _value => switch (widget.fieldKey) {
     'dateOfBirth' => _dateKey,
     'yearLevel' => _yearLevel ?? '',
+    'college' || 'course' => _optionId ?? '',
     _ => _valueController.text.trim(),
   };
 
@@ -229,6 +273,24 @@ class _CorrectionRequestSheetState extends State<CorrectionRequestSheet> {
               _dateKey.isEmpty ? 'Select date' : formatDateKey(_dateKey),
             ),
           ),
+        );
+      case 'college':
+      case 'course':
+        return DropdownButtonFormField<String>(
+          key: const Key('correction-value'),
+          initialValue: _optionId,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: _optionsLoading
+                ? 'Loading...'
+                : 'Correct ${widget.label.toLowerCase()}',
+            border: const OutlineInputBorder(),
+          ),
+          items: [
+            for (final o in _options)
+              DropdownMenuItem(value: o.id, child: Text(o.name)),
+          ],
+          onChanged: (v) => setState(() => _optionId = v),
         );
       case 'yearLevel':
         return DropdownButtonFormField<String>(

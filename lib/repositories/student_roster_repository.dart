@@ -1,4 +1,5 @@
 // ignore_for_file: prefer_initializing_formals
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
 import '../models/student_personal_info.dart';
@@ -9,12 +10,58 @@ import '../services/firebase/firebase_callable_router.dart';
 typedef StudentRosterCallableInvoker =
     Future<Object?> Function(String name, Map<String, Object?> data);
 
+/// An active college or course the student may pick when requesting a
+/// correction. [collegeId] is empty for colleges.
+class AcademicOption {
+  const AcademicOption({
+    required this.id,
+    required this.name,
+    this.collegeId = '',
+  });
+
+  final String id;
+  final String name;
+  final String collegeId;
+}
+
+typedef AcademicOptions = ({
+  List<AcademicOption> colleges,
+  List<AcademicOption> courses,
+});
+
+typedef AcademicOptionsLoader = Future<AcademicOptions> Function();
+
 class StudentRosterRepository {
   StudentRosterRepository({
     FirebaseFunctions? functions,
     StudentRosterCallableInvoker? invoker,
+    AcademicOptionsLoader? academicLoader,
   }) : _functions = functions,
-       _invoker = invoker;
+       _invoker = invoker,
+       _academicLoader = academicLoader;
+
+  final AcademicOptionsLoader? _academicLoader;
+
+  /// Active colleges and courses (client-readable catalogue collections),
+  /// queried the same way the server validates correction ids.
+  Future<AcademicOptions> listAcademicOptions() async {
+    final loader = _academicLoader;
+    if (loader != null) return loader();
+    final db = FirebaseFirestore.instance;
+    final results = await Future.wait([
+      db.collection('colleges').where('active', isEqualTo: true).get(),
+      db.collection('courses').where('active', isEqualTo: true).get(),
+    ]);
+    List<AcademicOption> read(QuerySnapshot<Map<String, dynamic>> snap) => [
+      for (final d in snap.docs)
+        AcademicOption(
+          id: d.id,
+          name: asText(d.data()['name']),
+          collegeId: asText(d.data()['collegeId']),
+        ),
+    ]..sort((a, b) => a.name.compareTo(b.name));
+    return (colleges: read(results[0]), courses: read(results[1]));
+  }
 
   final FirebaseFunctions? _functions;
   final StudentRosterCallableInvoker? _invoker;
@@ -97,9 +144,7 @@ class StudentRosterRepository {
 
   Future<({StudentOfficialInfo official, StudentPersonalInfo? personal})>
   getStudentPersonalInfo(String userId) async {
-    final result = await _callMap('getStudentPersonalInfo', {
-      'userId': userId,
-    });
+    final result = await _callMap('getStudentPersonalInfo', {'userId': userId});
     final personal = result['personal'];
     return (
       official: StudentOfficialInfo.fromJson(asStringMap(result['official'])),

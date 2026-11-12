@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../models/student_personal_info.dart';
 import '../../../providers/assessment_provider.dart';
+import '../../../providers/auth_provider.dart';
+import '../../../routes/route_names.dart';
 import '../../../providers/user_provider.dart';
 import '../../../repositories/student_roster_repository.dart';
 import '../../authentication/auth_flow_routes.dart';
@@ -40,13 +42,13 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
   static const _genericSaveError =
       "We couldn't save your information right now. Check your connection and try again.";
 
-  // Fields correctable by the student. College and course corrections need
-  // catalogue ids on the server, so they are handled by the PACC office.
   static const _correctable = [
     ('surname', 'Surname'),
     ('firstName', 'First name'),
     ('middleName', 'Middle name'),
     ('dateOfBirth', 'Date of birth'),
+    ('college', 'College'),
+    ('course', 'Course'),
     ('yearLevel', 'Year level'),
   ];
 
@@ -73,6 +75,9 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
   String? _saveError;
 
   bool get _isOnboarding => widget.mode == StudentInfoMode.onboarding;
+
+  /// Consent is collected on the first save, in either mode.
+  bool get _needsConsent => _information?.personal == null;
 
   TextEditingController _controller(String path) =>
       _controllers.putIfAbsent(path, TextEditingController.new);
@@ -193,10 +198,7 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
       _saving = true;
     });
     try {
-      await _repository.savePersonalInfo(
-        info,
-        privacyConsent: _isOnboarding ? _consent : true,
-      );
+      await _repository.savePersonalInfo(info, privacyConsent: _consent);
     } on FirebaseFunctionsException catch (error) {
       if (!mounted) return;
       final details = error.details;
@@ -273,20 +275,35 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
   Future<void> _requestCorrection(
     String key,
     String label,
-    String current,
-  ) async {
+    String current, {
+    String currentCollege = '',
+  }) async {
     final sent = await showCorrectionRequestSheet(
       context,
       repository: _repository,
       fieldKey: key,
       label: label,
       currentValue: current,
+      currentCollege: currentCollege,
     );
     if (!sent || !mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(content: Text('Correction request sent.')));
     await _load(keepForm: true);
+  }
+
+  Future<void> _signOut() async {
+    final auth = context.read<AuthProvider>();
+    final users = context.read<UserProvider>();
+    final navigator = Navigator.of(context);
+    try {
+      await auth.signOut();
+    } catch (_) {
+      // Fall through: the session is cleared locally as far as possible.
+    }
+    users.setUser(null);
+    navigator.pushNamedAndRemoveUntil(RouteNames.login, (route) => false);
   }
 
   @override
@@ -304,6 +321,14 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
             'Student Information',
             style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
           ),
+          actions: [
+            if (_isOnboarding)
+              TextButton(
+                key: const Key('sign-out'),
+                onPressed: _saving ? null : _signOut,
+                child: const Text('Sign out'),
+              ),
+          ],
         ),
         body: SafeArea(child: _body()),
       ),
@@ -331,7 +356,7 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
         ),
       );
     }
-    final canSave = !_saving && (!_isOnboarding || _consent);
+    final canSave = !_saving && (!_needsConsent || _consent);
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
@@ -349,11 +374,7 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
                     style: TextStyle(color: AppColors.textSecondary),
                   ),
                 ),
-              _officialSection(information),
-              if (information.corrections.isNotEmpty)
-                _correctionsSection(information.corrections),
-              _personalSection(),
-              if (_isOnboarding)
+              if (_needsConsent)
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
@@ -363,6 +384,10 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
                       : (v) => setState(() => _consent = v ?? false),
                   title: const Text(_consentCopy),
                 ),
+              _officialSection(information),
+              if (information.corrections.isNotEmpty)
+                _correctionsSection(information.corrections),
+              _personalSection(),
               if (_saveError != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
@@ -438,8 +463,9 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
         formatDateKey(o.dateOfBirth),
         'dateOfBirth',
       ),
-      ('college', 'College', o.college, null),
-      ('course', 'Course', o.course, null),
+      ('email', 'Email', o.email, null),
+      ('college', 'College', o.college, 'college'),
+      ('course', 'Course', o.course, 'course'),
       ('yearLevel', 'Year level', o.yearLevel, 'yearLevel'),
     ];
     return _card(
@@ -476,6 +502,7 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
                       correctable,
                       label,
                       _rawOfficial(o, correctable),
+                      currentCollege: o.college,
                     ),
                     child: const Text('Request correction'),
                   ),
@@ -494,6 +521,8 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
     'middleName' => o.middleName,
     'dateOfBirth' => o.dateOfBirth,
     'yearLevel' => o.yearLevel,
+    'college' => o.college,
+    'course' => o.course,
     _ => '',
   };
 

@@ -5,6 +5,9 @@ import 'package:mind_mates/features/student_info/screens/student_information_scr
 import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
+import 'package:mind_mates/providers/auth_provider.dart';
+import 'package:mind_mates/repositories/auth_repository.dart';
+import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
 import 'package:mind_mates/repositories/student_roster_repository.dart';
@@ -73,6 +76,18 @@ class _FakeUserRepository extends UserRepository {
   }
 }
 
+class _FakeAuthRepository extends AuthRepository {
+  _FakeAuthRepository() : super(AuthService());
+}
+
+class _FakeAuthProvider extends AuthProvider {
+  _FakeAuthProvider() : super(_FakeAuthRepository());
+  int signOuts = 0;
+
+  @override
+  Future<void> signOut() async => signOuts++;
+}
+
 class _FakeAssessmentRepository extends AssessmentRepository {
   @override
   Future<bool> ensureQuickAssessmentCompletion(String userId) async => true;
@@ -89,6 +104,7 @@ const _student = UserModel(
 void main() {
   late List<Map<String, Object?>> calls;
   late _FakeUserRepository userRepo;
+  late _FakeAuthProvider authProvider;
 
   Future<void> pump(
     WidgetTester tester, {
@@ -100,11 +116,22 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(900, 3000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     calls = [];
+    authProvider = _FakeAuthProvider();
     userRepo = _FakeUserRepository(
       reloaded ?? _student.copyWith(personalInfoRequired: false),
     );
     final userProvider = UserProvider(userRepo)..setUser(_student);
     final repo = StudentRosterRepository(
+      academicLoader: () async => (
+        colleges: const [
+          AcademicOption(id: 'colA', name: 'College of Computing'),
+          AcademicOption(id: 'colB', name: 'College of Other'),
+        ],
+        courses: const [
+          AcademicOption(id: 'crsA', name: 'BSIT', collegeId: 'colA'),
+          AcademicOption(id: 'crsB', name: 'BS Other', collegeId: 'colB'),
+        ],
+      ),
       invoker: (name, data) async {
         calls.add({'name': name, ...data});
         if (name == 'saveStudentPersonalInfo' && saveError != null) {
@@ -121,6 +148,7 @@ void main() {
       MultiProvider(
         providers: [
           ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+          ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
           ChangeNotifierProvider<AssessmentProvider>.value(
             value: AssessmentProvider(_FakeAssessmentRepository()),
           ),
@@ -129,6 +157,8 @@ void main() {
           routes: {
             RouteNames.profileSetup: (_) =>
                 const Scaffold(body: Center(child: Text('setup target'))),
+            RouteNames.login: (_) =>
+                const Scaffold(body: Center(child: Text('login target'))),
             RouteNames.home: (_) =>
                 const Scaffold(body: Center(child: Text('home target'))),
             RouteNames.onboarding: (_) =>
@@ -228,10 +258,84 @@ void main() {
     expect(find.text('2021-00123'), findsOneWidget);
     expect(find.text('Dela Cruz'), findsOneWidget);
     expect(find.text('Feb 3, 2005'), findsOneWidget);
-    // Student No. plus college and course have no correction action.
-    expect(find.text('Request correction'), findsNWidgets(5));
+    // Only Student No. and Email have no correction action.
+    expect(find.text('Request correction'), findsNWidgets(7));
     expect(find.byKey(const Key('correct-studentNo')), findsNothing);
-    expect(find.byKey(const Key('correct-college')), findsNothing);
+    expect(find.byKey(const Key('correct-email')), findsNothing);
+    expect(find.byKey(const Key('correct-college')), findsOneWidget);
+    expect(find.text('leo@example.com'), findsOneWidget);
+  });
+
+  testWidgets('first save from edit mode needs the consent checkbox', (
+    tester,
+  ) async {
+    await pump(tester, mode: StudentInfoMode.edit);
+    expect(find.text(_consent), findsOneWidget);
+    await fillAll(tester);
+    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(saveButton()).onPressed, isNull);
+    await acceptConsent(tester);
+    await tapSave(tester);
+    final save = calls.firstWhere(
+      (c) => c['name'] == 'saveStudentPersonalInfo',
+    );
+    expect(save['privacyConsent'], true);
+  });
+
+  testWidgets('onboarding sign out signs out and opens login', (tester) async {
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('sign-out')));
+    await tester.pumpAndSettle();
+    expect(authProvider.signOuts, 1);
+    expect(find.text('login target'), findsOneWidget);
+  });
+
+  testWidgets('college correction offers colleges and submits the id', (
+    tester,
+  ) async {
+    await pump(tester, mode: StudentInfoMode.edit);
+    await tester.ensureVisible(find.byKey(const Key('correct-college')));
+    await tester.tap(find.byKey(const Key('correct-college')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('correction-value')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('College of Other').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('correction-reason')), 'Moved');
+    await tester.pump();
+    await tester.tap(find.text('Submit request'));
+    await tester.pumpAndSettle();
+    final call = calls.firstWhere(
+      (c) => c['name'] == 'requestStudentCorrection',
+    );
+    expect(call['field'], 'college');
+    expect(call['requestedValue'], 'colB');
+  });
+
+  testWidgets('course correction lists only the current college courses', (
+    tester,
+  ) async {
+    await pump(tester, mode: StudentInfoMode.edit);
+    await tester.ensureVisible(find.byKey(const Key('correct-course')));
+    await tester.tap(find.byKey(const Key('correct-course')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('correction-value')));
+    await tester.pumpAndSettle();
+    expect(find.text('BS Other'), findsNothing);
+    await tester.tap(find.text('BSIT').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('correction-reason')),
+      'Shifted',
+    );
+    await tester.pump();
+    await tester.tap(find.text('Submit request'));
+    await tester.pumpAndSettle();
+    final call = calls.firstWhere(
+      (c) => c['name'] == 'requestStudentCorrection',
+    );
+    expect(call['field'], 'course');
+    expect(call['requestedValue'], 'crsA');
   });
 
   testWidgets('spouse field appears only when Married', (tester) async {

@@ -100,7 +100,7 @@ after(async () => {
   const reqs = await db.collection("student_correction_requests").where("studentNo", ">=", run).where("studentNo", "<=", `${run}~`).get();
   await Promise.all(reqs.docs.map((d) => d.ref.delete()));
   await Promise.all(created.map((r) => r.delete()));
-  for (let i = 1; i <= 12; i++) await db.doc(`student_personal_info/${uidOf(String(i))}`).delete();
+  for (let i = 1; i <= 14; i++) await db.doc(`student_personal_info/${uidOf(String(i))}`).delete();
   const aud = await db.collection("admin_audit_logs").where("targetType", "==", "student").get();
   await Promise.all(aud.docs.filter((d) => String(d.data().targetId).startsWith(run)).map((d) => d.ref.delete()));
 });
@@ -110,6 +110,15 @@ after(async () => {
 test("save rejects non-students", async () => {
   await put(`users/${run}-nonstudent`, {populationRole: "teaching", role: "teaching"});
   await rejects(save.run({auth: {uid: `${run}-nonstudent`}, data: {info: INFO, privacyConsent: true}}), "permission-denied");
+});
+
+test("effective role: a profile with only declaredRole student can use the student callables", async () => {
+  const {uid} = await seedStudent("13", {user: {populationRole: null, role: "", declaredRole: "student"}});
+  assert.deepEqual(await save.run({auth: {uid}, data: {info: INFO, privacyConsent: true}}), {ok: true});
+  await db.doc(`student_personal_info/${uid}`).delete();
+  const {uid: legacy} = await seedStudent("14", {user: {populationRole: null, declaredRole: null, role: "student"}});
+  assert.deepEqual(await save.run({auth: {uid: legacy}, data: {info: INFO, privacyConsent: true}}), {ok: true});
+  await db.doc(`student_personal_info/${legacy}`).delete();
 });
 
 test("first save needs consent, invalid payload reports errors, valid save writes everything", async () => {
