@@ -26,6 +26,8 @@ class StudentAssessmentScreen extends StatefulWidget {
 }
 
 class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
+  bool _showIntro = true;
+
   @override
   void initState() {
     super.initState();
@@ -40,10 +42,108 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
         // this screen to create an unauthenticated session.
         return;
       }
-      context.read<AssessmentProvider>().ensureStudentAssessmentStarted(
-        userId: userId,
-      );
+      final assessment = context.read<AssessmentProvider>();
+      if (userId != null &&
+          assessment.hasStudentAssessmentStarted &&
+          assessment.assessmentSessionOwnerId == userId) {
+        setState(() => _showIntro = false);
+      }
     });
+  }
+
+  void _acceptIntro() {
+    final userId = context.read<AuthProvider>().authenticatedUserId;
+    if (userId == null || userId.isEmpty) return;
+    context.read<AssessmentProvider>().ensureStudentAssessmentStarted(
+      userId: userId,
+    );
+    setState(() => _showIntro = false);
+  }
+
+  void _dismissIntro() {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    } else {
+      navigator.pushNamedAndRemoveUntil(RouteNames.home, (route) => false);
+    }
+  }
+
+  Widget _intro(AssessmentProvider provider) {
+    final isV4 = provider.isV4FullAssessment;
+    final statements = <String>[
+      if (isV4)
+        'This is a 50-question reflection across five well-being areas.',
+      if (isV4)
+        'Your result is calculated on our secure server using a fixed, published method.',
+      if (isV4)
+        'It asks about how things have felt over the past 7 days, using a four-point agreement scale.'
+      else
+        'It asks about how things have felt recently, using a simple agreement scale.',
+      'Generative AI is not used to decide your result.',
+      'This is a non-clinical well-being reflection, not a diagnosis or a mental-health test.',
+    ];
+    return Scaffold(
+      backgroundColor: _StudentPalette.background,
+      appBar: AppBar(title: const Text('Before you start')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'How this assessment works',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 14),
+                    for (final statement in statements)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.info_outline_rounded,
+                              color: Colors.amber,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(statement)),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              isV4
+                  ? 'MindMate V4 is a custom university well-being reflection and is not clinically validated. If you are in distress, PACC is here to help.'
+                  : 'This is a custom university well-being reflection and is not clinically validated. If you are in distress, PACC is here to help.',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _acceptIntro,
+              child: const Text('I understand, start assessment'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _dismissIntro,
+              child: const Text('Not now'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _presentPostAnswerFlow(AssessmentProvider provider) async {
@@ -130,6 +230,7 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
   Widget build(BuildContext context) {
     return Consumer<AssessmentProvider>(
       builder: (context, provider, _) {
+        if (_showIntro) return _intro(provider);
         final question = provider.currentStudentQuestion;
         if (question == null) {
           return const Scaffold(
