@@ -259,6 +259,48 @@ service cloud.firestore {
         && request.resource.data.userId == resource.data.userId) || isAdmin();
     }
 
+
+    // Human counseling conversations are separate from MindAid AI history.
+    // Only approved, email-verified counselor accounts may access the inbox.
+    function isApprovedCounselor() {
+      return signedIn() && isVerifiedEmail()
+        && currentAccessRole() == 'counselor'
+        && hasPortalAccess();
+    }
+
+    match /counselor_threads/{userId} {
+      allow get, list: if isOwner(userId) || isApprovedCounselor();
+      allow create: if isOwner(userId)
+        && request.resource.data.keys().hasOnly(['userId', 'collegeId', 'updatedAt'])
+        && request.resource.data.userId == userId
+        && exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.collegeId is string
+        && request.resource.data.collegeId ==
+          get(/databases/$(database)/documents/users/$(userId)).data.collegeId
+        && request.resource.data.updatedAt == request.time;
+      allow update: if (isOwner(userId) || isApprovedCounselor())
+        && resource.data.userId == userId
+        && request.resource.data.userId == userId
+        && request.resource.data.collegeId == resource.data.collegeId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isOwner(userId) || isApprovedCounselor();
+        allow create: if (isOwner(userId) || isApprovedCounselor())
+          && existsAfter(/databases/$(database)/documents/counselor_threads/$(userId))
+          && request.resource.data.keys().hasOnly(['senderId', 'senderRole', 'text', 'createdAt'])
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderRole == (isOwner(userId) ? 'user' : 'counselor')
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 1600
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
     match /mind_aid_messages/{messageId} {
       allow create: if isOwner(request.resource.data.userId)
         && request.resource.data.sender in ['user', 'assistant']
