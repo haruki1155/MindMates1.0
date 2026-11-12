@@ -277,12 +277,10 @@ class HomeAssessmentBanner extends StatelessWidget {
     super.key,
     required this.data,
     required this.onStart,
-    required this.onClose,
   });
 
   final HomeAssessmentPromptData data;
   final VoidCallback onStart;
-  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -332,12 +330,6 @@ class HomeAssessmentBanner extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-          HomePlainIconButton(
-            icon: Icons.close,
-            assetName: 'x.png',
-            tooltip: 'Dismiss',
-            onTap: onClose,
           ),
         ],
       ),
@@ -712,8 +704,6 @@ class HomeStreakCard extends StatelessWidget {
   /// The milestone "View recap ›" button (opens My Mood Journey).
   final VoidCallback? onViewRecap;
 
-  static const _teal = Color(0xFF2F7D6D);
-
   @override
   Widget build(BuildContext context) {
     final streak = data;
@@ -820,8 +810,8 @@ class HomeStreakCard extends StatelessWidget {
                       const SizedBox(height: 10),
                       _StreakPill(
                         label: 'Log mood',
-                        background: _teal,
-                        foreground: Colors.white,
+                        background: HomePalette.surface,
+                        foreground: HomePalette.text,
                         onPressed: onTap,
                       ),
                     ],

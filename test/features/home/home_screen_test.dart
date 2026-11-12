@@ -398,13 +398,12 @@ void main() {
     );
 
     expect(find.text('Mood check-ins'), findsNothing);
-    if (MoodV2FeatureFlag.enabled) {
-      expect(find.text('Log a mood'), findsOneWidget);
-    }
+    expect(find.byType(HomeWideButton), findsNothing);
     await tester.tap(
-      find
-          .text(MoodV2FeatureFlag.enabled ? 'Log a mood' : 'Log your mood')
-          .first,
+      find.descendant(
+        of: find.byType(HomeStreakCard),
+        matching: find.text('Log mood'),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -423,9 +422,7 @@ void main() {
     );
   });
 
-  testWidgets('home assessment banner can be dismissed for the session', (
-    tester,
-  ) async {
+  testWidgets('home assessment card has no dismiss button', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -468,10 +465,7 @@ void main() {
 
     await tester.pumpAndSettle();
     expect(find.text('Check in on academic well-being'), findsOneWidget);
-    await tester.tap(find.byTooltip('Dismiss'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Check in on academic well-being'), findsNothing);
+    expect(find.byTooltip('Dismiss'), findsNothing);
   });
 
   testWidgets('home Mental Wellbeing 101 opens mental health insights', (
@@ -570,15 +564,14 @@ void main() {
       'Calendar.png',
       'High Importance.png',
       'Forward.png',
-      'x.png',
       'Notification.png',
-      '+.png',
       'fire_icon.png',
       'Thumbs up.png',
       'Good Quality.png',
     ]) {
       expect(_dashboardAsset(assetName), findsWidgets);
     }
+    expect(_dashboardAsset('x.png'), findsNothing);
 
     await tester.scrollUntilVisible(
       find.text('Mental Wellbeing 101'),

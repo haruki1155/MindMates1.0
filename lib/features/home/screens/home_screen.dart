@@ -129,7 +129,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   bool _showBottomNav = true;
   bool _isOpeningAssessment = false;
-  bool _isAssessmentBannerDismissed = false;
   _HomeNavDestination _activeDestination = _HomeNavDestination.today;
   String? _loadedBackendUserId;
   String? _loadedAppointmentUserId;
@@ -356,20 +355,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 },
                               ),
                             ),
-                            const SizedBox(height: 14),
-                            HomeAnimatedSection(
-                              delay: 86,
-                              child: HomeWideButton(
-                                label: MoodV2FeatureFlag.actionLabel(
-                                  hasCheckedInToday: context
-                                      .watch<MoodProvider>()
-                                      .hasCheckedInToday,
-                                ),
-                                icon: Icons.add,
-                                assetName: '+.png',
-                                onTap: _openLogMood,
-                              ),
-                            ),
                             if (appointmentProvider != null) ...[
                               const SizedBox(height: 14),
                               const Text(
@@ -399,17 +384,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                             ],
-                            if (!_isAssessmentBannerDismissed) ...[
-                              const SizedBox(height: 14),
-                              HomeAnimatedSection(
-                                delay: 110,
-                                child: HomeAssessmentBanner(
-                                  data: data.assessment,
-                                  onStart: _openStudentAssessment,
-                                  onClose: _dismissAssessmentBanner,
-                                ),
+                            const SizedBox(height: 14),
+                            HomeAnimatedSection(
+                              delay: 110,
+                              child: HomeAssessmentBanner(
+                                data: data.assessment,
+                                onStart: _openStudentAssessment,
                               ),
-                            ],
+                            ),
                             const SizedBox(height: HomeMetrics.sectionGap),
                             HomeAnimatedSection(
                               delay: 120,
@@ -697,12 +679,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _openProfile() {
     Navigator.of(context).pushNamed(RouteNames.profile);
-  }
-
-  void _dismissAssessmentBanner() {
-    setState(() {
-      _isAssessmentBannerDismissed = true;
-    });
   }
 
   void _openServices() {
