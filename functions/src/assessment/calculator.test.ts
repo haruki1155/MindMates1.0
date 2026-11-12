@@ -48,6 +48,22 @@ test("quick assessment emits response-pattern labels for one-item indicators", (
   assert.match(String(domains[0].bandLabel), /Well-being|strain|support|responses/i);
 });
 
+test("quick v3 server interpretation matches personal focus copy", () => {
+  const answers: QuickAnswer[] = QUICK_QUESTIONS.map((question) => ({
+    questionId: question.id,
+    optionId: question.options[0].id,
+    value: question.options[0].value,
+  }));
+  answers[1] = {questionId: "overwhelmed", optionId: "sometimes", value: 3};
+  const result = calculateQuick("student", "Test User", answers);
+  const interpretation = result.interpretation as Record<string, unknown>;
+  assert.match(String(interpretation.userSummary), /^Your answers show/);
+  assert.deepEqual(interpretation.rationale, ["Areas worth a closer look: stress load."]);
+  assert.deepEqual(interpretation.focusInsights, [
+    "Stress load: Your tasks have felt overwhelming. Breaking work into smaller steps or talking to someone you trust can lighten the load.",
+  ]);
+});
+
 test("full assessment preserves the intended student domain sequence", () => {
   const sections = QUESTIONS_BY_ROLE.student
     .filter((question) => !question.conditional)
