@@ -1872,7 +1872,9 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
       setState(() {
         loading = false;
         loadingMore = false;
-        error = "We couldn't load this activity log.";
+        error = _actionValue() == 'STUDENT_PERSONAL_INFO_VIEWED'
+            ? 'Activity log unavailable: a required database index is not deployed.'
+            : "We couldn't load this activity log.";
       });
     }
   }
@@ -1949,6 +1951,13 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
               },
             ),
           ],
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 6),
+          child: Text(
+            'Student information views appear under their own filter.',
+            style: TextStyle(fontSize: 12, color: AdminColors.muted),
+          ),
         ),
         if (events.isEmpty)
           const Expanded(

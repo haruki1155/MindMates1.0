@@ -577,6 +577,9 @@ class AdminPortalRepository {
           : <AdminAuditEvent>[];
       return (events: events, hasMore: result.data['hasMore'] == true);
     } catch (_) {
+      // Never report "no views" when the access-log query itself failed (for
+      // example a missing index); the client-side fallback cannot filter it.
+      if (action == 'STUDENT_PERSONAL_INFO_VIEWED') rethrow;
       // The caller is already an authorized portal administrator. Fall back to
       // the protected Firestore read while a callable/index is propagating.
       final items = await _firestoreService.getDocuments(
@@ -584,9 +587,8 @@ class AdminPortalRepository {
         // Student-information views target the student, so they are listed
         // under the staff member who performed them.
         whereEquals: {
-          action == 'STUDENT_PERSONAL_INFO_VIEWED'
-              ? 'actorId'
-              : 'targetUserId': targetUserId,
+          action == 'STUDENT_PERSONAL_INFO_VIEWED' ? 'actorId' : 'targetUserId':
+              targetUserId,
         },
         orderBy: 'createdAt',
         limit: pageSize,

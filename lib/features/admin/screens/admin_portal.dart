@@ -29,6 +29,7 @@ import 'counselor_operations_dashboard.dart';
 import 'counselor_workflow_page.dart';
 import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
+import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
 
 const _yellow = AdminColors.accentStrong;
@@ -2783,6 +2784,16 @@ class _AppointmentCard extends StatelessWidget {
                 item.userId,
                 style: const TextStyle(color: AdminColors.muted, fontSize: 12),
               ),
+              if (item.userId.trim().isNotEmpty &&
+                  repository.currentAccessRole.canAccessClinicalData)
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: ViewStudentInformationButton(
+                    userId: item.userId,
+                    canView: repository.currentAccessRole.canAccessClinicalData,
+                  ),
+                ),
             ],
           ),
         );
