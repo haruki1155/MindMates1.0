@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../models/appointment_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
 
 enum CounselorWorkflowMode { cases, followUps }
@@ -12,8 +13,10 @@ class CounselorWorkflowPage extends StatelessWidget {
     required this.repository,
     required this.mode,
     required this.onOpenAppointments,
+    this.studentInfoLoader,
   });
 
+  final StudentPersonalInfoLoader? studentInfoLoader;
   final AdminPortalRepository repository;
   final CounselorWorkflowMode mode;
   final VoidCallback onOpenAppointments;
@@ -74,6 +77,9 @@ class CounselorWorkflowPage extends StatelessWidget {
                       appointment: appointment,
                       followUp: mode == CounselorWorkflowMode.followUps,
                       onOpenAppointments: onOpenAppointments,
+                      canViewStudentInfo:
+                          repository.currentAccessRole.canAccessClinicalData,
+                      studentInfoLoader: studentInfoLoader,
                     ),
                   ),
               ],
@@ -163,10 +169,14 @@ class _WorkCard extends StatelessWidget {
     required this.appointment,
     required this.followUp,
     required this.onOpenAppointments,
+    required this.canViewStudentInfo,
+    this.studentInfoLoader,
   });
   final AppointmentModel appointment;
   final bool followUp;
   final VoidCallback onOpenAppointments;
+  final bool canViewStudentInfo;
+  final StudentPersonalInfoLoader? studentInfoLoader;
   @override
   Widget build(BuildContext context) {
     final id = appointment.userId;
@@ -217,6 +227,11 @@ class _WorkCard extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          ViewStudentInformationButton(
+            userId: appointment.userId,
+            canView: canViewStudentInfo,
+            loader: studentInfoLoader,
           ),
           TextButton(
             onPressed: onOpenAppointments,

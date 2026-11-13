@@ -11,10 +11,11 @@ import '../services/firebase/callable_request_timeout.dart';
 import '../services/firebase/firebase_runtime_diagnostics.dart';
 
 typedef SchoolIdEmailResolver = Future<String> Function(String schoolId);
-typedef EmailPasswordSignIn = Future<UserCredential> Function({
-  required String email,
-  required String password,
-});
+typedef EmailPasswordSignIn =
+    Future<UserCredential> Function({
+      required String email,
+      required String password,
+    });
 
 class AuthRepository {
   AuthRepository(
@@ -91,6 +92,23 @@ class AuthRepository {
     required String password,
   }) async {
     final email = await resolveAuthEmailForSchoolId(schoolId);
+    return runBoundedCallable<UserCredential>(
+      operation: 'firebase_auth_sign_in',
+      timeout: signInTimeout,
+      request: () {
+        final signIn = emailSignIn;
+        return signIn != null
+            ? signIn(email: email, password: password)
+            : _authService.signIn(email: email, password: password);
+      },
+    );
+  }
+
+  /// Signs in with an explicit email address (used right after activation).
+  Future<UserCredential> signInWithEmail({
+    required String email,
+    required String password,
+  }) {
     return runBoundedCallable<UserCredential>(
       operation: 'firebase_auth_sign_in',
       timeout: signInTimeout,

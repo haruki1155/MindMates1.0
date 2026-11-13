@@ -75,3 +75,13 @@ test("cancellation retry markers must be server-shaped for the same user", async
   }, "user_1"), false);
   assert.equal(isCancellationRetryMarker({uid: "user_1", reason: "other"}, "user_1"), false);
 });
+
+test("students cannot self-provision; other roles can", async () => {
+  const {assertSelfProvisioningAllowed} = await import("./account_integrity");
+  assert.throws(() => assertSelfProvisioningAllowed("student"), (e: {code?: string; message?: string}) => {
+    assert.equal(e.code, "failed-precondition");
+    assert.equal(e.message, "Students activate accounts through the roster. Tap 'Activate student account'.");
+    return true;
+  });
+  assert.doesNotThrow(() => assertSelfProvisioningAllowed("teaching"));
+});

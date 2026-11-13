@@ -5,6 +5,7 @@ import '../features/counseling/screens/messages_hub_screen.dart';
 import '../features/authentication/screens/forgot_password_screen.dart';
 import '../features/authentication/screens/login_screen.dart';
 import '../features/authentication/screens/signup_screen.dart';
+import '../features/authentication/screens/student_activation_screen.dart';
 import '../features/authentication/screens/email_verification_screen.dart';
 import '../features/authentication/screens/profile_setup_screen.dart';
 import '../features/breathing/screens/mindful_breathing_screen.dart';
@@ -23,6 +24,7 @@ import '../features/secret_chat/pages/secret_chat_page.dart';
 import '../features/secret_chat/screens/secret_chat_profile_screen.dart';
 import '../features/sleep/screens/sleep_quality_screen.dart';
 import '../features/splash/screens/splash_screen.dart';
+import '../features/student_info/screens/student_information_screen.dart';
 import '../features/student_assessment/screens/student_assessment_complete_screen.dart';
 import '../features/student_assessment/screens/student_assessment_screen.dart';
 import '../features/page/mind_aid_page.dart';
@@ -36,8 +38,10 @@ class AppPages {
     RouteNames.onboarding: (_) => const OnboardingScreen(),
     RouteNames.login: (_) => const LoginScreen(),
     RouteNames.signup: (_) => const SignupScreen(),
+    RouteNames.studentActivation: (_) => const StudentActivationScreen(),
     RouteNames.emailVerification: (_) => const EmailVerificationScreen(),
     RouteNames.profileSetup: (_) => const ProfileSetupScreen(),
+    RouteNames.studentInformation: (_) => const StudentInformationScreen(),
     RouteNames.forgotPassword: (_) => const ForgotPasswordScreen(),
     RouteNames.quickAssessmentRole: (_) => const QuickAssessmentRoleScreen(),
     RouteNames.quickAssessmentQuestions: (_) =>

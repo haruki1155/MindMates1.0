@@ -33,9 +33,9 @@ export {
   requestStaffEmailVerification,
   requestStaffEmailVerificationDev,
 } from "./account_recovery";
-import {defineString} from "firebase-functions/params";
+import {configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid as requireAuthenticatedUser} from "./access";
 import {randomBytes} from "node:crypto";
-import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
+import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, auditLogOwnerField, writeAudit} from "./audit";
 import {
   AppointmentSchedulingValidationError,
   formatAppointmentTime,
@@ -90,7 +90,6 @@ export {
 if (!getApps().length) initializeApp();
 
 const db = getFirestore();
-const superAdminUid = defineString("SUPER_ADMIN_UID");
 const posts = db.collection("secret_chats");
 const stats = db.collection("secret_chat_profile_stats");
 const events = db.collection("_secret_chat_events");
@@ -104,12 +103,6 @@ const portalAppointmentQueue = db.collection("appointment_queue");
 const SECRET_CHAT_ALIAS_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/;
 const SECRET_CHAT_PHOTO_PATTERN = /^secret_chat_profiles\/([^/]+)\/avatar_[0-9]+\.(jpg|png)$/;
 const MAX_SECRET_CHAT_PHOTO_BYTES = 5 * 1024 * 1024;
-
-function requireAuthenticatedUser(request: {auth?: {uid: string}}): string {
-  const userId = request.auth?.uid;
-  if (!userId) throw new HttpsError("unauthenticated", "Sign in is required.");
-  return userId;
-}
 
 export function normalizeSecretChatAlias(value: unknown): string {
   if (typeof value !== "string") {
@@ -284,29 +277,6 @@ function manilaDateKey(date: Date): string {
   }).format(date);
 }
 
-async function requireStaff(uid: string): Promise<FirebaseFirestore.DocumentData> {
-  const user = await db.collection("users").doc(uid).get();
-  const profile = user.data() ?? {};
-  const legacyRole = String(profile.role ?? "").toLowerCase();
-  const accessRole = String(profile.accessRole ??
-    (legacyRole === "admin" || legacyRole === "counselor" ? legacyRole : "appUser"));
-  if (!["portalStaff", "counselor", "admin"].includes(accessRole)) {
-    throw new HttpsError("permission-denied", "Staff access is required.");
-  }
-  // New PACC access requests must pass all three gates.  Older privileged
-  // records remain readable while they are migrated, but no newly registered
-  // staff account can reach protected functions until verification is synced.
-  if (accessRole !== "admin" && profile.staffAccountStatus != null) {
-    const authUser = await getAuth().getUser(uid);
-    if (profile.staffAccountStatus !== "approved" ||
-        profile.accountStatus !== "active" ||
-        !authUser.emailVerified) {
-      throw new HttpsError("permission-denied", "Your PACC portal access is not active.");
-    }
-  }
-  return {...profile, accessRole};
-}
-
 async function requireClinicalAppointmentStaff(
   uid: string,
 ): Promise<FirebaseFirestore.DocumentData> {
@@ -318,26 +288,6 @@ async function requireClinicalAppointmentStaff(
     );
   }
   return staff;
-}
-
-function configuredSuperAdminUid(): string {
-  const value = superAdminUid.value().trim();
-  if (!value) throw new HttpsError("failed-precondition", "SUPER_ADMIN_UID is not configured.");
-  return value;
-}
-
-async function requireSuperAdmin(uid: string): Promise<FirebaseFirestore.DocumentData> {
-  if (uid !== configuredSuperAdminUid()) {
-    throw new HttpsError("permission-denied", "Super-administrator access is required.");
-  }
-  const actor = await requireStaff(uid);
-  if (actor.accessRole !== "admin") {
-    throw new HttpsError("permission-denied", "The configured account is not an administrator.");
-  }
-  await db.collection("system_config").doc("security").set(
-    {superAdminUid: uid, updatedAt: FieldValue.serverTimestamp()}, {merge: true},
-  );
-  return actor;
 }
 
 function normalizedEmployeeId(value: unknown): string {
@@ -983,7 +933,7 @@ export const getAuditLogPage = onCall(async (request) => {
   const afterMillis = typeof request.data?.afterMillis === "number" ? request.data.afterMillis : null;
   const pageSize = Math.min(Math.max(Number(request.data?.pageSize ?? 25), 1), 50);
   let query: FirebaseFirestore.Query = db.collection("admin_audit_logs")
-    .where("targetUserId", "==", targetUserId).orderBy("createdAt", "desc").limit(pageSize);
+    .where(auditLogOwnerField(action), "==", targetUserId).orderBy("createdAt", "desc").limit(pageSize);
   if (category) query = query.where("category", "==", category);
   if (action) query = query.where("action", "==", action);
   if (afterMillis != null) query = query.where("createdAt", ">=", Timestamp.fromMillis(afterMillis));
@@ -2397,3 +2347,14 @@ export const expireStaleAppointmentRequests = onSchedule(
     }));
   },
 );
+
+export {
+  backfillStudentInfoRequirement, importStudentRoster, issueStudentActivationCodes, listLegacyStudentsNotInRoster,
+  listStudentRoster, listStudentRosterImports, previewStudentRosterImport, resetStudentActivationLock,
+  revokeStudentActivation, setStudentRosterStatus, updateStudentRosterRecord,
+} from "./student_roster";
+export {activateStudentAccount, activateStudentAccountDev} from "./student_activation";
+export {
+  getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
+  reviewStudentCorrection, saveStudentPersonalInfo,
+} from "./student_personal_info";

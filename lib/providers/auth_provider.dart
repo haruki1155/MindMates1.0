@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../features/quick_assessment/models/quick_assessment_models.dart';
+import '../models/student_roster_models.dart';
 import '../repositories/auth_repository.dart';
+import '../repositories/student_roster_repository.dart';
 import '../services/firebase/firebase_error_message.dart';
 
 enum SignupState {
@@ -18,14 +20,23 @@ enum SignupState {
   authenticationFailed,
 }
 
+/// Thrown when the roster activation succeeded but the follow-up sign-in
+/// failed, so the account exists and the student should sign in normally.
+class StudentActivationSignInException implements Exception {
+  const StudentActivationSignInException();
+}
+
 class AuthProvider extends ChangeNotifier {
   AuthProvider(
     this._repository, {
     this.onSessionCleared,
     this.signOutCleanupTimeout = const Duration(seconds: 5),
-  });
+    StudentRosterRepository? rosterRepository,
+    // ignore: prefer_initializing_formals
+  }) : _rosterRepository = rosterRepository;
 
   final AuthRepository _repository;
+  final StudentRosterRepository? _rosterRepository;
   final VoidCallback? onSessionCleared;
   final Duration signOutCleanupTimeout;
 
@@ -210,6 +221,79 @@ class AuthProvider extends ChangeNotifier {
       );
       return credential.user?.uid ?? _repository.currentUserId;
     }, signOutOnFailure: true);
+  }
+
+  /// Activates a roster record, signs in with the new credentials and sends
+  /// the verification email. Throws [StudentActivationException] when the
+  /// server rejects the activation and [StudentActivationSignInException]
+  /// when the account was created but the follow-up sign-in failed.
+  Future<void> activateStudentAccount({
+    required String studentNo,
+    required String activationCode,
+    required String dateOfBirthKey,
+    required String email,
+    required String password,
+  }) async {
+    _requiresExplicitReauthentication = false;
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final repository = _rosterRepository ?? StudentRosterRepository();
+      final String activatedEmail;
+      try {
+        activatedEmail = await repository.activate(
+          studentNo: studentNo,
+          activationCode: activationCode,
+          dateOfBirthKey: dateOfBirthKey,
+          email: email,
+          password: password,
+        );
+      } on StudentActivationException {
+        rethrow;
+      } catch (error, stackTrace) {
+        FirebaseErrorMessage.log(
+          error,
+          stackTrace,
+          area: 'Student activation failed.',
+        );
+        throw const StudentActivationException(
+          StudentActivationFailure.unknown,
+        );
+      }
+      try {
+        final credential = await _repository.signInWithEmail(
+          email: activatedEmail,
+          password: password,
+        );
+        final id = credential.user?.uid ?? _repository.currentUserId;
+        if (id == null || id.isEmpty) {
+          throw StateError('Unable to identify authenticated user.');
+        }
+        _userId = id;
+        _isAuthenticated = true;
+      } catch (error, stackTrace) {
+        FirebaseErrorMessage.log(
+          error,
+          stackTrace,
+          area: 'Sign-in after student activation failed.',
+        );
+        throw const StudentActivationSignInException();
+      }
+      try {
+        await _repository.sendEmailVerification();
+      } catch (error, stackTrace) {
+        // Non-fatal: the verification screen offers a resend button.
+        FirebaseErrorMessage.log(
+          error,
+          stackTrace,
+          area: 'Verification email after student activation failed.',
+        );
+      }
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<String?> signInWithGoogle() {

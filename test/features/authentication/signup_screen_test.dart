@@ -26,12 +26,12 @@ void main() {
     expect(find.byType(AlertDialog), findsNothing);
     expect(find.text('Email Address'), findsWidgets);
     expect(_guideText('Email guide'), findsOneWidget);
-    expect(
-      _guideText('Use your personal email or your institutional email.'),
-      findsOneWidget,
-    );
-    expect(_guideContaining('@ucu.edu.ph'), findsNothing);
+    expect(_guideText('Use your @ucu.edu.ph employee email.'), findsOneWidget);
     expect(find.text('Student account'), findsNothing);
+    expect(find.text('Student ID'), findsNothing);
+    expect(find.text('Employee ID'), findsWidgets);
+    expect(find.text('Course or Program'), findsNothing);
+    expect(find.text('Year Level'), findsNothing);
   });
 
   testWidgets('email guide follows the typed email', (tester) async {
@@ -41,88 +41,44 @@ void main() {
     await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
     await _settleSignup(tester);
 
+    const studentPointer =
+        "Students activate accounts through the roster. Tap 'Activate student account'.";
     const cases = [
-      ('leo@gmail.com', 'Personal email detected.'),
+      ('leo@gmail.com', studentPointer),
       ('  Juan@UCU.edu.ph ', 'Institutional email detected.'),
-      ('juan@ucu.edu.ph.com', 'Personal email detected.'),
-      ('juan@student.ucu.edu.ph', 'Personal email detected.'),
-      ('', 'Use your personal email or your institutional email.'),
+      ('juan@ucu.edu.ph.com', studentPointer),
+      ('juan@student.ucu.edu.ph', studentPointer),
+      ('', 'Use your @ucu.edu.ph employee email.'),
     ];
     for (final (input, expected) in cases) {
       await tester.enterText(find.byType(TextFormField).first, input);
       await tester.pump();
       expect(_guideText('Email guide'), findsOneWidget, reason: input);
       expect(_guideText(expected), findsOneWidget, reason: input);
-      expect(_guideContaining('@ucu.edu.ph'), findsNothing, reason: input);
     }
     expect(find.text('Student account'), findsNothing);
     expect(find.text('Teaching personnel account detected'), findsNothing);
   });
 
-  testWidgets('department selection enables related courses', (tester) async {
+  testWidgets('department selection has no course picker', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
     await _settleSignup(tester);
 
-    expect(find.textContaining('Unofficial'), findsNothing);
     expect(find.text('College or Department'), findsWidgets);
-    expect(find.text('Course or Program'), findsWidgets);
-    expect(find.text('Select college first'), findsOneWidget);
+    expect(find.text('Course or Program'), findsNothing);
 
     await _selectDropdownItem(
       tester,
       fieldLabel: 'College or Department',
       itemLabel: 'College of Nursing',
     );
-
-    await _selectDropdownItem(
-      tester,
-      fieldLabel: 'Course or Program',
-      itemLabel: 'BS Nursing',
-    );
-
     expect(find.text('College of Nursing'), findsOneWidget);
-    expect(find.text('BS Nursing'), findsOneWidget);
   });
 
-  testWidgets('changing department clears the previous course', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(900, 1400));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-
-    await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
-    await _settleSignup(tester);
-
-    await _selectDropdownItem(
-      tester,
-      fieldLabel: 'College or Department',
-      itemLabel: 'College of Nursing',
-    );
-    await _selectDropdownItem(
-      tester,
-      fieldLabel: 'Course or Program',
-      itemLabel: 'BS Nursing',
-    );
-
-    await _selectDropdownItem(
-      tester,
-      fieldLabel: 'College or Department',
-      itemLabel: 'College of Pharmacy',
-    );
-
-    expect(find.text('College of Pharmacy'), findsOneWidget);
-    expect(find.text('BS Nursing'), findsNothing);
-
-    await _selectDropdownItem(
-      tester,
-      fieldLabel: 'Course or Program',
-      itemLabel: 'BS Pharmacy',
-    );
-    expect(find.text('BS Pharmacy'), findsOneWidget);
-  });
-
-  testWidgets('signup requires department and course', (tester) async {
+  testWidgets('signup requires department', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -137,11 +93,44 @@ void main() {
     await tester.pump();
 
     expect(find.text('College or department is required'), findsOneWidget);
-    expect(find.text('Course or program is required'), findsOneWidget);
     expect(authProvider.signupCalls, 0);
   });
 
-  testWidgets('signup passes selected department and course', (tester) async {
+  testWidgets('non-ucu email shows an error and does not submit', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider();
+    await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
+    await _settleSignup(tester);
+
+    await _fillRequiredTextFields(tester);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Email Address'),
+      'student@gmail.com',
+    );
+    await _selectDropdownItem(
+      tester,
+      fieldLabel: 'College or Department',
+      itemLabel: 'College of Nursing',
+    );
+    await _acceptTerms(tester);
+
+    await tester.tap(find.text('Sign Up'));
+    await tester.pump();
+
+    expect(
+      find.text('Use your @ucu.edu.ph employee email address'),
+      findsOneWidget,
+    );
+    expect(authProvider.signupCalls, 0);
+  });
+
+  testWidgets('signup passes selected department for employees', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -156,11 +145,6 @@ void main() {
       itemLabel:
           'College of Information and Technology Education / College of Computer Studies',
     );
-    await _selectDropdownItem(
-      tester,
-      fieldLabel: 'Course or Program',
-      itemLabel: 'BS Information Technology',
-    );
     await _acceptTerms(tester);
 
     await tester.tap(find.text('Sign Up'));
@@ -173,8 +157,9 @@ void main() {
       authProvider.department,
       'College of Information and Technology Education / College of Computer Studies',
     );
-    expect(authProvider.course, 'BS Information Technology');
-    expect(authProvider.generatedEmail, '2026.1@mindmate.local');
+    expect(authProvider.course, '');
+    expect(authProvider.role, AssessmentRole.faculty);
+    expect(authProvider.employeeId, '2026-1');
     expect(find.text('onboarding target'), findsOneWidget);
   });
 
@@ -203,6 +188,26 @@ void main() {
     expect(find.text('Year Level'), findsNothing);
     expect(find.text('Position or Designation'), findsWidgets);
     expect(find.text('Sector'), findsNothing);
+  });
+
+  testWidgets('student email on sign up points to student activation', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_SignupHarness(authProvider: _FakeAuthProvider()));
+    await _settleSignup(tester);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Email Address'),
+      'leo@gmail.com',
+    );
+    await tester.pump();
+
+    await tester.ensureVisible(find.text('Activate student account'));
+    await tester.tap(find.text('Activate student account'));
+    await tester.pumpAndSettle();
+    expect(find.text('activation target'), findsOneWidget);
   });
 
   testWidgets(
@@ -271,22 +276,100 @@ void main() {
     },
   );
 
-  testWidgets('non-teaching selection still shows universal student form', (
+  testWidgets('sign up has no student option or student-only fields', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      _SignupHarness(
+        authProvider: _FakeAuthProvider(),
+        role: AssessmentRole.staff,
+      ),
+    );
+    await _settleSignup(tester);
+
+    expect(find.text('Course or Program'), findsNothing);
+    expect(find.text('Year Level'), findsNothing);
+    expect(find.text('Student ID'), findsNothing);
+    expect(find.textContaining('Student account'), findsNothing);
+  });
+
+  testWidgets('a Google profile setup can always get back to sign in', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    // A personal Google account: the email field is read-only and its address
+    // can never pass the @ucu.edu.ph validator, so without this exit the
+    // screen is a dead end.
+    final authProvider = _FakeAuthProvider(googleEmail: 'leo@gmail.com');
+    await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
+    await _settleSignup(tester);
+
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.widgetWithText(TextFormField, 'Email Address'),
+          )
+          .controller
+          ?.text,
+      'leo@gmail.com',
+    );
+
+    final back = find.text('Back to sign in');
+    await tester.ensureVisible(back);
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+
+    expect(authProvider.signOutCalls, 1);
+    expect(find.text('login target'), findsOneWidget);
+  });
+
+  testWidgets('student activation from a Google profile setup keeps login reachable', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider(googleEmail: 'leo@gmail.com');
+    await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
+    await _settleSignup(tester);
+
+    await tester.ensureVisible(find.text('Activate student account'));
+    await tester.tap(find.text('Activate student account'));
+    await tester.pumpAndSettle();
+
+    expect(authProvider.signOutCalls, 1);
+    expect(find.text('activation target'), findsOneWidget);
+
+    // Popping activation must land on sign in, not on the orphaned signup form.
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    navigator.pop();
+    await tester.pumpAndSettle();
+    expect(find.text('login target'), findsOneWidget);
+  });
+
+  testWidgets('the password signup path also offers a way back to sign in', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final authProvider = _FakeAuthProvider();
-    await tester.pumpWidget(
-      _SignupHarness(authProvider: authProvider, role: AssessmentRole.staff),
-    );
+    await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
     await _settleSignup(tester);
 
-    expect(find.text('Sector'), findsNothing);
-    expect(find.text('College or Department'), findsWidgets);
-    expect(find.text('Course or Program'), findsWidgets);
-    expect(find.text('Year Level'), findsWidgets);
+    final back = find.text('Back to sign in');
+    await tester.ensureVisible(back);
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+
+    // Nothing to sign out of on the password path.
+    expect(authProvider.signOutCalls, 0);
+    expect(find.text('login target'), findsOneWidget);
   });
 }
 
@@ -298,7 +381,7 @@ Future<void> _fillRequiredTextFields(WidgetTester tester) async {
   await tester.pumpAndSettle();
   await tester.enterText(
     find.widgetWithText(TextFormField, 'Email Address'),
-    'student@gmail.com',
+    'leo@ucu.edu.ph',
   );
   await tester.enterText(
     find.widgetWithText(TextFormField, 'First Name'),
@@ -309,18 +392,8 @@ Future<void> _fillRequiredTextFields(WidgetTester tester) async {
     'Molar',
   );
   await tester.enterText(
-    find.widgetWithText(
-      TextFormField,
-      find.text('Student ID').evaluate().isNotEmpty
-          ? 'Student ID'
-          : 'Employee ID',
-    ),
+    find.widgetWithText(TextFormField, 'Employee ID'),
     '2026-1',
-  );
-  await _selectDropdownItem(
-    tester,
-    fieldLabel: 'Year Level',
-    itemLabel: '2nd Year',
   );
   await _selectDropdownItem(
     tester,
@@ -348,11 +421,6 @@ Future<void> _fillRequiredTextFields(WidgetTester tester) async {
 Finder _guideText(String text) => find.descendant(
   of: find.byKey(const Key('signup-email-guide')),
   matching: find.text(text),
-);
-
-Finder _guideContaining(String text) => find.descendant(
-  of: find.byKey(const Key('signup-email-guide')),
-  matching: find.textContaining(text),
 );
 
 Future<void> _settleSignup(WidgetTester tester) async {
@@ -426,8 +494,12 @@ class _SignupHarness extends StatelessWidget {
       child: MaterialApp(
         home: const SignupScreen(),
         routes: {
+          RouteNames.studentActivation: (_) =>
+              const Scaffold(body: Center(child: Text('activation target'))),
           RouteNames.onboarding: (_) =>
               const Scaffold(body: Center(child: Text('onboarding target'))),
+          RouteNames.login: (_) =>
+              const Scaffold(body: Center(child: Text('login target'))),
         },
       ),
     );
@@ -435,8 +507,10 @@ class _SignupHarness extends StatelessWidget {
 }
 
 class _FakeAuthProvider extends AuthProvider {
-  _FakeAuthProvider() : super(_FakeAuthRepository());
+  _FakeAuthProvider({this.googleEmail}) : super(_FakeAuthRepository());
 
+  final String? googleEmail;
+  int signOutCalls = 0;
   int signupCalls = 0;
   String? department;
   String? course;
@@ -450,10 +524,15 @@ class _FakeAuthProvider extends AuthProvider {
   String? gender;
 
   @override
-  String? get currentUserEmail => null;
+  String? get currentUserEmail => googleEmail;
 
   @override
   String? get currentUserDisplayName => null;
+
+  @override
+  Future<void> signOut() async {
+    signOutCalls += 1;
+  }
 
   @override
   Future<String?> signUp({

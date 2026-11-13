@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/core/constants/app_colors.dart';
 import 'package:mind_mates/features/authentication/screens/email_verification_screen.dart';
+import 'package:mind_mates/models/profile_roles.dart';
+import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/auth_provider.dart';
+import 'package:mind_mates/providers/user_provider.dart';
+import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:mind_mates/repositories/auth_repository.dart';
 import 'package:mind_mates/routes/route_names.dart';
 import 'package:mind_mates/services/auth/auth_service.dart';
@@ -252,6 +256,63 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets(
+    'verified student with pending info goes to Student Information',
+    (tester) async {
+      final auth = _FakeAuthProvider();
+      final users = UserProvider(
+        _FakeUserRepository(
+          const UserModel(
+            id: 'u1',
+            email: 'leo@example.com',
+            populationRole: PopulationRole.student,
+            personalInfoRequired: true,
+            profileVersion: 3,
+          ),
+        ),
+      );
+      await _pumpScreen(tester, auth, userProvider: users);
+      auth.verified = true;
+      await tester.tap(find.text('I verified my email'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1200));
+      await tester.pumpAndSettle();
+      expect(find.text('student info target'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  for (final student in [true, false]) {
+    testWidgets(
+      'Use another email routes ${student ? 'students to activation' : 'employees to signup'}',
+      (tester) async {
+        final users = UserProvider(
+          _FakeUserRepository(
+            UserModel(
+              id: 'u1',
+              email: 'leo@example.com',
+              populationRole: student
+                  ? PopulationRole.student
+                  : PopulationRole.teaching,
+            ),
+          ),
+        );
+        await _pumpScreen(tester, _FakeAuthProvider(), userProvider: users);
+        await tester.tap(find.text('Wrong email? Use another email'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.widgetWithText(FilledButton, 'Use another email'),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text(student ? 'activation target' : 'signup target'),
+          findsOneWidget,
+        );
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
 }
 
 ButtonStyleButton _buttonFor(WidgetTester tester, String label) =>
@@ -274,16 +335,29 @@ Finder _inBadge(Finder matching) => find.descendant(
 
 Finder _badgeText(String text) => _inBadge(find.text(text));
 
-Future<void> _pumpScreen(WidgetTester tester, _FakeAuthProvider auth) async {
+Future<void> _pumpScreen(
+  WidgetTester tester,
+  _FakeAuthProvider auth, {
+  UserProvider? userProvider,
+}) async {
   await tester.binding.setSurfaceSize(const Size(600, 1400));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(
-    ChangeNotifierProvider<AuthProvider>.value(
-      value: auth,
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider<AuthProvider>.value(value: auth),
+        if (userProvider != null)
+          ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+      ],
       child: MaterialApp(
         routes: {
           RouteNames.profileSetup: (_) =>
               const Scaffold(body: Text('profile setup target')),
+          RouteNames.studentActivation: (_) =>
+              const Scaffold(body: Text('activation target')),
+          RouteNames.studentInformation: (_) =>
+              const Scaffold(body: Text('student info target')),
+          RouteNames.signup: (_) => const Scaffold(body: Text('signup target')),
         },
         home: const EmailVerificationScreen(),
       ),
@@ -294,6 +368,23 @@ Future<void> _pumpScreen(WidgetTester tester, _FakeAuthProvider auth) async {
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository() : super(AuthService());
+
+  @override
+  String? get currentUserId => 'u1';
+
+  @override
+  Future<void> cancelPendingRegistration() async {}
+
+  @override
+  Future<void> signOut() async {}
+}
+
+class _FakeUserRepository extends UserRepository {
+  _FakeUserRepository(this.user);
+  final UserModel user;
+
+  @override
+  Future<UserModel?> fetchUserProfile(String uid) async => user;
 }
 
 class _FakeAuthProvider extends AuthProvider {

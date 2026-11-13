@@ -10,6 +10,7 @@ import '../../../models/pacc_availability_model.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../domain/admin_management_models.dart';
+import '../services/admin_unload_guard.dart';
 import '../domain/appointment_workflow.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/appointment_repository.dart';
@@ -23,6 +24,7 @@ import 'report_generation_page.dart';
 import 'admin_notifications_page.dart';
 import 'admin_change_password_screen.dart';
 import 'academic_structure_page.dart';
+import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
 import 'staff_operations_dashboard.dart';
 import 'staff_appointments_page.dart';
@@ -30,6 +32,7 @@ import 'counselor_operations_dashboard.dart';
 import 'counselor_workflow_page.dart';
 import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
+import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
 
 const _yellow = AdminColors.accentStrong;
@@ -46,6 +49,7 @@ String _headerRoleLabel(AccessRole role) => switch (role) {
 enum AdminPortalPage {
   dashboard,
   users,
+  studentRoster,
   academicStructure,
   profiling,
   appointments,
@@ -64,6 +68,7 @@ extension on AdminPortalPage {
   String get label => switch (this) {
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
+    AdminPortalPage.studentRoster => 'Student Roster',
     AdminPortalPage.academicStructure => 'Academic Structure',
     AdminPortalPage.profiling => 'Profiling Management',
     AdminPortalPage.appointments => 'Appointments',
@@ -88,6 +93,7 @@ extension on AdminPortalPage {
   IconData get icon => switch (this) {
     AdminPortalPage.dashboard => Icons.home_outlined,
     AdminPortalPage.users => Icons.group_outlined,
+    AdminPortalPage.studentRoster => Icons.school_outlined,
     AdminPortalPage.academicStructure => Icons.account_tree_outlined,
     AdminPortalPage.profiling => Icons.badge_outlined,
     AdminPortalPage.appointments => Icons.calendar_month_outlined,
@@ -380,8 +386,18 @@ class _LoginField extends StatelessWidget {
 }
 
 class AdminPortalHome extends StatefulWidget {
-  const AdminPortalHome({super.key, this.repository});
+  const AdminPortalHome({
+    super.key,
+    this.repository,
+    this.registerUnload = registerUnloadGuard,
+    this.removeUnload = removeUnloadGuard,
+  });
   final AdminPortalRepository? repository;
+
+  /// Browser tab-close guard seams; the defaults are no-ops off the web.
+  final UnloadGuardRegistrar registerUnload;
+  final UnloadGuardRemover removeUnload;
+
   @override
   State<AdminPortalHome> createState() => _AdminPortalHomeState();
 }
@@ -390,15 +406,30 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   late final AdminPortalRepository _repository =
       widget.repository ?? AdminPortalRepository();
   AdminPortalPage _page = AdminPortalPage.dashboard;
+  final _rosterLeaveGuard = StudentRosterLeaveGuard();
   bool _navCollapsed = false;
   late final Stream<List<AppNotificationModel>> _notifications;
   final PaccScheduleEditorController _scheduleController =
       PaccScheduleEditorController();
 
+  Object? _unloadHandle;
+
   @override
   void initState() {
     super.initState();
     _notifications = _repository.watchPortalNotifications();
+    // Closing or refreshing the tab mid-import, or with slips still
+    // undownloaded, loses plain codes that are never shown again.
+    _unloadHandle = widget.registerUnload(
+      () => _rosterLeaveGuard.hasUndownloadedCodes,
+    );
+  }
+
+  @override
+  void dispose() {
+    widget.removeUnload(_unloadHandle);
+    _unloadHandle = null;
+    super.dispose();
   }
 
   @override
@@ -453,6 +484,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
                     notifications: _notifications,
                     onOpenNotifications: () =>
                         _setPage(AdminPortalPage.notifications),
+                    confirmLeave: _rosterLeaveGuard.confirmLeave,
                   ),
                   Expanded(child: _buildPage()),
                 ],
@@ -477,6 +509,12 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
     if (_page == AdminPortalPage.availability &&
         page != AdminPortalPage.availability &&
         !await _scheduleController.confirmLeave(context)) {
+      return;
+    }
+    if (!mounted) return;
+    if (_page == AdminPortalPage.studentRoster &&
+        page != AdminPortalPage.studentRoster &&
+        !await _rosterLeaveGuard.confirmLeave(context)) {
       return;
     }
     if (!mounted) {
@@ -506,6 +544,9 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
       onOpenAcademicStructure: () =>
           _setPage(AdminPortalPage.academicStructure),
+    ),
+    AdminPortalPage.studentRoster => StudentRosterPage(
+      leaveGuard: _rosterLeaveGuard,
     ),
     AdminPortalPage.academicStructure => AcademicStructurePage(
       repository: _repository,
@@ -566,6 +607,7 @@ class _Nav extends StatelessWidget {
 
   bool _allowed(AdminPortalPage page) => switch (page) {
     AdminPortalPage.users => isSuperAdmin,
+    AdminPortalPage.studentRoster => isSuperAdmin,
     AdminPortalPage.academicStructure => isSuperAdmin,
     // Counselor case/profile access must come through an assigned-case
     // surface. The legacy organization-wide profiling screen is admin-only.
@@ -590,6 +632,7 @@ class _Nav extends StatelessWidget {
       const _NavSection('Overview', [AdminPortalPage.dashboard]),
       const _NavSection('People', [
         AdminPortalPage.users,
+        AdminPortalPage.studentRoster,
         AdminPortalPage.profiling,
         AdminPortalPage.academicStructure,
       ]),
@@ -804,7 +847,12 @@ class _PortalHeader extends StatelessWidget {
     required this.repository,
     required this.notifications,
     required this.onOpenNotifications,
+    required this.confirmLeave,
   });
+
+  /// The roster leave guard: undownloaded activation codes or an import in
+  /// flight must be confirmed before the session ends.
+  final Future<bool> Function(BuildContext context) confirmLeave;
   final bool compact;
   final bool navCollapsed;
   final VoidCallback? onMenuPressed;
@@ -873,6 +921,8 @@ class _PortalHeader extends StatelessWidget {
                 ),
               );
               if (confirmed != true) return;
+              if (!context.mounted) return;
+              if (!await confirmLeave(context)) return;
               await repository.signOut();
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
@@ -2779,6 +2829,16 @@ class _AppointmentCard extends StatelessWidget {
                 item.userId,
                 style: const TextStyle(color: AdminColors.muted, fontSize: 12),
               ),
+              if (item.userId.trim().isNotEmpty &&
+                  repository.currentAccessRole.canAccessClinicalData)
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: ViewStudentInformationButton(
+                    userId: item.userId,
+                    canView: repository.currentAccessRole.canAccessClinicalData,
+                  ),
+                ),
             ],
           ),
         );

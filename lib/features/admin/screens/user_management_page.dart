@@ -1829,6 +1829,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
     'Appointment rescheduled',
     'Appointment completed',
     'Schedule adjustment requested',
+    'Student information viewed',
   ];
 
   @override
@@ -1871,7 +1872,9 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
       setState(() {
         loading = false;
         loadingMore = false;
-        error = "We couldn't load this activity log.";
+        error = _actionValue() == 'STUDENT_PERSONAL_INFO_VIEWED'
+            ? 'Activity log unavailable: a required database index is not deployed.'
+            : "We couldn't load this activity log.";
       });
     }
   }
@@ -1899,6 +1902,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
     'Appointment rescheduled' => 'APPOINTMENT_RESCHEDULED',
     'Appointment completed' => 'APPOINTMENT_COMPLETED',
     'Schedule adjustment requested' => 'APPOINTMENT_ADJUSTMENT_REQUESTED',
+    'Student information viewed' => 'STUDENT_PERSONAL_INFO_VIEWED',
     _ => '',
   };
 
@@ -1947,6 +1951,13 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
               },
             ),
           ],
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 6),
+          child: Text(
+            'Student information views appear under their own filter.',
+            style: TextStyle(fontSize: 12, color: AdminColors.muted),
+          ),
         ),
         if (events.isEmpty)
           const Expanded(
@@ -2088,6 +2099,7 @@ String _auditActionLabel(String action) => switch (action) {
   'STAFF_ACCOUNT_REACTIVATED' => 'Account reactivated',
   'STAFF_REGISTRATION_APPROVED' => 'Staff registration approved',
   'STAFF_REGISTRATION_REJECTED' => 'Staff registration removed',
+  'STUDENT_PERSONAL_INFO_VIEWED' => 'Student information viewed',
   'accessRoleAssigned' => 'Role changed',
   'staffAccountEnabled' => 'Account reactivated',
   'staffAccountDisabled' => 'Account suspended',

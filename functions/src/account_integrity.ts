@@ -4,6 +4,8 @@ import {getAuth} from "firebase-admin/auth";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
+import {canonicalLoginId} from "./account_recovery";
+
 if (!getApps().length) initializeApp();
 
 const db = getFirestore();
@@ -77,6 +79,14 @@ function canonicalEmployeeId(value: string): string {
     throw new HttpsError("invalid-argument", "Enter a valid employee ID.");
   }
   return employeeId;
+}
+
+export const STUDENT_SELF_PROVISIONING_BLOCKED =
+  "Students activate accounts through the roster. Tap 'Activate student account'.";
+
+/** Students may no longer self-register; they activate through the roster instead. */
+export function assertSelfProvisioningAllowed(role: string): void {
+  if (role === "student") throw new HttpsError("failed-precondition", STUDENT_SELF_PROVISIONING_BLOCKED);
 }
 
 export function canonicalStudentId(value: string): string {
@@ -198,9 +208,20 @@ async function cancelPendingRegistrationHandler(request: CallableRequest) {
       throw cancellationError("This account has progressed and cannot be cancelled automatically.");
     }
 
+    // Roster activations reserve by the roster key (canonicalLoginId), not the legacy signup allowlist.
+    const rosterActivated = registrationType === "standard" && profileData.populationRole === "student" &&
+      profileData.verifiedBy === "roster-activation";
+    // Legacy students linked by a roster import also reserve by the roster key.
+    const rosterLinkedLegacy = registrationType === "standard" && profileData.populationRole === "student" &&
+      !rosterActivated && profileData.rosterLinked === true;
+    const rosterKeyed = rosterActivated || rosterLinkedLegacy;
+    const rosterKey = rosterKeyed ? canonicalLoginId(String(profileData.schoolId ?? "")) : "";
+    const rosterRef = rosterKeyed ? db.collection("student_roster").doc(rosterKey) : null;
     const reservationRef = registrationType === "staff" || profileData.populationRole === "teaching"
       ? db.collection("employee_id_reservations").doc(canonicalEmployeeId(String(profileData.employeeId ?? "")))
-      : db.collection("student_id_reservations").doc(canonicalStudentId(String(profileData.schoolId ?? "")));
+      : db.collection("student_id_reservations").doc(rosterKeyed
+        ? rosterKey
+        : canonicalStudentId(String(profileData.schoolId ?? "")));
     const accessRequestId = registrationType === "staff" ? String(profileData.accessRequestId ?? "").trim() : "";
     if (registrationType === "staff" && !accessRequestId) {
       throw cancellationError("This access request is incomplete and cannot be cancelled automatically.");
@@ -220,12 +241,29 @@ async function cancelPendingRegistrationHandler(request: CallableRequest) {
       if (!reservation.exists || reservation.data()?.userId !== uid) {
         throw cancellationError("Registration ownership could not be verified.");
       }
+      const roster = rosterRef ? await transaction.get(rosterRef) : null;
       if (requestRef) {
         const accessRequest = await transaction.get(requestRef);
         if (!accessRequest.exists || accessRequest.data()?.applicantUserId !== uid) {
           throw cancellationError("Access-request ownership could not be verified.");
         }
         transaction.delete(requestRef);
+      }
+      if (rosterLinkedLegacy && rosterRef && roster?.exists && roster.data()?.userId === uid) {
+        // No slip was ever issued for a linked legacy account; an admin reissues a code.
+        transaction.update(rosterRef, {
+          activated: false, userId: null, activationCode: null, updatedAt: FieldValue.serverTimestamp(),
+        });
+      } else if (rosterRef && roster?.exists && roster.data()?.userId === uid) {
+        // Give the slip back so the student can activate again with the same code.
+        const consumed = roster.data()?.consumedActivationCode;
+        transaction.update(rosterRef, {
+          activated: false, userId: null, consumedActivationCode: null,
+          activationCode: consumed && typeof consumed.hash === "string"
+            ? {hash: consumed.hash, salt: consumed.salt, issuedAt: consumed.issuedAt ?? null, expiresAt: consumed.expiresAt ?? null}
+            : null,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
       }
       transaction.delete(reservationRef);
       transaction.delete(profileRef);
@@ -266,6 +304,18 @@ export const cancelPendingRegistrationDev = onCall(
   {enforceAppCheck: false},
   cancelPendingRegistrationHandler,
 );
+
+/** Default activity/assessment fields every newly created app-user profile starts with. */
+export function defaultActivityFields(): Record<string, unknown> {
+  return {
+    dayStreak: 0, longestStreak: 0,
+    lastActivityDateKey: "", activeDateKeys: [], avatarAssetName: "",
+    quickAssessmentCompleted: false, quickAssessmentCompletedAt: null,
+    profileSetupCompleted: false,
+    lastActiveAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+}
 
 
 function collegeDocumentId(name: string): string {
@@ -437,6 +487,7 @@ async function provisionAppUserProfileHandler(request: CallableRequest) {
     const authUser = await getAuth().getUser(uid);
     const input = validatedProfileInput(request.data);
     const assignedRole = registrationRoleForEmail(authUser.email);
+    assertSelfProvisioningAllowed(assignedRole);
     if (input.populationRole !== assignedRole) {
       throw new HttpsError(
         "failed-precondition",
@@ -498,12 +549,7 @@ async function provisionAppUserProfileHandler(request: CallableRequest) {
         declaredRole: input.populationRole,
         accessRole: "appUser", verificationStatus: "verified", profileVersion: 3,
         verifiedAt: FieldValue.serverTimestamp(), verifiedBy: "automatic-registration",
-        dayStreak: 0, longestStreak: 0,
-        lastActivityDateKey: "", activeDateKeys: [], avatarAssetName: "",
-        quickAssessmentCompleted: false, quickAssessmentCompletedAt: null,
-        profileSetupCompleted: false,
-        lastActiveAt: FieldValue.serverTimestamp(), createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
+        ...defaultActivityFields(),
       });
     });
     console.info("profile_provisioned", {correlationId, created});

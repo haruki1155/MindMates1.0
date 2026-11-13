@@ -17,6 +17,7 @@ class FirebaseCallableRouter {
     'submitFullAssessment',
     'previewAssessmentDomain',
     'sendMindAidMessage',
+    'activateStudentAccount',
   };
 
   static String name(String protectedName) {
