@@ -19,6 +19,75 @@ test("deriveCode keeps acronyms and drops stop words", async () => {
   assert.equal(deriveCode("College of Arts and Sciences in the City"), "CASC");
 });
 
+test("deriveCode takes initials from an ALL-CAPS registrar export", async () => {
+  const {deriveCode} = await load();
+  assert.equal(deriveCode("BS NURSING"), "BN");
+  assert.equal(deriveCode("COLLEGE OF PHARMACY"), "CP");
+  assert.equal(deriveCode("BACHELOR OF SCIENCE IN NURSING"), "BSN");
+  // The acronym exception still applies to a mixed-case name, and is bounded to a short word.
+  assert.equal(deriveCode("BS Information Technology"), "BSIT");
+  assert.equal(deriveCode("MINDMATE Institute of Technology"), "MIT");
+});
+
+test("a sparse code column is read before any code is derived, in either row order", async () => {
+  const {validateCatalogRows} = await load();
+  const blankFirst = [
+    {college: "College of Law", collegeCode: "", department: "Law Dept", course: "Juris Doctor"},
+    {college: "College of Law", collegeCode: "CLAW", department: "Law Dept", course: "Master of Laws"},
+  ];
+  const codeFirst = [blankFirst[1], blankFirst[0]];
+  for (const rows of [blankFirst, codeFirst]) {
+    const out = validateCatalogRows(rows, emptyIndex);
+    assert.deepEqual(out.results.map((r) => r.ok), [true, true], JSON.stringify(out.results));
+    assert.deepEqual(out.plan.colleges.map((c) => c.code), ["CLAW"]);
+  }
+});
+
+test("a derived code yields to another row's explicit code", async () => {
+  const {validateCatalogRows} = await load();
+  const rows = [
+    {college: "College of Pharmacy", department: "Pharmacy Dept", course: "BS Pharmacy"},
+    {college: "City Park Annex", collegeCode: "CP", department: "Annex Dept", course: "BS Annex"},
+  ];
+  for (const ordered of [rows, [rows[1], rows[0]]]) {
+    const out = validateCatalogRows(ordered, emptyIndex);
+    assert.deepEqual(out.results.map((r) => r.ok), [true, true]);
+    const byName = new Map(out.plan.colleges.map((c) => [c.name, c.code]));
+    assert.equal(byName.get("City Park Annex"), "CP");
+    assert.equal(byName.get("College of Pharmacy"), "CP2");
+  }
+});
+
+test("the same new department name under two new colleges plans two departments", async () => {
+  const {validateCatalogRows} = await load();
+  const out = validateCatalogRows([
+    {college: "College One", department: "General Studies", course: "BS One"},
+    {college: "College Two", department: "General Studies", course: "BS Two"},
+  ], emptyIndex);
+  assert.deepEqual(out.results.map((r) => r.ok && r.kind), ["create", "create"]);
+  assert.equal(out.plan.departments.length, 2);
+  assert.deepEqual(out.plan.departments.map((d) => d.name), ["General Studies", "General Studies"]);
+  const [first, second] = out.plan.departments;
+  assert.notEqual(first.code, second.code);
+  assert.notEqual(first.parent, second.parent);
+  assert.deepEqual(out.plan.departments.map((d) => d.parent),
+    out.plan.colleges.map((c) => `new:${c.key}`));
+});
+
+test("an error row leaves nothing of its own in the plan", async () => {
+  const {validateCatalogRows} = await load();
+  const out = validateCatalogRows([
+    {college: "College Kept", collegeCode: "CK", department: "Dept Kept", course: "BS Kept"},
+    // The same code for a second college blocks this row only once every code has been read, by which
+    // time its department and course had already been resolved. Neither may stay in the plan.
+    {college: "College Dropped", collegeCode: "CK", department: "Dept Dropped", course: "BS Dropped"},
+  ], emptyIndex);
+  assert.deepEqual(out.results.map((r) => r.ok), [true, false]);
+  assert.deepEqual(out.plan.colleges.map((c) => c.name), ["College Kept"]);
+  assert.deepEqual(out.plan.departments.map((d) => d.name), ["Dept Kept"]);
+  assert.deepEqual(out.counts, {create: 1, exists: 0, error: 1, colleges: 1, departments: 1, courses: 1});
+});
+
 test("an absent department column invents one department per college", async () => {
   const {validateCatalogRows} = await load();
   const out = validateCatalogRows([

@@ -5,6 +5,7 @@ import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {importAcademicCatalog, previewAcademicCatalogImport} from "./index";
 import {academicImportTestHooks} from "./academic_import";
+import {deriveCode} from "./academic_import_domain";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
 
@@ -165,23 +166,44 @@ test("a clean import creates the catalogue, audits once, and re-running is a no-
 });
 
 test("a file code colliding with another record errors; a differing code only warns", async () => {
-  const colleges = await docsOf("colleges");
-  const pharmacy = colleges.find((c) => c.name === name("College of Pharmacy")) as Record<string, unknown>;
-  const law = colleges.find((c) => c.name === name("College of Law")) as Record<string, unknown>;
-  const collide = [{college: name("College of Law"), collegeCode: String(pharmacy.code).toLowerCase(),
-    department: name("Law Dept"), course: name("Juris Doctor")}];
+  // Seeded by this test alone, so it neither reads nor depends on what another test created.
+  await commit.run({auth, data: {fileName: "seed.xlsx", rows: [
+    {college: name("Collide One"), collegeCode: `${run}C1`, department: name("Collide Dept One"),
+      course: name("BS Collide One")},
+    {college: name("Collide Two"), collegeCode: `${run}C2`, department: name("Collide Dept Two"),
+      course: name("BS Collide Two")},
+  ]}});
+  const two = (await docsOf("colleges")).find((c) => c.name === name("Collide Two")) as Row;
+  assert.equal(two.code, `${run}C2`);
+
+  const collide = [{college: name("Collide Two"), collegeCode: `${run}c1`.toLowerCase(),
+    department: name("Collide Dept Two"), course: name("BS Collide Two")}];
   const out = await preview.run({auth, data: {fileName: "c.xlsx", rows: collide}}) as PreviewOut;
   assert.equal(out.rows[0].kind, "error");
-  assert.match(out.rows[0].errors.join(" "), /College of Pharmacy/);
+  assert.match(out.rows[0].errors.join(" "), new RegExp(name("Collide One")));
 
-  const differing = [{college: name("College of Law"), collegeCode: `${run}ZZ`,
-    department: name("Law Dept"), course: name("Juris Doctor")}];
+  const differing = [{college: name("Collide Two"), collegeCode: `${run}ZZ`,
+    department: name("Collide Dept Two"), course: name("BS Collide Two")}];
   const warned = await preview.run({auth, data: {fileName: "c.xlsx", rows: differing}}) as PreviewOut;
   assert.equal(warned.rows[0].kind, "exists");
   assert.match(warned.rows[0].warnings.join(" "), new RegExp(`${run}ZZ`));
   await commit.run({auth, data: {fileName: "c.xlsx", rows: differing}});
-  const stored = await db.collection("colleges").doc(String(law.id)).get();
-  assert.equal(stored.data()?.code, law.code);
+  const stored = await db.collection("colleges").doc(String(two.id)).get();
+  assert.equal(stored.data()?.code, `${run}C2`);
+});
+
+test("a sparse code column is read before any code is derived", async () => {
+  const rows = [
+    {college: name("Sparse College"), collegeCode: "", department: name("Sparse Dept"), course: name("BS Sparse A")},
+    {college: name("Sparse College"), collegeCode: `${run}SP`, department: name("Sparse Dept"),
+      course: name("BS Sparse B")},
+  ];
+  const out = await preview.run({auth, data: {fileName: "c.xlsx", rows}}) as PreviewOut;
+  assert.deepEqual(out.rows.map((r) => r.kind), ["create", "create"]);
+  await commit.run({auth, data: {fileName: "c.xlsx", rows}});
+  const college = (await docsOf("colleges")).find((c) => c.name === name("Sparse College")) as Row;
+  assert.equal(college.code, `${run}SP`);
+  assert.equal(college.normalizedCode, `${run}SP`.toLowerCase());
 });
 
 test("an archived college named by the file is an error row", async () => {
@@ -215,26 +237,50 @@ test("no Department column invents one department per college and flags the rows
 });
 
 test("derived codes that collide gain a digit", async () => {
-  const rows = [
-    {college: name("College of Codes"), department: name("Codes Dept"), course: `${run} Information Technology`},
-    {college: name("College of Codes"), department: name("Codes Dept"), course: `${run} Industrial Technology`},
-  ];
+  const names = [`${run} Information Technology`, `${run} Industrial Technology`];
+  const base = deriveCode(names[0]);
+  assert.equal(deriveCode(names[1]), base, "both names must derive the same code for this to mean anything");
+  // The shared emulator may already hold some of the candidates, so the expectation is the next two free
+  // ones in the base, base2, base3 … sequence rather than fixed strings.
+  const taken = new Set((await db.collection("courses").get()).docs
+    .map((d) => String(d.data().code ?? "").toLowerCase()));
+  const nextFree = () => {
+    for (let suffix = 1; ; suffix++) {
+      const candidate = suffix === 1 ? base : `${base}${suffix}`;
+      if (!taken.has(candidate.toLowerCase())) {
+        taken.add(candidate.toLowerCase());
+        return candidate;
+      }
+    }
+  };
+  const expected = [nextFree(), nextFree()];
+  const rows = names.map((course) => ({college: name("College of Codes"), department: name("Codes Dept"), course}));
   await commit.run({auth, data: {fileName: "c.xlsx", rows}});
   const courses = await docsOf("courses");
-  const codes = [`${run} Information Technology`, `${run} Industrial Technology`]
-    .map((n) => String(courses.find((c) => c.name === n)?.code ?? ""));
-  assert.deepEqual(codes, [`${run}IT`, `${run}IT2`]);
+  assert.deepEqual(names.map((n) => String(courses.find((c) => c.name === n)?.code ?? "")), expected);
 });
 
 test("a department name used under a different college is created, and a duplicated course is refused", async () => {
-  const rows = [{college: name("College of Law"), department: name("Pharmacy Dept"), course: name("BS Law Pharmacy")}];
+  // Seeded here, so this test stands on its own.
+  await commit.run({auth, data: {fileName: "seed.xlsx", rows: [
+    {college: name("Shared First"), department: name("Shared Dept"), course: name("BS Shared First")},
+  ]}});
+  const stored = (await docsOf("departments")).filter((d) => d.name === name("Shared Dept"));
+  assert.equal(stored.length, 1);
+  const rows = [{college: name("Shared Second"), department: name("Shared Dept"), course: name("BS Shared Second")}];
   const out = await preview.run({auth, data: {fileName: "c.xlsx", rows}}) as PreviewOut;
   assert.equal(out.rows[0].kind, "create");
   assert.equal(out.counts.departments, 1);
+  const imported = await commit.run({auth, data: {fileName: "c.xlsx", rows}}) as ImportOut;
+  assert.deepEqual(imported.counts, {colleges: 1, departments: 1, courses: 1});
+  const both = (await docsOf("departments")).filter((d) => d.name === name("Shared Dept"));
+  assert.equal(both.length, 2);
+  assert.notEqual(String(both[0].collegeId), String(both[1].collegeId));
+  assert.notEqual(String(both[0].code), String(both[1].code));
 
   const dupe = [
-    {college: name("College of Law"), department: name("Law Dept"), course: name("BS Doubled")},
-    {college: name("College of Law"), department: name("law   dept"), course: name("BS   DOUBLED")},
+    {college: name("Doubling College"), department: name("Doubling Dept"), course: name("BS Doubled")},
+    {college: name("Doubling College"), department: name("doubling   dept"), course: name("BS   DOUBLED")},
   ];
   const duped = await preview.run({auth, data: {fileName: "c.xlsx", rows: dupe}}) as PreviewOut;
   assert.deepEqual(duped.rows.map((r) => r.kind), ["create", "error"]);
