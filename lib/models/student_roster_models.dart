@@ -21,6 +21,7 @@ class RosterPreviewRow {
     required this.kind,
     this.changes = const {},
     this.errors = const [],
+    this.warnings = const [],
   });
 
   final int index;
@@ -28,6 +29,10 @@ class RosterPreviewRow {
   final RosterPreviewKind kind;
   final Map<String, ({String from, String to})> changes;
   final List<String> errors;
+
+  /// Non-blocking notes about the row — today, a link whose existing account
+  /// carries a different name or date of birth from the registrar row.
+  final List<String> warnings;
 
   factory RosterPreviewRow.fromJson(Map<Object?, Object?> json) {
     final map = asStringMap(json);
@@ -43,6 +48,7 @@ class RosterPreviewRow {
           ),
       },
       errors: [for (final e in asList(map['errors'])) asText(e)],
+      warnings: [for (final w in asList(map['warnings'])) asText(w)],
     );
   }
 }

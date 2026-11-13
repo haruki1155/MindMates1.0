@@ -156,6 +156,15 @@ class _LoginBodyState extends State<_LoginBody> {
       Navigator.of(context).pushReplacementNamed(RouteNames.signup);
       return;
     }
+    // The same mandatory gate the password path applies: a legacy student with
+    // a Google-backed account must still fill in Student Information first.
+    final gateRoute = gateRouteForUser(userProvider.user!);
+    if (gateRoute != null) {
+      Navigator.of(
+        context,
+      ).pushNamedAndRemoveUntil(gateRoute, (route) => false);
+      return;
+    }
     final completed = await assessmentProvider.ensureQuickAssessmentCompletion(
       userId,
     );

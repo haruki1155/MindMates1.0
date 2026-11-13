@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/authentication/screens/login_screen.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
 import 'package:mind_mates/providers/auth_provider.dart';
@@ -77,12 +78,83 @@ void main() {
       expect(find.text('activation target'), findsOneWidget);
     },
   );
+
+  testWidgets('password sign-in sends a student owing information to the gate', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider();
+    await tester.pumpWidget(
+      _LoginHarness(
+        authProvider: authProvider,
+        userRepository: _FakeUserRepository(gated: true),
+      ),
+    );
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'School ID'),
+      'UCU 2026-0001',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Password'),
+      'password123',
+    );
+    await tester.ensureVisible(find.text('Sign in'));
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('student information target'), findsOneWidget);
+    expect(find.text('home target'), findsNothing);
+  });
+
+  testWidgets('Google sign-in sends a student owing information to the gate', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider();
+    await tester.pumpWidget(
+      _LoginHarness(
+        authProvider: authProvider,
+        userRepository: _FakeUserRepository(gated: true),
+      ),
+    );
+
+    await tester.ensureVisible(find.text('Continue with Google'));
+    await tester.tap(find.text('Continue with Google'));
+    await tester.pumpAndSettle();
+
+    expect(authProvider.googleCalls, 1);
+    expect(find.text('student information target'), findsOneWidget);
+    expect(find.text('home target'), findsNothing);
+  });
+
+  testWidgets('Google sign-in with nothing pending still reaches home', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider();
+    await tester.pumpWidget(_LoginHarness(authProvider: authProvider));
+
+    await tester.ensureVisible(find.text('Continue with Google'));
+    await tester.tap(find.text('Continue with Google'));
+    await tester.pumpAndSettle();
+
+    expect(authProvider.googleCalls, 1);
+    expect(find.text('home target'), findsOneWidget);
+  });
 }
 
 class _LoginHarness extends StatelessWidget {
-  const _LoginHarness({required this.authProvider});
+  const _LoginHarness({required this.authProvider, this.userRepository});
 
   final AuthProvider authProvider;
+  final UserRepository? userRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -90,7 +162,8 @@ class _LoginHarness extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
         ChangeNotifierProvider<UserProvider>(
-          create: (_) => UserProvider(_FakeUserRepository()),
+          create: (_) =>
+              UserProvider(userRepository ?? _FakeUserRepository()),
         ),
         ChangeNotifierProvider<AssessmentProvider>(
           create: (_) => AssessmentProvider(_FakeAssessmentRepository()),
@@ -105,6 +178,11 @@ class _LoginHarness extends StatelessWidget {
               const Scaffold(body: Center(child: Text('activation target'))),
           RouteNames.home: (_) =>
               const Scaffold(body: Center(child: Text('home target'))),
+          RouteNames.signup: (_) =>
+              const Scaffold(body: Center(child: Text('signup target'))),
+          RouteNames.studentInformation: (_) => const Scaffold(
+            body: Center(child: Text('student information target')),
+          ),
         },
       ),
     );
@@ -115,6 +193,7 @@ class _FakeAuthProvider extends AuthProvider {
   _FakeAuthProvider() : super(_FakeAuthRepository());
 
   int signInCalls = 0;
+  int googleCalls = 0;
   String? schoolId;
 
   @override
@@ -126,6 +205,18 @@ class _FakeAuthProvider extends AuthProvider {
     this.schoolId = schoolId;
     return 'user_1';
   }
+
+  @override
+  Future<String?> signInWithGoogle() async {
+    googleCalls += 1;
+    return 'user_1';
+  }
+
+  @override
+  String? get currentUserEmail => null;
+
+  @override
+  bool get currentUserEmailVerified => true;
 }
 
 class _FakeAuthRepository extends AuthRepository {
@@ -133,9 +224,19 @@ class _FakeAuthRepository extends AuthRepository {
 }
 
 class _FakeUserRepository extends UserRepository {
+  _FakeUserRepository({this.gated = false});
+
+  /// A legacy student who still owes the mandatory Student Information form.
+  final bool gated;
+
   @override
   Future<UserModel?> fetchUserProfile(String uid) async {
-    return UserModel(id: uid, email: 'user@mindmate.local');
+    return UserModel(
+      id: uid,
+      email: 'user@mindmate.local',
+      populationRole: gated ? PopulationRole.student : null,
+      personalInfoRequired: gated,
+    );
   }
 }
 

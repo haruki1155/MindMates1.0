@@ -214,7 +214,11 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
         _errors = serverErrors;
         _saveError = serverErrors.isNotEmpty
             ? 'Please correct the highlighted fields.'
-            : (error.code == 'failed-precondition' &&
+            // A revoked or non-student account comes back as permission-denied
+            // with copy that explains why; "check your connection" would send
+            // the student looking in the wrong place.
+            : ((error.code == 'failed-precondition' ||
+                      error.code == 'permission-denied') &&
                   (error.message ?? '').isNotEmpty)
             ? error.message
             : _genericSaveError;

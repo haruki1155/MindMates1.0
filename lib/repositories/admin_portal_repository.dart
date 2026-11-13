@@ -584,12 +584,9 @@ class AdminPortalRepository {
       // the protected Firestore read while a callable/index is propagating.
       final items = await _firestoreService.getDocuments(
         FirestoreCollections.adminAuditLogs,
-        // Student-information views target the student, so they are listed
-        // under the staff member who performed them.
-        whereEquals: {
-          action == 'STUDENT_PERSONAL_INFO_VIEWED' ? 'actorId' : 'targetUserId':
-              targetUserId,
-        },
+        // View-filter queries rethrew above, so this fallback only ever serves
+        // target-scoped ones.
+        whereEquals: {'targetUserId': targetUserId},
         orderBy: 'createdAt',
         limit: pageSize,
       );

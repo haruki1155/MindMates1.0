@@ -44,7 +44,12 @@ void main() {
             'course': _m({'from': 'A', 'to': 'B'}),
           }),
         }),
-        _m({'index': 2, 'studentNo': '3', 'kind': 'link'}),
+        _m({
+          'index': 2,
+          'studentNo': '3',
+          'kind': 'link',
+          'warnings': <Object?>['different name'],
+        }),
         _m({
           'index': 3,
           'studentNo': '',
@@ -65,6 +70,8 @@ void main() {
     ]);
     expect(result.rows[1].changes['course'], (from: 'A', to: 'B'));
     expect(result.rows[3].errors, ['bad']);
+    expect(result.rows[2].warnings, ['different name']);
+    expect(result.rows[0].warnings, isEmpty);
     expect(result.counts['update'], 1);
     expect(calls.single.$1, 'previewStudentRosterImport');
     expect(calls.single.$2['fileName'], 'f.xlsx');

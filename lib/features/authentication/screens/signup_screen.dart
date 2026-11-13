@@ -259,17 +259,33 @@ class _SignupBodyState extends State<_SignupBody> {
     ).pushNamedAndRemoveUntil(destination, (route) => false);
   }
 
+  /// Leaves the signup form for sign in. A Google sign-in without a profile
+  /// arrives here by *replacing* login and leaves a live session behind, with a
+  /// read-only email the validator will never accept, so without this the
+  /// screen is a dead end: the form cannot be submitted and nothing can be
+  /// popped. Always available, on both the Google and password paths.
+  Future<void> _backToSignIn() async {
+    final navigator = Navigator.of(context);
+    await _signOutGoogleSession();
+    navigator.pushNamedAndRemoveUntil(RouteNames.login, (route) => false);
+  }
+
+  Future<void> _signOutGoogleSession() async {
+    if (!_isGoogleProfileSetup) return;
+    try {
+      await context.read<AuthProvider>().signOut();
+    } catch (_) {}
+  }
+
   Future<void> _openStudentActivation() async {
-    final authProvider = context.read<AuthProvider>();
     final navigator = Navigator.of(context);
     // A Google sign-in without a profile leaves a live session behind;
     // activation needs a clean one.
-    if (_isGoogleProfileSetup) {
-      try {
-        await authProvider.signOut();
-      } catch (_) {}
-    }
-    navigator.pushReplacementNamed(RouteNames.studentActivation);
+    await _signOutGoogleSession();
+    // Rebuild the stack on top of sign in rather than replacing this screen, so
+    // backing out of activation lands somewhere usable.
+    navigator.pushNamedAndRemoveUntil(RouteNames.login, (route) => false);
+    navigator.pushNamed(RouteNames.studentActivation);
   }
 
   Future<bool> _confirmRegistrationEmail(String normalizedEmail) async {
@@ -386,6 +402,7 @@ class _SignupBodyState extends State<_SignupBody> {
                     onTermsTap: _handleTermsChanged,
                     onSignUp: _handleSignUp,
                     onActivateStudent: _openStudentActivation,
+                    onBackToSignIn: _backToSignIn,
                     requiredValidator: _requiredValidator,
                     confirmPasswordValidator: _confirmPasswordValidator,
                   );
@@ -441,6 +458,7 @@ class _SignupFormCard extends StatelessWidget {
     required this.onPickDateOfBirth,
     required this.emailController,
     required this.onActivateStudent,
+    required this.onBackToSignIn,
   });
 
   final GlobalKey<FormState> formKey;
@@ -472,6 +490,7 @@ class _SignupFormCard extends StatelessWidget {
   final Future<void> Function() onPickDateOfBirth;
   final TextEditingController emailController;
   final VoidCallback onActivateStudent;
+  final VoidCallback onBackToSignIn;
 
   @override
   Widget build(BuildContext context) {
@@ -636,6 +655,20 @@ class _SignupFormCard extends StatelessWidget {
             _TermsCheckbox(acceptedTerms: acceptedTerms, onTap: onTermsTap),
             const SizedBox(height: 23),
             _SignUpButton(onPressed: isLoading ? null : onSignUp),
+            const SizedBox(height: 4),
+            TextButton.icon(
+              key: const Key('signup-back-to-sign-in'),
+              onPressed: isLoading ? null : onBackToSignIn,
+              style: TextButton.styleFrom(
+                foregroundColor: _SignupColors.text,
+                textStyle: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              icon: const Icon(Icons.arrow_back_rounded, size: 16),
+              label: const Text('Back to sign in'),
+            ),
           ],
         ),
       ),

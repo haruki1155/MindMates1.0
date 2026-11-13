@@ -79,6 +79,7 @@ class _Repo extends StudentRosterRepository {
     final out = <RosterPreviewRow>[];
     for (var i = 0; i < rows.length; i++) {
       final bad = rows[i]['studentNo']!.startsWith('ERR');
+      final link = rows[i]['studentNo']!.startsWith('LNK');
       if (bad) errors++;
       out.add(
         RosterPreviewRow(
@@ -86,6 +87,8 @@ class _Repo extends StudentRosterRepository {
           studentNo: rows[i]['studentNo']!,
           kind: bad
               ? RosterPreviewKind.error
+              : link
+              ? RosterPreviewKind.link
               : rows[i]['studentNo']!.startsWith('UPD')
               ? RosterPreviewKind.update
               : RosterPreviewKind.newRow,
@@ -93,6 +96,9 @@ class _Repo extends StudentRosterRepository {
               ? {'dateOfBirth': (from: '2005-02-03', to: '2005-02-04')}
               : const {},
           errors: bad ? const ['Course was not found.'] : const [],
+          warnings: link
+              ? const ['The existing account has a different name.']
+              : const [],
         ),
       );
     }
@@ -101,7 +107,7 @@ class _Repo extends StudentRosterRepository {
       counts: {
         'new': out.where((r) => r.kind == RosterPreviewKind.newRow).length,
         'update': out.where((r) => r.kind == RosterPreviewKind.update).length,
-        'link': 0,
+        'link': out.where((r) => r.kind == RosterPreviewKind.link).length,
         'error': errors,
       },
     );
@@ -301,6 +307,22 @@ void main() {
           .onPressed,
       isNull,
     );
+  });
+
+  testWidgets('a link row warning is shown and still allows the import', (
+    tester,
+  ) async {
+    final repo = _Repo();
+    await _pump(tester, repo, file: _csvFile([_csvRow('LNK-001')]));
+    await _chooseAndPreview(tester);
+
+    expect(find.text('LNK-001 · Links account'), findsOneWidget);
+    expect(
+      find.text('The existing account has a different name.'),
+      findsOneWidget,
+    );
+    // A warning is not an error: Import stays enabled.
+    expect(_button(tester, 'Import').onPressed, isNotNull);
   });
 
   testWidgets('a missing column is shown as a file error', (tester) async {

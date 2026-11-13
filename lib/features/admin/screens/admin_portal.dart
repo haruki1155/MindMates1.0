@@ -8,6 +8,7 @@ import '../../../models/pacc_availability_model.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../domain/admin_management_models.dart';
+import '../services/admin_unload_guard.dart';
 import '../domain/appointment_workflow.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/appointment_repository.dart';
@@ -380,8 +381,18 @@ class _LoginField extends StatelessWidget {
 }
 
 class AdminPortalHome extends StatefulWidget {
-  const AdminPortalHome({super.key, this.repository});
+  const AdminPortalHome({
+    super.key,
+    this.repository,
+    this.registerUnload = registerUnloadGuard,
+    this.removeUnload = removeUnloadGuard,
+  });
   final AdminPortalRepository? repository;
+
+  /// Browser tab-close guard seams; the defaults are no-ops off the web.
+  final UnloadGuardRegistrar registerUnload;
+  final UnloadGuardRemover removeUnload;
+
   @override
   State<AdminPortalHome> createState() => _AdminPortalHomeState();
 }
@@ -396,10 +407,24 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   final PaccScheduleEditorController _scheduleController =
       PaccScheduleEditorController();
 
+  Object? _unloadHandle;
+
   @override
   void initState() {
     super.initState();
     _notifications = _repository.watchPortalNotifications();
+    // Closing or refreshing the tab mid-import, or with slips still
+    // undownloaded, loses plain codes that are never shown again.
+    _unloadHandle = widget.registerUnload(
+      () => _rosterLeaveGuard.hasUndownloadedCodes,
+    );
+  }
+
+  @override
+  void dispose() {
+    widget.removeUnload(_unloadHandle);
+    _unloadHandle = null;
+    super.dispose();
   }
 
   @override
@@ -454,6 +479,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
                     notifications: _notifications,
                     onOpenNotifications: () =>
                         _setPage(AdminPortalPage.notifications),
+                    confirmLeave: _rosterLeaveGuard.confirmLeave,
                   ),
                   Expanded(child: _buildPage()),
                 ],
@@ -809,7 +835,12 @@ class _PortalHeader extends StatelessWidget {
     required this.repository,
     required this.notifications,
     required this.onOpenNotifications,
+    required this.confirmLeave,
   });
+
+  /// The roster leave guard: undownloaded activation codes or an import in
+  /// flight must be confirmed before the session ends.
+  final Future<bool> Function(BuildContext context) confirmLeave;
   final bool compact;
   final bool navCollapsed;
   final VoidCallback? onMenuPressed;
@@ -878,6 +909,8 @@ class _PortalHeader extends StatelessWidget {
                 ),
               );
               if (confirmed != true) return;
+              if (!context.mounted) return;
+              if (!await confirmLeave(context)) return;
               await repository.signOut();
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(

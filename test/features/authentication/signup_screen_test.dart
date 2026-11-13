@@ -295,6 +295,82 @@ void main() {
     expect(find.text('Student ID'), findsNothing);
     expect(find.textContaining('Student account'), findsNothing);
   });
+
+  testWidgets('a Google profile setup can always get back to sign in', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    // A personal Google account: the email field is read-only and its address
+    // can never pass the @ucu.edu.ph validator, so without this exit the
+    // screen is a dead end.
+    final authProvider = _FakeAuthProvider(googleEmail: 'leo@gmail.com');
+    await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
+    await _settleSignup(tester);
+
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.widgetWithText(TextFormField, 'Email Address'),
+          )
+          .controller
+          ?.text,
+      'leo@gmail.com',
+    );
+
+    final back = find.text('Back to sign in');
+    await tester.ensureVisible(back);
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+
+    expect(authProvider.signOutCalls, 1);
+    expect(find.text('login target'), findsOneWidget);
+  });
+
+  testWidgets('student activation from a Google profile setup keeps login reachable', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider(googleEmail: 'leo@gmail.com');
+    await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
+    await _settleSignup(tester);
+
+    await tester.ensureVisible(find.text('Activate student account'));
+    await tester.tap(find.text('Activate student account'));
+    await tester.pumpAndSettle();
+
+    expect(authProvider.signOutCalls, 1);
+    expect(find.text('activation target'), findsOneWidget);
+
+    // Popping activation must land on sign in, not on the orphaned signup form.
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    navigator.pop();
+    await tester.pumpAndSettle();
+    expect(find.text('login target'), findsOneWidget);
+  });
+
+  testWidgets('the password signup path also offers a way back to sign in', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider();
+    await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
+    await _settleSignup(tester);
+
+    final back = find.text('Back to sign in');
+    await tester.ensureVisible(back);
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+
+    // Nothing to sign out of on the password path.
+    expect(authProvider.signOutCalls, 0);
+    expect(find.text('login target'), findsOneWidget);
+  });
 }
 
 Future<void> _fillRequiredTextFields(WidgetTester tester) async {
@@ -422,6 +498,8 @@ class _SignupHarness extends StatelessWidget {
               const Scaffold(body: Center(child: Text('activation target'))),
           RouteNames.onboarding: (_) =>
               const Scaffold(body: Center(child: Text('onboarding target'))),
+          RouteNames.login: (_) =>
+              const Scaffold(body: Center(child: Text('login target'))),
         },
       ),
     );
@@ -429,8 +507,10 @@ class _SignupHarness extends StatelessWidget {
 }
 
 class _FakeAuthProvider extends AuthProvider {
-  _FakeAuthProvider() : super(_FakeAuthRepository());
+  _FakeAuthProvider({this.googleEmail}) : super(_FakeAuthRepository());
 
+  final String? googleEmail;
+  int signOutCalls = 0;
   int signupCalls = 0;
   String? department;
   String? course;
@@ -444,10 +524,15 @@ class _FakeAuthProvider extends AuthProvider {
   String? gender;
 
   @override
-  String? get currentUserEmail => null;
+  String? get currentUserEmail => googleEmail;
 
   @override
   String? get currentUserDisplayName => null;
+
+  @override
+  Future<void> signOut() async {
+    signOutCalls += 1;
+  }
 
   @override
   Future<String?> signUp({

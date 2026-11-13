@@ -806,6 +806,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
               kind: r.kind,
               changes: r.changes,
               errors: r.errors,
+              warnings: r.warnings,
             ),
           );
         }
@@ -1156,6 +1157,27 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
                           Text(
                             '${c.key}: ${_spellIfDate(c.value.from)} → '
                             '${_spellIfDate(c.value.to)}',
+                          ),
+                        for (final w in r.warnings)
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.warning_amber_rounded,
+                                size: 16,
+                                color: AdminColors.accentStrong,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  w,
+                                  style: const TextStyle(
+                                    color: AdminColors.accentStrong,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         for (final e in r.errors)
                           Text(

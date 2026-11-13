@@ -384,6 +384,23 @@ void main() {
     expect(find.text('Barangay is required.'), findsOneWidget);
   });
 
+  testWidgets('a revoked account sees the server reason, not a network hint', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      saveError: FirebaseFunctionsException(
+        code: 'permission-denied',
+        message: 'This account has been revoked.',
+      ),
+    );
+    await fillAll(tester);
+    await acceptConsent(tester);
+    await tapSave(tester);
+    expect(find.text('This account has been revoked.'), findsOneWidget);
+    expect(find.textContaining('Check your connection'), findsNothing);
+  });
+
   testWidgets('onboarding save reloads the user and follows the gate', (
     tester,
   ) async {
