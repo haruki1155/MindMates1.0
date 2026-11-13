@@ -61,12 +61,15 @@ export function roleOf(data: FirebaseFirestore.DocumentData): string {
   return String(data?.accessRole ?? data?.role ?? "").trim();
 }
 
+/**
+ * Clinical access: every staff gate in `requireStaff` (approved PACC access, active account, verified
+ * email) plus the counselor/admin role. Mirrors `requireClinicalAppointmentStaff`; a weaker check here
+ * would let an account that is locked out of every other staff callable read student information.
+ */
 export async function requireClinical(uid: string): Promise<FirebaseFirestore.DocumentData> {
-  const snapshot = await getFirestore().collection("users").doc(uid).get();
-  const data = snapshot.data() ?? {};
-  const role = roleOf(data);
-  if (role !== "counselor" && role !== "admin") {
+  const staff = await requireStaff(uid);
+  if (staff.accessRole !== "counselor" && staff.accessRole !== "admin") {
     throw new HttpsError("permission-denied", "Counselor or administrator access is required.");
   }
-  return data;
+  return staff;
 }

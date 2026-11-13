@@ -189,6 +189,11 @@ export const getStudentPersonalInfo = onCall(async (request) => {
     const userSnap = await transaction.get(db.collection("users").doc(targetId));
     if (!userSnap.exists) throw new HttpsError("not-found", "Student not found.");
     const user = userSnap.data() as Doc;
+    // Refuse employee/staff targets outright rather than returning an "official" view and writing a
+    // STUDENT_PERSONAL_INFO_VIEWED audit row about an account that is not a student.
+    if (!isStudentProfile(user)) {
+      throw new HttpsError("failed-precondition", "That account is not a student.");
+    }
     const key = keyOrNull(user.schoolId);
     const [rosterSnap, personalSnap] = await Promise.all([
       key ? transaction.get(db.collection("student_roster").doc(key)) : Promise.resolve(null),

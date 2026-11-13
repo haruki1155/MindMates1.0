@@ -38,6 +38,15 @@
       "collectionGroup": "admin_audit_logs",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "targetId", "order": "ASCENDING" },
+        { "fieldPath": "action", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "admin_audit_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "actorId", "order": "ASCENDING" },
         { "fieldPath": "action", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
@@ -332,6 +341,12 @@
   "fieldOverrides": [
     {
       "collectionGroup": "_password_reset_limits",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "student_activation_attempts",
       "fieldPath": "expiresAt",
       "ttl": true,
       "indexes": []

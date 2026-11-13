@@ -15,6 +15,14 @@ if (!getApps().length) initializeApp();
 
 const MAX_FAILURES = 5;
 const LOCK_MS = 30 * 60 * 1000;
+/**
+ * TTL on an attempts doc: the full lockout window plus a 24-hour margin. `student_activation_attempts`
+ * is written from an unauthenticated endpoint keyed by any canonical-shaped string, so without a TTL the
+ * collection grows without bound. The margin is deliberately larger than Firestore's own "deleted within
+ * 24 hours of expiry" guarantee is tight, so a live lockout can never be swept away early; a doc older
+ * than that protects nothing, because the lock has long since lapsed and a lapsed lock starts a fresh window.
+ */
+const ATTEMPT_TTL_MS = LOCK_MS + 24 * 60 * 60 * 1000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type Reason = "mismatch" | "expired" | "already-activated" | "email-in-use" | "invalid-input";
@@ -106,6 +114,7 @@ async function reserveAttempt(key: string): Promise<boolean> {
     transaction.set(ref, {
       studentKey: key, failedCount,
       lockedUntil: failedCount >= MAX_FAILURES ? Timestamp.fromMillis(now + LOCK_MS) : null,
+      expiresAt: Timestamp.fromMillis(now + ATTEMPT_TTL_MS),
       updatedAt: FieldValue.serverTimestamp(),
     });
     return true;

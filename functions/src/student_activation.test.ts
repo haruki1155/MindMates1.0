@@ -199,6 +199,7 @@ test("every mismatch kind returns the identical generic error", async () => {
     assert.equal(await authUserExists(`${runLower}-${tag}@example.com`), false);
   }
   assert.equal((await attemptsRef(good.key).get()).data()?.failedCount, 3);
+  assert.ok((await attemptsRef(good.key).get()).data()?.expiresAt instanceof Timestamp, "expiresAt is set on a first failure");
   assert.equal((await attemptsRef(keyOf(`${run}-UNKNOWN`)).get()).data()?.failedCount, 1);
   assert.equal((await attemptsRef(nullCode.key).get()).data()?.failedCount, 1);
   assert.equal((await attemptsRef(deactivated.key).get()).data()?.failedCount, 1);
@@ -223,6 +224,10 @@ test("five failures lock the Student No.; an expired lock allows success and cle
   assert.equal(await authUserExists(data.email), false);
   const locked = (await attemptsRef(s.key).get()).data() ?? {};
   assert.ok(locked.lockedUntil instanceof Timestamp && locked.lockedUntil.toMillis() > Date.now());
+  // Every attempt doc carries a TTL so this unauthenticated-write collection cannot grow without bound.
+  assert.ok(locked.expiresAt instanceof Timestamp, "expiresAt is set");
+  assert.ok(locked.expiresAt.toMillis() > locked.lockedUntil.toMillis(),
+    "the TTL outlives the lockout window");
   await attemptsRef(s.key).update({lockedUntil: Timestamp.fromMillis(Date.now() - 1000)});
   await activate.run({data});
   assert.equal(await authUserExists(data.email), true);

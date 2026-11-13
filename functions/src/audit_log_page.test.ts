@@ -29,8 +29,11 @@ const query = (targetUserId: string, action?: string) =>
 let roleChangeId = "";
 let viewId = "";
 
+let adminCreated = false;
+
 before(async () => {
   assert.ok(adminUid, "SUPER_ADMIN_UID is required");
+  adminCreated = !(await db.doc(`users/${adminUid}`).get()).exists;
   await db.doc(`users/${adminUid}`).set({id: adminUid, accessRole: "admin", role: "admin", name: "Test Admin"}, {merge: true});
   // Pre-existing shape: an action about a staff account.
   roleChangeId = await seed({actorId: adminUid, action: "STAFF_ROLE_CHANGED", category: "USER_MANAGEMENT",
@@ -42,7 +45,8 @@ before(async () => {
 
 after(async () => {
   await Promise.all(ids.map((id) => db.doc(`admin_audit_logs/${id}`).delete()));
-  await db.doc(`users/${adminUid}`).delete().catch(() => undefined);
+  // The super-admin profile is shared with every other suite: only remove it if this run created it.
+  if (adminCreated) await db.doc(`users/${adminUid}`).delete().catch(() => undefined);
 });
 
 test("staff-scoped action and the no-filter case are unchanged", async () => {

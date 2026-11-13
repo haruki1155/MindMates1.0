@@ -23,7 +23,7 @@ export const rosterTestHooks: {batchLimit?: number; afterClassify?: () => Promis
 export type IssuedCode = {studentNo: string; name: string; college: string; course: string; yearLevel: string;
   code: string; expiresAt: string};
 export type PreviewRow = {index: number; studentNo: string; kind: "new" | "update" | "link" | "error";
-  changes?: Record<string, {from: string; to: string}>; errors?: string[]};
+  changes?: Record<string, {from: string; to: string}>; errors?: string[]; warnings?: string[]};
 
 type Doc = FirebaseFirestore.DocumentData;
 type Classified = {
@@ -37,6 +37,7 @@ type Classified = {
   personalInfoExists?: boolean;
   changes?: Record<string, {from: string; to: string}>;
   errors?: string[];
+  warnings?: string[];
 };
 
 function database(): FirebaseFirestore.Firestore {
@@ -112,8 +113,9 @@ async function classify(rows: RosterRowInput[]): Promise<Classified[]> {
       if (!uid || !userSnaps.get(uid)?.exists) {
         byIndex.set(r.index, {...base, kind: "error", errors: ["Student No. is reserved by an account that cannot be linked."]});
       } else {
-        byIndex.set(r.index, {...base, kind: "link", linkUid: uid, linkUser: userSnaps.get(uid)?.data() ?? {},
-          personalInfoExists: infoSnaps.get(uid)?.exists === true});
+        const linkUser = userSnaps.get(uid)?.data() ?? {};
+        byIndex.set(r.index, {...base, kind: "link", linkUid: uid, linkUser,
+          personalInfoExists: infoSnaps.get(uid)?.exists === true, warnings: linkWarnings(value, linkUser)});
       }
     } else if (existing) {
       byIndex.set(r.index, {...base, kind: "update", changes: diff(value, existing)});
@@ -128,6 +130,27 @@ async function classify(rows: RosterRowInput[]): Promise<Classified[]> {
     }
     return byIndex.get(r.index) as Classified;
   });
+}
+
+/**
+ * A reservation only proves that someone typed this Student No. into their profile. When the account's
+ * own name or date of birth disagrees with the registrar row, linking hands the row to a possibly
+ * different person — so the preview says so. It stays a warning, never an error: linking must proceed.
+ */
+function linkWarnings(value: OfficialFields, user: Doc): string[] {
+  const accountName = [user.firstName, user.middleName, user.lastName].map((v) => String(v ?? "").trim())
+    .filter(Boolean).join(" ") || String(user.name ?? "").trim();
+  const rosterName = [value.firstName, value.middleName, value.surname].filter(Boolean).join(" ");
+  const nameDiffers = normalizeName(String(user.lastName ?? "")) !== normalizeName(value.surname) ||
+    normalizeName(String(user.firstName ?? "")) !== normalizeName(value.firstName);
+  const accountDob = String(user.dateOfBirthKey ?? "");
+  const dobDiffers = accountDob !== "" && accountDob !== value.dateOfBirthKey;
+  if (!nameDiffers && !dobDiffers) return [];
+  const parts: string[] = [];
+  if (nameDiffers) parts.push(`name "${accountName || "(blank)"}" (roster: "${rosterName}")`);
+  if (dobDiffers) parts.push(`date of birth ${accountDob} (roster: ${value.dateOfBirthKey})`);
+  return [`The existing account reserving this Student No. has a different ${parts.join(" and ")}. ` +
+    "Confirm this is the same student before importing."];
 }
 
 function diff(value: OfficialFields, existing: Doc): Record<string, {from: string; to: string}> {
@@ -146,7 +169,8 @@ export const previewStudentRosterImport = onCall(async (request) => {
   const out: PreviewRow[] = classified.map((c) => {
     counts[c.kind] += 1;
     return {index: c.index, studentNo: c.studentNo, kind: c.kind,
-      ...(c.kind === "update" ? {changes: c.changes} : {}), ...(c.kind === "error" ? {errors: c.errors} : {})};
+      ...(c.kind === "update" ? {changes: c.changes} : {}), ...(c.kind === "error" ? {errors: c.errors} : {}),
+      ...(c.warnings?.length ? {warnings: c.warnings} : {})};
   });
   return {rows: out, counts};
 });
@@ -232,8 +256,10 @@ function userAcademicFields(v: OfficialFields): Record<string, unknown> {
   };
 }
 
-const PREVIOUS_FIELDS = ["schoolId", "dateOfBirthKey", "collegeId", "courseId", "departmentId", "department", "course", "yearLevel",
-  "populationRole"];
+// The linked account's own values, snapshotted before the roster row takes over. The identity fields
+// (name, date of birth) are kept alongside the academic ones so a wrongful link is reconstructable.
+const PREVIOUS_FIELDS = ["schoolId", "firstName", "middleName", "lastName", "name", "dateOfBirthKey", "collegeId", "courseId",
+  "departmentId", "department", "course", "yearLevel", "populationRole"];
 
 type Unit = {ops: ((b: WriteBatch) => void)[]; kind: "new" | "updated" | "linked"; index: number; studentNo: string;
   code?: IssuedCode; previous?: Record<string, unknown>};
@@ -483,7 +509,7 @@ export const listStudentRoster = onCall(async (request) => {
   const prefix = search ? normalizeName(search) : "";
   let cursorOf: (snap: FirebaseFirestore.QueryDocumentSnapshot) => string[];
   if (prefix) {
-    query = query.where("surnameNormalized", ">=", prefix).where("surnameNormalized", "<", `${prefix}`)
+    query = query.where("surnameNormalized", ">=", prefix).where("surnameNormalized", "<", `${prefix}\uf8ff`)
       .orderBy("surnameNormalized").orderBy(FieldPath.documentId());
     cursorOf = (s) => [String(s.data().surnameNormalized ?? ""), s.id];
   } else {

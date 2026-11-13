@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {after, before, test} from "node:test";
 import {getApps, initializeApp} from "firebase-admin/app";
+import {getAuth} from "firebase-admin/auth";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {
@@ -24,7 +25,9 @@ const db = getFirestore();
 const run = `PI${Date.now()}`;
 const adminUid = process.env.SUPER_ADMIN_UID ?? "";
 const counselorUid = `${run}-counselor`;
+const unverifiedCounselorUid = `${run}-counselor-unverified`;
 const staffUid = `${run}-staff`;
+const authUids: string[] = [];
 const key = (n: string) => `${run}${n}`.toUpperCase();
 const uidOf = (n: string) => `${run}-u${n}`;
 const created: FirebaseFirestore.DocumentReference[] = [];
@@ -84,10 +87,30 @@ async function audits(action: string, targetId: string) {
   return snap.docs.filter((d) => d.data().action === action);
 }
 
+/** A real Auth record so the staff gates (which read emailVerified) can be exercised. */
+async function putAuthUser(uid: string, emailVerified: boolean) {
+  await getAuth().deleteUser(uid).catch(() => undefined);
+  await getAuth().createUser({uid, email: `${uid}@example.com`.toLowerCase(), emailVerified});
+  authUids.push(uid);
+}
+
+let adminCreated = false;
+
 before(async () => {
   assert.ok(adminUid, "SUPER_ADMIN_UID is required");
-  await put(`users/${adminUid}`, {id: adminUid, accessRole: "admin", role: "admin", name: "Test Admin", email: "a@example.com"});
-  await put(`users/${counselorUid}`, {id: counselorUid, accessRole: "counselor", role: "counselor", name: "Test Counselor"});
+  const adminRef = db.doc(`users/${adminUid}`);
+  adminCreated = !(await adminRef.get()).exists;
+  await adminRef.set({id: adminUid, accessRole: "admin", role: "admin", name: "Test Admin", email: "a@example.com"},
+    {merge: true});
+  // A legitimately active counselor: approved PACC access, active account and a verified email.
+  await putAuthUser(counselorUid, true);
+  await put(`users/${counselorUid}`, {id: counselorUid, accessRole: "counselor", role: "counselor", name: "Test Counselor",
+    staffAccountStatus: "approved", accountStatus: "active", email: `${counselorUid}@example.com`.toLowerCase()});
+  // Same approval, but the email was never verified: locked out of every staff callable.
+  await putAuthUser(unverifiedCounselorUid, false);
+  await put(`users/${unverifiedCounselorUid}`, {id: unverifiedCounselorUid, accessRole: "counselor", role: "counselor",
+    name: "Unverified Counselor", staffAccountStatus: "approved", accountStatus: "active",
+    email: `${unverifiedCounselorUid}@example.com`.toLowerCase()});
   await put(`users/${staffUid}`, {id: staffUid, accessRole: "portalStaff", role: "portalStaff", name: "Test Staff"});
   await put(`colleges/${collegeA}`, {name: "College of Testing", code: "COT", active: true});
   await put(`colleges/${collegeB}`, {name: "College of Other", code: "COO", active: true});
@@ -100,9 +123,12 @@ after(async () => {
   const reqs = await db.collection("student_correction_requests").where("studentNo", ">=", run).where("studentNo", "<=", `${run}~`).get();
   await Promise.all(reqs.docs.map((d) => d.ref.delete()));
   await Promise.all(created.map((r) => r.delete()));
-  for (let i = 1; i <= 14; i++) await db.doc(`student_personal_info/${uidOf(String(i))}`).delete();
+  for (let i = 1; i <= 15; i++) await db.doc(`student_personal_info/${uidOf(String(i))}`).delete();
   const aud = await db.collection("admin_audit_logs").where("targetType", "==", "student").get();
   await Promise.all(aud.docs.filter((d) => String(d.data().targetId).startsWith(run)).map((d) => d.ref.delete()));
+  await Promise.all(authUids.map((uid) => getAuth().deleteUser(uid).catch(() => undefined)));
+  // Only remove the shared super-admin profile when this run is the one that created it.
+  if (adminCreated) await db.doc(`users/${adminUid}`).delete().catch(() => undefined);
 });
 
 // ------------------------------------------------------------------ save
@@ -194,6 +220,17 @@ test("counselor view is audited, allowlisted, and clinical only", async () => {
   assert.equal(all.length, 2);
   assert.equal(all[0].data().category, "SECURITY");
   assert.equal(all[0].data().actorId, counselorUid);
+});
+
+test("an approved counselor whose email is unverified cannot read student information", async () => {
+  const {uid} = await seedStudent("15");
+  await rejects(view.run({auth: {uid: unverifiedCounselorUid}, data: {userId: uid}}), "permission-denied");
+  assert.equal((await audits("STUDENT_PERSONAL_INFO_VIEWED", uid)).length, 0);
+});
+
+test("a non-student target is refused and leaves no view audit", async () => {
+  await rejects(view.run({auth: {uid: counselorUid}, data: {userId: staffUid}}), "failed-precondition");
+  assert.equal((await audits("STUDENT_PERSONAL_INFO_VIEWED", staffUid)).length, 0);
 });
 
 // ------------------------------------------------------------------ corrections

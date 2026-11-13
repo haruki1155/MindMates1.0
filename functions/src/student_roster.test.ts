@@ -16,7 +16,8 @@ import {verifyActivationCode} from "./student_roster_domain";
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
 
 type Callable = {run: (request: {auth?: {uid: string}; data?: unknown}) => Promise<unknown>};
-type Preview = {rows: {index: number; studentNo: string; kind: string; changes?: Record<string, {from: string; to: string}>; errors?: string[]}[];
+type Preview = {rows: {index: number; studentNo: string; kind: string; changes?: Record<string, {from: string; to: string}>;
+  errors?: string[]; warnings?: string[]}[];
   counts: Record<string, number>};
 type Imported = {importId: string; counts: Record<string, number>; codes: {studentNo: string; code: string; expiresAt: string; name: string}[]};
 
@@ -45,8 +46,16 @@ async function denied(p: Promise<unknown>, code: string) {
   await assert.rejects(p, (e: {code?: unknown}) => e?.code === code);
 }
 const auth = {uid: adminUid};
+// Cleanup is scoped to what this run created: the shared super-admin actor also owns imports and audit
+// rows written by other suites, so deleting every STUDENT_* row of theirs would wipe their data too.
+let suiteStart = Timestamp.now();
+const ownedBy = (d: FirebaseFirestore.QueryDocumentSnapshot) => {
+  const at = d.data().createdAt;
+  return at instanceof Timestamp && at.toMillis() >= suiteStart.toMillis();
+};
 
 before(async () => {
+  suiteStart = Timestamp.fromMillis(Date.now() - 1000);
   assert.ok(process.env.FIRESTORE_EMULATOR_HOST && adminUid, "emulator + SUPER_ADMIN_UID required");
   const admin = db.collection("users").doc(adminUid);
   if (!(await admin.get()).exists) {
@@ -68,8 +77,9 @@ after(async () => {
   const rosters = await rosterRange().get();
   const imports = await db.collection("student_roster_imports").where("actorId", "==", adminUid).get();
   const audits = await db.collection("admin_audit_logs").where("actorId", "==", adminUid).get();
-  await Promise.all([...docs, ...rosters.docs.map((d) => d.ref), ...imports.docs.map((d) => d.ref),
-    ...audits.docs.filter((d) => String(d.data().action).startsWith("STUDENT_")).map((d) => d.ref)].map((r) => r.delete()));
+  await Promise.all([...docs, ...rosters.docs.map((d) => d.ref), ...imports.docs.filter(ownedBy).map((d) => d.ref),
+    ...audits.docs.filter((d) => String(d.data().action).startsWith("STUDENT_") && ownedBy(d)).map((d) => d.ref)]
+    .map((r) => r.delete()));
   if (adminCreated) await db.collection("users").doc(adminUid).delete();
 });
 
@@ -95,6 +105,36 @@ test("preview classifies rows and writes nothing", async () => {
   assert.deepEqual(out.rows[1].changes?.yearLevel, {from: "2nd Year", to: "3rd Year"});
   assert.deepEqual(out.counts, {new: 1, update: 1, link: 1, error: 3});
   assert.equal(await rosterCount(), before);
+});
+
+test("a link row whose account carries a different identity is flagged but still links", async () => {
+  const sameUid = `${run}-linkuid-same`;
+  const diffUid = `${run}-linkuid-diff`;
+  // Matching identity: no warning.
+  await db.collection("users").doc(sameUid).set({firstName: "Juan", lastName: "Dela CruzW1", dateOfBirthKey: "2004-05-06"});
+  // Someone else's Student No. typed into a pre-existing account.
+  await db.collection("users").doc(diffUid).set({firstName: "Pedro", lastName: "Reyes", dateOfBirthKey: "1999-01-02"});
+  await db.collection("student_id_reservations").doc(keyOf(`${run}-W1`)).set({userId: sameUid});
+  await db.collection("student_id_reservations").doc(keyOf(`${run}-W2`)).set({userId: diffUid});
+  created.push(db.collection("users").doc(sameUid), db.collection("users").doc(diffUid),
+    db.collection("student_id_reservations").doc(keyOf(`${run}-W1`)), db.collection("student_id_reservations").doc(keyOf(`${run}-W2`)));
+
+  const out = await preview.run({auth, data: {fileName: "r.xlsx", rows: [row("W1"), row("W2")]}}) as Preview;
+  assert.deepEqual(out.rows.map((r) => r.kind), ["link", "link"]);
+  assert.deepEqual(out.rows[0].warnings ?? [], []);
+  const warnings = out.rows[1].warnings ?? [];
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes("Pedro Reyes"), warnings[0]);
+  assert.ok(warnings[0].includes("1999-01-02"), warnings[0]);
+  // A warning never blocks the import; linking must still proceed.
+  const imported = await commit.run({auth, data: {fileName: "r.xlsx", rows: [row("W2")]}}) as Imported;
+  assert.deepEqual(imported.counts, {new: 0, updated: 0, linked: 1});
+  assert.equal((await roster("W2").get()).data()!.userId, diffUid);
+  const audit = (await db.collection("admin_audit_logs").where("targetId", "==", imported.importId).get()).docs[0].data();
+  const text = JSON.stringify(audit.metadata);
+  assert.ok(text.includes("Pedro"), text);
+  assert.ok(text.includes("Reyes"), text);
+  assert.ok(text.includes("1999-01-02"), text);
 });
 
 test("import with an error row writes nothing", async () => {
