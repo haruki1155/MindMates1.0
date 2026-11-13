@@ -11,6 +11,7 @@ import '../../home/screens/home_appointment_calendar_screen.dart';
 import '../widgets/appointment_details_sheet.dart';
 import '../widgets/appointment_list_view.dart';
 import '../../notifications/screens/notifications_screen.dart';
+import '../domain/best_contact_time.dart';
 
 class PaccCounselingScreen extends StatefulWidget {
   const PaccCounselingScreen({
@@ -43,7 +44,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   final _emailController = TextEditingController();
   final _facebookController = TextEditingController();
   final _concernController = TextEditingController();
-  final _bestTimeController = TextEditingController();
+  BestContactTime _bestTime = BestContactTime.defaults;
 
   late _PaccAppointmentTab _tab;
   _PaccAppointmentStep _step = _PaccAppointmentStep.intake;
@@ -90,7 +91,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _emailController.text = user.email;
       _facebookController.clear();
       _concernController.text = widget.initialConcern?.trim() ?? '';
-      _bestTimeController.clear();
+      _bestTime = BestContactTime.defaults;
       _sex = null;
       _course = user.course?.trim().isEmpty ?? true ? null : user.course;
       _yearLevel = null;
@@ -126,7 +127,6 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     _emailController.dispose();
     _facebookController.dispose();
     _concernController.dispose();
-    _bestTimeController.dispose();
     super.dispose();
   }
 
@@ -243,7 +243,8 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         emailController: _emailController,
         facebookController: _facebookController,
         concernController: _concernController,
-        bestTimeController: _bestTimeController,
+        bestTime: _bestTime,
+        onBestTimeChanged: (value) => setState(() => _bestTime = value),
         sex: _sex,
         course: _course,
         yearLevel: _yearLevel,
@@ -355,7 +356,9 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         _emailController.text = priorAppointment.email;
         _facebookController.text = priorAppointment.facebook ?? '';
         _concernController.text = priorAppointment.concern;
-        _bestTimeController.text = priorAppointment.bestTime ?? '';
+        _bestTime =
+            parseBestContactTime(priorAppointment.bestTime ?? '') ??
+            BestContactTime.defaults;
         _sex = priorAppointment.sex;
         _course = priorAppointment.course;
         _yearLevel = priorAppointment.yearLevel;
@@ -425,7 +428,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       preferredContactMethod: _preferredContactMethod!,
       therapyBefore: _therapyBefore,
       concern: _concernController.text.trim(),
-      bestTime: _bestTimeController.text.trim(),
+      bestTime: formatBestContactTime(_bestTime),
       scheduledAt: _scheduledAt(_selectedDate!, _selectedTime!),
       scheduledTime: _selectedTime!,
       location: 'PACC Office, 2nd Floor, Main Building',
@@ -1262,7 +1265,8 @@ class _IntakeFormView extends StatelessWidget {
     required this.emailController,
     required this.facebookController,
     required this.concernController,
-    required this.bestTimeController,
+    required this.bestTime,
+    required this.onBestTimeChanged,
     required this.sex,
     required this.course,
     required this.yearLevel,
@@ -1287,7 +1291,8 @@ class _IntakeFormView extends StatelessWidget {
   final TextEditingController emailController;
   final TextEditingController facebookController;
   final TextEditingController concernController;
-  final TextEditingController bestTimeController;
+  final BestContactTime bestTime;
+  final ValueChanged<BestContactTime> onBestTimeChanged;
   final String? sex;
   final String? course;
   final String? yearLevel;
@@ -1495,11 +1500,7 @@ class _IntakeFormView extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 const _FieldLabel('Best Time to Contact You*'),
-                _PaccTextField(
-                  controller: bestTimeController,
-                  hint: 'e.g. Weekend mornings 9 AM - 12 PM',
-                  validator: _required,
-                ),
+                _BestTimeField(value: bestTime, onChanged: onBestTimeChanged),
                 const SizedBox(height: 30),
                 SizedBox(
                   width: double.infinity,
@@ -1525,6 +1526,110 @@ class _IntakeFormView extends StatelessWidget {
     if (required != null) return required;
     return value!.contains('@') ? null : 'Enter a valid email';
   }
+}
+
+class _BestTimeField extends FormField<BestContactTime> {
+  _BestTimeField({
+    required BestContactTime value,
+    required ValueChanged<BestContactTime> onChanged,
+  }) : super(
+         initialValue: value,
+         validator: (value) => value?.isValidRange == true
+             ? null
+             : 'End time must be after the start time.',
+         builder: (field) {
+           final current = field.value ?? BestContactTime.defaults;
+
+           void update(BestContactTime next) {
+             field.didChange(next);
+             onChanged(next);
+           }
+
+           Future<void> pickTime(BuildContext context, bool isStart) async {
+             final selected = await showTimePicker(
+               context: context,
+               initialTime: isStart ? current.start : current.end,
+             );
+             if (selected == null || !field.mounted) return;
+             update(
+               BestContactTime(
+                 days: current.days,
+                 start: isStart ? selected : current.start,
+                 end: isStart ? current.end : selected,
+               ),
+             );
+           }
+
+           return Column(
+             crossAxisAlignment: CrossAxisAlignment.start,
+             children: [
+               Wrap(
+                 spacing: 8,
+                 runSpacing: 8,
+                 children: [
+                   for (final days in BestContactTimeDays.values)
+                     ChoiceChip(
+                       key: Key('best-time-days-${days.name}'),
+                       label: Text(days.label),
+                       selected: current.days == days,
+                       onSelected: (_) => update(
+                         BestContactTime(
+                           days: days,
+                           start: current.start,
+                           end: current.end,
+                         ),
+                       ),
+                     ),
+                 ],
+               ),
+               const SizedBox(height: 12),
+               Row(
+                 children: [
+                   for (final isStart in [true, false]) ...[
+                     if (!isStart) const SizedBox(width: 8),
+                     Expanded(
+                       child: OutlinedButton.icon(
+                         key: Key(
+                           isStart ? 'best-time-start' : 'best-time-end',
+                         ),
+                         onPressed: () => pickTime(field.context, isStart),
+                         icon: const Icon(Icons.schedule, size: 18),
+                         label: Column(
+                           mainAxisSize: MainAxisSize.min,
+                           crossAxisAlignment: CrossAxisAlignment.start,
+                           children: [
+                             Text(isStart ? 'From' : 'To'),
+                             Text(
+                               MaterialLocalizations.of(
+                                 field.context,
+                               ).formatTimeOfDay(
+                                 isStart ? current.start : current.end,
+                                 alwaysUse24HourFormat: MediaQuery.of(
+                                   field.context,
+                                 ).alwaysUse24HourFormat,
+                               ),
+                             ),
+                           ],
+                         ),
+                       ),
+                     ),
+                   ],
+                 ],
+               ),
+               if (field.hasError)
+                 Padding(
+                   padding: const EdgeInsets.only(top: 8),
+                   child: Text(
+                     field.errorText!,
+                     style: TextStyle(
+                       color: Theme.of(field.context).colorScheme.error,
+                     ),
+                   ),
+                 ),
+             ],
+           );
+         },
+       );
 }
 
 class _FormSection extends StatelessWidget {
