@@ -277,17 +277,15 @@ class HomeAssessmentBanner extends StatelessWidget {
     super.key,
     required this.data,
     required this.onStart,
-    required this.onClose,
   });
 
   final HomeAssessmentPromptData data;
   final VoidCallback onStart;
-  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: HomeDecor.card(
         color: const Color(0xFFF1F3FF),
         borderColor: const Color(0x665C7CFF),
@@ -333,12 +331,6 @@ class HomeAssessmentBanner extends StatelessWidget {
               ],
             ),
           ),
-          HomePlainIconButton(
-            icon: Icons.close,
-            assetName: 'x.png',
-            tooltip: 'Dismiss',
-            onTap: onClose,
-          ),
         ],
       ),
     );
@@ -354,6 +346,7 @@ class HomeWelcomeCard extends StatelessWidget {
     this.unreadNotificationCount = 0,
     required this.onCalendarTap,
     required this.onProfileTap,
+    this.onViewTodaysMood,
   });
 
   final HomeUserData user;
@@ -362,6 +355,9 @@ class HomeWelcomeCard extends StatelessWidget {
   final int unreadNotificationCount;
   final VoidCallback onCalendarTap;
   final VoidCallback onProfileTap;
+
+  /// Shown under today's mood once the user has checked in today (item 40).
+  final VoidCallback? onViewTodaysMood;
 
   @override
   Widget build(BuildContext context) {
@@ -455,6 +451,32 @@ class HomeWelcomeCard extends StatelessWidget {
                 ),
               ),
             ),
+            if (onViewTodaysMood != null) ...[
+              const SizedBox(height: 8),
+              OutlinedButton(
+                key: const Key('home-view-todays-mood'),
+                onPressed: onViewTodaysMood,
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: HomePalette.surface,
+                  foregroundColor: HomePalette.text,
+                  side: const BorderSide(color: HomePalette.sun),
+                  shape: const StadiumBorder(),
+                  minimumSize: const Size.fromHeight(44),
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(child: Text('View today’s mood')),
+                    SizedBox(width: 4),
+                    Icon(Icons.chevron_right, size: 20),
+                  ],
+                ),
+              ),
+            ],
           ],
         ],
       ),
@@ -712,8 +734,6 @@ class HomeStreakCard extends StatelessWidget {
   /// The milestone "View recap ›" button (opens My Mood Journey).
   final VoidCallback? onViewRecap;
 
-  static const _teal = Color(0xFF2F7D6D);
-
   @override
   Widget build(BuildContext context) {
     final streak = data;
@@ -820,8 +840,8 @@ class HomeStreakCard extends StatelessWidget {
                       const SizedBox(height: 10),
                       _StreakPill(
                         label: 'Log mood',
-                        background: _teal,
-                        foreground: Colors.white,
+                        background: HomePalette.surface,
+                        foreground: HomePalette.text,
                         onPressed: onTap,
                       ),
                     ],

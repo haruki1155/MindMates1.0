@@ -63,6 +63,18 @@ void main() {
     expect(find.byKey(const Key('streak-flame')), findsOneWidget);
   });
 
+  testWidgets('Log mood pill matches the gold card', (tester) async {
+    await pump(tester, data(HomeStreakState.notStarted, 0));
+    final button = tester.widget<FilledButton>(
+      find.ancestor(
+        of: find.text('Log mood'),
+        matching: find.byType(FilledButton),
+      ),
+    );
+    expect(button.style?.backgroundColor?.resolve({}), HomePalette.surface);
+    expect(button.style?.foregroundColor?.resolve({}), HomePalette.text);
+  });
+
   testWidgets('active but not checked in today', (tester) async {
     await pump(tester, data(HomeStreakState.activeNotToday, 4));
     expect(find.text('4'), findsOneWidget);

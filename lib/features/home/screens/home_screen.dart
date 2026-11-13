@@ -129,7 +129,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   bool _showBottomNav = true;
   bool _isOpeningAssessment = false;
-  bool _isAssessmentBannerDismissed = false;
   _HomeNavDestination _activeDestination = _HomeNavDestination.today;
   String? _loadedBackendUserId;
   String? _loadedAppointmentUserId;
@@ -318,6 +317,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 unreadNotificationCount: unreadNotifications,
                                 onCalendarTap: _openAppointmentCalendar,
                                 onProfileTap: _openProfile,
+                                onViewTodaysMood: _openTodaysMood,
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -356,20 +356,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 },
                               ),
                             ),
-                            const SizedBox(height: 14),
-                            HomeAnimatedSection(
-                              delay: 86,
-                              child: HomeWideButton(
-                                label: MoodV2FeatureFlag.actionLabel(
-                                  hasCheckedInToday: context
-                                      .watch<MoodProvider>()
-                                      .hasCheckedInToday,
-                                ),
-                                icon: Icons.add,
-                                assetName: '+.png',
-                                onTap: _openLogMood,
-                              ),
-                            ),
                             if (appointmentProvider != null) ...[
                               const SizedBox(height: 14),
                               const Text(
@@ -399,17 +385,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                             ],
-                            if (!_isAssessmentBannerDismissed) ...[
-                              const SizedBox(height: 14),
-                              HomeAnimatedSection(
-                                delay: 110,
-                                child: HomeAssessmentBanner(
-                                  data: data.assessment,
-                                  onStart: _openStudentAssessment,
-                                  onClose: _dismissAssessmentBanner,
-                                ),
+                            const SizedBox(height: 14),
+                            HomeAnimatedSection(
+                              delay: 110,
+                              child: HomeAssessmentBanner(
+                                data: data.assessment,
+                                onStart: _openStudentAssessment,
                               ),
-                            ],
+                            ),
                             const SizedBox(height: HomeMetrics.sectionGap),
                             HomeAnimatedSection(
                               delay: 120,
@@ -607,6 +590,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Item 40: today's check-ins live in My Mood Journey; without Mood V2
+  /// reading, Log Mood shows today's legacy entry instead.
+  void _openTodaysMood() {
+    final moodProvider = _readProviderOrNull<MoodProvider>(context);
+    if (MoodV2FeatureFlag.historyRead &&
+        (moodProvider?.isMoodV2ReadEnabled ?? false)) {
+      _openMoodJourney();
+    } else {
+      _openLogMood();
+    }
+  }
+
   void _onStreakTap(HomeStreakData? streak) {
     final done =
         streak?.state == HomeStreakState.doneToday ||
@@ -697,12 +692,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _openProfile() {
     Navigator.of(context).pushNamed(RouteNames.profile);
-  }
-
-  void _dismissAssessmentBanner() {
-    setState(() {
-      _isAssessmentBannerDismissed = true;
-    });
   }
 
   void _openServices() {

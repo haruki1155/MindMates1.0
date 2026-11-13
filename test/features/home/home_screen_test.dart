@@ -6,6 +6,8 @@ import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
 import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
+import 'package:mind_mates/features/mood/screens/log_mood_screen.dart';
+import 'package:mind_mates/features/mood/screens/mood_journey_screen.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
 import 'package:mind_mates/models/mood_model.dart';
 import 'package:mind_mates/models/report_model.dart';
@@ -322,6 +324,180 @@ void main() {
     );
   }
 
+  Future<void> pumpHomeWithMoods(
+    WidgetTester tester,
+    List<MoodModel> moods, {
+    Size size = const Size(900, 1400),
+  }) async {
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final userProvider = UserProvider(_FakeUserRepository())
+      ..setUser(
+        const UserModel(
+          id: 'user_1',
+          email: 'leo@example.com',
+          role: 'student',
+        ),
+      );
+    final moodProvider = MoodProvider(_FakeMoodRepository(recent: moods));
+    await moodProvider.loadRecentMoods('user_1');
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+          ChangeNotifierProvider<MoodProvider>.value(value: moodProvider),
+          ChangeNotifierProvider<ReportProvider>(
+            create: (_) => ReportProvider(_FakeReportRepository()),
+          ),
+          ChangeNotifierProvider<InsightsProvider>(
+            create: (_) => InsightsProvider(InsightsRepository()),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => AssessmentProvider(AssessmentRepository()),
+          ),
+          ChangeNotifierProvider(
+            create: (_) => BreathingProvider(_FakeBreathingRepository()),
+          ),
+        ],
+        child: MaterialApp(
+          theme: ThemeData(splashFactory: NoSplash.splashFactory),
+          routes: _testRoutes(),
+          home: const HomeScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+  }
+
+  MoodModel moodAt(DateTime createdAt) => MoodModel(
+    id: 'mood_today',
+    userId: 'user_1',
+    level: 4,
+    label: 'Okay',
+    createdAt: createdAt,
+  );
+
+  const viewTodaysMood = Key('home-view-todays-mood');
+
+  testWidgets('home shows View today’s mood only after a check-in', (
+    tester,
+  ) async {
+    await pumpHomeWithMoods(tester, const []);
+    expect(find.byKey(viewTodaysMood), findsNothing);
+
+    await pumpHomeWithMoods(tester, [moodAt(DateTime.now())]);
+    final chip = find.text('Today’s mood: Okay');
+    expect(chip, findsOneWidget);
+    expect(find.byKey(viewTodaysMood), findsOneWidget);
+    expect(find.text('View today’s mood'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.byKey(viewTodaysMood)).dy,
+      greaterThan(tester.getTopLeft(chip).dy),
+    );
+  });
+
+  testWidgets(
+    'View today’s mood opens Log Mood when Journey is unavailable',
+    (tester) async {
+      await pumpHomeWithMoods(tester, [moodAt(DateTime.now())]);
+      await tester.tap(find.byKey(viewTodaysMood));
+      await tester.pumpAndSettle();
+      expect(find.byType(LogMoodScreen), findsOneWidget);
+    },
+    skip: MoodV2FeatureFlag.historyRead,
+  );
+
+  testWidgets(
+    'V2: View today’s mood shows the V2 check-in and opens My Mood Journey',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      // Noon in Manila on 2026-11-12.
+      final now = DateTime.utc(2026, 11, 12, 4);
+      final userProvider = UserProvider(_FakeUserRepository())
+        ..setUser(
+          const UserModel(
+            id: 'user_1',
+            email: 'leo@example.com',
+            role: 'student',
+          ),
+        );
+      final moodProvider = MoodProvider(
+        _FakeMoodRepository(),
+        nowProvider: () => now,
+        combinedHistoryRepository: _V2History([
+          NormalizedMoodEvent(
+            id: 'v2-today',
+            userId: 'user_1',
+            level: 5,
+            dateKey: '2026-11-12',
+            occurredAt: DateTime.utc(2026, 11, 12, 2),
+            source: MoodEventSource.v2,
+            label: 'Excited',
+          ),
+        ]),
+        useMoodV2Read: true,
+      );
+      await moodProvider.loadMoodV2History('user_1', now: now);
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+            ChangeNotifierProvider<MoodProvider>.value(value: moodProvider),
+            ChangeNotifierProvider<ReportProvider>(
+              create: (_) => ReportProvider(_FakeReportRepository()),
+            ),
+            ChangeNotifierProvider<InsightsProvider>(
+              create: (_) => InsightsProvider(InsightsRepository()),
+            ),
+            ChangeNotifierProvider(
+              create: (_) => AssessmentProvider(AssessmentRepository()),
+            ),
+            ChangeNotifierProvider(
+              create: (_) => BreathingProvider(_FakeBreathingRepository()),
+            ),
+          ],
+          child: MaterialApp(
+            theme: ThemeData(splashFactory: NoSplash.splashFactory),
+            routes: _testRoutes(),
+            home: HomeScreen(nowProvider: () => now),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Today’s mood: Excited'), findsOneWidget);
+      await tester.tap(find.byKey(viewTodaysMood));
+      await tester.pumpAndSettle();
+      expect(find.byType(MoodJourneyScreen), findsOneWidget);
+      expect(find.byType(LogMoodScreen), findsNothing);
+    },
+    skip: !MoodV2FeatureFlag.historyRead || !MoodV2FeatureFlag.homeRead,
+  );
+
+  testWidgets('a mood from yesterday shows no View today’s mood', (
+    tester,
+  ) async {
+    await pumpHomeWithMoods(tester, [
+      moodAt(DateTime.now().subtract(const Duration(days: 1))),
+    ]);
+    expect(find.textContaining('Today’s mood'), findsNothing);
+    expect(find.byKey(viewTodaysMood), findsNothing);
+  });
+
+  testWidgets('welcome card fits a 360 px phone with large text', (
+    tester,
+  ) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 1.4;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await pumpHomeWithMoods(tester, [
+      moodAt(DateTime.now()),
+    ], size: const Size(360, 1400));
+    expect(find.byKey(viewTodaysMood), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('home Services destination opens the services screen', (
     tester,
   ) async {
@@ -398,13 +574,12 @@ void main() {
     );
 
     expect(find.text('Mood check-ins'), findsNothing);
-    if (MoodV2FeatureFlag.enabled) {
-      expect(find.text('Log a mood'), findsOneWidget);
-    }
+    expect(find.byType(HomeWideButton), findsNothing);
     await tester.tap(
-      find
-          .text(MoodV2FeatureFlag.enabled ? 'Log a mood' : 'Log your mood')
-          .first,
+      find.descendant(
+        of: find.byType(HomeStreakCard),
+        matching: find.text('Log mood'),
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -423,9 +598,7 @@ void main() {
     );
   });
 
-  testWidgets('home assessment banner can be dismissed for the session', (
-    tester,
-  ) async {
+  testWidgets('home assessment card has no dismiss button', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -468,10 +641,16 @@ void main() {
 
     await tester.pumpAndSettle();
     expect(find.text('Check in on academic well-being'), findsOneWidget);
-    await tester.tap(find.byTooltip('Dismiss'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Check in on academic well-being'), findsNothing);
+    expect(find.byTooltip('Dismiss'), findsNothing);
+    final card = tester.widget<Container>(
+      find
+          .descendant(
+            of: find.byType(HomeAssessmentBanner),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(card.padding, const EdgeInsets.fromLTRB(16, 14, 16, 14));
   });
 
   testWidgets('home Mental Wellbeing 101 opens mental health insights', (
@@ -570,15 +749,14 @@ void main() {
       'Calendar.png',
       'High Importance.png',
       'Forward.png',
-      'x.png',
       'Notification.png',
-      '+.png',
       'fire_icon.png',
       'Thumbs up.png',
       'Good Quality.png',
     ]) {
       expect(_dashboardAsset(assetName), findsWidgets);
     }
+    expect(_dashboardAsset('x.png'), findsNothing);
 
     await tester.scrollUntilVisible(
       find.text('Mental Wellbeing 101'),
@@ -974,6 +1152,10 @@ class _FakeAuthRepository extends AuthRepository {
 }
 
 class _FakeMoodRepository extends MoodRepository {
+  _FakeMoodRepository({this.recent = const []});
+
+  final List<MoodModel> recent;
+
   @override
   Future<String> createMood({
     required String userId,
@@ -992,7 +1174,7 @@ class _FakeMoodRepository extends MoodRepository {
 
   @override
   Future<List<MoodModel>> fetchRecentMoods(String userId, {int limit = 14}) {
-    return Future.value(const []);
+    return Future.value(recent);
   }
 }
 
