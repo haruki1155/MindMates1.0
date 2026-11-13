@@ -1419,6 +1419,197 @@ void main() {
     expect(writer.levels, isNotEmpty);
     expect(repository.createdLevel, isNull);
   });
+
+  // --- Task 3: source-neutral confirmation ------------------------------------
+
+  testWidgets(
+    'already logged today: the legacy entry renders in the V2 confirmation',
+    (tester) async {
+      final repository = _FakeMoodRepository(hasToday: true);
+      final moodProvider = MoodProvider(repository);
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: moodProvider,
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_1')),
+          moodV2Presentation: true,
+          moodV2WriterEnabled: false,
+          nowProvider: () => DateTime(2026, 7, 7, 12),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The V2 confirmation, not a blank form and not the legacy V1 card.
+      expect(
+        find.byKey(const ValueKey('mood-v2-confirmation')),
+        findsOneWidget,
+      );
+      expect(find.text('Your mood is recorded'), findsOneWidget);
+      expect(find.textContaining('already logged'), findsOneWidget);
+      expect(find.text('How are you feeling right now?'), findsNothing);
+      // No second daily entry is offered.
+      expect(find.text('Log another mood'), findsNothing);
+      expect(find.byKey(const ValueKey('mood-v2-add-entry')), findsNothing);
+    },
+  );
+
+  testWidgets('a legacy save lands in the V2 confirmation', (tester) async {
+    final repository = _FakeMoodRepository();
+    final moodProvider = MoodProvider(repository);
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: moodProvider,
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: false,
+        nowProvider: () => DateTime(2026, 7, 7, 12),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mood-v2-confirmation')), findsOneWidget);
+    expect(find.text('Log another mood'), findsNothing);
+  });
+
+  testWidgets('a legacy save never records a V2 event in the provider', (
+    tester,
+  ) async {
+    final repository = _FakeMoodRepository();
+    final moodProvider = _RecordingConfirmProvider(repository);
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: moodProvider,
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: false,
+        nowProvider: () => DateTime(2026, 7, 7, 12),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+
+    expect(repository.createdLabel, 'Okay');
+    expect(
+      moodProvider.recordedV2Entries,
+      isEmpty,
+      reason: 'a legacy save must not inject a v2-source event',
+    );
+  });
+
+  testWidgets('a legacy save refreshes today and the recent history', (
+    tester,
+  ) async {
+    final repository = _FakeMoodRepository();
+    final moodProvider = MoodProvider(repository);
+    final insights = _RecordingInsightsProvider();
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: moodProvider,
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        insightsProvider: insights,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: false,
+        nowProvider: () => DateTime(2026, 7, 7, 12),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+
+    expect(moodProvider.todayMood, isNotNull);
+    expect(repository.fetchedUserId, 'user_1');
+    expect(insights.refreshedUsers, contains('user_1'));
+  });
+
+  testWidgets('switching account clears the previous confirmation', (
+    tester,
+  ) async {
+    final repository = _FakeMoodRepository(hasToday: true);
+    final moodProvider = MoodProvider(repository);
+    final userProvider = UserProvider(_FakeUserRepository())
+      ..setUser(_user(id: 'user_1'));
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: moodProvider,
+        userProvider: userProvider,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: false,
+        nowProvider: () => DateTime(2026, 7, 7, 12),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mood-v2-confirmation')), findsOneWidget);
+
+    repository.hasToday = false;
+    userProvider.setUser(_user(id: 'user_2'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mood-v2-confirmation')), findsNothing);
+    expect(find.textContaining('already logged'), findsNothing);
+    expect(find.text('How are you feeling right now?'), findsOneWidget);
+  });
+
+  testWidgets('writer on renders the confirmation from the real V2 event', (
+    tester,
+  ) async {
+    final writer = _FakeMoodV2Writer();
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(_FakeMoodRepository()),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mood-v2-confirmation')), findsOneWidget);
+    // The writer path keeps its multi-entry affordance.
+    expect(find.text('Log another mood'), findsOneWidget);
+  });
+}
+
+/// Records any attempt to push a confirmed V2 entry into combined history, so
+/// a legacy save injecting a phantom v2-source event fails the test.
+class _RecordingConfirmProvider extends MoodProvider {
+  _RecordingConfirmProvider(super.repository);
+
+  final List<MoodV2Event> recordedV2Entries = [];
+
+  @override
+  void recordConfirmedMoodV2Entry(MoodV2Event entry) {
+    recordedV2Entries.add(entry);
+    super.recordConfirmedMoodV2Entry(entry);
+  }
 }
 
 Widget _logMoodApp({

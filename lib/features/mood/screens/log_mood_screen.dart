@@ -212,10 +212,10 @@ class _LogMoodScreenState extends State<LogMoodScreen>
 
   @override
   Widget build(BuildContext context) {
+    final confirmation = _confirmation;
     return Scaffold(
       backgroundColor: MoodLogPalette.background,
-      bottomNavigationBar:
-          widget.moodV2Presentation && _confirmedV2Entry == null
+      bottomNavigationBar: widget.moodV2Presentation && confirmation == null
           ? SafeArea(
               top: false,
               child: Padding(
@@ -248,7 +248,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                 v2: widget.moodV2Presentation,
                 now: _now,
                 showingResult: widget.moodV2Presentation
-                    ? _confirmedV2Entry != null
+                    ? confirmation != null
                     : _todayMood != null,
               ),
             ),
@@ -280,11 +280,13 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     final showV2History =
         MoodV2FeatureFlag.historyRead &&
         (moodProvider?.isMoodV2ReadEnabled ?? false);
-    if (widget.moodV2Presentation && _confirmedV2Entry != null) {
-      final entry = _confirmedV2Entry!;
+    final confirmation = _confirmation;
+    if (widget.moodV2Presentation && confirmation != null) {
       return _MoodSaved(
-        entry: entry,
-        onAnother: _startAdditionalMoodEntry,
+        confirmation: confirmation,
+        onAnother: widget.moodV2WriterEnabled
+            ? _startAdditionalMoodEntry
+            : null,
         onJourney: () => Navigator.of(context).push(
           MaterialPageRoute<void>(builder: (_) => const MoodJourneyScreen()),
         ),
@@ -515,6 +517,18 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       if (suggestion != null) _selectedMood = suggestion;
     });
     if (suggestion != null) unawaited(_offerMoodReflection());
+  }
+
+  /// Today's confirmed mood, whichever writer produced it.
+  ///
+  /// `didChangeDependencies` clears both sources on an account switch, so this
+  /// never carries another account's entry.
+  _ConfirmedMood? get _confirmation {
+    final v2Entry = _confirmedV2Entry;
+    if (v2Entry != null) return _ConfirmedMood.fromV2(v2Entry);
+    if (widget.moodV2WriterEnabled) return null;
+    final today = _todayMood;
+    return today == null ? null : _ConfirmedMood.fromLegacy(today);
   }
 
   Future<void> _loadTodayMood(String userId) async {
@@ -2225,26 +2239,57 @@ class _MoodCheckInSummary extends StatelessWidget {
   }
 }
 
+/// A saved mood, with no claim about which writer produced it.
+///
+/// Built from a [MoodV2Event] when the protected writer is on, and from the
+/// legacy [MoodModel] when it is off. Nothing fabricates a [MoodV2Event] from
+/// a legacy entry: a synthetic event would carry an invented id, dateKey and
+/// clientRequestId and could leak into combined history.
+class _ConfirmedMood {
+  const _ConfirmedMood({required this.occurredAt, this.label, this.note});
+
+  factory _ConfirmedMood.fromV2(MoodV2Event entry) => _ConfirmedMood(
+    occurredAt: entry.occurredAt,
+    label: entry.label,
+    note: entry.note,
+  );
+
+  factory _ConfirmedMood.fromLegacy(MoodModel mood) => _ConfirmedMood(
+    occurredAt: mood.createdAt,
+    label: mood.label,
+    note: mood.note,
+  );
+
+  final DateTime occurredAt;
+  final String? label;
+  final String? note;
+}
+
 class _MoodSaved extends StatelessWidget {
   const _MoodSaved({
-    required this.entry,
+    required this.confirmation,
     required this.onAnother,
     required this.onJourney,
     required this.onHome,
     this.historyError,
     required this.onRetryHistory,
   });
-  final MoodV2Event entry;
-  final VoidCallback onAnother, onJourney, onHome, onRetryHistory;
+  final _ConfirmedMood confirmation;
+
+  /// Null when the protected writer is off: the legacy writer accepts one
+  /// check-in per day, so a second entry must not be offered.
+  final VoidCallback? onAnother;
+  final VoidCallback onJourney, onHome, onRetryHistory;
   final String? historyError;
   @override
   Widget build(BuildContext context) {
     final choice = _moodChoices
-        .where((m) => m.label == entry.label)
+        .where((m) => m.label == confirmation.label)
         .firstOrNull;
     final time = TimeOfDay.fromDateTime(
-      MoodRepository.manilaWallClock(entry.occurredAt),
+      MoodRepository.manilaWallClock(confirmation.occurredAt),
     ).format(context);
+    final note = (confirmation.note ?? '').trim();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2294,13 +2339,25 @@ class _MoodSaved extends StatelessWidget {
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: Text(
-                  entry.label ?? 'Mood entry',
+                  confirmation.label ?? 'Mood entry',
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
+              if (note.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  note,
+                  key: const ValueKey('mood-confirmation-note'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    color: MoodLogPalette.bodyText,
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               const Text(
                 'Thank you for checking in with yourself.',
@@ -2315,41 +2372,45 @@ class _MoodSaved extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: MoodLogPalette.goldSoft,
-            borderRadius: BorderRadius.circular(16),
+        if (onAnother != null) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: MoodLogPalette.goldSoft,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Row(
+              children: [
+                Icon(
+                  Icons.event_available_outlined,
+                  color: MoodLogPalette.goldText,
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'You can check in again if your feelings change.',
+                  ),
+                ),
+              ],
+            ),
           ),
-          child: const Row(
-            children: [
-              Icon(
-                Icons.event_available_outlined,
-                color: MoodLogPalette.goldText,
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text('You can check in again if your feelings change.'),
-              ),
-            ],
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            key: const ValueKey('mood-v2-add-entry'),
+            onPressed: onAnother,
+            style: FilledButton.styleFrom(
+              backgroundColor: MoodLogPalette.gold,
+              foregroundColor: MoodLogPalette.ink,
+              minimumSize: const Size.fromHeight(52),
+            ),
+            icon: const Icon(Icons.add),
+            label: const Text(
+              'Log another mood',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
           ),
-        ),
-        const SizedBox(height: 20),
-        FilledButton.icon(
-          key: const ValueKey('mood-v2-add-entry'),
-          onPressed: onAnother,
-          style: FilledButton.styleFrom(
-            backgroundColor: MoodLogPalette.gold,
-            foregroundColor: MoodLogPalette.ink,
-            minimumSize: const Size.fromHeight(52),
-          ),
-          icon: const Icon(Icons.add),
-          label: const Text(
-            'Log another mood',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-          ),
-        ),
+        ],
         const SizedBox(height: 12),
         OutlinedButton(
           onPressed: onJourney,
