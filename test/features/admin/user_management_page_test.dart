@@ -32,6 +32,7 @@ class _Repository extends AdminPortalRepository {
       lastName: 'Student',
       schoolId: '2024-001',
       department: 'CITE',
+      collegeId: 'cite',
       course: 'BSIT',
       yearLevel: '3rd Year',
       populationRole: PopulationRole.student,
@@ -58,7 +59,9 @@ class _Repository extends AdminPortalRepository {
   ]);
 
   @override
-  Stream<List<College>> watchColleges() => Stream.value(const []);
+  Stream<List<College>> watchColleges() => Stream.value(const [
+    College(id: 'cite', name: 'CITE', code: '010', active: true),
+  ]);
   @override
   Stream<List<Department>> watchDepartments() => Stream.value(const []);
   @override
@@ -78,12 +81,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('USR-7K4P2Q'), findsOneWidget);
-    expect(find.text('Student'), findsOneWidget);
+    expect(find.text('2024-001'), findsOneWidget);
+    expect(find.text('Students'), findsOneWidget);
     expect(find.text('CITE'), findsOneWidget);
-    expect(find.text('2026-09-01'), findsOneWidget);
+    expect(find.text('Student ID'), findsOneWidget);
     expect(find.text('View user'), findsOneWidget);
-    expect(find.text('Private Student'), findsNothing);
+    expect(find.text('Private Student'), findsOneWidget);
     expect(find.text('private@student.example'), findsNothing);
     expect(find.text('Review'), findsNothing);
     expect(find.text('Verify'), findsNothing);
@@ -94,6 +97,33 @@ void main() {
     expect(find.text('Personal information'), findsOneWidget);
     expect(find.text('Private Student'), findsWidgets);
     expect(find.text('Academic information'), findsOneWidget);
+  });
+
+  testWidgets('user category navigation is connected and switches tabs', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(home: UserManagementPage(repository: _Repository())),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('user-category-segmented-nav')),
+      findsOneWidget,
+    );
+    expect(find.byType(ChoiceChip), findsNothing);
+    await tester.tap(find.byKey(const Key('user-tab-employees')));
+    await tester.pumpAndSettle();
+    expect(find.text('No employees found.'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('user-tab-students')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('user-category-segmented-nav')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('pending staff show visible contextual action buttons', (
