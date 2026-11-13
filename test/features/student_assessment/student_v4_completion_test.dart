@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/student_assessment/screens/student_assessment_complete_screen.dart';
+import 'package:mind_mates/features/student_assessment/widgets/assessment_domain_illustration.dart';
 import 'package:mind_mates/features/student_assessment/models/student_assessment_models.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
 import 'package:mind_mates/models/appointment_model.dart';
@@ -17,6 +18,55 @@ import 'package:mind_mates/routes/route_names.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  test('domain art maps all supported areas and status colors', () {
+    const icons = <String, IconData>{
+      'academic': Icons.menu_book_rounded,
+      'financial': Icons.savings_rounded,
+      'socialAdjustment': Icons.groups_rounded,
+      'sleepRest': Icons.bedtime_rounded,
+      'emotionalWellbeing': Icons.favorite_rounded,
+      'teachingWorkloadDemands': Icons.work_outline_rounded,
+      'nonTeachingWorkloadDemands': Icons.work_outline_rounded,
+      'teachingSupport': Icons.diversity_3_rounded,
+      'nonTeachingSupport': Icons.diversity_3_rounded,
+      'teachingEngagementMeaning': Icons.emoji_objects_rounded,
+      'nonTeachingEngagementMeaning': Icons.emoji_objects_rounded,
+    };
+    for (final entry in icons.entries) {
+      expect(assessmentDomainIcon(entry.key), entry.value);
+    }
+    expect(assessmentDomainIcon('unrecognized'), Icons.insights_rounded);
+    expect(assessmentStatusColor('supported'), const Color(0xFF2F7D6D));
+    expect(assessmentStatusColor('mostlySupported'), const Color(0xFF5E95BC));
+    expect(assessmentStatusColor('someStrain'), const Color(0xFFE09B2D));
+    expect(assessmentStatusColor('supportMayHelp'), const Color(0xFFC0603A));
+    expect(assessmentStatusColor('unknown'), const Color(0xFF6C665B));
+  });
+
+  testWidgets('domain art is sized and decorative', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: AssessmentDomainIllustration(
+            domainId: 'academic',
+            status: 'supported',
+          ),
+        ),
+      ),
+    );
+    final art = find.byType(AssessmentDomainIllustration);
+    expect(tester.getSize(art), const Size(52, 52));
+    final icon = tester.widget<Icon>(find.byIcon(Icons.menu_book_rounded));
+    expect(icon.size, 26);
+    expect(icon.color, const Color(0xFF2F7D6D));
+    expect(
+      find.ancestor(
+        of: find.byIcon(Icons.menu_book_rounded),
+        matching: find.byType(ExcludeSemantics),
+      ),
+      findsOneWidget,
+    );
+  });
   testWidgets(
     'shows the PACC prompt only after a saved supportMayHelp V4 result',
     (tester) async {
@@ -254,6 +304,7 @@ void main() {
       await _expectTextVisible(tester, 'Overall Well-Being Status');
       await _expectTextVisible(tester, 'Assessment Summary');
       await _expectTextVisible(tester, 'What Your Responses Suggest Overall');
+      expect(find.textContaining('response completeness'), findsNothing);
       await _expectTextVisible(tester, 'Strengths & Focus Areas');
       await _expectTextVisible(tester, 'Strengths');
       await _expectTextVisible(tester, 'Focus Areas');
@@ -262,6 +313,13 @@ void main() {
       expect(find.text('What to notice'), findsNothing);
       final domainCard = find.byKey(const ValueKey('v4-domain-domain_0'));
       await _scrollIntoView(tester, domainCard);
+      expect(
+        find.descendant(
+          of: domainCard,
+          matching: find.byIcon(Icons.insights_rounded),
+        ),
+        findsOneWidget,
+      );
       await tester.tap(domainCard);
       await tester.pump(const Duration(milliseconds: 300));
       await _expectTextVisible(tester, 'What to notice');
@@ -269,7 +327,12 @@ void main() {
       await _expectTextVisible(tester, 'A practical next step');
       await _expectTextVisible(tester, 'Reflection prompt');
       await _expectTextVisible(tester, 'Suggested Next Steps');
-      await _expectTextVisible(tester, 'Assessment Responses');
+      expect(find.text('Assessment Responses'), findsNothing);
+      await _expectTextVisible(tester, 'Review Responses');
+      await tester.tap(find.text('Review Responses'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.text('Your responses'), findsOneWidget);
       final responseGroup = find.byKey(
         const ValueKey('v4-response-group-domain_0'),
       );
@@ -277,6 +340,10 @@ void main() {
       await tester.tap(responseGroup);
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('1. Saved review question 1.'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.text('Review Responses'), findsOneWidget);
       expect(find.text('Response Completeness'), findsNothing);
       expect(find.text('How This Result Was Created'), findsNothing);
       await _expectTextVisible(tester, 'About This Result');
@@ -463,7 +530,10 @@ void main() {
 
     expect(find.text('Legacy student V4 result.'), findsOneWidget);
     expect(find.text('Response Completeness'), findsNothing);
-    await _expectTextVisible(tester, 'Assessment Responses');
+    await _expectTextVisible(tester, 'Review Responses');
+    await tester.tap(find.text('Review Responses'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
     await _expectTextVisible(
       tester,
       'Saved assessment responses are unavailable for this result.',
@@ -675,7 +745,7 @@ class _V4Repository extends AssessmentRepository with _PreviewingV4Repository {
       else
         'userSummary': 'Verified workplace V4 result.',
       'overallResponseSummary':
-          'Five well-being areas were considered using your completed responses.',
+          'Five well-being areas were considered using your completed responses. You answered 50 of 50 questions, giving this result high response completeness.',
       'domainSummaries': _domainSummariesFor(instrumentVersion),
       'focusInsights': const ['One area may benefit from attention.'],
       'strengthInsights': const ['One supportive pattern was identified.'],

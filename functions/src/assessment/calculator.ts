@@ -372,14 +372,25 @@ export function calculateQuick(role: string, name: string, answers: QuickAnswer[
   const priority = level === "low" ? "routine" : level === "moderate" ? "monitor" : level === "high" ? "followUpSuggested" : "promptFollowUp";
   const overallPattern = responsePattern(concernScore);
   const quickSummary: Record<string, string> = {
-    wellBeingSupported: "Your brief check-in shows several supportive patterns worth continuing.",
-    generallySteady: "Your brief check-in appears generally balanced, with some opportunities for continued awareness.",
-    someStrain: "Your brief check-in highlights one or more areas you may want to explore more closely.",
-    supportMayHelp: "Your brief check-in highlights areas where support may make current challenges easier to manage.",
+    wellBeingSupported: "Your answers show healthy patterns in most areas. Keep doing what helps you feel well.",
+    generallySteady: "Your answers show a generally steady balance, with a few areas worth keeping an eye on.",
+    someStrain: "Your answers show some areas that may be adding strain right now. Take a closer look at them below.",
+    supportMayHelp: "Your answers show several areas where things may feel hard right now. Support can help, and you do not have to handle this alone.",
   };
-  const quickFocus = topConcernAreas.length ? `Areas you may want to explore are ${topConcernAreas.join(", ")}.` : "No quick-check answer stood out as an immediate area to explore.";
-  const quickStrengths = responses.filter((response) => response.concernScore <= SCORE_BOUNDARIES.watchful).sort((a, b) => b.concernScore - a.concernScore).slice(0, 3).map((response) => `${QUICK_QUESTIONS.find((item) => item.id === response.questionId)!.area} showed a supportive or balanced response.`);
-  const quickFocusInsights = responses.filter((response) => response.concernScore > SCORE_BOUNDARIES.watchful).sort((a, b) => b.concernScore - a.concernScore).slice(0, 3).map((response) => `${QUICK_QUESTIONS.find((item) => item.id === response.questionId)!.area} may be worth reflecting on or exploring in the full assessment.`);
+  const quickCopy: Record<string, {well: string; closer: string}> = {
+    calm_relaxed: {well: "You have often felt calm, which suggests you are finding time to rest and recover.", closer: "You have not felt calm very often lately. Short breaks, slow breathing, or a MindMate breathing exercise may help."},
+    overwhelmed: {well: "Your tasks feel manageable right now. Keep the routines that help you stay on top of things.", closer: "Your tasks have felt overwhelming. Breaking work into smaller steps or talking to someone you trust can lighten the load."},
+    connected: {well: "You feel connected to the people around you. These relationships are a strong source of support.", closer: "You have felt less connected lately. Reaching out to a friend, classmate, or co-worker can make a real difference."},
+    little_interest: {well: "You are still enjoying the things you like to do, which is a healthy sign for your mood and energy.", closer: "You have had less interest in things you usually enjoy. If this continues, it is worth talking to someone, such as a PACC counselor."},
+    stress_affecting_life: {well: "Stress has not been getting in the way of your daily life. You seem to be coping well.", closer: "Stress has been affecting your daily life. This is a good time to look for support before it builds up."},
+  };
+  const quickArea = (questionId: string) => QUICK_QUESTIONS.find((item) => item.id === questionId)!.area;
+  const quickOrder = (a: typeof responses[number], b: typeof responses[number]) => b.concernScore - a.concernScore || quickArea(a.questionId).localeCompare(quickArea(b.questionId));
+  const focusAreas = responses.filter((response) => response.concernScore > SCORE_BOUNDARIES.watchful).sort(quickOrder).slice(0, 3).map((response) => quickArea(response.questionId).toLowerCase());
+  const joinAreas = (areas: string[]) => areas.length < 3 ? areas.join(" and ") : `${areas.slice(0, -1).join(", ")}, and ${areas.at(-1)}`;
+  const quickFocus = focusAreas.length ? `Areas worth a closer look: ${joinAreas(focusAreas)}.` : "None of your answers stood out as needing attention right now.";
+  const quickStrengths = responses.filter((response) => response.concernScore <= SCORE_BOUNDARIES.watchful).sort(quickOrder).slice(0, 3).map((response) => `${quickArea(response.questionId)}: ${quickCopy[response.questionId].well}`);
+  const quickFocusInsights = responses.filter((response) => response.concernScore > SCORE_BOUNDARIES.watchful).sort(quickOrder).slice(0, 3).map((response) => `${quickArea(response.questionId)}: ${quickCopy[response.questionId].closer}`);
   const interpretation: Interpretation = {
     algorithmVersion: ALGORITHM_VERSION,
     questionSetVersion: QUICK_QUESTION_SET_VERSION,

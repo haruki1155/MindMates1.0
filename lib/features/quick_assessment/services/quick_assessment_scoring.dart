@@ -1,5 +1,6 @@
 import '../models/quick_assessment_models.dart';
 import '../../student_assessment/models/assessment_interpretation_models.dart';
+import '../data/quick_indicator_copy.dart';
 
 class QuickAssessmentScoring {
   const QuickAssessmentScoring._();
@@ -104,13 +105,13 @@ class QuickAssessmentScoring {
     final pattern = AssessmentResponsePattern.codeForScore(score);
     return switch (pattern) {
       'wellBeingSupported' =>
-        'Your brief check-in shows several supportive patterns worth continuing.',
+        'Your answers show healthy patterns in most areas. Keep doing what helps you feel well.',
       'generallySteady' =>
-        'Your brief check-in appears generally balanced, with some opportunities for continued awareness.',
+        'Your answers show a generally steady balance, with a few areas worth keeping an eye on.',
       'someStrain' =>
-        'Your brief check-in highlights one or more areas you may want to explore more closely.',
+        'Your answers show some areas that may be adding strain right now. Take a closer look at them below.',
       _ =>
-        'Your brief check-in highlights areas where support may make current challenges easier to manage.',
+        'Your answers show several areas where things may feel hard right now. Support can help, and you do not have to handle this alone.',
     };
   }
 
@@ -130,24 +131,28 @@ class QuickAssessmentScoring {
   static AssessmentInterpretation interpretationFor(
     List<QuickAssessmentResponse> responses,
   ) {
-    final domains = areaScores(responses).entries.map((entry) {
-      final band = _band(entry.value);
-      return AssessmentDomainResult(
-        domain: entry.key,
-        score: entry.value,
-        band: band,
-        answeredCount: 1,
-        skippedCount: 0,
-        presentedCount: 1,
-        completionPercent: 100,
-        isScorable: true,
-        interpretation:
-            '${AssessmentResponsePattern.labelForScore(entry.value)} based on this single quick-check response.',
-        suggestedAction: recommendedNextStepForLevel(
-          overallLevel(averageConcernScore(responses)),
-        ),
-      );
-    }).toList()..sort((a, b) => b.score.compareTo(a.score));
+    final domains =
+        areaScores(responses).entries.map((entry) {
+          final band = _band(entry.value);
+          return AssessmentDomainResult(
+            domain: entry.key,
+            score: entry.value,
+            band: band,
+            answeredCount: 1,
+            skippedCount: 0,
+            presentedCount: 1,
+            completionPercent: 100,
+            isScorable: true,
+            interpretation:
+                '${AssessmentResponsePattern.labelForScore(entry.value)} based on this single quick-check response.',
+            suggestedAction: recommendedNextStepForLevel(
+              overallLevel(averageConcernScore(responses)),
+            ),
+          );
+        }).toList()..sort((a, b) {
+          final score = b.score.compareTo(a.score);
+          return score != 0 ? score : a.domain.compareTo(b.domain);
+        });
     final level = overallLevel(averageConcernScore(responses));
     final priority = switch (level) {
       QuickAssessmentLevel.low => AssessmentSupportPriority.routine,
@@ -155,26 +160,24 @@ class QuickAssessmentScoring {
       QuickAssessmentLevel.high => AssessmentSupportPriority.followUpSuggested,
       QuickAssessmentLevel.veryHigh => AssessmentSupportPriority.promptFollowUp,
     };
-    final top = domains.where((domain) => domain.score >= 30).take(3).toList();
+    final top = domains.where((domain) => domain.score > 40).take(3).toList();
     final focus = top.isEmpty
-        ? 'No quick-check answer stood out as an immediate area to explore.'
-        : 'Areas you may want to explore are ${top.map((domain) => domain.domain).join(', ')}.';
-    final strengths = domains
-        .where((domain) => domain.score <= 40)
-        .take(3)
-        .map(
-          (domain) =>
-              '${domain.domain} showed a supportive or balanced response.',
-        )
-        .toList();
-    final focusInsights = domains
-        .where((domain) => domain.score > 40)
-        .take(3)
-        .map(
-          (domain) =>
-              '${domain.domain} may be worth reflecting on or exploring in the full assessment.',
-        )
-        .toList();
+        ? 'None of your answers stood out as needing attention right now.'
+        : 'Areas worth a closer look: ${_joinAreas(top.map((domain) => domain.domain.toLowerCase()).toList())}.';
+    final strengths =
+        responses.where((response) => response.concernScore <= 40).toList()
+          ..sort(_compareResponses);
+    final focusResponses =
+        responses.where((response) => response.concernScore > 40).toList()
+          ..sort(_compareResponses);
+    final strengthInsights = strengths.take(3).map((response) {
+      final copy = QuickIndicatorCopy.forQuestionId(response.questionId);
+      return copy == null ? '' : '${copy.name}: ${copy.goingWell}';
+    }).toList();
+    final focusInsights = focusResponses.take(3).map((response) {
+      final copy = QuickIndicatorCopy.forQuestionId(response.questionId);
+      return copy == null ? '' : '${copy.name}: ${copy.closerLook}';
+    }).toList();
     return AssessmentInterpretation(
       supportPriority: priority,
       responseQuality: AssessmentResponseQuality(
@@ -186,13 +189,31 @@ class QuickAssessmentScoring {
       ),
       domainResults: domains,
       rationale: [focus],
-      strengthInsights: strengths,
+      strengthInsights: strengthInsights,
       focusInsights: focusInsights,
       userSummary: '${summaryForScore(averageConcernScore(responses))} $focus',
       counselorSummary:
           'Quick wellness screen: ${priority.label}. The five indicators each represent one response; use the full role-based assessment for category-level interpretation.',
       suggestedActions: [recommendedNextStepForLevel(level)],
-      questionSetVersion: 'quick_v2',
+      questionSetVersion: 'quick_v3',
+    );
+  }
+
+  static String _joinAreas(List<String> areas) => switch (areas.length) {
+    0 => '',
+    1 => areas.first,
+    2 => '${areas.first} and ${areas.last}',
+    _ => '${areas.take(areas.length - 1).join(', ')}, and ${areas.last}',
+  };
+
+  static int _compareResponses(
+    QuickAssessmentResponse a,
+    QuickAssessmentResponse b,
+  ) {
+    final score = b.concernScore.compareTo(a.concernScore);
+    if (score != 0) return score;
+    return (concernAreasByQuestionId[a.questionId] ?? '').compareTo(
+      concernAreasByQuestionId[b.questionId] ?? '',
     );
   }
 

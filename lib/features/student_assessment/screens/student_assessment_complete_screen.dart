@@ -14,9 +14,11 @@ import '../../../services/firebase/firebase_runtime_diagnostics.dart';
 import '../../quick_assessment/widgets/quick_assessment_widgets.dart';
 import '../../counseling/screens/pacc_counseling_screen.dart';
 import '../models/student_assessment_models.dart';
+import '../services/assessment_summary_text.dart';
 import '../models/assessment_interpretation_models.dart';
-import '../widgets/v4_assessment_response_review.dart';
 import '../widgets/assessment_presentation.dart';
+import '../widgets/assessment_domain_illustration.dart';
+import 'assessment_saved_responses_screen.dart';
 
 class StudentAssessmentCompleteScreen extends StatefulWidget {
   const StudentAssessmentCompleteScreen({super.key});
@@ -483,9 +485,10 @@ class _StudentV4ProfileView extends StatelessWidget {
         _v4NonEmptyText(interpretation['userSummary']) ??
         _v4NonEmptyText(interpretation['studentSummary']) ??
         'This is a snapshot of the past 7 days based on the areas you answered.';
-    final overallResponseSummary =
-        _v4NonEmptyText(interpretation['overallResponseSummary']) ??
-        'Your responses are considered across five well-being areas.';
+    final overallResponseSummary = withoutResponseCompleteness(
+      _v4NonEmptyText(interpretation['overallResponseSummary']) ??
+          'Your responses are considered across five well-being areas.',
+    );
     final disclaimer =
         _v4NonEmptyText(interpretation['disclaimer']) ??
         'This is a non-clinical well-being reflection, not a diagnosis.';
@@ -590,19 +593,6 @@ class _StudentV4ProfileView extends StatelessWidget {
                     ),
             ),
             const SizedBox(height: 12),
-            Text(
-              'Assessment Responses',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 8),
-            V4AssessmentResponseReview(
-              itemSnapshot: _maps(payload['itemSnapshot']),
-              responses: _maps(payload['responses']),
-              domainSummaries: domainSummaries,
-            ),
-            const SizedBox(height: 12),
             const _V4TransparencySection(
               title: 'References & Resources',
               child: Column(
@@ -640,6 +630,21 @@ class _StudentV4ProfileView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
+            OutlinedButton.icon(
+              style: AssessmentPresentation.outlinedButtonStyle(context),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => AssessmentSavedResponsesScreen(
+                    itemSnapshot: _maps(payload['itemSnapshot']),
+                    responses: _maps(payload['responses']),
+                    domainSummaries: domainSummaries,
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.checklist_rounded),
+              label: const Text('Review Responses'),
+            ),
+            const SizedBox(height: 10),
             OutlinedButton.icon(
               style: AssessmentPresentation.outlinedButtonStyle(context),
               onPressed: () => Navigator.of(context).push(
@@ -701,12 +706,18 @@ class _V4DomainReflectionCard extends StatelessWidget {
     final summary =
         _v4NonEmptyText(domain['summary']) ??
         'This area is available for reflection based on your saved responses.';
+    final status = domain['status']?.toString();
+    final statusColor = assessmentStatusColor(status);
     return AssessmentSurfaceCard(
       padding: EdgeInsets.zero,
       child: ExpansionTile(
         key: ValueKey('v4-domain-${domain['domainId']}'),
         tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        leading: AssessmentDomainIllustration(
+          domainId: domain['domainId']?.toString(),
+          status: status,
+        ),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
         subtitle: Padding(
           padding: const EdgeInsets.only(top: 6),
@@ -714,7 +725,8 @@ class _V4DomainReflectionCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AssessmentStatusPill(
-                label: _v4DomainLabel(domain['status']?.toString()),
+                label: _v4DomainLabel(status),
+                color: statusColor,
               ),
               const SizedBox(height: 6),
               Text(
@@ -730,23 +742,40 @@ class _V4DomainReflectionCard extends StatelessWidget {
           ),
         ),
         children: [
-          if (hasDetails) ...[
-            if (focus != null)
-              _V4DomainDetail(label: 'What to notice', value: focus),
-            if (strength != null)
-              _V4DomainDetail(label: 'Supportive pattern', value: strength),
-            if (action != null)
-              _V4DomainDetail(label: 'A practical next step', value: action),
-            if (prompt != null)
-              _V4DomainDetail(label: 'Reflection prompt', value: prompt),
-          ] else
-            Text(
-              'Detailed reflections were not included with this earlier saved result.',
-              style: TextStyle(
-                color: AssessmentPresentation.muted(context),
-                height: 1.4,
-              ),
+          Container(
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(color: statusColor, width: 3)),
             ),
+            padding: const EdgeInsets.only(left: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (hasDetails) ...[
+                  if (focus != null)
+                    _V4DomainDetail(label: 'What to notice', value: focus),
+                  if (strength != null)
+                    _V4DomainDetail(
+                      label: 'Supportive pattern',
+                      value: strength,
+                    ),
+                  if (action != null)
+                    _V4DomainDetail(
+                      label: 'A practical next step',
+                      value: action,
+                    ),
+                  if (prompt != null)
+                    _V4DomainDetail(label: 'Reflection prompt', value: prompt),
+                ] else
+                  Text(
+                    'Detailed reflections were not included with this earlier saved result.',
+                    style: TextStyle(
+                      color: AssessmentPresentation.muted(context),
+                      height: 1.4,
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -1160,14 +1189,6 @@ class _SummaryCards extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         _InfoCard(
-          title: 'Response confidence',
-          body:
-              '${result.interpretation.responseQuality.confidence.label} '
-              '(${result.interpretation.responseQuality.completionPercent.round()}% answered). '
-              'This summary uses only the questions you answered.',
-        ),
-        const SizedBox(height: 10),
-        _InfoCard(
           title: 'Support options',
           body:
               '${result.interpretation.supportPriority.label}. Everyone experiences challenges differently. Counseling is available as an optional, confidential conversation if you would like additional guidance.',
@@ -1448,15 +1469,6 @@ class _ScoreBar extends StatelessWidget {
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   height: 1.25,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                '${domain.answeredCount} of ${domain.presentedCount} questions answered',
-                style: const TextStyle(
-                  color: _ResultPalette.mutedText,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
