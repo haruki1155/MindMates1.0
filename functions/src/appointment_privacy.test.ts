@@ -9,6 +9,7 @@ test("portal queue projection excludes clinical and personal appointment fields"
     scheduledAt: "2026-10-01T09:00:00.000Z",
     scheduledTime: "5:00 PM",
     status: "requested",
+    scheduleRevision: 7,
     counselorName: "Counselor Name",
     concern: "Sensitive concern",
     email: "student@example.com",
@@ -23,6 +24,7 @@ test("portal queue projection excludes clinical and personal appointment fields"
     "assignedCounselor",
     "isArchived",
     "projectedAt",
+    "scheduleRevision",
     "scheduledAt",
     "scheduledTime",
     "sourceUpdatedAt",
@@ -31,6 +33,7 @@ test("portal queue projection excludes clinical and personal appointment fields"
   ]);
   assert.equal(projection.studentDisplayName, "Student Name");
   assert.equal(projection.appointmentId, "appointment-1");
+  assert.equal(projection.scheduleRevision, 7);
   assert.equal(projection.concern, undefined);
   assert.equal(projection.email, undefined);
   assert.equal(projection.userId, undefined);

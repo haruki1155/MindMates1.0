@@ -53,6 +53,24 @@ class AppointmentRepository {
         .toList(growable: false);
   }
 
+  Future<void> rescheduleAppointment({
+    required String appointmentId,
+    required DateTime expectedScheduledAt,
+    required int expectedScheduleRevision,
+    required DateTime scheduledAt,
+    required String requestId,
+  }) async {
+    await _functionClient
+        .routedCallable('rescheduleStudentAppointment')
+        .call<Map<String, dynamic>>({
+          'appointmentId': appointmentId,
+          'expectedScheduledAt': expectedScheduledAt.millisecondsSinceEpoch,
+          'expectedScheduleRevision': expectedScheduleRevision,
+          'scheduledAt': scheduledAt.millisecondsSinceEpoch,
+          'requestId': requestId,
+        });
+  }
+
   Future<List<AppointmentModel>> fetchAppointments(String userId) {
     return _firestoreService
         .getDocuments(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/appointment_model.dart';
+import 'appointment_presentation.dart';
 
 enum AppointmentSection { upcoming, past, cancelled }
 
@@ -14,10 +15,10 @@ class AppointmentUiState {
   static AppointmentUiState from(AppointmentStatus status) => switch (status) {
     AppointmentStatus.requested ||
     AppointmentStatus.legacyRequested => const AppointmentUiState(
-      'Awaiting Confirmation',
+      'Awaiting confirmation',
       'PACC Counseling is reviewing your appointment request.',
       Icons.hourglass_top_rounded,
-      Color(0xFF55718C),
+      Color(0xFF91600B),
     ),
     AppointmentStatus.confirmed => const AppointmentUiState(
       'Confirmed',
@@ -62,10 +63,10 @@ class AppointmentUiState {
       Color(0xFF6C6C6C),
     ),
     AppointmentStatus.unknown => const AppointmentUiState(
-      'Awaiting Confirmation',
+      'Status unavailable',
       '',
       Icons.hourglass_top_rounded,
-      Color(0xFF55718C),
+      Color(0xFF91600B),
     ),
   };
 
@@ -118,14 +119,28 @@ class _AppointmentListViewState extends State<AppointmentListView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'My Appointments',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: AppointmentVisuals.teal, borderRadius: BorderRadius.circular(20)),
+          child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('YOUR WELL-BEING MATTERS', style: TextStyle(color: Color(0xFFCEE2DA), fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w800)),
+            SizedBox(height: 12),
+            Text('Support begins with one conversation.', style: TextStyle(color: Colors.white, fontSize: 21, height: 1.35, fontWeight: FontWeight.w800)),
+            SizedBox(height: 12),
+            Text('Arrange a session with PACC at a time that works for you.', style: TextStyle(color: Color(0xFFD3E4DE), fontSize: 14, height: 1.5)),
+            SizedBox(height: 16),
+            Icon(Icons.favorite_border, color: Color(0xFFD3E4DE)),
+          ]),
         ),
         const SizedBox(height: 16),
         Semantics(
           label: 'Appointment categories',
-          child: Row(
+          child: Container(
+            key: const ValueKey('appointment-category-container'),
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(color: const Color(0xFFE9EFEB), borderRadius: BorderRadius.circular(16)),
+            child: Row(
             children: AppointmentSection.values
                 .map(
                   (section) => Expanded(
@@ -141,35 +156,9 @@ class _AppointmentListViewState extends State<AppointmentListView> {
                   ),
                 )
                 .toList(),
-          ),
+          )),
         ),
         const SizedBox(height: 20),
-        if (_section == AppointmentSection.upcoming) ...[
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: bookingBlocked ? null : () => widget.onBook(null),
-              icon: const Icon(Icons.add),
-              label: const Text('Book Appointment'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(50),
-                backgroundColor: const Color(0xFFFFC107),
-                foregroundColor: const Color(0xFF111827),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-            ),
-          ),
-          if (bookingBlocked) ...[
-            const SizedBox(height: 8),
-            const Text(
-              'You already have an active appointment. Please complete it before booking another one.',
-              style: TextStyle(color: Color(0xFF6D675F)),
-            ),
-          ],
-          const SizedBox(height: 20),
-        ],
         Text(
           '${switch (_section) {
             AppointmentSection.upcoming => 'Upcoming',
@@ -196,6 +185,18 @@ class _AppointmentListViewState extends State<AppointmentListView> {
               ),
             ),
           ),
+        if (_section == AppointmentSection.upcoming && bookingBlocked) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xFFFFF9EA), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFF3DEAA))),
+            child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.info_outline, size: 20, color: Color(0xFF91600B)),
+              SizedBox(width: 10),
+              Expanded(child: Text('You already have an active appointment. Please complete it before booking another one.', style: AppointmentVisuals.body)),
+            ]),
+          ),
+        ],
         const SizedBox(height: 16),
         _SectionMessagePanel(section: _section),
       ],
@@ -219,23 +220,19 @@ class _SectionTab extends StatelessWidget {
     label: '$label appointments',
     child: InkWell(
       onTap: onTap,
-      child: Container(
-        height: 44,
+      child: AnimatedContainer(
+        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 220),
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: selected
-                  ? const Color(0xFFFFB800)
-                  : const Color(0xFFE4DED3),
-              width: selected ? 3 : 1,
-            ),
-          ),
+          color: selected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(13),
+
         ),
         child: Text(
           label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 14,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
@@ -291,57 +288,38 @@ class AppointmentCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        FittedBox(
-                          alignment: Alignment.centerLeft,
-                          fit: BoxFit.scaleDown,
-                          child: _StatusBadge(ui: ui),
-                        ),
+                        AppointmentStatusBadge(status: appointment.lifecycleStatus),
                         const SizedBox(height: 8),
+                        const Text('PACC Counseling', style: AppointmentVisuals.section),
+                        const SizedBox(height: 4),
                         Text(
-                          appointment.scheduledTime,
+                          '${appointment.scheduledTime} \u00b7 Philippine Time',
                           style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 16,
+                            color: AppointmentVisuals.muted,
+                            fontSize: 12,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    tooltip: 'View appointment details',
-                    onPressed: onView,
-                    icon: const Icon(Icons.chevron_right),
-                  ),
                 ],
               ),
               const SizedBox(height: 10),
               _Info(icon: Icons.place_outlined, text: appointment.location),
-              _Info(
+              if (compact) _Info(
                 icon: Icons.badge_outlined,
                 text: (appointment.counselorName ?? '').trim().isEmpty
                     ? 'Counselor: Not yet assigned'
                     : 'Counselor: ${appointment.counselorName}',
               ),
-              if (!compact && appointment.concern.trim().isNotEmpty) ...[
-                const SizedBox(height: 8),
-                const Text(
-                  'Concern',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                Text(
-                  appointment.concern,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-              if (ui.description.isNotEmpty) ...[
+              if (ui.description.isNotEmpty && appointment.lifecycleStatus != AppointmentStatus.requested && appointment.lifecycleStatus != AppointmentStatus.confirmed) ...[
                 const SizedBox(height: 8),
                 Text(
                   ui.description,
                   style: TextStyle(color: Colors.grey.shade700),
                 ),
               ],
-              const SizedBox(height: 14),
+              const Divider(height: 28, color: AppointmentVisuals.line),
               _actions(context, ui),
             ],
           ),
@@ -352,104 +330,27 @@ class AppointmentCard extends StatelessWidget {
 
   Widget _actions(BuildContext context, AppointmentUiState ui) {
     final status = appointment.lifecycleStatus;
-    if ({
-      AppointmentStatus.requested,
-      AppointmentStatus.confirmed,
-    }.contains(status)) {
-      return Row(
-        children: [
-          _OutlineAction(label: 'View Details', onPressed: onView),
-          const SizedBox(width: 8),
-          Expanded(
-            child: FilledButton(
-              onPressed: isSaving ? null : () => _showManage(context),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-                backgroundColor: const Color(0xFFFFB800),
-                foregroundColor: Colors.black,
-              ),
-              child: const Text('Manage'),
-            ),
-          ),
-        ],
+    final view = _OutlineAction(label: 'View appointment', onPressed: onView);
+    Widget? secondary;
+    if ({AppointmentStatus.requested, AppointmentStatus.confirmed}.contains(status)) {
+      secondary = OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: AppointmentVisuals.teal),
+        onPressed: isSaving ? null : onCalendar,
+        icon: const Icon(Icons.calendar_month_outlined, size: 18),
+        label: const Text('Add to Calendar', textAlign: TextAlign.center),
       );
+    } else if ({AppointmentStatus.completed, AppointmentStatus.cancelled, AppointmentStatus.declined, AppointmentStatus.expired, AppointmentStatus.noShow}.contains(status)) {
+      final book = appointment.hasAvailableFollowUpOffer ? 'Book Follow-up' : status == AppointmentStatus.noShow ? 'Book Another Appointment' : status == AppointmentStatus.declined ? 'Book Appointment' : 'Book Again';
+      secondary = FilledButton(onPressed: bookingBlocked || isSaving ? null : onBook, style: AppointmentVisuals.primary, child: Text(book, textAlign: TextAlign.center));
     }
-    if (status == AppointmentStatus.rescheduleProposed) {
-      return SizedBox(
-        width: double.infinity,
-        child: FilledButton(
-          onPressed: onView,
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(48),
-            backgroundColor: const Color(0xFFFFB800),
-            foregroundColor: Colors.black,
-          ),
-          child: const Text('View appointment details'),
-        ),
-      );
-    }
-    final book =
-        appointment.hasAvailableFollowUpOffer
-        ? 'Book Follow-up'
-        : status == AppointmentStatus.noShow
-        ? 'Book Another Appointment'
-        : status == AppointmentStatus.declined
-        ? 'Book Appointment'
-        : 'Book Again';
-    if ({
-      AppointmentStatus.completed,
-      AppointmentStatus.cancelled,
-      AppointmentStatus.declined,
-      AppointmentStatus.expired,
-      AppointmentStatus.noShow,
-    }.contains(status)) {
-      return Row(
-        children: [
-          _OutlineAction(label: 'View Details', onPressed: onView),
-          const SizedBox(width: 8),
-          Expanded(
-            child: FilledButton(
-              onPressed: bookingBlocked ? null : onBook,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-                backgroundColor: const Color(0xFFFFB800),
-                foregroundColor: Colors.black,
-              ),
-              child: Text(book),
-            ),
-          ),
-        ],
-      );
-    }
-    return Row(
-      children: [
-        Expanded(
-          child: _OutlineAction(label: 'View Details', onPressed: onView),
-        ),
-        const SizedBox(width: 8),
-      ],
-    );
+    if (secondary == null) return SizedBox(width: double.infinity, child: view);
+    final action = secondary;
+    return LayoutBuilder(builder: (context, constraints) {
+      if (constraints.maxWidth < 300 || MediaQuery.textScalerOf(context).scale(14) > 19) return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [view, const SizedBox(height: 8), action]);
+      return Row(children: [Expanded(child: view), const SizedBox(width: 8), Expanded(child: action)]);
+    });
   }
 
-  void _showManage(BuildContext context) => showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    builder: (context) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.calendar_month_outlined),
-            title: const Text('Add to Calendar'),
-            onTap: () {
-              Navigator.pop(context);
-              onCalendar();
-            },
-          ),
-        ],
-      ),
-    ),
-  );
   // Legacy records are view-only while PACC finalizes their schedule.
   // ignore: unused_element
   void _showProposal(BuildContext context) => showModalBottomSheet<void>(
@@ -499,34 +400,6 @@ class AppointmentCard extends StatelessWidget {
   );
 }
 
-class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.ui});
-  final AppointmentUiState ui;
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: BoxDecoration(
-      color: ui.color.withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(99),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(ui.icon, size: 16, color: ui.color),
-        const SizedBox(width: 4),
-        Text(
-          ui.label,
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 12,
-            color: ui.color,
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
 class _AppointmentDateBlock extends StatelessWidget {
   const _AppointmentDateBlock({required this.date});
 
@@ -548,12 +421,11 @@ class _AppointmentDateBlock extends StatelessWidget {
       'NOV',
       'DEC',
     ];
-    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return Container(
       width: 60,
       padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF3F4F6),
+        color: const Color(0xFFFFF3D3),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -565,10 +437,6 @@ class _AppointmentDateBlock extends StatelessWidget {
           Text(
             '${date.day}',
             style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-          ),
-          Text(
-            weekdays[date.weekday - 1],
-            style: const TextStyle(fontSize: 11),
           ),
         ],
       ),
@@ -588,7 +456,7 @@ class _Info extends StatelessWidget {
         Icon(icon, size: 18, color: Colors.grey.shade700),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis),
+          child: Text(text, style: AppointmentVisuals.body.copyWith(fontSize: 12)),
         ),
       ],
     ),
@@ -603,7 +471,7 @@ class _OutlineAction extends StatelessWidget {
   Widget build(BuildContext context) => OutlinedButton(
     onPressed: onPressed,
     style: OutlinedButton.styleFrom(minimumSize: const Size(110, 48)),
-    child: Text(label),
+    child: Text(label, textAlign: TextAlign.center),
   );
 }
 
@@ -619,10 +487,23 @@ class _EmptyState extends StatelessWidget {
         : section == AppointmentSection.past
         ? 'No past appointments yet.'
         : 'No cancelled appointments.';
-    return Card(
+    final category = switch (section) {
+      AppointmentSection.upcoming => 'Upcoming',
+      AppointmentSection.past => 'Past',
+      AppointmentSection.cancelled => 'Cancelled',
+    };
+    return SizedBox(
+      width: double.infinity,
+      child: Card(
+      key: ValueKey('appointment-empty-$category'),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: const BorderSide(color: AppointmentVisuals.line)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Icon(
               upcoming
@@ -634,11 +515,12 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               text,
+              textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
             ),
             if (upcoming) ...[
               const SizedBox(height: 6),
-              const Text('Book a session when you’re ready.'),
+              const Text(textAlign: TextAlign.center, 'Book a session when you’re ready.'),
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: onBook,
@@ -646,13 +528,13 @@ class _EmptyState extends StatelessWidget {
                   backgroundColor: const Color(0xFFFFB800),
                   foregroundColor: Colors.black,
                 ),
-                child: const Text('Book Appointment'),
+                child: const Text('Book Appointment', textAlign: TextAlign.center),
               ),
             ],
           ],
         ),
       ),
-    );
+    ));
   }
 }
 

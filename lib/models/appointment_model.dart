@@ -83,6 +83,8 @@ class AppointmentModel {
     this.bestTime,
     this.counselorName,
     this.updatedAt,
+    this.scheduleRevision = 0,
+    this.hasScheduleRevision = false,
     this.assignedStaffId,
     this.staffReply,
     this.reviewedAt,
@@ -123,6 +125,8 @@ class AppointmentModel {
   final String? counselorName;
   final DateTime createdAt;
   final DateTime? updatedAt;
+  final int scheduleRevision;
+  final bool hasScheduleRevision;
   final String? assignedStaffId;
   final String? staffReply;
   final DateTime? reviewedAt;
@@ -192,6 +196,8 @@ class AppointmentModel {
       counselorName: _optionalString(json['counselorName']),
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
       updatedAt: dateTimeFromFirestore(json['updatedAt']),
+      scheduleRevision: json['scheduleRevision'] is int ? json['scheduleRevision'] as int : 0,
+      hasScheduleRevision: json['scheduleRevision'] is int,
       assignedStaffId: _optionalString(json['assignedStaffId']),
       staffReply: _optionalString(json['staffReply']),
       reviewedAt: dateTimeFromFirestore(json['reviewedAt']),
@@ -243,6 +249,7 @@ class AppointmentModel {
       'academicYearId': academicYearId ?? '',
       'createdAt': createdAt,
       'updatedAt': updatedAt,
+      'scheduleRevision': scheduleRevision,
       'parentAppointmentId': parentAppointmentId ?? '',
       'rescheduleReason': rescheduleReason ?? '',
       'followUpRecommended': followUpRecommended,
@@ -275,6 +282,8 @@ class AppointmentModel {
     String? counselorName,
     DateTime? createdAt,
     DateTime? updatedAt,
+    int? scheduleRevision,
+    bool? hasScheduleRevision,
     String? assignedStaffId,
     String? staffReply,
     DateTime? reviewedAt,
@@ -316,6 +325,8 @@ class AppointmentModel {
       counselorName: counselorName ?? this.counselorName,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      scheduleRevision: scheduleRevision ?? this.scheduleRevision,
+      hasScheduleRevision: hasScheduleRevision ?? this.hasScheduleRevision,
       assignedStaffId: assignedStaffId ?? this.assignedStaffId,
       staffReply: staffReply ?? this.staffReply,
       reviewedAt: reviewedAt ?? this.reviewedAt,

@@ -127,6 +127,7 @@ class AppointmentProvider extends ChangeNotifier {
     try {
       final slots = await _repository.getAvailableSlots(date);
       _slotAvailabilityMessage = _repository.lastSlotAvailabilityMessage;
+      _errorMessage = null;
       return slots;
     } catch (error, stackTrace) {
       FirebaseErrorMessage.log(
@@ -138,10 +139,43 @@ class AppointmentProvider extends ChangeNotifier {
         error,
         fallback: 'Unable to load available appointment times.',
       );
-      _slotAvailabilityMessage =
-          'Unable to load appointment times. Please try again.';
+      _slotAvailabilityMessage = FirebaseErrorMessage.codeOf(error) == 'internal'
+          ? 'Appointment times could not be loaded. Retry, or ask PACC to check the published schedule.'
+          : _errorMessage;
       notifyListeners();
       return const [];
+    }
+  }
+
+  Future<bool> rescheduleAppointment(
+    AppointmentModel appointment,
+    DateTime selected,
+    String requestId,
+  ) async {
+    if (_isSaving || _loadedUserId != appointment.userId || !appointment.hasScheduleRevision) return false;
+    final generation = _loadGeneration;
+    _isSaving = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await _repository.rescheduleAppointment(
+        appointmentId: appointment.id,
+        expectedScheduledAt: appointment.scheduledAt,
+        expectedScheduleRevision: appointment.scheduleRevision,
+        scheduledAt: selected,
+        requestId: requestId,
+      );
+      return generation == _loadGeneration && _loadedUserId == appointment.userId;
+    } catch (error) {
+      if (generation != _loadGeneration || _loadedUserId != appointment.userId) return false;
+      _errorMessage = FirebaseErrorMessage.describe(
+        error,
+        fallback: 'Unable to change the appointment. Please try again.',
+      );
+      return false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
     }
   }
 

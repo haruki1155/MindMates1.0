@@ -27,8 +27,9 @@ async function futureWeekdaySlot(excluded = new Set<number>()): Promise<number> 
   }
   throw new Error("No future weekday slot found.");
 }
+const presented = new Map<string, {expectedScheduledAt: number; expectedStatus: string; expectedScheduleRevision: number}>();
 function payload(appointmentId: string, proposedAt: number, reason = "Office schedule adjustment") {
-  return {appointmentId, action: "rescheduled", reply: "PACC has updated your appointment schedule.", proposedScheduledAt: proposedAt, rescheduleReason: reason};
+  return {appointmentId, ...presented.get(appointmentId), action: "rescheduled", reply: "PACC has updated your appointment schedule.", proposedScheduledAt: proposedAt, rescheduleReason: reason};
 }
 async function expectCallableFailure(promise: Promise<unknown>, code: string): Promise<void> {
   await assert.rejects(promise, (error: {code?: unknown}) => error?.code === code);
@@ -36,7 +37,9 @@ async function expectCallableFailure(promise: Promise<unknown>, code: string): P
 async function seedAppointment(id: string, options: {assignedStaffId?: string; status?: string; scheduledAt?: number; claimSlot?: boolean} = {}) {
   const scheduledAt = options.scheduledAt ?? await futureWeekdaySlot();
   const appointment = db.collection("appointments").doc(`${prefix}-${id}`);
-  await appointment.set({userId: studentId, status: options.status ?? "confirmed", assignedStaffId: options.assignedStaffId ?? counselorId, scheduledAt: Timestamp.fromMillis(scheduledAt), scheduledTime: "9:00 AM", concern: "Academic pressure"});
+  const status = options.status ?? "confirmed";
+  presented.set(appointment.id, {expectedScheduledAt: scheduledAt, expectedStatus: status, expectedScheduleRevision: 0});
+  await appointment.set({userId: studentId, status, scheduleRevision: 0, assignedStaffId: options.assignedStaffId ?? counselorId, scheduledAt: Timestamp.fromMillis(scheduledAt), scheduledTime: "9:00 AM", concern: "Academic pressure"});
   await db.collection("appointment_user_locks").doc(studentId).set({appointmentId: appointment.id});
   if (options.claimSlot !== false) await db.collection("appointment_slots").doc(`pacc_${scheduledAt}`).set({appointmentId: appointment.id, scheduledAt: Timestamp.fromMillis(scheduledAt)});
   return appointment;

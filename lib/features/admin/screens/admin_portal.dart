@@ -3276,8 +3276,18 @@ class _AppointmentCard extends StatelessWidget {
                         }
                         setDialogState(() => submitting = true);
                         try {
+                          if (!item.hasScheduleRevision) {
+                            await repository.initializeAppointmentScheduleRevision(appointmentId: item.id, scheduledAt: item.scheduledAt, status: item.lifecycleStatus.value);
+                            if (!context.mounted) return;
+                            Navigator.of(context).pop();
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Appointment prepared. Refresh and review it before confirming.')));
+                            return;
+                          }
                           await repository.reviewAppointment(
                             appointmentId: item.id,
+                            expectedScheduledAt: item.scheduledAt.millisecondsSinceEpoch,
+                            expectedScheduleRevision: item.scheduleRevision,
+                            expectedStatus: item.lifecycleStatus.value,
                             action: action,
                             reply: action == 'completed'
                                 ? 'Appointment completed.'

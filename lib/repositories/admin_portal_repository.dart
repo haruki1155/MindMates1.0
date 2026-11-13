@@ -1075,10 +1075,19 @@ class AdminPortalRepository {
                   ..sort((a, b) => b.dateKey.compareTo(a.dateKey)),
           );
 
+  Future<void> initializeAppointmentScheduleRevision({required String appointmentId, required DateTime scheduledAt, required String status}) async {
+    await FirebaseFunctions.instance.httpsCallable('initializeAppointmentScheduleRevision').call({
+      'appointmentId': appointmentId, 'expectedScheduledAt': scheduledAt.millisecondsSinceEpoch, 'expectedStatus': status,
+    });
+  }
+
   Future<void> reviewAppointment({
     required String appointmentId,
     required String action,
     required String reply,
+    int? expectedScheduledAt,
+    required int expectedScheduleRevision,
+    required String expectedStatus,
     DateTime? proposedScheduledAt,
     String? proposedScheduledTime,
     String? rescheduleReason,
@@ -1090,6 +1099,9 @@ class AdminPortalRepository {
       'appointmentId': appointmentId,
       'action': action,
       'reply': reply,
+      'expectedScheduledAt': ?expectedScheduledAt,
+      'expectedScheduleRevision': expectedScheduleRevision,
+      'expectedStatus': expectedStatus,
       if (proposedScheduledAt != null)
         'proposedScheduledAt': proposedScheduledAt.millisecondsSinceEpoch,
       if (proposedScheduledAt != null)
