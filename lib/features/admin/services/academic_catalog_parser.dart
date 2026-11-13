@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:excel_plus/excel_plus.dart' as excel;
 
+import 'ooxml_namespace_fallback.dart';
+
 /// The columns an academic catalogue file may carry.
 enum CatalogRole {
   college,
@@ -70,7 +72,7 @@ CatalogParseResult parseCatalogFile(String fileName, List<int> bytes) {
     if (isCsv) {
       grids[fileName] = _parseCsv(utf8.decode(bytes, allowMalformed: true));
     } else {
-      final book = excel.Excel.decodeBytes(bytes);
+      final book = decodeXlsxWithNamespaceFallback(bytes);
       for (final entry in book.tables.entries) {
         grids[entry.key] = [
           for (final row in entry.value.rows)
