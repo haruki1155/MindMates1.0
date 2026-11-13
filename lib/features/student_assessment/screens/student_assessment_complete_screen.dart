@@ -1471,15 +1471,6 @@ class _ScoreBar extends StatelessWidget {
                   height: 1.25,
                 ),
               ),
-              const SizedBox(height: 5),
-              Text(
-                '${domain.answeredCount} of ${domain.presentedCount} questions answered',
-                style: const TextStyle(
-                  color: _ResultPalette.mutedText,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
             ],
           ),
         );
