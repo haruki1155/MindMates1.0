@@ -313,6 +313,8 @@ void main() {
     await setControlledTime(tester, const Key('day-1-opens'), '10:00');
     await tester.tap(find.text('Apply'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save schedule'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save schedule'));
     await tester.pumpAndSettle();
 
