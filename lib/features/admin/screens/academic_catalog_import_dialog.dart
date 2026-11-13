@@ -80,6 +80,9 @@ class _AcademicCatalogImportDialogState
 
   bool get _sheetTooLarge => _sheet.rows.length > catalogImportRowLimit;
 
+  /// The backend refuses a row-less file, so there is nothing to continue to.
+  bool get _sheetEmpty => _sheet.rows.isEmpty;
+
   bool get _previewBlocked {
     final p = _preview!;
     return (p.counts['error'] ?? 0) > 0 ||
@@ -152,14 +155,27 @@ class _AcademicCatalogImportDialogState
         _preview = preview;
         _step = _Step.preview;
       });
+    } on FirebaseFunctionsException catch (e) {
+      // A refusal the server explained is shown as it stands: telling the
+      // administrator to retry a file the backend will never accept is worse
+      // than saying what is wrong with it.
+      if (!mounted) return;
+      final explained = (e.message ?? '').trim();
+      setState(() {
+        _busy = false;
+        _error = explained.isEmpty ? _previewFailed : explained;
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = 'The preview could not be generated. Please try again.';
+        _error = _previewFailed;
       });
     }
   }
+
+  static const _previewFailed =
+      'The preview could not be generated. Please try again.';
 
   Future<void> _import() async {
     setState(() {
@@ -279,6 +295,11 @@ class _AcademicCatalogImportDialogState
           'it in parts.',
           style: const TextStyle(color: AdminColors.danger),
         ),
+      if (_sheetEmpty)
+        const Text(
+          'This sheet has no data rows.',
+          style: TextStyle(color: AdminColors.danger),
+        ),
     ];
   }
 
@@ -329,9 +350,14 @@ class _AcademicCatalogImportDialogState
                 onChanged: (v) => setState(() {
                   if (v == null || v < 0) {
                     _mapping.remove(role);
-                  } else {
-                    _mapping[role] = v;
+                    return;
                   }
+                  // One column can only mean one thing: two roles sharing a
+                  // column would name a department after every course, or make
+                  // a code the course name, and the preview would call it
+                  // Create with nothing to flag.
+                  _mapping.removeWhere((other, column) => column == v);
+                  _mapping[role] = v;
                 }),
               ),
             ),
@@ -482,7 +508,7 @@ class _AcademicCatalogImportDialogState
         return [
           TextButton(onPressed: close, child: const Text('Cancel')),
           FilledButton(
-            onPressed: _sheetTooLarge ? null : _toMapping,
+            onPressed: _sheetTooLarge || _sheetEmpty ? null : _toMapping,
             child: const Text('Continue'),
           ),
         ];

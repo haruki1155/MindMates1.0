@@ -17,6 +17,7 @@ class _Repo extends AdminPortalRepository {
   final previews = <List<Map<String, String>>>[];
   final imports = <List<Map<String, String>>>[];
   CatalogPreview Function(List<Map<String, String>> rows)? previewBuilder;
+  Object? previewError;
   Object? importError;
   CatalogImportResult importResult = const CatalogImportResult(
     importId: 'imp-1',
@@ -38,6 +39,7 @@ class _Repo extends AdminPortalRepository {
     required List<Map<String, String>> rows,
   }) async {
     previews.add(rows);
+    if (previewError != null) throw previewError!;
     return previewBuilder?.call(rows) ??
         CatalogPreview(
           rows: [
@@ -428,5 +430,62 @@ void main() {
     await _next(tester);
     expect(find.textContaining('Row 4 of the file'), findsOneWidget);
     expect(find.textContaining('Row 6 of the file'), findsOneWidget);
+  });
+
+  testWidgets('a sheet with no data rows is refused before any call', (
+    tester,
+  ) async {
+    final repo = _Repo();
+    await _open(
+      tester,
+      repo,
+      CatalogParseResult(
+        sheets: [_sheet('Empty', rows: const [])],
+        fileErrors: const [],
+      ),
+    );
+    expect(find.text('This sheet has no data rows.'), findsOneWidget);
+    expect(_enabled(tester, 'Continue'), isFalse);
+    expect(repo.previews, isEmpty);
+  });
+
+  testWidgets('a preview rejection surfaces the server message', (
+    tester,
+  ) async {
+    final repo = _Repo()
+      ..previewError = FirebaseFunctionsException(
+        code: 'invalid-argument',
+        message: 'The catalogue file has no rows.',
+      );
+    await _open(
+      tester,
+      repo,
+      CatalogParseResult(sheets: [_sheet('A')], fileErrors: const []),
+    );
+    await _next(tester);
+    await _next(tester);
+    expect(find.text('The catalogue file has no rows.'), findsOneWidget);
+    expect(find.textContaining('Please try again'), findsNothing);
+  });
+
+  testWidgets('a column taken by another role leaves only one role holding it', (
+    tester,
+  ) async {
+    final repo = _Repo();
+    await _open(
+      tester,
+      repo,
+      CatalogParseResult(sheets: [_sheet('A')], fileErrors: const []),
+    );
+    await _next(tester);
+    expect(find.text('e.g. BSIT'), findsOneWidget);
+    // Point Department at the column Course already holds.
+    await tester.tap(find.byKey(const ValueKey('map-department')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Course').last);
+    await tester.pumpAndSettle();
+    // Only Department holds it now, so Course is unmapped and Continue gates.
+    expect(find.text('e.g. BSIT'), findsOneWidget);
+    expect(_enabled(tester, 'Continue'), isFalse);
   });
 }

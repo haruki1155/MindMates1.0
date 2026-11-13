@@ -117,4 +117,20 @@ void main() {
     expect(result.status, 'complete');
     expect(result.message, isNull);
   });
+
+  test('importCatalog treats an unrecognised status as partial', () async {
+    final repo = build();
+    respond = (_) => _m({
+      'importId': 'imp3',
+      'status': 'queued-somehow',
+      'counts': _m({'colleges': 0, 'departments': 0, 'courses': 0}),
+    });
+    final result = await repo.importCatalog(
+      fileName: 'f',
+      sheetName: 's',
+      rows: const [],
+    );
+    expect(result.status, 'partial');
+    expect(result.isPartial, isTrue);
+  });
 }

@@ -85,7 +85,10 @@ class CatalogImportResult {
     return CatalogImportResult(
       importId: asText(map['importId']),
       counts: intMap(map['counts']),
-      status: map['status'] == 'partial' ? 'partial' : 'complete',
+      // Only an explicit `complete` reads as success: anything unexpected is
+      // reported as partial, so an unrecognised status never claims the whole
+      // file was imported.
+      status: map['status'] == 'complete' ? 'complete' : 'partial',
       message: message.isEmpty ? null : message,
     );
   }
