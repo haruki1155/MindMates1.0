@@ -22,6 +22,106 @@ import 'package:mind_mates/services/firebase/firestore_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  test(
+    'quick v3 catalog explains every question without changing answer IDs',
+    () {
+      final questions = QuickAssessmentQuestions.questions;
+      expect(questions, hasLength(5));
+      expect(questions.map((q) => q.id), [
+        'calm_relaxed',
+        'overwhelmed',
+        'connected',
+        'little_interest',
+        'stress_affecting_life',
+      ]);
+      expect(
+        questions.first.prompt,
+        'In the past two weeks, how often have you felt calm and relaxed?',
+      );
+      expect(
+        questions.first.purpose,
+        'Feeling calm is a sign that your mind has room to rest and recover. It is one of the clearest everyday signs of overall well-being.',
+      );
+      expect(questions[2].options[2].id, 'neutral');
+      expect(
+        questions[2].options[2].label,
+        'Neither connected nor disconnected',
+      );
+      expect(questions[3].options[2].value, 3);
+      expect(questions[3].options[2].label, 'More than half the days');
+    },
+  );
+  test('quick v3 interpretation uses answer-specific focus and copy', () {
+    final result = QuickAssessmentScoring.interpretationFor([
+      const QuickAssessmentResponse(
+        questionId: 'overwhelmed',
+        optionId: 'sometimes',
+        value: 3,
+        concernScore: 50,
+      ),
+      const QuickAssessmentResponse(
+        questionId: 'little_interest',
+        optionId: 'several_days',
+        value: 2,
+        concernScore: 33.3,
+      ),
+    ]);
+    expect(result.questionSetVersion, 'quick_v3');
+    expect(result.rationale.single, 'Areas worth a closer look: stress load.');
+    expect(
+      result.focusInsights.single,
+      startsWith('Stress load: Your tasks have felt overwhelming.'),
+    );
+    expect(
+      result.strengthInsights.single,
+      startsWith('Motivation and interest: You are still enjoying'),
+    );
+    expect(result.userSummary, startsWith('Your answers show'));
+  });
+  test('quick v3 focus orders tied areas by name', () {
+    final result = QuickAssessmentScoring.interpretationFor([
+      const QuickAssessmentResponse(
+        questionId: 'overwhelmed',
+        optionId: 'very_often',
+        value: 5,
+        concernScore: 75,
+      ),
+      const QuickAssessmentResponse(
+        questionId: 'stress_affecting_life',
+        optionId: 'often',
+        value: 4,
+        concernScore: 75,
+      ),
+      const QuickAssessmentResponse(
+        questionId: 'calm_relaxed',
+        optionId: 'less_than_half',
+        value: 2,
+        concernScore: 75,
+      ),
+    ]);
+    expect(
+      result.rationale.single,
+      'Areas worth a closer look: daily coping, emotional calm, and stress load.',
+    );
+  });
+  test('quick v3 has exact summaries for all four patterns', () {
+    expect(
+      QuickAssessmentScoring.summaryForScore(0),
+      'Your answers show healthy patterns in most areas. Keep doing what helps you feel well.',
+    );
+    expect(
+      QuickAssessmentScoring.summaryForScore(25),
+      'Your answers show a generally steady balance, with a few areas worth keeping an eye on.',
+    );
+    expect(
+      QuickAssessmentScoring.summaryForScore(50),
+      'Your answers show some areas that may be adding strain right now. Take a closer look at them below.',
+    );
+    expect(
+      QuickAssessmentScoring.summaryForScore(100),
+      'Your answers show several areas where things may feel hard right now. Support can help, and you do not have to handle this alone.',
+    );
+  });
   group('QuickAssessmentScoring', () {
     test('returns progress labels from 1/5 through 5/5', () {
       expect(QuickAssessmentScoring.progressLabelForStep(1), '1/5');
@@ -293,104 +393,158 @@ void main() {
       expect(firestore.setDocumentData?['quickAssessmentCompleted'], isTrue);
     });
 
-    test('quick submission timeout ends loading without a duplicate call',
-        () async {
-      final pending = Completer<Map<String, Object>>();
-      var submitCalls = 0;
-      final repository = AssessmentRepository(
-        stagingQuickAssessmentSubmitter: ({
-          required userId,
-          required result,
-        }) {
-          submitCalls += 1;
-          return pending.future;
-        },
-        quickAssessmentCompletionChecker: (_) async => false,
-        callableTimeout: const Duration(milliseconds: 1),
-      );
-      final provider = _readyProvider(repository: repository);
+    test(
+      'quick submission timeout ends loading without a duplicate call',
+      () async {
+        final pending = Completer<Map<String, Object>>();
+        var submitCalls = 0;
+        final repository = AssessmentRepository(
+          stagingQuickAssessmentSubmitter:
+              ({required userId, required result}) {
+                submitCalls += 1;
+                return pending.future;
+              },
+          quickAssessmentCompletionChecker: (_) async => false,
+          callableTimeout: const Duration(milliseconds: 1),
+        );
+        final provider = _readyProvider(repository: repository);
 
-      for (final question in QuickAssessmentQuestions.questions) {
-        provider.selectAnswer(question.options.first);
-        provider.moveToNextQuestion();
-      }
+        for (final question in QuickAssessmentQuestions.questions) {
+          provider.selectAnswer(question.options.first);
+          provider.moveToNextQuestion();
+        }
 
-      await expectLater(
-        provider.saveQuickAssessmentForUser('user_1'),
-        throwsA(isA<CallableRequestTimeoutException>()),
-      );
-      expect(provider.isSavingQuickAssessment, isFalse);
+        await expectLater(
+          provider.saveQuickAssessmentForUser('user_1'),
+          throwsA(isA<CallableRequestTimeoutException>()),
+        );
+        expect(provider.isSavingQuickAssessment, isFalse);
 
-      await expectLater(
-        provider.saveQuickAssessmentForUser('user_1'),
-        throwsA(isA<QuickAssessmentSubmissionPendingException>()),
-      );
-      expect(submitCalls, 1);
-      pending.complete(<String, Object>{'saved': true});
-    });
+        await expectLater(
+          provider.saveQuickAssessmentForUser('user_1'),
+          throwsA(isA<QuickAssessmentSubmissionPendingException>()),
+        );
+        expect(submitCalls, 1);
+        pending.complete(<String, Object>{'saved': true});
+      },
+    );
 
-    test('reconciles server completion after an uncertain quick timeout',
-        () async {
-      final pending = Completer<Map<String, Object>>();
-      var completionChecks = 0;
-      final repository = AssessmentRepository(
-        stagingQuickAssessmentSubmitter: ({
-          required userId,
-          required result,
-        }) => pending.future,
-        quickAssessmentCompletionChecker: (_) async {
-          completionChecks += 1;
-          return completionChecks >= 2;
-        },
-        callableTimeout: const Duration(milliseconds: 1),
-      );
-      final provider = _readyProvider(repository: repository);
+    test(
+      'reconciles server completion after an uncertain quick timeout',
+      () async {
+        final pending = Completer<Map<String, Object>>();
+        var completionChecks = 0;
+        final repository = AssessmentRepository(
+          stagingQuickAssessmentSubmitter:
+              ({required userId, required result}) => pending.future,
+          quickAssessmentCompletionChecker: (_) async {
+            completionChecks += 1;
+            return completionChecks >= 2;
+          },
+          callableTimeout: const Duration(milliseconds: 1),
+        );
+        final provider = _readyProvider(repository: repository);
 
-      for (final question in QuickAssessmentQuestions.questions) {
-        provider.selectAnswer(question.options.first);
-        provider.moveToNextQuestion();
-      }
+        for (final question in QuickAssessmentQuestions.questions) {
+          provider.selectAnswer(question.options.first);
+          provider.moveToNextQuestion();
+        }
 
-      await expectLater(
-        provider.saveQuickAssessmentForUser('user_1'),
-        throwsA(isA<CallableRequestTimeoutException>()),
-      );
+        await expectLater(
+          provider.saveQuickAssessmentForUser('user_1'),
+          throwsA(isA<CallableRequestTimeoutException>()),
+        );
 
-      final recovered = await provider.saveQuickAssessmentForUser('user_1');
-      expect(recovered, <String, Object>{'reconciled': true});
-      pending.complete(<String, Object>{'saved': true});
-    });
+        final recovered = await provider.saveQuickAssessmentForUser('user_1');
+        expect(recovered, <String, Object>{'reconciled': true});
+        pending.complete(<String, Object>{'saved': true});
+      },
+    );
 
-    test('late quick submission cannot update a different authenticated session',
-        () async {
-      final pending = Completer<Map<String, Object>>();
-      final repository = AssessmentRepository(
-        stagingQuickAssessmentSubmitter: ({
-          required userId,
-          required result,
-        }) => pending.future,
-        callableTimeout: const Duration(seconds: 1),
-      );
-      final provider = AssessmentProvider(repository)
-        ..bindAuthenticatedUser('student_a')
-        ..selectRole(AssessmentRole.student)
-        ..updateName('Leo');
+    test(
+      'late quick submission cannot update a different authenticated session',
+      () async {
+        final pending = Completer<Map<String, Object>>();
+        final repository = AssessmentRepository(
+          stagingQuickAssessmentSubmitter:
+              ({required userId, required result}) => pending.future,
+          callableTimeout: const Duration(seconds: 1),
+        );
+        final provider = AssessmentProvider(repository)
+          ..bindAuthenticatedUser('student_a')
+          ..selectRole(AssessmentRole.student)
+          ..updateName('Leo');
 
-      for (final question in QuickAssessmentQuestions.questions) {
-        provider.selectAnswer(question.options.first);
-        provider.moveToNextQuestion();
-      }
+        for (final question in QuickAssessmentQuestions.questions) {
+          provider.selectAnswer(question.options.first);
+          provider.moveToNextQuestion();
+        }
 
-      final saving = provider.saveQuickAssessmentForUser('student_a');
-      provider.bindAuthenticatedUser('student_b');
-      pending.complete(<String, Object>{'saved': true});
+        final saving = provider.saveQuickAssessmentForUser('student_a');
+        provider.bindAuthenticatedUser('student_b');
+        pending.complete(<String, Object>{'saved': true});
 
-      expect(await saving, isNull);
-      expect(provider.isSavingQuickAssessment, isFalse);
-    });
+        expect(await saving, isNull);
+        expect(provider.isSavingQuickAssessment, isFalse);
+      },
+    );
   });
 
   group('QuickAssessmentCategoryScreen', () {
+    testWidgets('long connectedness choice fits and advances at 360px', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final provider = _readyProvider(
+        repository: _RecordingQuickAssessmentRepository(
+          _FakeFirestoreService(),
+        ),
+      )..resetQuestions();
+      for (var i = 0; i < 2; i++) {
+        provider.selectAnswer(
+          QuickAssessmentQuestions.questions[i].options.first,
+        );
+        provider.moveToNextQuestion();
+      }
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AssessmentProvider>.value(
+          value: provider,
+          child: const MaterialApp(home: QuickAssessmentQuestionScreen()),
+        ),
+      );
+      final longLabel = find.text('Neither connected nor disconnected');
+      expect(longLabel, findsOneWidget);
+      expect(tester.widget<Text>(longLabel).maxLines, 2);
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(longLabel);
+      await tester.tap(longLabel);
+      await tester.pump();
+      await tester.ensureVisible(find.text('Next'));
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      expect(provider.currentQuestion.id, 'little_interest');
+    });
+    testWidgets('question screen explains why the item is asked', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final provider = _readyProvider(
+        repository: _RecordingQuickAssessmentRepository(
+          _FakeFirestoreService(),
+        ),
+      )..resetQuestions();
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AssessmentProvider>.value(
+          value: provider,
+          child: const MaterialApp(home: QuickAssessmentQuestionScreen()),
+        ),
+      );
+      expect(find.textContaining('Why we ask'), findsOneWidget);
+      expect(find.textContaining('Feeling calm is a sign'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
     testWidgets('quick assessment completion opens optional full assessment', (
       tester,
     ) async {
@@ -489,6 +643,14 @@ void main() {
 
       expect(find.text('Assessment limit reached'), findsOneWidget);
       expect(find.textContaining('up to 2 times in 7 days'), findsOneWidget);
+      expect(
+        find.textContaining('2 school days between attempts'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('School days are Monday to Friday'),
+        findsOneWidget,
+      );
       expect(find.text('student assessment target'), findsNothing);
     });
 
@@ -576,9 +738,7 @@ void main() {
   group('Quick assessment uses the profile name', () {
     test('beginQuickAssessment uses profile name and starts fresh', () {
       final provider = _readyProvider()
-        ..selectAnswer(
-          QuickAssessmentQuestions.questions.first.options.first,
-        );
+        ..selectAnswer(QuickAssessmentQuestions.questions.first.options.first);
 
       provider.beginQuickAssessment(
         role: AssessmentRole.faculty,
@@ -592,41 +752,48 @@ void main() {
       expect(provider.quickResult, isNull);
     });
 
-    test('beginQuickAssessment falls back and caps the name for the server', () {
-      final provider = AssessmentProvider(AssessmentRepository());
+    test(
+      'beginQuickAssessment falls back and caps the name for the server',
+      () {
+        final provider = AssessmentProvider(AssessmentRepository());
 
-      provider.beginQuickAssessment(role: AssessmentRole.student, name: '   ');
-      expect(provider.name, 'MindMate User');
+        provider.beginQuickAssessment(
+          role: AssessmentRole.student,
+          name: '   ',
+        );
+        expect(provider.name, 'MindMate User');
 
-      provider.beginQuickAssessment(
-        role: AssessmentRole.student,
-        name: 'a' * 150,
-      );
-      expect(provider.name.length, 100);
-    });
+        provider.beginQuickAssessment(
+          role: AssessmentRole.student,
+          name: 'a' * 150,
+        );
+        expect(provider.name.length, 100);
+      },
+    );
 
-    testWidgets('choosing a role skips the name step and uses the profile name', (
-      tester,
-    ) async {
-      final assessmentProvider = AssessmentProvider(AssessmentRepository());
-      await _pumpRoleScreen(
-        tester,
-        assessmentProvider: assessmentProvider,
-        user: const UserModel(
-          id: 'u1',
-          email: 'leo@example.com',
-          firstName: 'Leo',
-          lastName: 'Cruz',
-        ),
-      );
+    testWidgets(
+      'choosing a role skips the name step and uses the profile name',
+      (tester) async {
+        final assessmentProvider = AssessmentProvider(AssessmentRepository());
+        await _pumpRoleScreen(
+          tester,
+          assessmentProvider: assessmentProvider,
+          user: const UserModel(
+            id: 'u1',
+            email: 'leo@example.com',
+            firstName: 'Leo',
+            lastName: 'Cruz',
+          ),
+        );
 
-      await tester.tap(find.text('Student'));
-      await tester.pumpAndSettle();
+        await tester.tap(find.text('Student'));
+        await tester.pumpAndSettle();
 
-      expect(find.text('questions target'), findsOneWidget);
-      expect(assessmentProvider.name, 'Leo Cruz');
-      expect(assessmentProvider.selectedRole, AssessmentRole.student);
-    });
+        expect(find.text('questions target'), findsOneWidget);
+        expect(assessmentProvider.name, 'Leo Cruz');
+        expect(assessmentProvider.selectedRole, AssessmentRole.student);
+      },
+    );
 
     testWidgets('stored role redirects straight to questions', (tester) async {
       final assessmentProvider = AssessmentProvider(AssessmentRepository());

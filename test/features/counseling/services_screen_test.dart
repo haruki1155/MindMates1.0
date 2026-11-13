@@ -259,7 +259,7 @@ void main() {
 
     expect(find.text('Home'), findsOneWidget);
     expect(find.text('Appointment'), findsOneWidget);
-    expect(find.text('Secret Chat'), findsOneWidget);
+    expect(find.text('Forum'), findsOneWidget);
     expect(find.text('Message'), findsOneWidget);
   });
 
@@ -505,7 +505,6 @@ Future<void> _fillVisibleForm(WidgetTester tester) async {
     fields.at(8),
     'I feel overwhelmed and would like to talk to someone.',
   );
-  await tester.enterText(fields.at(9), 'Weekday mornings');
 }
 
 Future<void> _chooseVisibleOption(WidgetTester tester, String label) async {

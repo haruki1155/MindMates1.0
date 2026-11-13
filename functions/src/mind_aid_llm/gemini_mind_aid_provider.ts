@@ -1,9 +1,9 @@
 import {GoogleGenAI, ThinkingLevel} from "@google/genai";
 import {MindAidLlmProvider} from "./mind_aid_llm_provider";
-import {MindAidLlmRequest, MindAidLlmResponse} from "./mind_aid_llm_models";
+import {GEMINI_MINDAID_MODEL, MindAidLlmRequest, MindAidLlmResponse} from "./mind_aid_llm_models";
 import {buildMindAidSystemInstruction} from "./mind_aid_system_prompt";
 
-export const GEMINI_MINDAID_MODEL = "gemini-3.8-flash" as const;
+export {GEMINI_MINDAID_MODEL} from "./mind_aid_llm_models";
 
 export class GeminiMindAidProvider implements MindAidLlmProvider {
   constructor(
@@ -12,6 +12,7 @@ export class GeminiMindAidProvider implements MindAidLlmProvider {
   ) {}
 
   async generate(request: MindAidLlmRequest): Promise<MindAidLlmResponse> {
+    if (this.projectId !== "mindmate-staging") throw new Error("gemini_staging_only");
     const client = new GoogleGenAI({vertexai: true, project: this.projectId, location: "global"});
     const contents = [
       ...request.recentTurns.map((turn) => ({

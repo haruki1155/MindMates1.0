@@ -152,7 +152,10 @@ class QuickPatternLegend extends StatelessWidget {
       key: const Key('quick-pattern-legend'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Legend', style: TextStyle(fontWeight: FontWeight.w900)),
+        const Text(
+          'What the colors mean',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
         const SizedBox(height: 6),
         Wrap(
           spacing: 12,

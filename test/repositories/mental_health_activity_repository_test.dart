@@ -8,7 +8,7 @@ void main() {
       () async {
         final repository = MentalHealthActivityRepository(
           dataSource: _FakeActivityDataSource(
-            user: {'dayStreak': 6},
+            user: {'dayStreak': 6, 'lastActivityDateKey': '2026-07-07'},
             activities: [
               _activity('moodCheckIn', hour: 8),
               _activity('mindAidMessage', hour: 9),
@@ -54,6 +54,24 @@ void main() {
         );
       },
     );
+
+    test('current streak drops to 0 after a missed day', () async {
+      final repository = MentalHealthActivityRepository(
+        dataSource: _FakeActivityDataSource(
+          user: {'dayStreak': 6, 'lastActivityDateKey': '2026-07-01'},
+          activities: const [],
+          moods: const [],
+          breathingSessions: const [],
+        ),
+      );
+
+      final summary = await repository.fetchDailySummary(
+        'user_1',
+        date: DateTime(2026, 7, 7, 16),
+      );
+
+      expect(summary.currentStreak, 0);
+    });
 
     test(
       'uses user activities for Secret Chat comments without comments query',

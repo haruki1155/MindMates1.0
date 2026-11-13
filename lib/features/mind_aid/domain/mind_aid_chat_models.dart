@@ -162,6 +162,7 @@ class MindAidChatResponse {
     this.fallbackReason = '',
     this.model,
     this.actions = const [],
+    this.effectiveConversationMode,
   });
 
   final String text;
@@ -180,6 +181,7 @@ class MindAidChatResponse {
   final String fallbackReason;
   final String? model;
   final List<MindAidAction> actions;
+  final String? effectiveConversationMode;
 
   String get primaryIntent => intentOverride?.trim().isNotEmpty == true
       ? intentOverride!.trim()

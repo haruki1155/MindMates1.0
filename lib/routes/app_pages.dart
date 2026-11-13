@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../features/counseling/screens/counselor_chat_screen.dart';
+import '../features/counseling/screens/messages_hub_screen.dart';
 
 import '../features/authentication/screens/forgot_password_screen.dart';
 import '../features/authentication/screens/login_screen.dart';
@@ -49,6 +51,8 @@ class AppPages {
     RouteNames.studentAssessment: (_) => const StudentAssessmentScreen(),
     RouteNames.studentAssessmentComplete: (_) =>
         const StudentAssessmentCompleteScreen(),
+    RouteNames.messages: (_) => const MessagesHubScreen(),
+    RouteNames.counselorChat: (_) => const CounselorChatScreen(),
     RouteNames.home: (_) => const HomeScreen(),
     RouteNames.appointmentCalendar: (_) =>
         const HomeAppointmentCalendarScreen(),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../domain/home_streak_source.dart';
+
 class HomeDashboardData {
   const HomeDashboardData({
     required this.headerTitle,
@@ -326,6 +328,8 @@ class HomeStreakData {
     this.lastActiveAt,
     this.missedDays,
     this.wasReset,
+    this.state = HomeStreakState.notStarted,
+    this.canViewRecap = false,
   });
 
   final String title;
@@ -335,6 +339,10 @@ class HomeStreakData {
   final DateTime? lastActiveAt;
   final int? missedDays;
   final bool? wasReset;
+  final HomeStreakState state;
+
+  /// True when My Mood Journey is available for the milestone recap.
+  final bool canViewRecap;
 }
 
 class HomeServiceData {

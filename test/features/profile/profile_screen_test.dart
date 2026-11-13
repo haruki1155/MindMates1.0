@@ -125,6 +125,38 @@ void main() {
     expect(find.text('--/10'), findsNWidgets(2));
   });
 
+  for (final (key, expected) in [('2000-01-01', '0'), (null, '5')]) {
+    testWidgets('profile day streak shows the effective streak ($expected)', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final provider = UserProvider(_FakeUserRepository())
+        ..setUser(
+          UserModel(
+            id: 'user_1',
+            email: 'leo@example.com',
+            role: 'student',
+            dayStreak: 5,
+            lastActivityDateKey:
+                key ?? StreakCalculator.dateKey(DateTime.now()),
+          ),
+        );
+
+      await tester.pumpWidget(_profileApp(provider));
+      await tester.pump();
+
+      final metric = find.ancestor(
+        of: find.text('Day Streak'),
+        matching: find.byType(Column),
+      );
+      expect(
+        find.descendant(of: metric.first, matching: find.text(expected)),
+        findsOneWidget,
+      );
+    });
+  }
+
   testWidgets('Edit Profile offers a photo upload action', (tester) async {
     final imageBytes = base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
@@ -395,7 +427,8 @@ void main() {
         },
         'interpretation': {
           'userSummary': 'Saved teaching assessment summary.',
-          'overallResponseSummary': 'Saved overall response pattern.',
+          'overallResponseSummary':
+              'Saved overall response pattern. You answered 50 of 50 questions, giving this result high response completeness.',
           'domainSummaries': [
             {
               'domainId': 'teachingWorkloadDemands',
@@ -443,6 +476,7 @@ void main() {
       expect(find.text('Saved teaching assessment summary.'), findsOneWidget);
       expect(find.text('What Your Responses Suggest Overall'), findsOneWidget);
       expect(find.text('Saved overall response pattern.'), findsOneWidget);
+      expect(find.textContaining('response completeness'), findsNothing);
       expect(find.text('Teaching Workload & Role Demands'), findsOneWidget);
       expect(find.text('Saved workload reflection.'), findsOneWidget);
       expect(find.text('Saved focus insight.'), findsOneWidget);

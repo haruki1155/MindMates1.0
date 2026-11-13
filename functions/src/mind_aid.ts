@@ -39,7 +39,7 @@ interface MindAidResponse {
   confidence: number;
   safetyLevel: SafetyLevel;
   source: MindAidSource;
-  model?: "gemini-3.8-flash";
+  model?: MindAidLlmResponse["model"] | "gemini-2.5-flash";
   suggestions: string[];
   actions: MindAidAction[];
   requiresEscalation: boolean;
@@ -544,7 +544,7 @@ async function persistTurn(uid: string, requestId: string, conversationId: strin
       source: response.source, confidence: response.confidence, fallbackReason: response.fallbackReason,
       effectiveConversationMode: response.effectiveConversationMode,
       ...(response.model ? {model: response.model} : {}),
-      actions: response.actions, createdAt: FieldValue.serverTimestamp(),
+      actions: response.actions, suggestions: response.suggestions, createdAt: FieldValue.serverTimestamp(),
     });
     transaction.set(day, {
       dateKey: manilaDateKey(new Date()), turnCount: FieldValue.increment(1),
@@ -580,10 +580,11 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
     return {
       messageId: existing.id, text: data.text, intent: data.primaryIntent ?? "general_support",
       confidence: data.confidence ?? 0, safetyLevel: data.safetyLevel ?? "safeSupport",
-      source: data.source ?? "dialogflow", suggestions: [], actions: data.actions ?? [],
+      source: data.source ?? "dialogflow", suggestions: data.suggestions ?? [], actions: data.actions ?? [],
       requiresEscalation: data.requiresEscalation === true, fallbackReason: data.fallbackReason ?? "",
-      effectiveConversationMode: conversationMode,
-      model: data.model === "gemini-3.8-flash" ? data.model : undefined,
+      effectiveConversationMode: data.effectiveConversationMode ?? conversationMode,
+      // Retain attribution on historical turns while validating current responses.
+      model: data.model === GEMINI_MINDAID_MODEL || data.model === "gemini-2.5-flash" ? data.model : undefined,
     } satisfies MindAidResponse;
   }
 

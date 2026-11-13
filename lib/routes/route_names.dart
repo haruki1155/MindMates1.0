@@ -15,6 +15,8 @@ class RouteNames {
   static const quickAssessmentCategory = '/quick-assessment/category';
   static const studentAssessment = '/student-assessment';
   static const studentAssessmentComplete = '/student-assessment/complete';
+  static const messages = '/messages';
+  static const counselorChat = '/messages/counselor';
   static const home = '/home';
   static const appointmentCalendar = '/home/appointment-calendar';
   static const services = '/services';

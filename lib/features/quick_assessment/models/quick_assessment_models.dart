@@ -107,12 +107,14 @@ class QuickAssessmentQuestion {
   const QuickAssessmentQuestion({
     required this.id,
     required this.prompt,
+    required this.purpose,
     required this.direction,
     required this.options,
   });
 
   final String id;
   final String prompt;
+  final String purpose;
   final QuickQuestionDirection direction;
   final List<QuickAssessmentOption> options;
 }

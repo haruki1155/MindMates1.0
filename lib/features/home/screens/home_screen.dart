@@ -14,12 +14,16 @@ import '../../../providers/notification_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../mood/config/mood_v2_feature_flag.dart';
+import '../../mood/domain/mood_v2_analytics.dart';
+import '../../mood/screens/mood_journey_screen.dart';
+import '../domain/home_streak_source.dart';
 import '../../../repositories/assessment_repository.dart';
 import '../../../repositories/mood_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
 import '../../quick_assessment/models/quick_assessment_models.dart';
 import '../../counseling/screens/pacc_counseling_screen.dart';
+import '../../counseling/widgets/counselor_unread_badges.dart';
 import '../../counseling/widgets/appointment_details_sheet.dart';
 import '../../../models/appointment_model.dart';
 import '../../../models/profile_roles.dart';
@@ -126,7 +130,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   bool _showBottomNav = true;
   bool _isOpeningAssessment = false;
-  bool _isAssessmentBannerDismissed = false;
   _HomeNavDestination _activeDestination = _HomeNavDestination.today;
   String? _loadedBackendUserId;
   String? _loadedAppointmentUserId;
@@ -315,6 +318,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 unreadNotificationCount: unreadNotifications,
                                 onCalendarTap: _openAppointmentCalendar,
                                 onProfileTap: _openProfile,
+                                onViewTodaysMood: _openTodaysMood,
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -322,7 +326,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               delay: 74,
                               child: HomeStreakCard(
                                 data: data.streak,
-                                onTap: _openLogMood,
+                                onTap: () => _onStreakTap(data.streak),
+                                onViewRecap: () => _openMoodJourney(
+                                  milestoneDays: data.streak?.days,
+                                ),
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -348,20 +355,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         ),
                                   );
                                 },
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            HomeAnimatedSection(
-                              delay: 86,
-                              child: HomeWideButton(
-                                label: MoodV2FeatureFlag.actionLabel(
-                                  hasCheckedInToday: context
-                                      .watch<MoodProvider>()
-                                      .hasCheckedInToday,
-                                ),
-                                icon: Icons.add,
-                                assetName: '+.png',
-                                onTap: _openLogMood,
                               ),
                             ),
                             if (appointmentProvider != null) ...[
@@ -393,17 +386,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                             ],
-                            if (!_isAssessmentBannerDismissed) ...[
-                              const SizedBox(height: 14),
-                              HomeAnimatedSection(
-                                delay: 110,
-                                child: HomeAssessmentBanner(
-                                  data: data.assessment,
-                                  onStart: _openStudentAssessment,
-                                  onClose: _dismissAssessmentBanner,
-                                ),
+                            const SizedBox(height: 14),
+                            HomeAnimatedSection(
+                              delay: 110,
+                              child: HomeAssessmentBanner(
+                                data: data.assessment,
+                                onStart: _openStudentAssessment,
                               ),
-                            ],
+                            ),
                             const SizedBox(height: HomeMetrics.sectionGap),
                             HomeAnimatedSection(
                               delay: 120,
@@ -490,8 +480,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final moodProvider = _watchProviderOrNull<MoodProvider>(context);
     final moods = moodProvider?.moods ?? const [];
 
+    final streakSnapshot = user == null
+        ? null
+        : resolveHomeStreak(
+            v2History: _ownedV2History(moodProvider, user.id),
+            storedStreak: user.dayStreak,
+            lastActivityDateKey: user.lastActivityDateKey,
+            activeDateKeys: user.activeDateKeys,
+            now: widget._nowProvider(),
+          );
+    final canViewRecap =
+        MoodV2FeatureFlag.historyRead &&
+        (moodProvider?.isMoodV2ReadEnabled ?? false);
     final backendActivityDates =
-        user?.activeDateKeys
+        streakSnapshot?.activeDateKeys
             .map(_dateFromActivityKey)
             .whereType<DateTime>()
             .toList(growable: false) ??
@@ -533,16 +535,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               nextAvailableAt: base.assessment.nextAvailableAt,
               canTakeAssessment: base.assessment.canTakeAssessment,
             ),
-      streak: user == null
+      streak: user == null || streakSnapshot == null
           ? base.streak
           : HomeStreakData(
               title: 'Day streak',
-              days: user.dayStreak,
-              description: user.dayStreak == 0
-                  ? 'Start with one check-in today'
-                  : 'Keep your wellness rhythm going',
+              days: streakSnapshot.days,
+              description: homeStreakDescription(
+                streakSnapshot.state,
+                days: streakSnapshot.days,
+                canViewRecap: canViewRecap,
+              ),
               linkLabel: '',
               lastActiveAt: user.lastActiveAt,
+              state: streakSnapshot.state,
+              canViewRecap: canViewRecap,
             ),
       days: activityDates.isEmpty
           ? base.days
@@ -563,6 +569,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               actionLabel: 'View Summary',
             ),
     );
+  }
+
+  /// Mood V2 history for Home, only when it is enabled, loaded and belongs
+  /// to the signed-in user (never a previous account's history).
+  MoodHistoryWindow? _ownedV2History(MoodProvider? moodProvider, String uid) {
+    if (!MoodV2FeatureFlag.homeRead || moodProvider == null) return null;
+    if (!moodProvider.isMoodV2ReadEnabled || uid.isEmpty) return null;
+    final history = moodProvider.v2History;
+    if (history == null) return null;
+    return history.events.every((event) => event.userId == uid)
+        ? history
+        : null;
+  }
+
+  void _openMoodJourney({int? milestoneDays}) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MoodJourneyScreen(milestoneDays: milestoneDays),
+      ),
+    );
+  }
+
+  /// Item 40: today's check-ins live in My Mood Journey; without Mood V2
+  /// reading, Log Mood shows today's legacy entry instead.
+  void _openTodaysMood() {
+    final moodProvider = _readProviderOrNull<MoodProvider>(context);
+    if (MoodV2FeatureFlag.historyRead &&
+        (moodProvider?.isMoodV2ReadEnabled ?? false)) {
+      _openMoodJourney();
+    } else {
+      _openLogMood();
+    }
+  }
+
+  void _onStreakTap(HomeStreakData? streak) {
+    final done =
+        streak?.state == HomeStreakState.doneToday ||
+        streak?.state == HomeStreakState.milestone;
+    if (done && (streak?.canViewRecap ?? false)) {
+      _openMoodJourney();
+    } else {
+      _openLogMood();
+    }
   }
 
   DateTime? _dateFromActivityKey(String key) {
@@ -618,7 +667,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case _HomeNavDestination.services:
         _openServices();
       case _HomeNavDestination.messages:
-        Navigator.of(context).pushNamed(RouteNames.mindAid);
+        Navigator.of(context).pushNamed(RouteNames.messages);
       case _HomeNavDestination.appointments:
         setState(() {
           _activeDestination = _HomeNavDestination.appointments;
@@ -644,12 +693,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _openProfile() {
     Navigator.of(context).pushNamed(RouteNames.profile);
-  }
-
-  void _dismissAssessmentBanner() {
-    setState(() {
-      _isAssessmentBannerDismissed = true;
-    });
   }
 
   void _openServices() {
@@ -871,14 +914,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               fontWeight: FontWeight.w900,
             ),
           ),
-          content: Text(
-            'You can take the full assessment up to 2 times in 7 days, with 2 days between attempts. $nextEligibleText',
-            style: TextStyle(
-              color: HomePalette.blueText,
-              fontSize: 13,
-              height: 1.35,
-              fontWeight: FontWeight.w600,
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'You can take the full assessment up to 2 times in 7 days, with 2 school days between attempts. $nextEligibleText',
+                style: const TextStyle(
+                  color: HomePalette.blueText,
+                  fontSize: 13,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'School days are Monday to Friday, so weekends are not counted.',
+              ),
+            ],
           ),
           actions: [
             FilledButton(
@@ -924,11 +977,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ];
 
     final local = date.toLocal();
-    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
-    final minute = local.minute.toString().padLeft(2, '0');
-    final period = local.hour >= 12 ? 'PM' : 'AM';
-
-    return '${weekdays[local.weekday - 1]}, ${months[local.month - 1]} ${local.day}, ${local.year} at $hour:$minute $period';
+    return '${weekdays[local.weekday - 1]}, ${months[local.month - 1]} ${local.day}, ${local.year}';
   }
 
   void _openResource(HomeResourceData resource) {
@@ -1210,7 +1259,7 @@ class _HomeBottomNav extends StatelessWidget {
                   ),
                   _HomeBottomNavItem(
                     icon: Icons.forum_outlined,
-                    label: 'Secret Chat',
+                    label: 'Forum',
                     isActive: active == _HomeNavDestination.secretChat,
                     onTap: () => onDestinationSelected?.call(
                       _HomeNavDestination.secretChat,
@@ -1218,7 +1267,6 @@ class _HomeBottomNav extends StatelessWidget {
                   ),
                   _HomeBottomNavItem(
                     icon: Icons.chat_bubble_outline,
-                    assetName: 'mail.png',
                     label: 'Message',
                     isActive: active == _HomeNavDestination.messages,
                     onTap: () => onDestinationSelected?.call(
@@ -1241,14 +1289,12 @@ class _HomeBottomNavItem extends StatelessWidget {
     required this.label,
     required this.isActive,
     required this.onTap,
-    this.assetName,
   });
 
   final IconData icon;
   final String label;
   final bool isActive;
   final VoidCallback onTap;
-  final String? assetName;
 
   @override
   Widget build(BuildContext context) {
@@ -1275,12 +1321,26 @@ class _HomeBottomNavItem extends StatelessWidget {
                       : null,
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: assetName == null
-                    ? Icon(icon, size: 20, color: HomePalette.text)
-                    : Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: HomeDashboardAssetImage(assetName: assetName!),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Center(
+                      child: Icon(
+                        icon,
+                        size: 20,
+                        color: label == 'Message'
+                            ? const Color(0xFF111827)
+                            : HomePalette.text,
                       ),
+                    ),
+                    if (label == 'Message')
+                      const Positioned(
+                        right: -7,
+                        top: -7,
+                        child: StudentCounselorUnreadBadge(),
+                      ),
+                  ],
+                ),
               ),
               const SizedBox(height: 2),
               FittedBox(

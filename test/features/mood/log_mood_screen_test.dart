@@ -410,6 +410,43 @@ void main() {
     expect(insights.refreshedUsers, ['user_1']);
     expect(writer.levels, [5]);
   });
+  for (final failing in [false, true]) {
+    testWidgets(
+      'confirmed V2 save records one mood check-in for the streak '
+      '(streak sync ${failing ? 'fails' : 'succeeds'})',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(900, 1400));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final users = _FakeUserRepository(throwOnRecordActivity: failing);
+        final writer = _FakeMoodV2Writer();
+        await tester.pumpWidget(
+          _logMoodApp(
+            moodProvider: _RecordingMoodProvider(),
+            userProvider: UserProvider(users)..setUser(_user(id: 'user_1')),
+            insightsProvider: _RecordingInsightsProvider(),
+            moodV2Enabled: true,
+            moodV2Writer: writer,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Great'));
+        await _skipReflection(tester);
+        await tester.pump();
+        await tester.tap(find.text('Save mood entry'));
+        await tester.pumpAndSettle();
+
+        expect(writer.levels, [5]);
+        expect(users.recordedActivities, [
+          ('user_1', UserActivityType.moodCheckIn),
+        ]);
+        expect(
+          find.text('Unable to save this mood entry. Try again.'),
+          findsNothing,
+        );
+      },
+    );
+  }
+
   testWidgets('renders all mood choices and note field', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -597,6 +634,8 @@ void main() {
     expect(find.byType(LogMoodScreen), findsOneWidget);
     expect(find.text("Today's check-in is complete"), findsOneWidget);
     expect(find.text('Exams feel heavy.'), findsOneWidget);
+    expect(find.text('1-day mood streak'), findsOneWidget);
+    expect(find.text('1-day activity streak'), findsNothing);
   });
 
   testWidgets('save failure keeps screen visible and shows error', (
@@ -1417,7 +1456,22 @@ class _FakeMoodV2Writer implements MoodV2EntryWriter {
 }
 
 class _FakeUserRepository extends UserRepository {
+  _FakeUserRepository({this.throwOnRecordActivity = false});
+
+  final bool throwOnRecordActivity;
   String? loadedUid;
+  final List<(String, UserActivityType)> recordedActivities = [];
+
+  @override
+  Future<UserModel?> recordActivity(
+    String uid,
+    UserActivityType type, {
+    DateTime? occurredAt,
+  }) async {
+    recordedActivities.add((uid, type));
+    if (throwOnRecordActivity) throw StateError('streak sync failed');
+    return null;
+  }
 
   @override
   Future<UserModel?> fetchUserProfile(String uid) async {

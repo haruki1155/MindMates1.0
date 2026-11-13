@@ -108,6 +108,19 @@ class _QuestionPage extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    'Why we ask: ${question.purpose}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: QuickAssessmentPalette.secondaryText,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
                 SizedBox(height: provider.currentQuestionIndex == 4 ? 30 : 28),
                 for (final option in question.options) ...[
                   _OptionTile(
@@ -218,7 +231,8 @@ class _QuestionPage extends StatelessWidget {
             content: Text(
               FirebaseErrorMessage.describe(
                 error,
-                fallback: 'Unable to save your quick assessment. Please try again.',
+                fallback:
+                    'Unable to save your quick assessment. Please try again.',
               ),
             ),
           ),
@@ -302,8 +316,8 @@ class _OptionTile extends StatelessWidget {
             highlightColor: QuickAssessmentPalette.primary.withValues(
               alpha: 0.08,
             ),
-            child: SizedBox(
-              height: 52,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 52),
               child: Row(
                 children: [
                   const SizedBox(width: 14),
@@ -320,8 +334,7 @@ class _OptionTile extends StatelessWidget {
                   Expanded(
                     child: Text(
                       option.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
                       style: const TextStyle(
                         color: QuickAssessmentPalette.text,
                         fontSize: 14,
