@@ -3,11 +3,21 @@ import 'package:flutter/material.dart';
 import '../domain/admin_management_models.dart';
 import '../theme/admin_theme.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../services/academic_catalog_parser.dart';
+import '../services/admin_import_file_picker.dart';
+import 'academic_catalog_import_dialog.dart';
 
 /// The administrator's single source of truth for colleges, departments and courses.
 class AcademicStructurePage extends StatefulWidget {
-  const AcademicStructurePage({super.key, required this.repository});
+  const AcademicStructurePage({
+    super.key,
+    required this.repository,
+    this.pickFile = pickAdminImportFile,
+    this.parseFile = parseCatalogFile,
+  });
   final AdminPortalRepository repository;
+  final CatalogFilePicker pickFile;
+  final CatalogFileParser parseFile;
 
   @override
   State<AcademicStructurePage> createState() => _AcademicStructurePageState();
@@ -177,7 +187,21 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
     ],
   );
 
-  List<Widget> _toolbarActions() => const <Widget>[];
+  List<Widget> _toolbarActions() => <Widget>[
+    OutlinedButton.icon(
+      onPressed: () => showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AcademicCatalogImportDialog(
+          repository: widget.repository,
+          pickFile: widget.pickFile,
+          parseFile: widget.parseFile,
+        ),
+      ),
+      icon: const Icon(Icons.upload_file),
+      label: const Text('Import catalogue'),
+    ),
+  ];
 
   Widget _streams({
     required bool wide,
