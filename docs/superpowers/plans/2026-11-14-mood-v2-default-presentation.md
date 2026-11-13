@@ -109,18 +109,32 @@ test('isStagingBuild agrees with the resolved environment', () {
 
 **Interfaces:**
 - Consumes: Task 1's `MoodV2FeatureFlag.presentation` and `enabled`.
-- Produces: the screen takes two injectable inputs — `presentation` (default `MoodV2FeatureFlag.presentation`) and `writerEnabled` (default `MoodV2FeatureFlag.enabled`) — replacing the single `moodV2Enabled`. Task 3 builds on the same two.
+- Produces: the screen takes two injectable inputs — `moodV2Presentation` (default `MoodV2FeatureFlag.presentation`) and `moodV2WriterEnabled` (default `MoodV2FeatureFlag.enabled`) — replacing the single `moodV2Enabled`. Task 3 builds on the same two.
 
-**The classification.** Every current `widget.moodV2Enabled` site, already audited:
+**Naming.** The constructor already has a `moodV2Writer` parameter (line 34) — the injected
+`MoodV2EntryWriter` *implementation*, a test seam, not a flag. To avoid a clash, the two new inputs are
+named `moodV2Presentation` and `moodV2WriterEnabled`, matching the existing `moodV2*` prefix. They
+**replace** `moodV2Enabled`; the 29 existing call sites in `test/features/mood/log_mood_screen_test.dart`
+and `mood_visual_acceptance_test.dart` are updated mechanically (`moodV2Enabled: true` → both true,
+`false` → both false), preserving each test's intent, since every one of them injects a
+`moodV2Writer` fake and therefore means presentation *and* writer today.
 
-| Lines | What it governs | Becomes |
-|---|---|---|
-| 69 (`_offerMoodReflection`), 236 (`v2:`), 311, 320, 330, 350, 367, 375, 392, 413, 417, 429, 438, 442 | layout, styling, compact variants, reflection prompt, history placement, button label | `presentation` |
-| 206 (bottom bar), 238 (`showingResult:`), 271 (confirmation render) | whether the save bar and the result are shown | `presentation` **and** the source-neutral "confirmation shown" state from Task 3 |
-| 289, 295, 304 (legacy loading / error / today's result) | the legacy today's-mood states | shown when the **writer is off** — invert from `!moodV2Enabled` to `!writerEnabled` |
-| 510 (`_loadTodayMood` V2 branch) | which load runs | `writerEnabled`; with the writer off the legacy load must run |
-| 552 (`_saveMoodV2` branch) | the writer | `writerEnabled` |
-| 759 (overnight reset skip) | keeping a V2 draft overnight | `writerEnabled` |
+**The classification.** All **25** occurrences of `moodV2Enabled` in the screen, verified by
+`grep -n` — 2 declaration sites plus 23 behavioural sites:
+
+| Lines | Count | What it governs | Becomes |
+|---|---|---|---|
+| 35, 42 | 2 | the constructor default and the field | **declaration** — split into `moodV2Presentation` and `moodV2WriterEnabled` |
+| 69 (`_offerMoodReflection`), 236 (`v2:`), 311, 320, 330, 350, 367, 375, 392, 413, 417, 429, 438, 442 | 14 | layout, styling, compact variants, reflection prompt, history placement, button label | `moodV2Presentation` |
+| 206 (bottom bar), 238 (`showingResult:`), 271 (confirmation render) | 3 | whether the save bar and the result are shown | `moodV2Presentation` **and** the source-neutral "confirmation shown" state from Task 3 |
+| 289, 295, 304 (legacy loading / error / today's result) | 3 | the legacy today's-mood states | shown when the **writer is off** — invert from `!moodV2Enabled` to `!moodV2WriterEnabled` |
+| 510 (`_loadTodayMood` V2 branch) | 1 | which load runs | `moodV2WriterEnabled`; with the writer off the legacy load must run |
+| 552 (`_saveMoodV2` branch) | 1 | the writer | `moodV2WriterEnabled` |
+| 759 (overnight reset skip) | 1 | keeping a V2 draft overnight | `moodV2WriterEnabled` |
+| | **25** | | |
+
+The injected `moodV2Writer` (line 34) and `moodV2RequestIdGenerator` (line 36) are untouched — they are
+the separately authorized pilot/test override mechanism and must keep working.
 
 - [ ] **Step 1: Write the failing tests** (all with `presentation: true, writerEnabled: false` unless stated):
   - **the ordinary path**: no mood today → the V2 form renders, choosing a mood and saving calls the **legacy** provider save, and `_saveMoodV2` is never reached
@@ -143,7 +157,7 @@ test('isStagingBuild agrees with the resolved environment', () {
 - Test: `test/features/mood/log_mood_screen_test.dart`
 
 **Interfaces:**
-- Consumes: Task 2's `presentation` / `writerEnabled`.
+- Consumes: Task 2's `moodV2Presentation` / `moodV2WriterEnabled`.
 - Produces: `_MoodSaved` takes a source-neutral view (label, timestamp, optional note) instead of requiring a `MoodV2Event`; a single "confirmation shown" state drives lines 206, 238 and 271 regardless of which writer produced it.
 
 - [ ] **Step 1: Write the failing tests** (`presentation: true, writerEnabled: false`):
