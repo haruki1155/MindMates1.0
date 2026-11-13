@@ -10,9 +10,12 @@ import 'package:mind_mates/features/student_assessment/services/student_assessme
 import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
+import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
+import 'package:mind_mates/repositories/auth_repository.dart';
+import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:mind_mates/services/firebase/firestore_service.dart';
@@ -508,25 +511,28 @@ void main() {
   });
 
   group('AssessmentProvider student assessment flow', () {
-    test('keeps a fixed 50-question assessment after elevated answers', () async {
-      final provider = AssessmentProvider(_PreviewAssessmentRepository());
-      provider.startStudentAssessment();
+    test(
+      'keeps a fixed 50-question assessment after elevated answers',
+      () async {
+        final provider = AssessmentProvider(_PreviewAssessmentRepository());
+        provider.startStudentAssessment();
 
-      for (var index = 0; index < 10; index += 1) {
-        await provider.answerCurrentStudentQuestion(LikertAnswer.always);
-      }
-      provider.continueAfterDomainReview();
+        for (var index = 0; index < 10; index += 1) {
+          await provider.answerCurrentStudentQuestion(LikertAnswer.always);
+        }
+        provider.continueAfterDomainReview();
 
-      expect(
-        provider.studentQuestions.any((question) => question.isConditional),
-        isFalse,
-      );
-      expect(provider.studentQuestions, hasLength(50));
-      expect(
-        provider.currentStudentQuestion?.section,
-        AssessmentSection.financial,
-      );
-    });
+        expect(
+          provider.studentQuestions.any((question) => question.isConditional),
+          isFalse,
+        );
+        expect(provider.studentQuestions, hasLength(50));
+        expect(
+          provider.currentStudentQuestion?.section,
+          AssessmentSection.financial,
+        );
+      },
+    );
 
     test('goes back and allows a previous answer to be changed', () {
       final provider = AssessmentProvider(AssessmentRepository())
@@ -594,17 +600,18 @@ void main() {
       );
 
       expect(eligibility.canStart, isFalse);
-      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 4, 9));
+      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 6));
       expect(eligibility.reason, FullAssessmentBlockReason.minimumInterval);
     });
 
-    test('allows full assessment 2 days after one completion', () {
+    test('waits for the next school-day start after an afternoon minimum', () {
       final eligibility = FullAssessmentEligibility.fromCompletedDates(
         completedAt: [DateTime(2026, 7, 1, 9)],
         now: DateTime(2026, 7, 3, 9),
       );
 
-      expect(eligibility.canStart, isTrue);
+      expect(eligibility.canStart, isFalse);
+      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 6));
     });
 
     test('blocks after 2 full assessments in a rolling 7-day period', () {
@@ -614,7 +621,7 @@ void main() {
       );
 
       expect(eligibility.canStart, isFalse);
-      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 6, 9));
+      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 7));
       expect(eligibility.reason, FullAssessmentBlockReason.rollingLimit);
     });
 
@@ -627,10 +634,70 @@ void main() {
         );
 
         expect(eligibility.canStart, isFalse);
-        expect(eligibility.nextEligibleAt, DateTime(2026, 7, 5, 8));
+        expect(eligibility.nextEligibleAt, DateTime(2026, 7, 7));
         expect(eligibility.reason, FullAssessmentBlockReason.minimumInterval);
       },
     );
+
+    test('counts two school days after a Friday completion', () {
+      final eligibility = FullAssessmentEligibility.fromCompletedDates(
+        completedAt: [DateTime(2026, 7, 3, 16, 32)],
+        now: DateTime(2026, 7, 6, 18),
+      );
+      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 7));
+      expect(eligibility.canStart, isFalse);
+    });
+
+    test('weekday afternoon cannot reopen before server minimum interval', () {
+      final eligibility = FullAssessmentEligibility.fromCompletedDates(
+        completedAt: [DateTime(2026, 7, 6, 16, 32)],
+        now: DateTime(2026, 7, 8, 8),
+      );
+      expect(eligibility.canStart, isFalse);
+      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 9));
+    });
+
+    test('never opens a rolling window before the exact seven days end', () {
+      final eligibility = FullAssessmentEligibility.fromCompletedDates(
+        completedAt: [DateTime(2026, 6, 29, 9), DateTime(2026, 7, 1, 9)],
+        now: DateTime(2026, 7, 6, 0),
+      );
+      expect(eligibility.canStart, isFalse);
+      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 7));
+    });
+
+    test('moves a weekend rolling expiry to Monday midnight', () {
+      final eligibility = FullAssessmentEligibility.fromCompletedDates(
+        completedAt: [DateTime(2026, 6, 27, 9), DateTime(2026, 7, 1, 9)],
+        now: DateTime(2026, 7, 3, 9),
+      );
+      expect(eligibility.canStart, isFalse);
+      expect(eligibility.nextEligibleAt, DateTime(2026, 7, 6));
+      expect(eligibility.reason, FullAssessmentBlockReason.rollingLimit);
+    });
+
+    test('keeps advertised Monday deadline after raw rolling expiry', () {
+      final completedAt = [DateTime(2026, 6, 27, 9), DateTime(2026, 7, 1, 9)];
+      for (final now in [
+        DateTime(2026, 7, 4, 8, 59),
+        DateTime(2026, 7, 4, 9),
+        DateTime(2026, 7, 5, 23, 59),
+      ]) {
+        final eligibility = FullAssessmentEligibility.fromCompletedDates(
+          completedAt: completedAt,
+          now: now,
+        );
+        expect(eligibility.canStart, isFalse);
+        expect(eligibility.nextEligibleAt, DateTime(2026, 7, 6));
+      }
+      expect(
+        FullAssessmentEligibility.fromCompletedDates(
+          completedAt: completedAt,
+          now: DateTime(2026, 7, 6),
+        ).canStart,
+        isTrue,
+      );
+    });
   });
 
   group('AssessmentRepository full assessment eligibility', () {
@@ -661,7 +728,7 @@ void main() {
         expect(firestore.orderBy, 'createdAt');
         expect(firestore.descending, isTrue);
         expect(eligibility.canStart, isFalse);
-        expect(eligibility.nextEligibleAt, DateTime(2026, 7, 4, 9));
+        expect(eligibility.nextEligibleAt, DateTime(2026, 7, 6));
         expect(eligibility.reason, FullAssessmentBlockReason.minimumInterval);
       },
     );
@@ -682,17 +749,22 @@ void main() {
       await tester.pump();
 
       expect(provider.studentQuestions, isEmpty);
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('Before you start'), findsOneWidget);
       expect(find.text('Strongly Disagree'), findsNothing);
     });
 
     testWidgets('offers four choices without a neutral option', (tester) async {
       final provider = AssessmentProvider(AssessmentRepository())
-        ..startStudentAssessment();
+        ..startStudentAssessment(userId: 'student-1');
 
       await tester.pumpWidget(
-        ChangeNotifierProvider<AssessmentProvider>.value(
-          value: provider,
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AssessmentProvider>.value(value: provider),
+            ChangeNotifierProvider<AuthProvider>(
+              create: (_) => _AssessmentTestAuthProvider(),
+            ),
+          ],
           child: const MaterialApp(home: StudentAssessmentScreen()),
         ),
       );
@@ -779,6 +851,17 @@ void main() {
       );
     });
   });
+}
+
+class _AssessmentTestAuthProvider extends AuthProvider {
+  _AssessmentTestAuthProvider() : super(_AssessmentTestAuthRepository());
+}
+
+class _AssessmentTestAuthRepository extends AuthRepository {
+  _AssessmentTestAuthRepository() : super(AuthService());
+
+  @override
+  String? get currentUserId => 'student-1';
 }
 
 void _completeAssessment(AssessmentProvider provider) {
