@@ -1010,7 +1010,13 @@ export const saveOrganizationRecord = onCall(async (request) => {
       throw new HttpsError("failed-precondition", "Choose a department under the selected college.");
     }
   }
-  const duplicate = await db.collection(collection).where("normalizedName", "==", name.toLowerCase()).limit(10).get();
+  // Colleges are global, a department is unique within its college, and a COURSE is unique within its
+  // college too — the roster import resolves a course inside a college, so two same-named courses in one
+  // college could not be told apart, whatever departments they sit under. Codes stay collection-wide
+  // unique because the roster import resolves a college or course by name OR code.
+  let nameQuery = db.collection(collection).where("normalizedName", "==", name.toLowerCase());
+  if (kind !== "college") nameQuery = nameQuery.where("collegeId", "==", collegeId);
+  const duplicate = await nameQuery.limit(10).get();
   const duplicateCode = await db.collection(collection).where("normalizedCode", "==", code.toLowerCase()).limit(10).get();
   if (duplicate.docs.some((doc) => doc.id !== recordId) || duplicateCode.docs.some((doc) => doc.id !== recordId)) {
     throw new HttpsError("already-exists", `A ${kind} with that name already exists.`);
@@ -2354,6 +2360,7 @@ export {
   listStudentRoster, listStudentRosterImports, previewStudentRosterImport, resetStudentActivationLock,
   revokeStudentActivation, setStudentRosterStatus, updateStudentRosterRecord,
 } from "./student_roster";
+export {importAcademicCatalog, previewAcademicCatalogImport} from "./academic_import";
 export {activateStudentAccount, activateStudentAccountDev} from "./student_activation";
 export {
   getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
