@@ -112,6 +112,106 @@ void main() {
       expect(result.sheets.single.rows, isEmpty);
     });
 
+    test('a title row above a lone Course header is not the header', () {
+      final result = parseCatalogFile(
+        'cat.csv',
+        _csv('Course Offerings 2026\nCourse\nBSCE\nBSN\n'),
+      );
+      expect(result.fileErrors, isEmpty);
+      expect(result.sheets.single.headers, ['Course']);
+      expect(result.sheets.single.rows, [
+        ['BSCE'],
+        ['BSN'],
+      ]);
+    });
+
+    test('an xlsx title row above the header is discarded', () {
+      final result = parseCatalogFile(
+        'cat.xlsx',
+        _xlsx({
+          'S': [
+            ['College of Engineering'],
+            ['College', 'Course'],
+            ['Eng', 'BSCE'],
+          ],
+        }),
+      );
+      expect(result.fileErrors, isEmpty);
+      expect(result.sheets.single.headers, ['College', 'Course']);
+      expect(result.sheets.single.rows, [
+        ['Eng', 'BSCE'],
+      ]);
+    });
+
+    test('an xlsx header at a non-first row is found', () {
+      final result = parseCatalogFile(
+        'cat.xlsx',
+        _xlsx({
+          'S': [
+            [null],
+            [null],
+            ['Course'],
+            ['BSCE'],
+          ],
+        }),
+      );
+      expect(result.fileErrors, isEmpty);
+      expect(result.sheets.single.headers, ['Course']);
+      expect(result.sheets.single.rows, [
+        ['BSCE'],
+      ]);
+    });
+
+    test('a data row containing College of Arts never beats the header', () {
+      final result = parseCatalogFile(
+        'cat.csv',
+        _csv('Course\nCollege of Arts\nBSN\n'),
+      );
+      expect(result.sheets.single.headers, ['Course']);
+      expect(result.sheets.single.rows, [
+        ['College of Arts'],
+        ['BSN'],
+      ]);
+    });
+
+    test('a CR-only line ending is read', () {
+      final result = parseCatalogFile(
+        'cat.csv',
+        _csv('College,Course\rEng,BSCE\r'),
+      );
+      expect(result.sheets.single.rows, [
+        ['Eng', 'BSCE'],
+      ]);
+    });
+
+    test('an empty sheet in a workbook is reported by name', () {
+      final result = parseCatalogFile(
+        'cat.xlsx',
+        _xlsx({
+          'Good': [
+            ['College'],
+            ['Eng'],
+          ],
+          'Empty': <List<Object?>>[],
+        }),
+      );
+      expect(result.sheets.map((s) => s.name), ['Good']);
+      expect(result.fileErrors.single, contains('Empty'));
+    });
+
+    test('a header-only xlsx gives a sheet with empty rows', () {
+      final result = parseCatalogFile(
+        'cat.xlsx',
+        _xlsx({
+          'S': [
+            ['College', 'Course'],
+          ],
+        }),
+      );
+      expect(result.fileErrors, isEmpty);
+      expect(result.sheets.single.rows, isEmpty);
+    });
+
     test('a zero-byte file is a file error', () {
       expect(parseCatalogFile('cat.csv', []).fileErrors, isNotEmpty);
       expect(parseCatalogFile('cat.xlsx', []).fileErrors, isNotEmpty);

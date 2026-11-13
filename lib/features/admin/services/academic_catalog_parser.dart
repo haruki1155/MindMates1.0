@@ -101,12 +101,14 @@ CatalogParseResult parseCatalogFile(String fileName, List<int> bytes) {
 }
 
 CatalogSheet? _buildSheet(String name, List<List<String>> grid) {
-  // The header is the row, among the first few, that places the most roles
-  // (earliest wins a tie); a row placing none is never a header.
+  // The header is the row, among the first few, with the most EXACT synonym
+  // matches (a title or data row such as "Course Offerings" must not win on a
+  // prefix match); the earliest wins a tie. Prefix matching only applies when
+  // mapping columns of the chosen row.
   var headerAt = -1;
   var best = 0;
   for (var r = 0; r < grid.length && r < _headerSearchDepth; r++) {
-    final found = detectColumns(grid[r]).length;
+    final found = _detect(grid[r], allowPrefix: false).length;
     if (found > best) {
       best = found;
       headerAt = r;
@@ -149,7 +151,13 @@ const _synonyms = <CatalogRole, List<String>>{
 /// are never consulted. Each column and each role is used at most once, and an
 /// exact match is preferred to a prefix match (`Course Code (optional)`).
 /// Headers that cannot be placed are simply absent from the result.
-Map<CatalogRole, int> detectColumns(List<String> headers) {
+Map<CatalogRole, int> detectColumns(List<String> headers) =>
+    _detect(headers, allowPrefix: true);
+
+Map<CatalogRole, int> _detect(
+  List<String> headers, {
+  required bool allowPrefix,
+}) {
   final normalized = [for (final h in headers) _normalize(h)];
   final result = <CatalogRole, int>{};
   final usedColumns = <int>{};
@@ -167,6 +175,7 @@ Map<CatalogRole, int> detectColumns(List<String> headers) {
 
   // Prefix pass: a column takes the free role whose longest synonym begins its
   // header at a word boundary.
+  if (!allowPrefix) return result;
   final wordChar = RegExp(r'[a-z0-9]');
   for (var c = 0; c < normalized.length; c++) {
     if (usedColumns.contains(c)) continue;
