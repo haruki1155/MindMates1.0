@@ -59,7 +59,7 @@ class MindMateBottomNavigation extends StatelessWidget {
               context,
               MindMateNavDestination.secretChat,
               Icons.forum_outlined,
-              'Secret Chat',
+              'Forum',
             ),
             _item(
               context,
@@ -131,7 +131,7 @@ class MindMateBottomNavigation extends StatelessWidget {
       MindMateNavDestination.appointments => RouteNames.home,
       MindMateNavDestination.services => RouteNames.services,
       MindMateNavDestination.secretChat => RouteNames.secretChat,
-      MindMateNavDestination.message => RouteNames.mindAid,
+      MindMateNavDestination.message => RouteNames.messages,
     };
     Navigator.of(context).pushNamedAndRemoveUntil(
       route,

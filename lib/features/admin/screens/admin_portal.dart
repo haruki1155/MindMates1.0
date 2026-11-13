@@ -1,4 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'counselor_messages_page.dart';
+import '../../counseling/widgets/counselor_unread_badges.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/admin_inquiry_model.dart';
@@ -53,6 +55,7 @@ enum AdminPortalPage {
   notifications,
   availability,
   inquiries,
+  counselorMessages,
   assessments,
   profile,
 }
@@ -70,6 +73,7 @@ extension on AdminPortalPage {
     AdminPortalPage.notifications => 'Notifications',
     AdminPortalPage.availability => 'Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
+    AdminPortalPage.counselorMessages => 'Counselor Messages',
     AdminPortalPage.assessments => 'Assessment Results',
     AdminPortalPage.profile => 'Profile',
   };
@@ -93,6 +97,7 @@ extension on AdminPortalPage {
     AdminPortalPage.notifications => Icons.notifications_outlined,
     AdminPortalPage.availability => Icons.storefront_outlined,
     AdminPortalPage.inquiries => Icons.chat_bubble_outline_rounded,
+    AdminPortalPage.counselorMessages => Icons.forum_outlined,
     AdminPortalPage.assessments => Icons.assignment_outlined,
     AdminPortalPage.profile => Icons.account_circle_outlined,
   };
@@ -537,6 +542,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       controller: _scheduleController,
     ),
     AdminPortalPage.inquiries => _InquiriesPage(repository: _repository),
+    AdminPortalPage.counselorMessages => const CounselorMessagesPage(),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
   };
@@ -573,6 +579,7 @@ class _Nav extends StatelessWidget {
     AdminPortalPage.assessments => accessRole.canAccessClinicalData,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
+    AdminPortalPage.counselorMessages => accessRole == AccessRole.counselor,
     AdminPortalPage.appointments =>
       accessRole.canUsePortal || accessRole == AccessRole.admin,
     _ => accessRole.canUsePortal || accessRole == AccessRole.admin,
@@ -592,6 +599,7 @@ class _Nav extends StatelessWidget {
         AdminPortalPage.cases,
         AdminPortalPage.followUps,
         AdminPortalPage.inquiries,
+        AdminPortalPage.counselorMessages,
       ]),
       const _NavSection('Insights', [
         AdminPortalPage.assessments,
@@ -741,6 +749,10 @@ class _Nav extends StatelessWidget {
                                     : AdminColors.muted,
                                 size: 21,
                               ),
+                              trailing:
+                                  item == AdminPortalPage.counselorMessages
+                                  ? const CounselorInboxUnreadBadge()
+                                  : null,
                               title: Text(
                                 item.workspaceLabel,
                                 style: const TextStyle(

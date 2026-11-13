@@ -15,7 +15,7 @@ class AppBootstrap extends StatefulWidget {
     super.key,
     required this.initializer,
     required this.child,
-    this.timeout = const Duration(seconds: 15),
+    this.timeout = const Duration(seconds: 45),
   });
 
   final AppInitializer initializer;
@@ -46,7 +46,9 @@ class _AppBootstrapState extends State<AppBootstrap> {
       if (mounted) {
         setState(() => _ready = true);
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      debugPrint('MindMate bootstrap failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
       if (mounted) setState(() => _error = error);
     }
   }

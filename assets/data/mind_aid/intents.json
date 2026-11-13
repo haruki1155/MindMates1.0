@@ -1,1911 +1,2231 @@
 ﻿{
-    "version":  1,
-    "sourceDatasetId":  "mindmate_supportive_guidance_dataset",
-    "sourceVersion":  "1.0.1",
-    "records":  [
-                    {
-                        "id":  "student_academic_stress_001",
-                        "intent":  "academic_stress",
-                        "category":  "academic_wellbeing",
-                        "keywords":  [
-                                         "academic stress",
-                                         "academic",
-                                         "stress",
-                                         "Academic Stress",
-                                         "academic_wellbeing",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "academic stress",
-                                        "Academic Stress"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "It sounds like you\u0027re carrying a lot of academic responsibilities right now, and that can be exhausting. Many students experience stress when balancing assignments, projects, deadlines, and personal responsibilities. Remember that feeling stressed does not mean you are incapable-it often means you are trying your best to meet important goals. Take things one step at a time, celebrate even small accomplishments, and give yourself credit for the effort you have already made. Progress is built through consistent effort, not perfection."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_academic_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_examination_anxiety_002",
-                        "intent":  "examination_anxiety",
-                        "category":  "academic_wellbeing",
-                        "keywords":  [
-                                         "examination anxiety",
-                                         "examination",
-                                         "anxiety",
-                                         "Examination Anxiety",
-                                         "academic_wellbeing",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "examination anxiety",
-                                        "Examination Anxiety"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Feeling nervous before an examination is completely normal. In fact, many students experience anxiety because they care about doing well and achieving their goals. While exams may feel overwhelming, they do not define your intelligence, worth, or future success. Focus on the preparation you have already completed and remind yourself that doing your best is enough. Trust in the effort you have invested and approach the examination one question at a time."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_academic_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_financial_stress_004",
-                        "intent":  "financial_stress",
-                        "category":  "general_support",
-                        "keywords":  [
-                                         "financial stress",
-                                         "financial",
-                                         "stress",
-                                         "Financial Stress",
-                                         "general_support",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "financial stress",
-                                        "Financial Stress"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Financial concerns can create significant pressure and uncertainty, and it is understandable if these challenges are affecting your peace of mind. Remember that financial difficulties are circumstances you are experiencing-they do not define your value, potential, or future. Many people face financial struggles at different stages of life. Focus on the steps you can take today, seek support when needed, and remind yourself that difficult situations can improve over time."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_general_support"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_lack_of_motivation_005",
-                        "intent":  "lack_of_motivation",
-                        "category":  "general_support",
-                        "keywords":  [
-                                         "lack of motivation",
-                                         "lack",
-                                         "motivation",
-                                         "Lack of Motivation",
-                                         "general_support",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "lack of motivation",
-                                        "Lack of Motivation"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "There are days when motivation feels difficult to find, and that\u0027s completely okay. Motivation naturally rises and falls, especially during periods of stress, fatigue, or emotional strain. You do not have to feel motivated all the time to make progress. Sometimes, simply taking one small step forward is already an accomplishment. Be patient with yourself and remember that consistency often matters more than motivation."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_general_support"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_loneliness_007",
-                        "intent":  "loneliness",
-                        "category":  "social_relationships",
-                        "keywords":  [
-                                         "loneliness",
-                                         "Loneliness",
-                                         "social_relationships",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "Loneliness"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Feeling lonely can be difficult, and it is important to know that your feelings are valid. Loneliness does not mean something is wrong with you-it simply reflects a human need for connection and belonging. While it may feel isolating right now, meaningful connections often begin through small conversations, shared experiences, or reaching out to trusted individuals. You do not have to carry everything on your own."
-                                      ],
-                        "copingSteps":  [
-                                            "reach_one_person"
-                                        ],
-                        "recommendations":  [
-                                                "resource_social_relationships"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_social_isolation_008",
-                        "intent":  "social_isolation",
-                        "category":  "social_relationships",
-                        "keywords":  [
-                                         "social isolation",
-                                         "social",
-                                         "isolation",
-                                         "Social Isolation",
-                                         "social_relationships",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "social isolation",
-                                        "Social Isolation"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Spending long periods feeling disconnected from others can affect emotional well-being. Human beings naturally seek connection, support, and understanding from people around them. Even small interactions with friends, family members, classmates, or colleagues can positively impact emotional health. Remember that reaching out is a sign of strength, not weakness."
-                                      ],
-                        "copingSteps":  [
-                                            "reach_one_person"
-                                        ],
-                        "recommendations":  [
-                                                "resource_social_relationships"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_self_doubt_010",
-                        "intent":  "self_doubt",
-                        "category":  "self_worth_and_confidence",
-                        "keywords":  [
-                                         "self-doubt",
-                                         "self",
-                                         "doubt",
-                                         "Self-Doubt",
-                                         "self_worth_and_confidence",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "Self-Doubt"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Many people experience moments where they question their abilities, decisions, or potential. Experiencing self-doubt does not mean you are incapable-it often means you care deeply about doing well. Try to remember the challenges you have already overcome and the progress you have made so far. Growth comes through learning and persistence, not through perfection. Trust yourself and give yourself the same kindness you would offer a friend."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_self_worth_and_confidence"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_fear_of_failure_011",
-                        "intent":  "fear_of_failure",
-                        "category":  "self_worth_and_confidence",
-                        "keywords":  [
-                                         "fear of failure",
-                                         "fear",
-                                         "failure",
-                                         "Fear of Failure",
-                                         "self_worth_and_confidence",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "fear of failure",
-                                        "Fear of Failure"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "It can be frightening to think about making mistakes or not meeting expectations, especially when something is important to you. However, every successful person has experienced setbacks and challenges along the way. Failure does not define your abilities-it provides opportunities to learn, improve, and grow. Instead of focusing on what might go wrong, try to recognize the effort you are making and the lessons you are gaining from every experience."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_self_worth_and_confidence"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_workplace_stress_012",
-                        "intent":  "workplace_stress",
-                        "category":  "general_support",
-                        "keywords":  [
-                                         "workplace stress",
-                                         "workplace",
-                                         "stress",
-                                         "Workplace Stress",
-                                         "general_support",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "workplace stress",
-                                        "Workplace Stress"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Managing responsibilities at work can sometimes feel exhausting, especially when deadlines, expectations, and multiple tasks compete for your attention. It is okay to acknowledge when you feel stressed. Remember that your value is not measured solely by productivity. Taking care of yourself and recognizing your accomplishments are important parts of maintaining balance and well-being."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_general_support"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_burnout_013",
-                        "intent":  "burnout",
-                        "category":  "stress_and_recovery",
-                        "keywords":  [
-                                         "burnout",
-                                         "Burnout",
-                                         "stress_and_recovery",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "Burnout"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "You may have been giving so much of your time and energy to your responsibilities that you have forgotten to care for yourself. Feeling emotionally drained or exhausted can be a sign that your mind and body need rest. Taking a break does not mean you are weak or unproductive-it means you are taking care of yourself so you can continue moving forward in a healthier way."
-                                      ],
-                        "copingSteps":  [
-                                            "body_check",
-                                            "rest_plan"
-                                        ],
-                        "recommendations":  [
-                                                "resource_stress_and_recovery"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_difficulty_sleeping_014",
-                        "intent":  "difficulty_sleeping",
-                        "category":  "stress_and_recovery",
-                        "keywords":  [
-                                         "difficulty sleeping",
-                                         "difficulty",
-                                         "sleeping",
-                                         "Difficulty Sleeping",
-                                         "stress_and_recovery",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "difficulty sleeping",
-                                        "Difficulty Sleeping"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Sleep difficulties can be frustrating, especially when your mind feels busy with worries or responsibilities. Remember that your body and mind need adequate rest to function at their best. Establishing healthy routines and creating moments of relaxation before bedtime may help improve sleep quality over time."
-                                      ],
-                        "copingSteps":  [
-                                            "body_check",
-                                            "rest_plan"
-                                        ],
-                        "recommendations":  [
-                                                "resource_stress_and_recovery"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_fatigue_015",
-                        "intent":  "fatigue",
-                        "category":  "stress_and_recovery",
-                        "keywords":  [
-                                         "fatigue",
-                                         "Fatigue",
-                                         "stress_and_recovery",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "Fatigue"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Feeling constantly tired can affect your energy, concentration, and motivation. Sometimes fatigue is your body\u0027s way of telling you that it needs rest and recovery. Allow yourself time to recharge and remember that taking care of your well-being is an important responsibility, not a luxury."
-                                      ],
-                        "copingSteps":  [
-                                            "body_check",
-                                            "rest_plan"
-                                        ],
-                        "recommendations":  [
-                                                "resource_stress_and_recovery"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_feeling_angry_017",
-                        "intent":  "feeling_angry",
-                        "category":  "emotional_wellbeing",
-                        "keywords":  [
-                                         "feeling angry",
-                                         "feeling",
-                                         "angry",
-                                         "Feeling Angry",
-                                         "emotional_wellbeing",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "feeling angry",
-                                        "Feeling Angry"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Anger is a normal emotional response, especially when something feels unfair, frustrating, or hurtful. What matters is not whether you feel angry but how you respond to that feeling. Taking time to understand what triggered your emotions can help you express yourself more calmly and constructively."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_emotional_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_worry_about_the_future_019",
-                        "intent":  "worry_about_the_future",
-                        "category":  "emotional_wellbeing",
-                        "keywords":  [
-                                         "worry about the future",
-                                         "worry",
-                                         "about",
-                                         "the",
-                                         "future",
-                                         "Worry About the Future",
-                                         "emotional_wellbeing",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "worry about the future",
-                                        "Worry About the Future"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Thinking about the future can sometimes feel overwhelming, especially when many things seem uncertain. While you may not have all the answers today, focusing on the actions you can take right now can help reduce unnecessary worry. Trust that each step you take contributes to your growth and future opportunities."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_emotional_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_relationship_problems_020",
-                        "intent":  "relationship_problems",
-                        "category":  "social_relationships",
-                        "keywords":  [
-                                         "relationship problems",
-                                         "relationship",
-                                         "problems",
-                                         "Relationship Problems",
-                                         "social_relationships",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "relationship problems",
-                                        "Relationship Problems"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Challenges in relationships can be emotionally difficult because relationships often play an important role in our lives. Misunderstandings and disagreements can happen, but healthy communication, patience, and mutual respect can help strengthen connections. Remember to prioritize both your emotional well-being and the well-being of others."
-                                      ],
-                        "copingSteps":  [
-                                            "reach_one_person"
-                                        ],
-                        "recommendations":  [
-                                                "resource_social_relationships"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_low_self_esteem_023",
-                        "intent":  "low_self_esteem",
-                        "category":  "self_worth_and_confidence",
-                        "keywords":  [
-                                         "low self-esteem",
-                                         "low",
-                                         "self",
-                                         "esteem",
-                                         "Low Self-Esteem",
-                                         "self_worth_and_confidence",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "low self-esteem",
-                                        "Low Self-Esteem"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "It can be difficult when you focus more on your weaknesses than your strengths. Remember that every person has unique abilities, qualities, and accomplishments. Building confidence takes time, patience, and self-compassion. Be kind to yourself and acknowledge the progress you have made."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_self_worth_and_confidence"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_academic_burnout_025",
-                        "intent":  "academic_burnout",
-                        "category":  "academic_wellbeing",
-                        "keywords":  [
-                                         "academic burnout",
-                                         "academic",
-                                         "burnout",
-                                         "Academic Burnout",
-                                         "academic_wellbeing",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "academic burnout",
-                                        "Academic Burnout"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Constant academic demands can sometimes leave you feeling exhausted and disconnected from your studies. If school tasks have become difficult to manage, remember that taking care of your well-being is an important part of academic success. Rest and balance can help restore energy and motivation."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_academic_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_stress_from_deadlines_027",
-                        "intent":  "stress_from_deadlines",
-                        "category":  "academic_wellbeing",
-                        "keywords":  [
-                                         "stress from deadlines",
-                                         "stress",
-                                         "from",
-                                         "deadlines",
-                                         "Stress From Deadlines",
-                                         "academic_wellbeing",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "stress from deadlines",
-                                        "Stress From Deadlines"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Deadlines can create pressure, especially when several responsibilities need to be completed within a limited period. Try focusing on one task at a time and recognizing each step of progress. Small accomplishments can help reduce feelings of overwhelm."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_academic_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_adjustment_difficulties_028",
-                        "intent":  "adjustment_difficulties",
-                        "category":  "general_support",
-                        "keywords":  [
-                                         "adjustment difficulties",
-                                         "adjustment",
-                                         "difficulties",
-                                         "Adjustment Difficulties",
-                                         "general_support",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "adjustment difficulties",
-                                        "Adjustment Difficulties"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Adapting to new environments, responsibilities, or life changes can take time. It is normal to feel uncertain while adjusting. Be patient with yourself and remember that growth often happens gradually as you gain experience and confidence."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_general_support"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_feeling_nervous_029",
-                        "intent":  "feeling_nervous",
-                        "category":  "emotional_wellbeing",
-                        "keywords":  [
-                                         "feeling nervous",
-                                         "feeling",
-                                         "nervous",
-                                         "Feeling Nervous",
-                                         "emotional_wellbeing",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "feeling nervous",
-                                        "Feeling Nervous"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Feeling nervous often means that something is important to you. Whether it is a presentation, interview, examination, or new experience, nervousness is a common and natural reaction. Trust in your preparation and remind yourself that confidence develops through experience."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_emotional_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_emotional_exhaustion_031",
-                        "intent":  "emotional_exhaustion",
-                        "category":  "stress_and_recovery",
-                        "keywords":  [
-                                         "emotional exhaustion",
-                                         "emotional",
-                                         "exhaustion",
-                                         "Emotional Exhaustion",
-                                         "stress_and_recovery",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "emotional exhaustion",
-                                        "Emotional Exhaustion"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Emotional exhaustion can occur when you have been carrying stress and responsibilities for a long period without enough opportunities to rest. Give yourself permission to slow down, reflect, and reconnect with activities that help you feel supported and refreshed."
-                                      ],
-                        "copingSteps":  [
-                                            "body_check",
-                                            "rest_plan"
-                                        ],
-                        "recommendations":  [
-                                                "resource_stress_and_recovery"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_feeling_pressured_032",
-                        "intent":  "feeling_pressured",
-                        "category":  "self_worth_and_confidence",
-                        "keywords":  [
-                                         "feeling pressured",
-                                         "feeling",
-                                         "pressured",
-                                         "Feeling Pressured",
-                                         "self_worth_and_confidence",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "feeling pressured",
-                                        "Feeling Pressured"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Pressure from expectations can sometimes feel overwhelming. While goals and responsibilities are important, it is equally important to recognize your limits and allow yourself room to learn and grow. You do not have to be perfect to be successful."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_self_worth_and_confidence"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "student_general_emotional_support_034",
-                        "intent":  "general_emotional_support",
-                        "category":  "general_support",
-                        "keywords":  [
-                                         "general emotional support",
-                                         "general",
-                                         "emotional",
-                                         "support",
-                                         "General Emotional Support",
-                                         "general_support",
-                                         "supportive_guidance"
-                                     ],
-                        "phrases":  [
-                                        "general emotional support",
-                                        "General Emotional Support"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Whatever you may be experiencing right now, your feelings are valid and deserve attention. Every person encounters challenges, setbacks, and moments of uncertainty. Taking time to understand your emotions and care for your well-being is an important act of self-care. Remember that growth takes time, and every small step toward understanding yourself is meaningful progress."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_general_support"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "workplace_work_overload_001",
-                        "intent":  "work_overload",
-                        "category":  "workplace_wellbeing",
-                        "keywords":  [
-                                         "work overload",
-                                         "work",
-                                         "overload",
-                                         "Work Overload",
-                                         "workplace_wellbeing",
-                                         "mindmate_says"
-                                     ],
-                        "phrases":  [
-                                        "work overload",
-                                        "Work Overload"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "It seems like you\u0027re carrying many responsibilities right now. When tasks continue to pile up, it\u0027s normal to feel mentally and physically exhausted. Remember that productivity is not measured by how much you can do at once, but by how consistently you can move forward. Taking one task at a time and recognizing your progress can help reduce feelings of overwhelm."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_workplace_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "workplace_tight_deadlines_002",
-                        "intent":  "tight_deadlines",
-                        "category":  "workplace_wellbeing",
-                        "keywords":  [
-                                         "tight deadlines",
-                                         "tight",
-                                         "deadlines",
-                                         "Tight Deadlines",
-                                         "workplace_wellbeing",
-                                         "mindmate_says"
-                                     ],
-                        "phrases":  [
-                                        "tight deadlines",
-                                        "Tight Deadlines"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Deadlines can create pressure, especially when multiple responsibilities compete for your attention. While it may feel urgent to accomplish everything immediately, remember that steady progress is often more effective than rushing. Every small step completed today contributes to your overall success."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_workplace_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "workplace_feeling_mentally_drained_003",
-                        "intent":  "feeling_mentally_drained",
-                        "category":  "workplace_wellbeing",
-                        "keywords":  [
-                                         "feeling mentally drained",
-                                         "feeling",
-                                         "mentally",
-                                         "drained",
-                                         "Feeling Mentally Drained",
-                                         "workplace_wellbeing",
-                                         "mindmate_says"
-                                     ],
-                        "phrases":  [
-                                        "feeling mentally drained",
-                                        "Feeling Mentally Drained"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Constant demands can sometimes leave you feeling emotionally and mentally exhausted. Feeling drained does not mean you are incapable-it may simply be a sign that your mind and body need time to recover. Rest is not a reward for productivity; it is part of maintaining it."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_workplace_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "workplace_pressure_to_perform_004",
-                        "intent":  "pressure_to_perform",
-                        "category":  "workplace_wellbeing",
-                        "keywords":  [
-                                         "pressure to perform",
-                                         "pressure",
-                                         "perform",
-                                         "Pressure to Perform",
-                                         "workplace_wellbeing",
-                                         "mindmate_says"
-                                     ],
-                        "phrases":  [
-                                        "pressure to perform",
-                                        "Pressure to Perform"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Wanting to perform well is understandable, especially when you care about your responsibilities. However, perfection is not required for growth. Focus on doing your best rather than expecting yourself to be flawless. Progress is built through effort, learning, and continuous improvement."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_workplace_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "workplace_difficult_co_workers_005",
-                        "intent":  "difficult_co_workers",
-                        "category":  "workplace_wellbeing",
-                        "keywords":  [
-                                         "difficult co-workers",
-                                         "difficult",
-                                         "workers",
-                                         "Difficult Co-workers",
-                                         "workplace_wellbeing",
-                                         "mindmate_says"
-                                     ],
-                        "phrases":  [
-                                        "difficult co-workers",
-                                        "Difficult Co-workers"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Working with different personalities can sometimes be challenging. Not every interaction will be easy, but maintaining professionalism, patience, and respectful communication can help create healthier workplace relationships. Remember that you cannot control others, but you can control how you respond."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_workplace_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "workplace_learning_new_responsibilities_008",
-                        "intent":  "learning_new_responsibilities",
-                        "category":  "workplace_wellbeing",
-                        "keywords":  [
-                                         "learning new responsibilities",
-                                         "learning",
-                                         "new",
-                                         "responsibilities",
-                                         "Learning New Responsibilities",
-                                         "workplace_wellbeing",
-                                         "mindmate_says"
-                                     ],
-                        "phrases":  [
-                                        "learning new responsibilities",
-                                        "Learning New Responsibilities"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Starting new responsibilities can feel overwhelming at first. Every expert was once a beginner. Allow yourself time to learn, ask questions, and make mistakes along the way. Growth often happens outside your comfort zone."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_workplace_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "workplace_fear_of_making_mistakes_009",
-                        "intent":  "fear_of_making_mistakes",
-                        "category":  "workplace_wellbeing",
-                        "keywords":  [
-                                         "fear of making mistakes",
-                                         "fear",
-                                         "making",
-                                         "mistakes",
-                                         "Fear of Making Mistakes",
-                                         "workplace_wellbeing",
-                                         "mindmate_says"
-                                     ],
-                        "phrases":  [
-                                        "fear of making mistakes",
-                                        "Fear of Making Mistakes"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Making mistakes can feel uncomfortable, especially when you want to perform well. However, mistakes are often opportunities to gain experience and improve future decisions. What matters most is your willingness to learn and continue moving forward."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_workplace_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "workplace_burnout_warning_010",
-                        "intent":  "burnout_warning",
-                        "category":  "workplace_wellbeing",
-                        "keywords":  [
-                                         "burnout warning",
-                                         "burnout",
-                                         "warning",
-                                         "Burnout Warning",
-                                         "workplace_wellbeing",
-                                         "mindmate_says"
-                                     ],
-                        "phrases":  [
-                                        "burnout warning",
-                                        "Burnout Warning"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "It sounds like you\u0027ve been giving a lot of your energy for a long time. Burnout can occur when stress becomes chronic and difficult to manage. If possible, consider creating space for rest, reflection, and activities that help you recharge. Taking care of yourself is an important part of sustaining your ability to help others."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_workplace_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "workplace_lack_of_work_life_balance_011",
-                        "intent":  "lack_of_work_life_balance",
-                        "category":  "workplace_wellbeing",
-                        "keywords":  [
-                                         "lack of work-life balance",
-                                         "lack",
-                                         "work",
-                                         "life",
-                                         "balance",
-                                         "Lack of Work-Life Balance",
-                                         "workplace_wellbeing",
-                                         "mindmate_says"
-                                     ],
-                        "phrases":  [
-                                        "lack of work-life balance",
-                                        "Lack of Work-Life Balance"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Balancing work, personal responsibilities, and self-care can be challenging. While responsibilities are important, your well-being matters too. Creating time for rest, hobbies, family, and personal interests can help support both productivity and emotional wellness."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_workplace_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "anxiety_panic_attack_001",
-                        "intent":  "panic_attack_or_sudden_intense_fear",
-                        "category":  "acute_anxiety",
-                        "keywords":  [
-                                         "panic attack",
-                                         "canâ€™t breathe",
-                                         "cant breathe",
-                                         "heart racing",
-                                         "sudden fear",
-                                         "dizzy",
-                                         "panic",
-                                         "Panic Attack or Sudden Intense Fear",
-                                         "acute_anxiety",
-                                         "grounding_support"
-                                     ],
-                        "phrases":  [
-                                        "panic attack",
-                                        "canâ€™t breathe",
-                                        "cant breathe",
-                                        "heart racing",
-                                        "sudden fear",
-                                        "Panic Attack or Sudden Intense Fear"
-                                    ],
-                        "severity":  "medium",
-                        "riskFlags":  [
-                                          "acute_anxiety"
-                                      ],
-                        "responses":  [
-                                          "A sudden wave of panic can feel scary, but it can pass. Try slowing your breathing, noticing five things around you, and sitting somewhere safe. If chest pain, fainting, injury, or severe physical symptoms are present, seek medical help immediately."
-                                      ],
-                        "copingSteps":  [
-                                            "reach_one_person",
-                                            "two_minute_breathing",
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_acute_anxiety",
-                                                "pacc-counseling"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "Who is one safe person you could reach out to today?",
-                                                  "Would you prefer support from a friend, family member, or counselor?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "mood_persistent_low_mood_001",
-                        "intent":  "persistent_low_mood_or_depression_concern",
-                        "category":  "mood_support",
-                        "keywords":  [
-                                         "depressed",
-                                         "depression",
-                                         "low mood",
-                                         "no interest",
-                                         "empty",
-                                         "worthless",
-                                         "sad for weeks",
-                                         "Persistent Low Mood or Depression Concern",
-                                         "mood_support",
-                                         "professional_referral_support"
-                                     ],
-                        "phrases":  [
-                                        "low mood",
-                                        "no interest",
-                                        "sad for weeks",
-                                        "Persistent Low Mood or Depression Concern"
-                                    ],
-                        "severity":  "medium",
-                        "riskFlags":  [
-                                          "depression_concern"
-                                      ],
-                        "responses":  [
-                                          "Feeling low for a long time can be heavy, especially when it affects sleep, motivation, appetite, or daily functioning. You deserve support. Consider talking to a counselor, mental-health professional, or trusted university support office."
-                                      ],
-                        "copingSteps":  [
-                                            "reach_support_service",
-                                            "body_check"
-                                        ],
-                        "recommendations":  [
-                                                "resource_mood_support",
-                                                "pacc-counseling"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "Would you like help thinking through what to tell a counselor?",
-                                                  "Has this started affecting your daily routine or safety?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "trauma_violence_trauma_response_001",
-                        "intent":  "trauma_response",
-                        "category":  "trauma_support",
-                        "keywords":  [
-                                         "trauma",
-                                         "flashback",
-                                         "triggered",
-                                         "bad memory",
-                                         "ptsd",
-                                         "violence",
-                                         "assault",
-                                         "Trauma Response",
-                                         "trauma_support",
-                                         "trauma_informed_support"
-                                     ],
-                        "phrases":  [
-                                        "bad memory",
-                                        "Trauma Response"
-                                    ],
-                        "severity":  "medium",
-                        "riskFlags":  [
-                                          "trauma"
-                                      ],
-                        "responses":  [
-                                          "What happened to you matters, and your reaction is valid. You do not have to explain everything at once. Try to focus on safety, grounding, and reaching out to a trusted person or professional support when you are ready."
-                                      ],
-                        "copingSteps":  [
-                                            "reach_support_service",
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_trauma_support",
-                                                "pacc-counseling"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "Would you like help thinking through what to tell a counselor?",
-                                                  "Has this started affecting your daily routine or safety?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "social_bullying_cyberbullying_001",
-                        "intent":  "bullying_or_cyberbullying",
-                        "category":  "social_safety",
-                        "keywords":  [
-                                         "bullying",
-                                         "cyberbullying",
-                                         "teased",
-                                         "humiliated",
-                                         "online harassment",
-                                         "rumors",
-                                         "excluded",
-                                         "Bullying or Cyberbullying",
-                                         "social_safety",
-                                         "support_and_reporting_guidance"
-                                     ],
-                        "phrases":  [
-                                        "online harassment",
-                                        "Bullying or Cyberbullying"
-                                    ],
-                        "severity":  "medium",
-                        "riskFlags":  [
-                                          "bullying"
-                                      ],
-                        "responses":  [
-                                          "Being bullied or humiliated can deeply affect your well-being. This is not your fault. Save evidence when it is safe, avoid responding to harmful messages, and reach out to a trusted teacher, adviser, supervisor, or support office."
-                                      ],
-                        "copingSteps":  [
-                                            "reach_one_person",
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_social_safety",
-                                                "pacc-counseling"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "Who is one safe person you could reach out to today?",
-                                                  "Would you prefer support from a friend, family member, or counselor?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "coping_substance_use_concern_001",
-                        "intent":  "substance_use_as_coping",
-                        "category":  "coping_and_substance_use",
-                        "keywords":  [
-                                         "drinking to cope",
-                                         "alcohol",
-                                         "drugs",
-                                         "substance",
-                                         "using to forget",
-                                         "addiction",
-                                         "Substance Use as Coping",
-                                         "coping_and_substance_use",
-                                         "supportive_referral"
-                                     ],
-                        "phrases":  [
-                                        "drinking to cope",
-                                        "using to forget",
-                                        "Substance Use as Coping"
-                                    ],
-                        "severity":  "medium",
-                        "riskFlags":  [
-                                          "substance_use"
-                                      ],
-                        "responses":  [
-                                          "Using alcohol or substances to cope can feel like temporary relief, but it can make stress and safety risks worse over time. Consider speaking with a counselor, healthcare provider, or trusted support service for safer coping options."
-                                      ],
-                        "copingSteps":  [
-                                            "reach_support_service",
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_coping_and_substance_use",
-                                                "pacc-counseling"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "Would you like help thinking through what to tell a counselor?",
-                                                  "Has this started affecting your daily routine or safety?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "academic_time_management_001",
-                        "intent":  "time_management_difficulty",
-                        "category":  "academic_wellbeing",
-                        "keywords":  [
-                                         "time management",
-                                         "late tasks",
-                                         "canâ€™t manage time",
-                                         "cant manage time",
-                                         "schedule",
-                                         "prioritize",
-                                         "Time Management Difficulty",
-                                         "academic_wellbeing",
-                                         "skill_building_support"
-                                     ],
-                        "phrases":  [
-                                        "time management",
-                                        "late tasks",
-                                        "canâ€™t manage time",
-                                        "cant manage time",
-                                        "Time Management Difficulty"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Managing time is easier when tasks are visible and small. Try listing your tasks, choosing the most urgent one, and working in short focused blocks with breaks. Progress matters more than doing everything perfectly at once."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_academic_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "academic_procrastination_001",
-                        "intent":  "procrastination_and_task_avoidance",
-                        "category":  "academic_wellbeing",
-                        "keywords":  [
-                                         "procrastination",
-                                         "task avoidance",
-                                         "putting off tasks",
-                                         "cramming",
-                                         "canâ€™t start",
-                                         "cant start",
-                                         "Procrastination and Task Avoidance",
-                                         "academic_wellbeing",
-                                         "skill_building_support"
-                                     ],
-                        "phrases":  [
-                                        "task avoidance",
-                                        "putting off tasks",
-                                        "canâ€™t start",
-                                        "cant start",
-                                        "Procrastination and Task Avoidance"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Starting can be the hardest part. Try making the task smaller: open the file, write one sentence, or study for five minutes. A small start can reduce pressure and build momentum."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_academic_wellbeing"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "confidence_imposter_syndrome_001",
-                        "intent":  "imposter_feelings",
-                        "category":  "self_worth_and_confidence",
-                        "keywords":  [
-                                         "imposter syndrome",
-                                         "impostor syndrome",
-                                         "fraud",
-                                         "not good enough",
-                                         "donâ€™t belong",
-                                         "dont belong",
-                                         "Imposter Feelings",
-                                         "self_worth_and_confidence",
-                                         "confidence_support"
-                                     ],
-                        "phrases":  [
-                                        "imposter syndrome",
-                                        "impostor syndrome",
-                                        "not good enough",
-                                        "donâ€™t belong",
-                                        "dont belong",
-                                        "Imposter Feelings"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Feeling like you do not belong can happen even when you are working hard and learning. Your doubts are not proof that you are failing. Try noticing evidence of effort, progress, and feedback instead of focusing only on mistakes."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_self_worth_and_confidence"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "grief_loss_support_001",
-                        "intent":  "grief_and_loss",
-                        "category":  "grief_and_loss",
-                        "keywords":  [
-                                         "grief",
-                                         "loss",
-                                         "death",
-                                         "mourning",
-                                         "passed away",
-                                         "bereavement",
-                                         "Grief and Loss",
-                                         "grief_and_loss",
-                                         "grief_support"
-                                     ],
-                        "phrases":  [
-                                        "passed away",
-                                        "Grief and Loss"
-                                    ],
-                        "severity":  "medium",
-                        "riskFlags":  [
-                                          "grief"
-                                      ],
-                        "responses":  [
-                                          "Losing someone or something important can affect your emotions, focus, sleep, and energy. There is no single correct way to grieve. Allow yourself support from trusted people, and consider professional help if grief feels unbearable or unsafe."
-                                      ],
-                        "copingSteps":  [
-                                            "reach_one_person",
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_grief_and_loss",
-                                                "pacc-counseling"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "Who is one safe person you could reach out to today?",
-                                                  "Would you prefer support from a friend, family member, or counselor?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "performance_perfectionism_001",
-                        "intent":  "perfectionism",
-                        "category":  "self_worth_and_confidence",
-                        "keywords":  [
-                                         "perfectionism",
-                                         "perfect",
-                                         "mistakes",
-                                         "unrealistic expectations",
-                                         "high standards",
-                                         "Perfectionism",
-                                         "self_worth_and_confidence",
-                                         "supportive_reframing"
-                                     ],
-                        "phrases":  [
-                                        "unrealistic expectations",
-                                        "high standards",
-                                        "Perfectionism"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Wanting to do well can be healthy, but needing everything to be perfect can become exhausting. Try aiming for clear progress, realistic standards, and learning from mistakes instead of treating mistakes as failure."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_self_worth_and_confidence"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "academic_public_speaking_anxiety_001",
-                        "intent":  "public_speaking_anxiety",
-                        "category":  "anxiety_and_performance",
-                        "keywords":  [
-                                         "public speaking",
-                                         "presentation anxiety",
-                                         "reporting",
-                                         "stage fright",
-                                         "speaking in class",
-                                         "Public Speaking Anxiety",
-                                         "anxiety_and_performance",
-                                         "performance_support"
-                                     ],
-                        "phrases":  [
-                                        "public speaking",
-                                        "presentation anxiety",
-                                        "stage fright",
-                                        "speaking in class",
-                                        "Public Speaking Anxiety"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-                                          "performance_anxiety"
-                                      ],
-                        "responses":  [
-                                          "Feeling nervous before speaking in front of others is common. Prepare your key points, practice in small steps, and focus on communicating one idea at a time. Confidence usually grows through repeated experience."
-                                      ],
-                        "copingSteps":  [
-                                            "two_minute_breathing"
-                                        ],
-                        "recommendations":  [
-                                                "resource_anxiety_and_performance"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "adjustment_transition_to_college_or_work_001",
-                        "intent":  "transition_to_college_or_work",
-                        "category":  "adjustment_and_transition",
-                        "keywords":  [
-                                         "new school",
-                                         "new job",
-                                         "transition",
-                                         "adjustment",
-                                         "first year",
-                                         "new environment",
-                                         "Transition to College or Work",
-                                         "adjustment_and_transition",
-                                         "adjustment_support"
-                                     ],
-                        "phrases":  [
-                                        "new school",
-                                        "new job",
-                                        "first year",
-                                        "new environment",
-                                        "Transition to College or Work"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [
-
-                                      ],
-                        "responses":  [
-                                          "Adjusting to a new environment takes time. It is normal to feel unsure while learning routines, expectations, and relationships. Build small habits, ask questions, and give yourself time to adapt."
-                                      ],
-                        "copingSteps":  [
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_adjustment_and_transition"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What part of this feels hardest right now?",
-                                                  "Would you like one small coping step for the next few minutes?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       }
-                    },
-                    {
-                        "id":  "support_two_minute_coping_001",
-                        "intent":  "two_minute_coping_step",
-                        "category":  "stress_and_recovery",
-                        "keywords":  [
-                                         "two minute coping",
-                                         "2 minute coping",
-                                         "coping step",
-                                         "calm down",
-                                         "grounding",
-                                         "breathing exercise"
-                                     ],
-                        "phrases":  [
-                                        "give me a 2-minute coping step",
-                                        "two minute coping",
-                                        "help me calm down"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [],
-                        "responses":  [
-                                          "Let us make this very small. For the next two minutes, breathe in for four counts, hold for two, and breathe out for six. Then name one thing you can see and one thing you can physically feel. You do not need to solve everything right now-just help your body feel a little safer."
-                                      ],
-                        "copingSteps":  [
-                                            "two_minute_breathing",
-                                            "grounding_5_4_3_2_1"
-                                        ],
-                        "recommendations":  [
-                                                "resource_stress_and_recovery"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "Do you want a calming step or a practical next step after this?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       },
-                        "supportStyle":  "calming",
-                        "assessmentCategories":  [
-                                                     "Emotional Well-Being",
-                                                     "Sleep and Rest"
-                                                 ]
-                    },
-                    {
-                        "id":  "support_make_a_plan_001",
-                        "intent":  "make_support_plan",
-                        "category":  "general_support",
-                        "keywords":  [
-                                         "make a plan",
-                                         "help me make a plan",
-                                         "what should i do next",
-                                         "next step",
-                                         "action plan"
-                                     ],
-                        "phrases":  [
-                                        "help me make a plan",
-                                        "what should i do next",
-                                        "make a plan"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [],
-                        "responses":  [
-                                          "We can turn this into a simple plan: choose one concern, choose one action that takes less than five minutes, and choose one person or service you can contact if it still feels heavy. The goal is progress, not perfection."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "resource_general_support"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "What is the one concern you want the plan to focus on?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       },
-                        "supportStyle":  "practical"
-                    },
-                    {
-                        "id":  "support_talk_to_pacc_001",
-                        "intent":  "connect_to_pacc",
-                        "category":  "help_seeking",
-                        "keywords":  [
-                                         "talk to pacc",
-                                         "pacc",
-                                         "counselor",
-                                         "counselling",
-                                         "counseling",
-                                         "support service",
-                                         "professional support"
-                                     ],
-                        "phrases":  [
-                                        "talk to pacc",
-                                        "connect me to support",
-                                        "professional support"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [],
-                        "responses":  [
-                                          "Reaching out to PACC or another trusted support service can be a strong next step, especially if this has been affecting your sleep, focus, safety, or daily functioning. You can start with a simple message: \"I have been struggling and I would like to talk to someone.\""
-                                      ],
-                        "copingSteps":  [
-                                            "reach_support_service"
-                                        ],
-                        "recommendations":  [
-                                                "pacc-counseling",
-                                                "resource_general_support"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "Would you like help wording what to say when asking for support?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       },
-                        "supportStyle":  "practical"
-                    },
-                    {
-                        "id":  "support_review_score_001",
-                        "intent":  "assessment_score_support",
-                        "category":  "assessment_support",
-                        "keywords":  [
-                                         "assessment",
-                                         "score",
-                                         "result",
-                                         "review my assessment",
-                                         "explain my score"
-                                     ],
-                        "phrases":  [
-                                        "review my assessment",
-                                        "explain my score",
-                                        "what does my result mean"
-                                    ],
-                        "severity":  "low",
-                        "riskFlags":  [],
-                        "responses":  [
-                                          "Your assessment can be a helpful starting point for reflection, not a diagnosis. It can show which areas may deserve more care, then we can choose one practical next step based on what feels most urgent today."
-                                      ],
-                        "copingSteps":  [
-                                            "task_breakdown"
-                                        ],
-                        "recommendations":  [
-                                                "pacc-counseling"
-                                            ],
-                        "followUpQuestions":  [
-                                                  "Would you like me to focus on your top concern area or your overall score?"
-                                              ],
-                        "escalation":  {
-                                           "required":  false,
-                                           "message":  ""
-                                       },
-                        "supportStyle":  "reflective"
-                    }
-                ]
+  "version": 1,
+  "sourceDatasetId": "mindmate_supportive_guidance_dataset",
+  "sourceVersion": "1.0.1",
+  "records": [
+    {
+      "id": "general_stress_support_001",
+      "intent": "general_stress",
+      "category": "general_support",
+      "keywords": [
+        "stress",
+        "stressed",
+        "stressful",
+        "coping stress",
+        "cope with stress",
+        "manage stress",
+        "stress management"
+      ],
+      "phrases": [
+        "coping stress",
+        "cope with stress",
+        "manage stress",
+        "stress management",
+        "dealing with stress"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Stress can feel overwhelming, but you can start with small steps. Try taking a few slow breaths, identifying what is causing the pressure, and choosing one manageable action. Short breaks, rest, and talking with someone you trust can also help. Is your stress connected to school, work, family, or something else?",
+        "When stress builds up, it can help to pause rather than solve everything at once. Try a grounding exercise, take a short break, and focus on one thing within your control. What has been causing you the most stress lately?",
+        "You do not need to handle every stressful situation at once. Consider slowing your breathing, writing down your worries, and separating what you can change from what you cannot. Would you like a simple coping exercise or help understanding the source of your stress?"
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_general_support"
+      ],
+      "followUpQuestions": [
+        "What has been causing your stress lately?",
+        "Would you like to try a short coping exercise?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_academic_stress_001",
+      "intent": "academic_stress",
+      "category": "academic_wellbeing",
+      "keywords": [
+        "academic stress",
+        "academic",
+        "Academic Stress",
+        "academic_wellbeing",
+        "supportive_guidance",
+        "stressed about exams",
+        "stress about exams",
+        "stressed about school",
+        "school stress",
+        "exam stress"
+      ],
+      "phrases": [
+        "academic stress",
+        "Academic Stress",
+        "stressed about exams",
+        "stress about exams",
+        "stressed about school"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "It sounds like you're carrying a lot of academic responsibilities right now, and that can be exhausting. Many students experience stress when balancing assignments, projects, deadlines, and personal responsibilities. Remember that feeling stressed does not mean you are incapable-it often means you are trying your best to meet important goals. Take things one step at a time, celebrate even small accomplishments, and give yourself credit for the effort you have already made. Progress is built through consistent effort, not perfection."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_academic_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_examination_anxiety_002",
+      "intent": "examination_anxiety",
+      "category": "academic_wellbeing",
+      "keywords": [
+        "examination anxiety",
+        "examination",
+        "anxiety",
+        "Examination Anxiety",
+        "academic_wellbeing",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "examination anxiety",
+        "Examination Anxiety"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Feeling nervous before an examination is completely normal. In fact, many students experience anxiety because they care about doing well and achieving their goals. While exams may feel overwhelming, they do not define your intelligence, worth, or future success. Focus on the preparation you have already completed and remind yourself that doing your best is enough. Trust in the effort you have invested and approach the examination one question at a time."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_academic_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_financial_stress_004",
+      "intent": "financial_stress",
+      "category": "general_support",
+      "keywords": [
+        "financial stress",
+        "financial",
+        "stress",
+        "Financial Stress",
+        "general_support",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "financial stress",
+        "Financial Stress"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Financial concerns can create significant pressure and uncertainty, and it is understandable if these challenges are affecting your peace of mind. Remember that financial difficulties are circumstances you are experiencing-they do not define your value, potential, or future. Many people face financial struggles at different stages of life. Focus on the steps you can take today, seek support when needed, and remind yourself that difficult situations can improve over time."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_general_support"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_lack_of_motivation_005",
+      "intent": "lack_of_motivation",
+      "category": "general_support",
+      "keywords": [
+        "lack of motivation",
+        "lack",
+        "motivation",
+        "Lack of Motivation",
+        "general_support",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "lack of motivation",
+        "Lack of Motivation"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "There are days when motivation feels difficult to find, and that's completely okay. Motivation naturally rises and falls, especially during periods of stress, fatigue, or emotional strain. You do not have to feel motivated all the time to make progress. Sometimes, simply taking one small step forward is already an accomplishment. Be patient with yourself and remember that consistency often matters more than motivation."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_general_support"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_loneliness_007",
+      "intent": "loneliness",
+      "category": "social_relationships",
+      "keywords": [
+        "loneliness",
+        "Loneliness",
+        "social_relationships",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "Loneliness"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Feeling lonely can be difficult, and it is important to know that your feelings are valid. Loneliness does not mean something is wrong with you-it simply reflects a human need for connection and belonging. While it may feel isolating right now, meaningful connections often begin through small conversations, shared experiences, or reaching out to trusted individuals. You do not have to carry everything on your own."
+      ],
+      "copingSteps": [
+        "reach_one_person"
+      ],
+      "recommendations": [
+        "resource_social_relationships"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_social_isolation_008",
+      "intent": "social_isolation",
+      "category": "social_relationships",
+      "keywords": [
+        "social isolation",
+        "social",
+        "isolation",
+        "Social Isolation",
+        "social_relationships",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "social isolation",
+        "Social Isolation"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Spending long periods feeling disconnected from others can affect emotional well-being. Human beings naturally seek connection, support, and understanding from people around them. Even small interactions with friends, family members, classmates, or colleagues can positively impact emotional health. Remember that reaching out is a sign of strength, not weakness."
+      ],
+      "copingSteps": [
+        "reach_one_person"
+      ],
+      "recommendations": [
+        "resource_social_relationships"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_self_doubt_010",
+      "intent": "self_doubt",
+      "category": "self_worth_and_confidence",
+      "keywords": [
+        "self-doubt",
+        "self",
+        "doubt",
+        "Self-Doubt",
+        "self_worth_and_confidence",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "Self-Doubt"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Many people experience moments where they question their abilities, decisions, or potential. Experiencing self-doubt does not mean you are incapable-it often means you care deeply about doing well. Try to remember the challenges you have already overcome and the progress you have made so far. Growth comes through learning and persistence, not through perfection. Trust yourself and give yourself the same kindness you would offer a friend."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_self_worth_and_confidence"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_fear_of_failure_011",
+      "intent": "fear_of_failure",
+      "category": "self_worth_and_confidence",
+      "keywords": [
+        "fear of failure",
+        "fear",
+        "failure",
+        "Fear of Failure",
+        "self_worth_and_confidence",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "fear of failure",
+        "Fear of Failure"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "It can be frightening to think about making mistakes or not meeting expectations, especially when something is important to you. However, every successful person has experienced setbacks and challenges along the way. Failure does not define your abilities-it provides opportunities to learn, improve, and grow. Instead of focusing on what might go wrong, try to recognize the effort you are making and the lessons you are gaining from every experience."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_self_worth_and_confidence"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_workplace_stress_012",
+      "intent": "workplace_stress",
+      "category": "general_support",
+      "keywords": [
+        "workplace stress",
+        "workplace",
+        "stress",
+        "Workplace Stress",
+        "general_support",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "workplace stress",
+        "Workplace Stress"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Managing responsibilities at work can sometimes feel exhausting, especially when deadlines, expectations, and multiple tasks compete for your attention. It is okay to acknowledge when you feel stressed. Remember that your value is not measured solely by productivity. Taking care of yourself and recognizing your accomplishments are important parts of maintaining balance and well-being."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_general_support"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_burnout_013",
+      "intent": "burnout",
+      "category": "stress_and_recovery",
+      "keywords": [
+        "burnout",
+        "Burnout",
+        "stress_and_recovery",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "Burnout"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "You may have been giving so much of your time and energy to your responsibilities that you have forgotten to care for yourself. Feeling emotionally drained or exhausted can be a sign that your mind and body need rest. Taking a break does not mean you are weak or unproductive-it means you are taking care of yourself so you can continue moving forward in a healthier way."
+      ],
+      "copingSteps": [
+        "body_check",
+        "rest_plan"
+      ],
+      "recommendations": [
+        "resource_stress_and_recovery"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_difficulty_sleeping_014",
+      "intent": "difficulty_sleeping",
+      "category": "stress_and_recovery",
+      "keywords": [
+        "difficulty sleeping",
+        "difficulty",
+        "sleeping",
+        "Difficulty Sleeping",
+        "stress_and_recovery",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "difficulty sleeping",
+        "Difficulty Sleeping"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Sleep difficulties can be frustrating, especially when your mind feels busy with worries or responsibilities. Remember that your body and mind need adequate rest to function at their best. Establishing healthy routines and creating moments of relaxation before bedtime may help improve sleep quality over time."
+      ],
+      "copingSteps": [
+        "body_check",
+        "rest_plan"
+      ],
+      "recommendations": [
+        "resource_stress_and_recovery"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_fatigue_015",
+      "intent": "fatigue",
+      "category": "stress_and_recovery",
+      "keywords": [
+        "fatigue",
+        "Fatigue",
+        "stress_and_recovery",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "Fatigue"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Feeling constantly tired can affect your energy, concentration, and motivation. Sometimes fatigue is your body's way of telling you that it needs rest and recovery. Allow yourself time to recharge and remember that taking care of your well-being is an important responsibility, not a luxury."
+      ],
+      "copingSteps": [
+        "body_check",
+        "rest_plan"
+      ],
+      "recommendations": [
+        "resource_stress_and_recovery"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_feeling_angry_017",
+      "intent": "feeling_angry",
+      "category": "emotional_wellbeing",
+      "keywords": [
+        "feeling angry",
+        "feeling",
+        "angry",
+        "Feeling Angry",
+        "emotional_wellbeing",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "feeling angry",
+        "Feeling Angry"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Anger is a normal emotional response, especially when something feels unfair, frustrating, or hurtful. What matters is not whether you feel angry but how you respond to that feeling. Taking time to understand what triggered your emotions can help you express yourself more calmly and constructively."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_emotional_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_worry_about_the_future_019",
+      "intent": "worry_about_the_future",
+      "category": "emotional_wellbeing",
+      "keywords": [
+        "worry about the future",
+        "worry",
+        "about",
+        "the",
+        "future",
+        "Worry About the Future",
+        "emotional_wellbeing",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "worry about the future",
+        "Worry About the Future"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Thinking about the future can sometimes feel overwhelming, especially when many things seem uncertain. While you may not have all the answers today, focusing on the actions you can take right now can help reduce unnecessary worry. Trust that each step you take contributes to your growth and future opportunities."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_emotional_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_relationship_problems_020",
+      "intent": "relationship_problems",
+      "category": "social_relationships",
+      "keywords": [
+        "relationship problems",
+        "relationship",
+        "problems",
+        "Relationship Problems",
+        "social_relationships",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "relationship problems",
+        "Relationship Problems"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Challenges in relationships can be emotionally difficult because relationships often play an important role in our lives. Misunderstandings and disagreements can happen, but healthy communication, patience, and mutual respect can help strengthen connections. Remember to prioritize both your emotional well-being and the well-being of others."
+      ],
+      "copingSteps": [
+        "reach_one_person"
+      ],
+      "recommendations": [
+        "resource_social_relationships"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_low_self_esteem_023",
+      "intent": "low_self_esteem",
+      "category": "self_worth_and_confidence",
+      "keywords": [
+        "low self-esteem",
+        "low",
+        "self",
+        "esteem",
+        "Low Self-Esteem",
+        "self_worth_and_confidence",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "low self-esteem",
+        "Low Self-Esteem"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "It can be difficult when you focus more on your weaknesses than your strengths. Remember that every person has unique abilities, qualities, and accomplishments. Building confidence takes time, patience, and self-compassion. Be kind to yourself and acknowledge the progress you have made."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_self_worth_and_confidence"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_academic_burnout_025",
+      "intent": "academic_burnout",
+      "category": "academic_wellbeing",
+      "keywords": [
+        "academic burnout",
+        "academic",
+        "burnout",
+        "Academic Burnout",
+        "academic_wellbeing",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "academic burnout",
+        "Academic Burnout"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Constant academic demands can sometimes leave you feeling exhausted and disconnected from your studies. If school tasks have become difficult to manage, remember that taking care of your well-being is an important part of academic success. Rest and balance can help restore energy and motivation."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_academic_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_stress_from_deadlines_027",
+      "intent": "stress_from_deadlines",
+      "category": "academic_wellbeing",
+      "keywords": [
+        "stress from deadlines",
+        "stress",
+        "from",
+        "deadlines",
+        "Stress From Deadlines",
+        "academic_wellbeing",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "stress from deadlines",
+        "Stress From Deadlines"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Deadlines can create pressure, especially when several responsibilities need to be completed within a limited period. Try focusing on one task at a time and recognizing each step of progress. Small accomplishments can help reduce feelings of overwhelm."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_academic_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_adjustment_difficulties_028",
+      "intent": "adjustment_difficulties",
+      "category": "general_support",
+      "keywords": [
+        "adjustment difficulties",
+        "adjustment",
+        "difficulties",
+        "Adjustment Difficulties",
+        "general_support",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "adjustment difficulties",
+        "Adjustment Difficulties"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Adapting to new environments, responsibilities, or life changes can take time. It is normal to feel uncertain while adjusting. Be patient with yourself and remember that growth often happens gradually as you gain experience and confidence."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_general_support"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_feeling_nervous_029",
+      "intent": "feeling_nervous",
+      "category": "emotional_wellbeing",
+      "keywords": [
+        "feeling nervous",
+        "feeling",
+        "nervous",
+        "Feeling Nervous",
+        "emotional_wellbeing",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "feeling nervous",
+        "Feeling Nervous"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Feeling nervous often means that something is important to you. Whether it is a presentation, interview, examination, or new experience, nervousness is a common and natural reaction. Trust in your preparation and remind yourself that confidence develops through experience."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_emotional_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_emotional_exhaustion_031",
+      "intent": "emotional_exhaustion",
+      "category": "stress_and_recovery",
+      "keywords": [
+        "emotional exhaustion",
+        "emotional",
+        "exhaustion",
+        "Emotional Exhaustion",
+        "stress_and_recovery",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "emotional exhaustion",
+        "Emotional Exhaustion"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Emotional exhaustion can occur when you have been carrying stress and responsibilities for a long period without enough opportunities to rest. Give yourself permission to slow down, reflect, and reconnect with activities that help you feel supported and refreshed."
+      ],
+      "copingSteps": [
+        "body_check",
+        "rest_plan"
+      ],
+      "recommendations": [
+        "resource_stress_and_recovery"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_feeling_pressured_032",
+      "intent": "feeling_pressured",
+      "category": "self_worth_and_confidence",
+      "keywords": [
+        "feeling pressured",
+        "feeling",
+        "pressured",
+        "Feeling Pressured",
+        "self_worth_and_confidence",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "feeling pressured",
+        "Feeling Pressured"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Pressure from expectations can sometimes feel overwhelming. While goals and responsibilities are important, it is equally important to recognize your limits and allow yourself room to learn and grow. You do not have to be perfect to be successful."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_self_worth_and_confidence"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "student_general_emotional_support_034",
+      "intent": "general_emotional_support",
+      "category": "general_support",
+      "keywords": [
+        "general emotional support",
+        "general",
+        "emotional",
+        "support",
+        "General Emotional Support",
+        "general_support",
+        "supportive_guidance"
+      ],
+      "phrases": [
+        "general emotional support",
+        "General Emotional Support"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Whatever you may be experiencing right now, your feelings are valid and deserve attention. Every person encounters challenges, setbacks, and moments of uncertainty. Taking time to understand your emotions and care for your well-being is an important act of self-care. Remember that growth takes time, and every small step toward understanding yourself is meaningful progress."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_general_support"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "workplace_work_overload_001",
+      "intent": "work_overload",
+      "category": "workplace_wellbeing",
+      "keywords": [
+        "work overload",
+        "work",
+        "overload",
+        "Work Overload",
+        "workplace_wellbeing",
+        "mindmate_says"
+      ],
+      "phrases": [
+        "work overload",
+        "Work Overload"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "It seems like you're carrying many responsibilities right now. When tasks continue to pile up, it's normal to feel mentally and physically exhausted. Remember that productivity is not measured by how much you can do at once, but by how consistently you can move forward. Taking one task at a time and recognizing your progress can help reduce feelings of overwhelm."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_workplace_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "workplace_tight_deadlines_002",
+      "intent": "tight_deadlines",
+      "category": "workplace_wellbeing",
+      "keywords": [
+        "tight deadlines",
+        "tight",
+        "deadlines",
+        "Tight Deadlines",
+        "workplace_wellbeing",
+        "mindmate_says"
+      ],
+      "phrases": [
+        "tight deadlines",
+        "Tight Deadlines"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Deadlines can create pressure, especially when multiple responsibilities compete for your attention. While it may feel urgent to accomplish everything immediately, remember that steady progress is often more effective than rushing. Every small step completed today contributes to your overall success."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_workplace_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "workplace_feeling_mentally_drained_003",
+      "intent": "feeling_mentally_drained",
+      "category": "workplace_wellbeing",
+      "keywords": [
+        "feeling mentally drained",
+        "feeling",
+        "mentally",
+        "drained",
+        "Feeling Mentally Drained",
+        "workplace_wellbeing",
+        "mindmate_says"
+      ],
+      "phrases": [
+        "feeling mentally drained",
+        "Feeling Mentally Drained"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Constant demands can sometimes leave you feeling emotionally and mentally exhausted. Feeling drained does not mean you are incapable-it may simply be a sign that your mind and body need time to recover. Rest is not a reward for productivity; it is part of maintaining it."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_workplace_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "workplace_pressure_to_perform_004",
+      "intent": "pressure_to_perform",
+      "category": "workplace_wellbeing",
+      "keywords": [
+        "pressure to perform",
+        "pressure",
+        "perform",
+        "Pressure to Perform",
+        "workplace_wellbeing",
+        "mindmate_says"
+      ],
+      "phrases": [
+        "pressure to perform",
+        "Pressure to Perform"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Wanting to perform well is understandable, especially when you care about your responsibilities. However, perfection is not required for growth. Focus on doing your best rather than expecting yourself to be flawless. Progress is built through effort, learning, and continuous improvement."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_workplace_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "workplace_difficult_co_workers_005",
+      "intent": "difficult_co_workers",
+      "category": "workplace_wellbeing",
+      "keywords": [
+        "difficult co-workers",
+        "difficult",
+        "workers",
+        "Difficult Co-workers",
+        "workplace_wellbeing",
+        "mindmate_says"
+      ],
+      "phrases": [
+        "difficult co-workers",
+        "Difficult Co-workers"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Working with different personalities can sometimes be challenging. Not every interaction will be easy, but maintaining professionalism, patience, and respectful communication can help create healthier workplace relationships. Remember that you cannot control others, but you can control how you respond."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_workplace_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "workplace_learning_new_responsibilities_008",
+      "intent": "learning_new_responsibilities",
+      "category": "workplace_wellbeing",
+      "keywords": [
+        "learning new responsibilities",
+        "learning",
+        "new",
+        "responsibilities",
+        "Learning New Responsibilities",
+        "workplace_wellbeing",
+        "mindmate_says"
+      ],
+      "phrases": [
+        "learning new responsibilities",
+        "Learning New Responsibilities"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Starting new responsibilities can feel overwhelming at first. Every expert was once a beginner. Allow yourself time to learn, ask questions, and make mistakes along the way. Growth often happens outside your comfort zone."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_workplace_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "workplace_fear_of_making_mistakes_009",
+      "intent": "fear_of_making_mistakes",
+      "category": "workplace_wellbeing",
+      "keywords": [
+        "fear of making mistakes",
+        "fear",
+        "making",
+        "mistakes",
+        "Fear of Making Mistakes",
+        "workplace_wellbeing",
+        "mindmate_says"
+      ],
+      "phrases": [
+        "fear of making mistakes",
+        "Fear of Making Mistakes"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Making mistakes can feel uncomfortable, especially when you want to perform well. However, mistakes are often opportunities to gain experience and improve future decisions. What matters most is your willingness to learn and continue moving forward."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_workplace_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "workplace_burnout_warning_010",
+      "intent": "burnout_warning",
+      "category": "workplace_wellbeing",
+      "keywords": [
+        "burnout warning",
+        "burnout",
+        "warning",
+        "Burnout Warning",
+        "workplace_wellbeing",
+        "mindmate_says"
+      ],
+      "phrases": [
+        "burnout warning",
+        "Burnout Warning"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "It sounds like you've been giving a lot of your energy for a long time. Burnout can occur when stress becomes chronic and difficult to manage. If possible, consider creating space for rest, reflection, and activities that help you recharge. Taking care of yourself is an important part of sustaining your ability to help others."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_workplace_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "workplace_lack_of_work_life_balance_011",
+      "intent": "lack_of_work_life_balance",
+      "category": "workplace_wellbeing",
+      "keywords": [
+        "lack of work-life balance",
+        "lack",
+        "work",
+        "life",
+        "balance",
+        "Lack of Work-Life Balance",
+        "workplace_wellbeing",
+        "mindmate_says"
+      ],
+      "phrases": [
+        "lack of work-life balance",
+        "Lack of Work-Life Balance"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Balancing work, personal responsibilities, and self-care can be challenging. While responsibilities are important, your well-being matters too. Creating time for rest, hobbies, family, and personal interests can help support both productivity and emotional wellness."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_workplace_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "anxiety_panic_attack_001",
+      "intent": "panic_attack_or_sudden_intense_fear",
+      "category": "acute_anxiety",
+      "keywords": [
+        "panic attack",
+        "canâ€™t breathe",
+        "cant breathe",
+        "heart racing",
+        "sudden fear",
+        "dizzy",
+        "panic",
+        "Panic Attack or Sudden Intense Fear",
+        "acute_anxiety",
+        "grounding_support"
+      ],
+      "phrases": [
+        "panic attack",
+        "canâ€™t breathe",
+        "cant breathe",
+        "heart racing",
+        "sudden fear",
+        "Panic Attack or Sudden Intense Fear"
+      ],
+      "severity": "medium",
+      "riskFlags": [
+        "acute_anxiety"
+      ],
+      "responses": [
+        "A sudden wave of panic can feel scary, but it can pass. Try slowing your breathing, noticing five things around you, and sitting somewhere safe. If chest pain, fainting, injury, or severe physical symptoms are present, seek medical help immediately."
+      ],
+      "copingSteps": [
+        "reach_one_person",
+        "two_minute_breathing",
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_acute_anxiety",
+        "pacc-counseling"
+      ],
+      "followUpQuestions": [
+        "Who is one safe person you could reach out to today?",
+        "Would you prefer support from a friend, family member, or counselor?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "mood_persistent_low_mood_001",
+      "intent": "persistent_low_mood_or_depression_concern",
+      "category": "mood_support",
+      "keywords": [
+        "depressed",
+        "depression",
+        "low mood",
+        "no interest",
+        "empty",
+        "worthless",
+        "sad for weeks",
+        "Persistent Low Mood or Depression Concern",
+        "mood_support",
+        "professional_referral_support"
+      ],
+      "phrases": [
+        "low mood",
+        "no interest",
+        "sad for weeks",
+        "Persistent Low Mood or Depression Concern"
+      ],
+      "severity": "medium",
+      "riskFlags": [
+        "depression_concern"
+      ],
+      "responses": [
+        "Feeling low for a long time can be heavy, especially when it affects sleep, motivation, appetite, or daily functioning. You deserve support. Consider talking to a counselor, mental-health professional, or trusted university support office."
+      ],
+      "copingSteps": [
+        "reach_support_service",
+        "body_check"
+      ],
+      "recommendations": [
+        "resource_mood_support",
+        "pacc-counseling"
+      ],
+      "followUpQuestions": [
+        "Would you like help thinking through what to tell a counselor?",
+        "Has this started affecting your daily routine or safety?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "trauma_violence_trauma_response_001",
+      "intent": "trauma_response",
+      "category": "trauma_support",
+      "keywords": [
+        "trauma",
+        "flashback",
+        "triggered",
+        "bad memory",
+        "ptsd",
+        "violence",
+        "assault",
+        "Trauma Response",
+        "trauma_support",
+        "trauma_informed_support"
+      ],
+      "phrases": [
+        "bad memory",
+        "Trauma Response"
+      ],
+      "severity": "medium",
+      "riskFlags": [
+        "trauma"
+      ],
+      "responses": [
+        "What happened to you matters, and your reaction is valid. You do not have to explain everything at once. Try to focus on safety, grounding, and reaching out to a trusted person or professional support when you are ready."
+      ],
+      "copingSteps": [
+        "reach_support_service",
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_trauma_support",
+        "pacc-counseling"
+      ],
+      "followUpQuestions": [
+        "Would you like help thinking through what to tell a counselor?",
+        "Has this started affecting your daily routine or safety?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "social_bullying_cyberbullying_001",
+      "intent": "bullying_or_cyberbullying",
+      "category": "social_safety",
+      "keywords": [
+        "bullying",
+        "cyberbullying",
+        "teased",
+        "humiliated",
+        "online harassment",
+        "rumors",
+        "excluded",
+        "Bullying or Cyberbullying",
+        "social_safety",
+        "support_and_reporting_guidance"
+      ],
+      "phrases": [
+        "online harassment",
+        "Bullying or Cyberbullying"
+      ],
+      "severity": "medium",
+      "riskFlags": [
+        "bullying"
+      ],
+      "responses": [
+        "Being bullied or humiliated can deeply affect your well-being. This is not your fault. Save evidence when it is safe, avoid responding to harmful messages, and reach out to a trusted teacher, adviser, supervisor, or support office."
+      ],
+      "copingSteps": [
+        "reach_one_person",
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_social_safety",
+        "pacc-counseling"
+      ],
+      "followUpQuestions": [
+        "Who is one safe person you could reach out to today?",
+        "Would you prefer support from a friend, family member, or counselor?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "coping_substance_use_concern_001",
+      "intent": "substance_use_as_coping",
+      "category": "coping_and_substance_use",
+      "keywords": [
+        "drinking to cope",
+        "alcohol",
+        "drugs",
+        "substance",
+        "using to forget",
+        "addiction",
+        "Substance Use as Coping",
+        "coping_and_substance_use",
+        "supportive_referral"
+      ],
+      "phrases": [
+        "drinking to cope",
+        "using to forget",
+        "Substance Use as Coping"
+      ],
+      "severity": "medium",
+      "riskFlags": [
+        "substance_use"
+      ],
+      "responses": [
+        "Using alcohol or substances to cope can feel like temporary relief, but it can make stress and safety risks worse over time. Consider speaking with a counselor, healthcare provider, or trusted support service for safer coping options."
+      ],
+      "copingSteps": [
+        "reach_support_service",
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_coping_and_substance_use",
+        "pacc-counseling"
+      ],
+      "followUpQuestions": [
+        "Would you like help thinking through what to tell a counselor?",
+        "Has this started affecting your daily routine or safety?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "academic_time_management_001",
+      "intent": "time_management_difficulty",
+      "category": "academic_wellbeing",
+      "keywords": [
+        "time management",
+        "late tasks",
+        "canâ€™t manage time",
+        "cant manage time",
+        "schedule",
+        "prioritize",
+        "Time Management Difficulty",
+        "academic_wellbeing",
+        "skill_building_support"
+      ],
+      "phrases": [
+        "time management",
+        "late tasks",
+        "canâ€™t manage time",
+        "cant manage time",
+        "Time Management Difficulty"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Managing time is easier when tasks are visible and small. Try listing your tasks, choosing the most urgent one, and working in short focused blocks with breaks. Progress matters more than doing everything perfectly at once."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_academic_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "academic_procrastination_001",
+      "intent": "procrastination_and_task_avoidance",
+      "category": "academic_wellbeing",
+      "keywords": [
+        "procrastination",
+        "task avoidance",
+        "putting off tasks",
+        "cramming",
+        "canâ€™t start",
+        "cant start",
+        "Procrastination and Task Avoidance",
+        "academic_wellbeing",
+        "skill_building_support"
+      ],
+      "phrases": [
+        "task avoidance",
+        "putting off tasks",
+        "canâ€™t start",
+        "cant start",
+        "Procrastination and Task Avoidance"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Starting can be the hardest part. Try making the task smaller: open the file, write one sentence, or study for five minutes. A small start can reduce pressure and build momentum."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_academic_wellbeing"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "confidence_imposter_syndrome_001",
+      "intent": "imposter_feelings",
+      "category": "self_worth_and_confidence",
+      "keywords": [
+        "imposter syndrome",
+        "impostor syndrome",
+        "fraud",
+        "not good enough",
+        "donâ€™t belong",
+        "dont belong",
+        "Imposter Feelings",
+        "self_worth_and_confidence",
+        "confidence_support"
+      ],
+      "phrases": [
+        "imposter syndrome",
+        "impostor syndrome",
+        "not good enough",
+        "donâ€™t belong",
+        "dont belong",
+        "Imposter Feelings"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Feeling like you do not belong can happen even when you are working hard and learning. Your doubts are not proof that you are failing. Try noticing evidence of effort, progress, and feedback instead of focusing only on mistakes."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_self_worth_and_confidence"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "grief_loss_support_001",
+      "intent": "grief_and_loss",
+      "category": "grief_and_loss",
+      "keywords": [
+        "grief",
+        "loss",
+        "death",
+        "mourning",
+        "passed away",
+        "bereavement",
+        "Grief and Loss",
+        "grief_and_loss",
+        "grief_support"
+      ],
+      "phrases": [
+        "passed away",
+        "Grief and Loss"
+      ],
+      "severity": "medium",
+      "riskFlags": [
+        "grief"
+      ],
+      "responses": [
+        "Losing someone or something important can affect your emotions, focus, sleep, and energy. There is no single correct way to grieve. Allow yourself support from trusted people, and consider professional help if grief feels unbearable or unsafe."
+      ],
+      "copingSteps": [
+        "reach_one_person",
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_grief_and_loss",
+        "pacc-counseling"
+      ],
+      "followUpQuestions": [
+        "Who is one safe person you could reach out to today?",
+        "Would you prefer support from a friend, family member, or counselor?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "performance_perfectionism_001",
+      "intent": "perfectionism",
+      "category": "self_worth_and_confidence",
+      "keywords": [
+        "perfectionism",
+        "perfect",
+        "mistakes",
+        "unrealistic expectations",
+        "high standards",
+        "Perfectionism",
+        "self_worth_and_confidence",
+        "supportive_reframing"
+      ],
+      "phrases": [
+        "unrealistic expectations",
+        "high standards",
+        "Perfectionism"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Wanting to do well can be healthy, but needing everything to be perfect can become exhausting. Try aiming for clear progress, realistic standards, and learning from mistakes instead of treating mistakes as failure."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_self_worth_and_confidence"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "academic_public_speaking_anxiety_001",
+      "intent": "public_speaking_anxiety",
+      "category": "anxiety_and_performance",
+      "keywords": [
+        "public speaking",
+        "presentation anxiety",
+        "reporting",
+        "stage fright",
+        "speaking in class",
+        "Public Speaking Anxiety",
+        "anxiety_and_performance",
+        "performance_support"
+      ],
+      "phrases": [
+        "public speaking",
+        "presentation anxiety",
+        "stage fright",
+        "speaking in class",
+        "Public Speaking Anxiety"
+      ],
+      "severity": "low",
+      "riskFlags": [
+        "performance_anxiety"
+      ],
+      "responses": [
+        "Feeling nervous before speaking in front of others is common. Prepare your key points, practice in small steps, and focus on communicating one idea at a time. Confidence usually grows through repeated experience."
+      ],
+      "copingSteps": [
+        "two_minute_breathing"
+      ],
+      "recommendations": [
+        "resource_anxiety_and_performance"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "adjustment_transition_to_college_or_work_001",
+      "intent": "transition_to_college_or_work",
+      "category": "adjustment_and_transition",
+      "keywords": [
+        "new school",
+        "new job",
+        "transition",
+        "adjustment",
+        "first year",
+        "new environment",
+        "Transition to College or Work",
+        "adjustment_and_transition",
+        "adjustment_support"
+      ],
+      "phrases": [
+        "new school",
+        "new job",
+        "first year",
+        "new environment",
+        "Transition to College or Work"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Adjusting to a new environment takes time. It is normal to feel unsure while learning routines, expectations, and relationships. Build small habits, ask questions, and give yourself time to adapt."
+      ],
+      "copingSteps": [
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_adjustment_and_transition"
+      ],
+      "followUpQuestions": [
+        "What part of this feels hardest right now?",
+        "Would you like one small coping step for the next few minutes?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      }
+    },
+    {
+      "id": "support_two_minute_coping_001",
+      "intent": "two_minute_coping_step",
+      "category": "stress_and_recovery",
+      "keywords": [
+        "two minute coping",
+        "2 minute coping",
+        "coping step",
+        "calm down",
+        "grounding",
+        "breathing exercise"
+      ],
+      "phrases": [
+        "give me a 2-minute coping step",
+        "two minute coping",
+        "help me calm down"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Let us make this very small. For the next two minutes, breathe in for four counts, hold for two, and breathe out for six. Then name one thing you can see and one thing you can physically feel. You do not need to solve everything right now-just help your body feel a little safer."
+      ],
+      "copingSteps": [
+        "two_minute_breathing",
+        "grounding_5_4_3_2_1"
+      ],
+      "recommendations": [
+        "resource_stress_and_recovery"
+      ],
+      "followUpQuestions": [
+        "Do you want a calming step or a practical next step after this?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "calming",
+      "assessmentCategories": [
+        "Emotional Well-Being",
+        "Sleep and Rest"
+      ]
+    },
+    {
+      "id": "support_make_a_plan_001",
+      "intent": "make_support_plan",
+      "category": "general_support",
+      "keywords": [
+        "make a plan",
+        "help me make a plan",
+        "what should i do next",
+        "next step",
+        "action plan"
+      ],
+      "phrases": [
+        "help me make a plan",
+        "what should i do next",
+        "make a plan"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "We can turn this into a simple plan: choose one concern, choose one action that takes less than five minutes, and choose one person or service you can contact if it still feels heavy. The goal is progress, not perfection."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "resource_general_support"
+      ],
+      "followUpQuestions": [
+        "What is the one concern you want the plan to focus on?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "support_talk_to_pacc_001",
+      "intent": "connect_to_pacc",
+      "category": "help_seeking",
+      "keywords": [
+        "talk to pacc",
+        "pacc",
+        "counselor",
+        "counselling",
+        "counseling",
+        "support service",
+        "professional support"
+      ],
+      "phrases": [
+        "talk to pacc",
+        "connect me to support",
+        "professional support"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Reaching out to PACC or another trusted support service can be a strong next step, especially if this has been affecting your sleep, focus, safety, or daily functioning. You can start with a simple message: \"I have been struggling and I would like to talk to someone.\""
+      ],
+      "copingSteps": [
+        "reach_support_service"
+      ],
+      "recommendations": [
+        "pacc-counseling",
+        "resource_general_support"
+      ],
+      "followUpQuestions": [
+        "Would you like help wording what to say when asking for support?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "support_review_score_001",
+      "intent": "assessment_score_support",
+      "category": "assessment_support",
+      "keywords": [
+        "assessment",
+        "score",
+        "result",
+        "review my assessment",
+        "explain my score"
+      ],
+      "phrases": [
+        "review my assessment",
+        "explain my score",
+        "what does my result mean"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Your assessment can be a helpful starting point for reflection, not a diagnosis. It can show which areas may deserve more care, then we can choose one practical next step based on what feels most urgent today."
+      ],
+      "copingSteps": [
+        "task_breakdown"
+      ],
+      "recommendations": [
+        "pacc-counseling"
+      ],
+      "followUpQuestions": [
+        "Would you like me to focus on your top concern area or your overall score?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "reflective"
+    },
+    {
+      "id": "mindmate_mindmate_overview_001",
+      "intent": "mindmate_overview",
+      "category": "mindmate_support",
+      "keywords": [
+        "what is mindmate",
+        "about mindmate",
+        "mindmate app",
+        "mindmate features",
+        "purpose of mindmate"
+      ],
+      "phrases": [
+        "what is mindmate",
+        "about mindmate",
+        "mindmate app"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "MindMate is a mental health self-assessment and wellness support application developed for Urdaneta City University's PACC. It provides self-assessment, wellness activities, personal insights, and ways to connect with counseling support. It is a support tool, not a substitute for professional diagnosis or treatment."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like to learn about a specific MindMate feature?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "mindmate_mindaid_help_001",
+      "intent": "mindaid_help",
+      "category": "mindmate_support",
+      "keywords": [
+        "what is mindaid",
+        "mindaid chatbot",
+        "mindaid help",
+        "how to use mindaid",
+        "chat with mindaid"
+      ],
+      "phrases": [
+        "what is mindaid",
+        "mindaid chatbot",
+        "mindaid help"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "MindAid is MindMate's wellness support chatbot. You can talk about stress, anxiety, emotional concerns, coping strategies, and MindMate features. It offers general guidance and can help you explore available support options, but it does not diagnose mental health conditions."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like emotional support or help using MindMate?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "mindmate_mood_tracking_help_001",
+      "intent": "mood_tracking_help",
+      "category": "mindmate_support",
+      "keywords": [
+        "mood tracking",
+        "mood tracker",
+        "track my mood",
+        "log my mood",
+        "mood check in"
+      ],
+      "phrases": [
+        "mood tracking",
+        "mood tracker",
+        "track my mood"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "MindMate's mood tracking feature helps you record and reflect on how you feel. Regular check-ins can help you notice emotional patterns over time. You can use your entries as a starting point for understanding your wellness."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like help starting a mood check-in?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "mindmate_breathing_feature_help_001",
+      "intent": "breathing_feature_help",
+      "category": "mindmate_support",
+      "keywords": [
+        "breathing exercises",
+        "breathing feature",
+        "mindmate breathing",
+        "guided breathing"
+      ],
+      "phrases": [
+        "breathing exercises",
+        "breathing feature",
+        "mindmate breathing"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "MindMate includes breathing exercises designed to support relaxation and emotional regulation. You can open the Breathing Exercises feature from the dashboard and follow the guided activity at a comfortable pace."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like to try a short breathing exercise?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "mindmate_secret_posting_help_001",
+      "intent": "secret_posting_help",
+      "category": "mindmate_support",
+      "keywords": [
+        "secret posting",
+        "secret post",
+        "anonymous post",
+        "secret chat feature",
+        "write a secret post"
+      ],
+      "phrases": [
+        "secret posting",
+        "secret post",
+        "anonymous post"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Secret Posting is a MindMate feature where users can share thoughts and feelings through posts. Be mindful of what you share and avoid including identifying or sensitive information in public or shared content."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like to know how to use Secret Posting?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "mindmate_facial_tracking_help_001",
+      "intent": "facial_tracking_help",
+      "category": "mindmate_support",
+      "keywords": [
+        "facial tracking",
+        "facial recognition",
+        "emotion tracking",
+        "facial emotion",
+        "expression check in"
+      ],
+      "phrases": [
+        "facial tracking",
+        "facial recognition",
+        "emotion tracking"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "MindMate's facial tracking feature uses facial expressions to support emotional check-ins. Facial expressions alone cannot reliably determine a person's mental health, so results should be treated as reflective information rather than a diagnosis."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like to learn how facial check-ins relate to wellness tracking?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "mindmate_insights_help_001",
+      "intent": "insights_help",
+      "category": "mindmate_support",
+      "keywords": [
+        "mindmate insights",
+        "wellness insights",
+        "personal insights",
+        "insights feature",
+        "view my insights"
+      ],
+      "phrases": [
+        "mindmate insights",
+        "wellness insights",
+        "personal insights"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "MindMate's Insights section helps you review available wellness information and reflect on your progress. The section also provides access to appointment-related features and wellness resources."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like help understanding your insights or finding appointments?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "mindmate_appointment_help_001",
+      "intent": "appointment_help",
+      "category": "mindmate_support",
+      "keywords": [
+        "book appointment",
+        "counseling appointment",
+        "schedule counseling",
+        "request appointment",
+        "make an appointment",
+        "appointment with counselor",
+        "book an appointment",
+        "schedule an appointment",
+        "request an appointment",
+        "appointment",
+        "book counseling"
+      ],
+      "phrases": [
+        "book appointment",
+        "counseling appointment",
+        "schedule counseling",
+        "book an appointment",
+        "schedule an appointment",
+        "request an appointment"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "You can request counseling support through MindMate's appointment feature, available in the Insights section. Follow the available appointment steps and wait for confirmation from the appropriate PACC personnel. A request does not automatically mean an appointment is confirmed."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like help preparing a message for your appointment request?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "mindmate_counselor_messaging_help_001",
+      "intent": "counselor_messaging_help",
+      "category": "mindmate_support",
+      "keywords": [
+        "message counselor",
+        "guidance counselor chat",
+        "talk to guidance counselor",
+        "counselor messaging",
+        "contact guidance counselor",
+        "message a guidance counselor",
+        "message a counselor",
+        "message guidance counselor",
+        "chat with a counselor",
+        "send a message to counselor"
+      ],
+      "phrases": [
+        "message counselor",
+        "guidance counselor chat",
+        "talk to guidance counselor",
+        "message a guidance counselor",
+        "message a counselor",
+        "chat with a counselor"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "MindMate's Messages section provides access to MindAid and a separate Guidance Counselor messaging option. MindAid offers automated wellness support, while counselor messaging is intended for communication with authorized human support personnel."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like automated MindAid support or guidance counselor assistance?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    },
+    {
+      "id": "mindmate_privacy_help_001",
+      "intent": "privacy_help",
+      "category": "mindmate_support",
+      "keywords": [
+        "mindmate privacy",
+        "data privacy",
+        "is mindmate safe",
+        "personal information privacy",
+        "mental health data privacy",
+        "mental health data private",
+        "is my mental health data private",
+        "is my data private",
+        "privacy",
+        "data protection",
+        "confidentiality"
+      ],
+      "phrases": [
+        "mindmate privacy",
+        "data privacy",
+        "is mindmate safe",
+        "is my mental health data private",
+        "is my data private",
+        "mental health data private"
+      ],
+      "severity": "low",
+      "riskFlags": [],
+      "responses": [
+        "Mental health information is sensitive. MindMate is designed to support privacy-conscious handling of user information, but actual protection depends on the application's implemented security controls and access permissions. Avoid sharing passwords or unnecessary personal details in messages or posts."
+      ],
+      "copingSteps": [],
+      "recommendations": [],
+      "followUpQuestions": [
+        "Would you like to know more about privacy when using MindMate?"
+      ],
+      "escalation": {
+        "required": false,
+        "message": ""
+      },
+      "supportStyle": "practical"
+    }
+  ]
 }
