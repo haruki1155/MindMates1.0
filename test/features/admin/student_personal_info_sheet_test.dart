@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/counseling/widgets/student_personal_info_sheet.dart';
+import 'package:mind_mates/features/admin/screens/counselor_workflow_page.dart';
+import 'package:mind_mates/models/appointment_model.dart';
 import 'package:mind_mates/models/profile_roles.dart';
+import 'package:mind_mates/repositories/admin_portal_repository.dart';
 import 'package:mind_mates/models/student_personal_info.dart';
 
 const _official = StudentOfficialInfo(
@@ -26,6 +29,32 @@ Widget _host(String userId, bool canView, StudentPersonalInfoLoader loader) =>
         ),
       ),
     );
+
+class _Repo extends AdminPortalRepository {
+  _Repo(this.role, this.userIds);
+  final AccessRole role;
+  final List<String> userIds;
+  @override
+  AccessRole get currentAccessRole => role;
+  @override
+  Stream<List<AppointmentModel>> watchAppointments() => Stream.value([
+    for (final id in userIds)
+      AppointmentModel(
+        id: 'a-$id',
+        userId: id,
+        fullName: 'S',
+        scheduledAt: DateTime(2026, 1, 1),
+        scheduledTime: '10:00 AM',
+        location: 'PACC',
+        status: 'confirmed',
+        concern: '',
+        contactNumber: '',
+        email: '',
+        preferredContactMethod: '',
+        createdAt: DateTime(2026, 1, 1),
+      ),
+  ]);
+}
 
 void main() {
   test('only clinical roles may view', () {
@@ -63,5 +92,34 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Access to this record is logged.'), findsOneWidget);
+  });
+
+  Future<void> pumpWorkflow(WidgetTester tester, _Repo repo) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CounselorWorkflowPage(
+            repository: repo,
+            mode: CounselorWorkflowMode.cases,
+            onOpenAppointments: () {},
+            studentInfoLoader: (id) async =>
+                (official: _official, personal: null),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('counselor case card shows the action', (tester) async {
+    await pumpWorkflow(tester, _Repo(AccessRole.counselor, ['u1']));
+    expect(find.text('View Student Information'), findsOneWidget);
+  });
+
+  testWidgets('portal staff never see the action', (tester) async {
+    await pumpWorkflow(tester, _Repo(AccessRole.portalStaff, ['u1']));
+    expect(find.text('View Student Information'), findsNothing);
   });
 }
