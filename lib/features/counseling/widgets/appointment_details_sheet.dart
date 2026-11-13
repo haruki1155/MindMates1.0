@@ -93,7 +93,7 @@ Future<void> showAppointmentDetailsSheet(
     final current = matches != null && matches.isNotEmpty ? matches.first : appointment;
     final canEdit = !current.isArchived && current.hasScheduleRevision &&
         current.scheduledAt.isAfter(DateTime.now()) &&
-        (current.lifecycleStatus == AppointmentStatus.requested || current.lifecycleStatus == AppointmentStatus.confirmed) &&
+        (current.lifecycleStatus == AppointmentStatus.requested || current.lifecycleStatus == AppointmentStatus.confirmed || (current.lifecycleStatus == AppointmentStatus.rescheduleProposed && current.hasPendingScheduleChange)) &&
         auth?.authenticatedUserId == current.userId;
     final canBook = onBookAppointment != null && {
       AppointmentStatus.cancelled, AppointmentStatus.completed,
@@ -115,7 +115,7 @@ Future<void> showAppointmentDetailsSheet(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   LayoutBuilder(builder: (context, constraints) {
                     final label = const Text('YOUR COUNSELING SESSION', style: TextStyle(color: Color(0xFFA17720), fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.w800));
-                    final badge = AppointmentStatusBadge(status: current.lifecycleStatus);
+                    final badge = AppointmentStatusBadge(status: current.lifecycleStatus, pendingLabel: current.hasPendingScheduleChange ? current.pendingScheduleLabel : null);
                     return constraints.maxWidth < 280 || MediaQuery.textScalerOf(context).scale(12) > 18
                         ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [label, const SizedBox(height: 12), badge])
                         : Row(children: [const Expanded(child: Padding(padding: EdgeInsets.only(right: 12), child: Text('YOUR COUNSELING\nSESSION', style: TextStyle(color: Color(0xFFA17720), fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.w800)))), Flexible(child: badge)]);
@@ -130,13 +130,24 @@ Future<void> showAppointmentDetailsSheet(
                 ]),
               ),
               const SizedBox(height: 24),
+              if (current.hasPendingScheduleChange) ...[
+                Container(padding: const EdgeInsets.all(18), decoration: AppointmentVisuals.card, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Proposed time', style: AppointmentVisuals.section),
+                  const SizedBox(height: 10),
+                  Text('${_weekdayDate(current.proposedScheduledAt!)} - ${current.proposedScheduledTime ?? ''} PHT', style: AppointmentVisuals.body),
+                  const SizedBox(height: 8),
+                  Text(current.hasVerifiedPendingScheduleChange ? 'Current time stays reserved until you both agree.' : 'PACC must verify the reservation for this older proposal.', style: AppointmentVisuals.body),
+                  const Text('The proposed time is checked again when accepted.', style: AppointmentVisuals.body),
+                ])),
+                const SizedBox(height: 20),
+              ],
               const Text('Appointment activity', style: AppointmentVisuals.section),
               const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(20), decoration: AppointmentVisuals.card,
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   _ActivityEntry(title: 'Request received', detail: 'Your request was received on ${formatAppointmentDate(current.createdAt)}.'),
-                  _ActivityEntry(processing: current.lifecycleStatus == AppointmentStatus.requested || current.lifecycleStatus == AppointmentStatus.legacyRequested || current.lifecycleStatus == AppointmentStatus.rescheduleProposed, title: 'Current status', detail: _activityDescription(current.lifecycleStatus)),
+                  _ActivityEntry(processing: current.hasPendingScheduleChange || current.lifecycleStatus == AppointmentStatus.requested || current.lifecycleStatus == AppointmentStatus.legacyRequested || current.lifecycleStatus == AppointmentStatus.rescheduleProposed, title: 'Current status', detail: _activityDescription(current.lifecycleStatus)),
                   if (current.scheduleRevision > 0 && current.updatedAt != null)
                     _ActivityEntry(title: 'Appointment updated', detail: 'Last recorded update: ${formatAppointmentDate(current.updatedAt!)}.'),
                   if ((current.staffReply ?? '').trim().isNotEmpty)
@@ -165,6 +176,10 @@ Future<void> showAppointmentDetailsSheet(
           ))),
         ])),
         bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (canEdit && current.hasVerifiedPendingScheduleChange && current.proposedBy == 'counselor') Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+            child: _AcceptProposalButton(appointment: current),
+          ),
           if (canEdit || canBook) Container(
             color: Colors.white,
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
@@ -181,8 +196,13 @@ Future<void> showAppointmentDetailsSheet(
               },
               iconAlignment: IconAlignment.end,
               icon: const Icon(Icons.arrow_forward, size: 18),
-              label: Text(canEdit ? 'Edit date and time' : current.hasAvailableFollowUpOffer ? 'Book Follow-up' : 'Book Appointment'),
+              label: Text(canEdit ? (current.hasPendingScheduleChange ? 'Suggest another time' : 'Edit date and time') : current.hasAvailableFollowUpOffer ? 'Book Follow-up' : 'Book Appointment'),
             ),
+          ),
+          if (canEdit) TextButton.icon(
+            onPressed: provider?.isSaving == true ? null : () => showDialog<void>(context: context, barrierDismissible: false, builder: (_) => _CancelAppointmentDialog(appointment: current)),
+            icon: const Icon(Icons.cancel_outlined),
+            label: const Text('Cancel appointment', textAlign: TextAlign.center),
           ),
           const MindMateBottomNavigation(active: MindMateNavDestination.appointments),
         ]),
@@ -190,6 +210,74 @@ Future<void> showAppointmentDetailsSheet(
     );
   },
 );
+
+class _AcceptProposalButton extends StatefulWidget {
+  const _AcceptProposalButton({required this.appointment});
+  final AppointmentModel appointment;
+  @override
+  State<_AcceptProposalButton> createState() => _AcceptProposalButtonState();
+}
+class _AcceptProposalButtonState extends State<_AcceptProposalButton> {
+  String? requestId;
+  @override
+  void didUpdateWidget(covariant _AcceptProposalButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.appointment.id != widget.appointment.id || oldWidget.appointment.proposalRevision != widget.appointment.proposalRevision) requestId = null;
+  }
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<AppointmentProvider>();
+    return SizedBox(width: double.infinity, child: FilledButton(
+      style: AppointmentVisuals.primary,
+      onPressed: provider.isSaving ? null : () async {
+        requestId ??= 'accept_${DateTime.now().microsecondsSinceEpoch}';
+        final ok = await provider.changeAgreement(widget.appointment, 'accept', requestId!);
+        if (!ok && context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(provider.errorMessage ?? 'Unable to accept this proposal.')));
+      },
+      child: const Text('Accept proposed time', textAlign: TextAlign.center),
+    ));
+  }
+}
+
+class _CancelAppointmentDialog extends StatefulWidget {
+  const _CancelAppointmentDialog({required this.appointment});
+  final AppointmentModel appointment;
+  @override
+  State<_CancelAppointmentDialog> createState() => _CancelAppointmentDialogState();
+}
+
+class _CancelAppointmentDialogState extends State<_CancelAppointmentDialog> {
+  final reason = TextEditingController();
+  late final requestId = 'cancel_${DateTime.now().microsecondsSinceEpoch}';
+  String? error;
+  bool invalidated = false;
+  @override
+  void dispose() { reason.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<AppointmentProvider>();
+    if (context.watch<AuthProvider?>()?.authenticatedUserId != widget.appointment.userId) invalidated = true;
+    return PopScope(canPop: !provider.isSaving, child: AlertDialog(
+      title: const Text('Cancel this appointment?'),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('This immediately cancels your request or approved appointment and releases its reserved time. A reason is optional.'),
+        const SizedBox(height: 16),
+        if (!invalidated) TextField(key: const ValueKey('cancellation-reason'), controller: reason, maxLength: 500, minLines: 2, maxLines: 4, enabled: !provider.isSaving, decoration: const InputDecoration(labelText: 'Reason (optional)')),
+        if (invalidated) const Text('This appointment is unavailable for the current account.'),
+        if (error != null) Semantics(liveRegion: true, child: Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error))),
+      ])),
+      actions: [
+        TextButton(onPressed: provider.isSaving ? null : () => Navigator.pop(context), child: const Text('Keep appointment')),
+        FilledButton(onPressed: provider.isSaving || invalidated ? null : () async {
+          final ok = await provider.changeAgreement(widget.appointment, 'cancel', requestId, reason: reason.text.trim());
+          if (!context.mounted || invalidated) return;
+          if (ok) { Navigator.pop(context); }
+          else { setState(() => error = provider.errorMessage ?? 'Unable to cancel. Your appointment has been kept.'); }
+        }, child: Text(provider.isSaving ? 'Cancelling...' : 'Confirm cancellation')),
+      ],
+    ));
+  }
+}
 
 class _ActivityEntry extends StatelessWidget {
   const _ActivityEntry({required this.title, required this.detail, this.processing = false});
@@ -268,7 +356,7 @@ class _EditAppointmentScheduleState extends State<_EditAppointmentSchedule> {
     if (!mounted || sessionInvalidated || date != chosen) return;
     setState(() {
       final original = widget.appointment.scheduledAt;
-      slots = isSameAppointmentDate(chosen, original)
+      slots = !widget.appointment.hasPendingScheduleChange && isSameAppointmentDate(chosen, original)
           ? [AppointmentSlot(start: original, label: '${widget.appointment.scheduledTime} (current)'), ...result]
           : result;
       loading = false;
@@ -328,9 +416,9 @@ class _EditAppointmentScheduleState extends State<_EditAppointmentSchedule> {
                 const SizedBox(height: 24),
                 Center(child: Text(unchanged ? 'Schedule unchanged' : 'Change received', style: AppointmentVisuals.title, textAlign: TextAlign.center)),
                 const SizedBox(height: 12),
-                Text(unchanged ? 'Your existing schedule and approval have been kept.' : 'Your new preferred time has been submitted. Your appointment is now awaiting confirmation by PACC.', textAlign: TextAlign.center, style: AppointmentVisuals.body),
+                Text(unchanged ? 'Your existing schedule and approval have been kept.' : 'Your preferred time has been sent to PACC for agreement. Your current time remains reserved until PACC accepts.', textAlign: TextAlign.center, style: AppointmentVisuals.body),
                 const SizedBox(height: 24),
-                _ScheduleSummary(title: 'Current state', date: selected!.start, time: selected!.label.replaceAll(' (current)', ''), status: unchanged ? widget.appointment.lifecycleStatus : AppointmentStatus.requested),
+                _ScheduleSummary(title: unchanged ? 'Current state' : 'Proposed time', date: selected!.start, time: selected!.label.replaceAll(' (current)', ''), status: unchanged ? widget.appointment.lifecycleStatus : null),
                 const SizedBox(height: 20),
                 const _ScheduleNotice('Watch for a notification when PACC reviews your new preference.'),
               ] else ...[
@@ -343,7 +431,7 @@ class _EditAppointmentScheduleState extends State<_EditAppointmentSchedule> {
                 if (reviewing) ...[
                   _ScheduleSummary(title: 'New preferred schedule', date: selected!.start, time: selected!.label.replaceAll(' (current)', ''), onEdit: busy || refreshRequired ? null : () => setState(() => reviewing = false)),
                   const SizedBox(height: 18),
-                  _ScheduleNotice(unchanged ? 'This is your current schedule. Its existing approval will be kept.' : 'Changing your schedule will return it to Awaiting confirmation. PACC will need to review the new selection.'),
+                  _ScheduleNotice(unchanged ? 'This is your current schedule. Its existing approval will be kept.' : 'PACC must accept your proposed time. Your current reservation stays in place until you both agree.'),
                 ] else ...[
                   const Text('Choose a new date and time', style: AppointmentVisuals.section),
                   const SizedBox(height: 16),

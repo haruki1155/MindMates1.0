@@ -288,7 +288,7 @@ class AppointmentCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        AppointmentStatusBadge(status: appointment.lifecycleStatus),
+                        AppointmentStatusBadge(status: appointment.lifecycleStatus, pendingLabel: appointment.hasPendingScheduleChange ? appointment.pendingScheduleLabel : null),
                         const SizedBox(height: 8),
                         const Text('PACC Counseling', style: AppointmentVisuals.section),
                         const SizedBox(height: 4),

@@ -57,6 +57,7 @@ class AppointmentRepository {
     required String appointmentId,
     required DateTime expectedScheduledAt,
     required int expectedScheduleRevision,
+    int expectedProposalRevision = 0,
     required DateTime scheduledAt,
     required String requestId,
   }) async {
@@ -66,9 +67,22 @@ class AppointmentRepository {
           'appointmentId': appointmentId,
           'expectedScheduledAt': expectedScheduledAt.millisecondsSinceEpoch,
           'expectedScheduleRevision': expectedScheduleRevision,
+          'expectedProposalRevision': expectedProposalRevision,
           'scheduledAt': scheduledAt.millisecondsSinceEpoch,
           'requestId': requestId,
         });
+  }
+
+  Future<void> changeAgreement({required AppointmentModel appointment, required String action, required String requestId, String? reason}) async {
+    await _functionClient.routedCallable('changeAppointmentAgreement').call<Map<String, dynamic>>({
+      'appointmentId': appointment.id,
+      'action': action,
+      'requestId': requestId,
+      'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
+      'expectedScheduleRevision': appointment.scheduleRevision,
+      'expectedProposalRevision': appointment.proposalRevision,
+      if (reason != null) 'reason': reason.trim(),
+    });
   }
 
   Future<List<AppointmentModel>> fetchAppointments(String userId) {

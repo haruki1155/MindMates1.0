@@ -130,35 +130,40 @@ test("integrated reschedule, notification retries, queue, confirmation, and revi
   const remind = functions.sendAppointmentReminders as unknown as {run: (r: unknown) => Promise<unknown>};
   const original = await ref.get();
   const request = {auth: {uid}, data: {appointmentId: id, expectedScheduledAt: a, expectedScheduleRevision: 0, scheduledAt: b, requestId: "gate2-integrated-edit"}};
-  await edit.run({...request, data: {...request.data, scheduledAt: a}});
+  await edit.run({...request, data: {...request.data, scheduledAt: a, requestId: "gate2_noop_original"}});
   assert.deepEqual((await ref.get()).data(), original.data());
+  // Fail the transactional proposal once, then retry the same identity.
+  const failure = mock.method(db, "runTransaction", async () => { throw new Error("injected processing failure"); });
+  await assert.rejects(edit.run(request), /injected/);
+  failure.mock.restore();
+  await edit.run(request);
   await edit.run(request);
   const pending = await ref.get();
+  assert.equal(pending.data()?.scheduledAt.toMillis(), a);
+  assert.equal(pending.data()?.proposalStatus, "pending");
   const event = {params: {appointmentId: id}, data: {before: original, after: pending}};
-  // Simulate failure before notification transaction commit, then retry.
-  const originalTransaction = db.runTransaction.bind(db);
-  const failure = mock.method(db, "runTransaction", async () => { throw new Error("injected processing failure"); });
-  await assert.rejects(notify.run(event), /injected/);
-  failure.mock.restore();
-  assert.equal(typeof originalTransaction, "function");
-  await Promise.all([notify.run(event), notify.run(event), sync.run(event)]);
-  const noteRef = db.doc(`notifications/portal_appointment_action_${id}_gate2-integrated-edit_${staff}`);
+  await sync.run(event);
+  const noteRef = db.doc(`notifications/agreement_${id}_gate2-integrated-edit_${staff}`);
   const note = (await noteRef.get()).data()!;
-  assert.equal(note.scheduleRevision, 1);
-  assert.equal(note.scheduledAt.toMillis(), b);
+  assert.equal(note.scheduleRevision, 0);
+  assert.equal(note.proposalRevision, 1);
+  assert.equal(note.scheduledAt.toMillis(), a);
   assert.equal(JSON.stringify(note).includes("PRIVATE"), false);
   assert.equal(note.fullName, undefined);
-  assert.equal((await db.doc(`appointment_queue/${id}`).get()).data()?.status, "requested");
-  await review.run({auth: {uid: staff}, data: {appointmentId: id, action: "confirmed", reply: "Confirmed", expectedScheduledAt: b, expectedScheduleRevision: 1, expectedStatus: "requested"}});
-  await sync.run(event); // delayed pending snapshot after confirmation
   assert.equal((await db.doc(`appointment_queue/${id}`).get()).data()?.status, "confirmed");
+  const agree = functions.changeAppointmentAgreement as unknown as {run: (r: unknown) => Promise<unknown>};
+  await agree.run({auth: {uid: staff}, data: {appointmentId: id, action: "accept", requestId: "gate2_staff_accept", expectedScheduledAt: a, expectedScheduleRevision: 0, expectedProposalRevision: 1}});
+  await sync.run(event);
+  assert.equal((await db.doc(`appointment_queue/${id}`).get()).data()?.scheduledAt.toMillis(), b);
   assert.ok((await noteRef.get()).data()?.archivedAt);
   const clock = mock.method(Timestamp, "now", () => Timestamp.fromMillis(b - 55 * 60000));
   try { await Promise.all([remind.run({}), remind.run({})]); } finally { clock.mock.restore(); }
   const reminder = db.doc(`notifications/appointment_reminder_oneHour_${id}_revision_1`);
   assert.equal((await reminder.get()).exists, true);
   const beforeReturn = await ref.get();
-  await edit.run({auth: {uid}, data: {appointmentId: id, expectedScheduledAt: b, expectedScheduleRevision: 1, scheduledAt: a, requestId: "gate2-integrated-return"}});
+  await edit.run({auth: {uid}, data: {appointmentId: id, expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 2, scheduledAt: a, requestId: "gate2-integrated-return"}});
+  assert.equal((await ref.get()).data()?.scheduledAt.toMillis(), b);
+  await agree.run({auth: {uid: staff}, data: {appointmentId: id, action: "accept", requestId: "gate2_accept_return", expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 3}});
   await sync.run(event);
   assert.ok((await reminder.get()).data()?.archivedAt);
   await notify.run(event); // revision 1 cannot recreate a current pending alert

@@ -6,6 +6,7 @@ AppointmentQueue classifyAppointment(
   AppointmentModel appointment,
   DateTime now,
 ) {
+  if (appointment.hasPendingScheduleChange && appointment.proposedBy == 'student') return AppointmentQueue.needsAction;
   if (appointment.status.trim().toLowerCase() == 'completed') {
     return AppointmentQueue.completed;
   }
@@ -59,8 +60,7 @@ bool canReviewAppointment(AppointmentModel appointment, DateTime now) =>
       AppointmentStatus.requested ||
       AppointmentStatus.legacyRequested ||
       AppointmentStatus.rescheduleProposed => true,
-      AppointmentStatus.confirmed =>
-        classifyAppointment(appointment, now) != AppointmentQueue.upcoming,
+      AppointmentStatus.confirmed => true,
       _ => false,
     };
 

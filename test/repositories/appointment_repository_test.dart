@@ -5,6 +5,7 @@ import 'package:firebase_core_platform_interface/test.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/repositories/appointment_repository.dart';
+import 'package:mind_mates/models/appointment_model.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -56,6 +57,7 @@ void main() {
         'appointmentId': 'actual-appointment',
         'expectedScheduledAt': original.millisecondsSinceEpoch,
         'expectedScheduleRevision': 7,
+        'expectedProposalRevision': 0,
         'scheduledAt': original
             .add(const Duration(hours: 1))
             .millisecondsSinceEpoch,
@@ -63,6 +65,18 @@ void main() {
       });
     },
   );
+  test('cancellation transports the exact revisions and accepts a blank reason', () async {
+    final item = AppointmentModel(id: 'owned-appointment', userId: 'student', fullName: 'Student', concern: '', scheduledAt: original, scheduledTime: '09:00 AM', location: 'PACC', status: 'confirmed', contactNumber: '', email: '', preferredContactMethod: '', createdAt: original, scheduleRevision: 7, proposalRevision: 3, hasScheduleRevision: true);
+    await AppointmentRepository().changeAgreement(appointment: item, action: 'cancel', requestId: 'same_cancel_request', reason: '');
+    expect(requests.single['functionName'], 'changeAppointmentAgreement');
+    final data = requests.single['parameters'] as Map;
+    expect(data['expectedScheduledAt'], original.millisecondsSinceEpoch);
+    expect(data['expectedScheduleRevision'], 7);
+    expect(data['expectedProposalRevision'], 3);
+    expect(data['reason'], '');
+    expect(data['requestId'], 'same_cancel_request');
+  });
+
   for (final code in [
     'aborted',
     'already-exists',

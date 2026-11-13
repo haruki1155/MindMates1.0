@@ -9,7 +9,7 @@ test("student appointment rescheduling exposes a trusted callable", () => {
   assert.equal(typeof (callable as {run?: unknown}).run, "function");
 });
 
-test("student reschedule moves the slot atomically and safely replays", async () => {
+test("student proposals retain the slot and agreement safely replays", async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("Firestore emulator required");
   const db = getFirestore();
   const uid = "schedule-test-student";
@@ -65,53 +65,34 @@ test("student reschedule moves the slot atomically and safely replays", async ()
   assert.equal((await oldSlot.get()).data()?.appointmentId, "other-booking");
   await oldSlot.set({appointmentId: id});
   await assertCode({...request, data: {...request.data, expectedScheduledAt: oldAt - 3600000}}, "aborted");
-  await call.run({...request, data: {...request.data, scheduledAt: oldAt}});
+  await call.run({...request, data: {...request.data, scheduledAt: oldAt, requestId: "noop_original_schedule"}});
   assert.equal((await appointment.get()).data()?.status, "confirmed");
   await call.run(request);
-  assert.equal((await appointment.get()).data()?.status, "requested");
-  assert.equal((await appointment.get()).data()?.scheduleRevision, 1);
-  assert.equal((await appointment.get()).data()?.concern, "preserved");
-  assert.equal((await oldSlot.get()).exists, false);
-  assert.equal((await newSlot.get()).data()?.appointmentId, id);
+  const pending = (await appointment.get()).data()!;
+  assert.equal(pending.status, "confirmed");
+  assert.equal(pending.scheduleRevision, 0);
+  assert.equal(pending.proposalRevision, 1);
+  assert.equal(pending.concern, "preserved");
+  assert.equal((await oldSlot.get()).data()?.appointmentId, id);
+  assert.equal((await newSlot.get()).exists, false);
   await call.run(request);
   await assertCode({...request, data: {...request.data, scheduledAt: newAt + 3600000}}, "already-exists");
-  assert.equal((await appointment.get()).data()?.scheduleRevision, 1);
-  await call.run({auth: {uid}, data: {appointmentId: id, expectedScheduledAt: newAt, expectedScheduleRevision: 1, scheduledAt: oldAt, requestId: "request_abcdef"}});
-  assert.equal((await appointment.get()).data()?.scheduleRevision, 2);
-  await assertCode({...request, data: {...request.data, requestId: "request_stale123"}}, "aborted");
-  await call.run(request);
-  assert.equal((await appointment.get()).data()?.scheduledAt.toMillis(), oldAt);
-  assert.equal((await appointment.get()).data()?.scheduleRevision, 2);
-  const review = functions.reviewAppointment as unknown as {run: (r: unknown) => Promise<unknown>};
-  await assert.rejects(review.run({auth: {uid: staff}, data: {appointmentId: id, action: "confirmed", reply: "Confirmed"}}), (e: {code?: string}) => e.code === "aborted");
-  await assert.rejects(review.run({auth: {uid: staff}, data: {appointmentId: id, action: "confirmed", reply: "Confirmed", expectedScheduledAt: oldAt, expectedScheduleRevision: 0, expectedStatus: "requested"}}), (e: {code?: string}) => e.code === "aborted");
-  await review.run({auth: {uid: staff}, data: {appointmentId: id, action: "confirmed", reply: "Confirmed", expectedScheduledAt: oldAt, expectedScheduleRevision: 2, expectedStatus: "requested"}});
-  assert.equal((await appointment.get()).data()?.status, "confirmed");
-  const edits = await Promise.allSettled([newAt, newAt + 3600000].map((target, i) => call.run({auth: {uid}, data: {appointmentId: id, expectedScheduledAt: oldAt, expectedScheduleRevision: 2, scheduledAt: target, requestId: `race_edit_${i}`}})));
-  assert.equal(edits.filter((item) => item.status === "fulfilled").length, 1);
-  const raced = (await appointment.get()).data()!;
-  assert.equal(raced.scheduleRevision, 3);
-  assert.equal(raced.status, "requested");
+  const agree = functions.changeAppointmentAgreement as unknown as {run: (r: unknown) => Promise<unknown>};
+  const acceptance = {auth: {uid: staff}, data: {appointmentId: id, action: "accept", expectedScheduledAt: oldAt, expectedScheduleRevision: 0, expectedProposalRevision: 1, requestId: "staff_accept_schedule"}};
+  await agree.run(acceptance);
+  await agree.run(acceptance);
   assert.equal((await oldSlot.get()).exists, false);
-  assert.equal((await db.collection("appointment_slots").doc(`pacc_${raced.scheduledAt.toMillis()}`).get()).data()?.appointmentId, id);
-  const staff2 = "schedule-test-staff-2";
-  await db.collection("users").doc(staff2).set({accessRole: "admin", name: "Staff 2"});
-  const decisions = await Promise.allSettled([staff, staff2].map((actor) => review.run({auth: {uid: actor}, data: {appointmentId: id, action: "confirmed", reply: "Confirmed", expectedScheduledAt: raced.scheduledAt.toMillis(), expectedScheduleRevision: 3, expectedStatus: "requested"}})));
-  assert.equal(decisions.filter((item) => item.status === "fulfilled").length, 1);
+  assert.equal((await newSlot.get()).data()?.appointmentId, id);
+  assert.equal((await appointment.get()).data()?.scheduleRevision, 1);
   assert.equal((await appointment.get()).data()?.status, "confirmed");
-  await appointment.update({status: "requested"});
-  const overlapping = await Promise.allSettled([
-    call.run({auth: {uid}, data: {appointmentId: id, expectedScheduledAt: raced.scheduledAt.toMillis(), expectedScheduleRevision: 3, scheduledAt: oldAt, requestId: "race_staff_student"}}),
-    review.run({auth: {uid: staff}, data: {appointmentId: id, action: "confirmed", reply: "Confirmed", expectedScheduledAt: raced.scheduledAt.toMillis(), expectedScheduleRevision: 3, expectedStatus: "requested"}}),
-  ]);
-  assert.equal(overlapping[0].status, "fulfilled");
-  const final = (await appointment.get()).data()!;
-  assert.equal(final.status, "requested");
-  assert.equal(final.scheduleRevision, 4);
-  assert.equal(final.scheduledAt.toMillis(), oldAt);
-  assert.equal((await oldSlot.get()).data()?.appointmentId, id);
-  assert.equal((await db.collection("appointment_slots").doc(`pacc_${raced.scheduledAt.toMillis()}`).get()).exists, false);
-  assert.equal((await lock.get()).data()?.appointmentId, id);
+  const edits = await Promise.allSettled([oldAt, newAt + 3600000].map((target, i) => call.run({auth: {uid}, data: {appointmentId: id, expectedScheduledAt: newAt, expectedScheduleRevision: 1, expectedProposalRevision: 2, scheduledAt: target, requestId: `race_edit_${i}`}})));
+  assert.equal(edits.filter(r => r.status === "fulfilled").length, 1);
+  const raced = (await appointment.get()).data()!;
+  assert.equal(raced.scheduleRevision, 1);
+  assert.equal(raced.proposalRevision, 3);
+  assert.equal(raced.scheduledAt.toMillis(), newAt);
+  assert.equal((await newSlot.get()).data()?.appointmentId, id);
+  await assert.rejects(agree.run({...acceptance, data: {...acceptance.data, requestId: "stale_acceptance_2"}}), {code: "aborted"});
 });
 
 test("legacy initialization races fail closed and never reset a revision", async () => {
@@ -152,15 +133,17 @@ test("legacy initialization races fail closed and never reset a revision", async
   assert.equal(race[0].status, "fulfilled");
   if (race[1].status === "rejected") await edit.run(change);
   const revised = (await ref.get()).data()!;
-  assert.equal(revised.scheduleRevision, 1);
-  assert.equal(revised.scheduledAt.toMillis(), at + 3600000);
-  assert.equal(revised.status, "requested");
+  assert.equal(revised.scheduleRevision, 0);
+  assert.equal(revised.proposalRevision, 1);
+  assert.equal(revised.scheduledAt.toMillis(), at);
+  assert.equal(revised.status, "confirmed");
   const resets = await Promise.allSettled([baseline.run(init), baseline.run(init)]);
   assert.equal(resets.filter((r) => r.status === "fulfilled").length, 0);
   assert.deepEqual((await ref.get()).data(), revised);
-  assert.equal((await slot.get()).exists, false);
-  assert.equal((await db.doc(`appointment_slots/pacc_${at + 3600000}`).get()).data()?.appointmentId, id);
+  assert.equal((await slot.get()).data()?.appointmentId, id);
+  assert.equal((await db.doc(`appointment_slots/pacc_${at + 3600000}`).get()).exists, false);
   assert.equal((await lock.get()).data()?.appointmentId, id);
-  await review.run({auth: {uid: staff}, data: {appointmentId: id, action: "confirmed", reply: "Refreshed review", expectedScheduledAt: at + 3600000, expectedScheduleRevision: 1, expectedStatus: "requested"}});
+  const agree = functions.changeAppointmentAgreement as unknown as {run: (r: unknown) => Promise<unknown>};
+  await agree.run({auth: {uid: staff}, data: {appointmentId: id, action: "accept", requestId: "legacy_final_accept", expectedScheduledAt: at, expectedScheduleRevision: 0, expectedProposalRevision: 1}});
   assert.equal((await ref.get()).data()?.status, "confirmed");
 });

@@ -33,6 +33,9 @@ class TestRepository extends AppointmentRepository {
   Completer<void>? pending;
   Object? failure;
   int calls = 0;
+  String? lastAgreementAction, lastAgreementReason;
+  int? lastAgreementRevision;
+  final agreementRequests = <String>[];
   int? revision;
   DateTime? original;
   @override
@@ -50,10 +53,20 @@ class TestRepository extends AppointmentRepository {
     ),
   ];
   @override
+  Future<void> changeAgreement({required AppointmentModel appointment, required String action, required String requestId, String? reason}) async {
+    agreementRequests.add(requestId);
+    lastAgreementAction = action;
+    lastAgreementReason = reason;
+    lastAgreementRevision = appointment.proposalRevision;
+    if (failure != null) throw failure!;
+    item = item.copyWith(status: action == 'cancel' ? 'cancelled' : 'confirmed', proposalStatus: action == 'cancel' ? 'cancelled' : 'accepted', scheduledAt: action == 'accept' ? item.proposedScheduledAt : item.scheduledAt);
+    updates.add([item]);
+  }
+  @override
   Future<void> rescheduleAppointment({
     required String appointmentId,
     required DateTime expectedScheduledAt,
-    required int expectedScheduleRevision,
+    required int expectedScheduleRevision, int expectedProposalRevision = 0,
     required DateTime scheduledAt,
     required String requestId,
   }) async {
@@ -62,10 +75,10 @@ class TestRepository extends AppointmentRepository {
     original = expectedScheduledAt;
     if (pending != null) await pending!.future;
     if (failure != null) throw failure!;
-    item = item.copyWith(
-      scheduledAt: scheduledAt,
-      status: scheduledAt == item.scheduledAt ? item.status : 'requested',
-    );
+    if (scheduledAt != item.scheduledAt) { item = item.copyWith(
+      proposedScheduledAt: scheduledAt, proposedScheduledTime: '2:00 PM',
+      proposedBy: 'student', proposalStatus: 'pending', proposalRevision: item.proposalRevision + 1,
+    ); }
     updates.add([item]);
   }
 }
@@ -148,6 +161,67 @@ void main() {
     expect(find.byKey(const ValueKey('processing-indicator-static')), findsOneWidget);
   });
 
+  testWidgets('accept retry keeps request identity after a temporary failure', (tester) async {
+    final repo = TestRepository()..item = appointment('confirmed').copyWith(proposalStatus: 'pending', proposedBy: 'counselor', proposalRevision: 2, proposedScheduledAt: appointment('confirmed').scheduledAt.add(const Duration(hours: 1)), proposedScheduledTime: '11:00 AM')..failure = FirebaseFunctionsException(code: 'unavailable', message: 'Try again');
+    await open(tester, repo, TestAuth(), AppointmentProvider(repo));
+    await tester.tap(find.text('Accept proposed time'));
+    await tester.pumpAndSettle();
+    repo.failure = null;
+    await tester.tap(find.text('Accept proposed time'));
+    await tester.pumpAndSettle();
+    expect(repo.agreementRequests, hasLength(2));
+    expect(repo.agreementRequests[0], repo.agreementRequests[1]);
+  });
+
+  testWidgets('cancellation keeps optional reason after failure and can be dismissed', (tester) async {
+    final repo = TestRepository()..item = appointment('requested')..failure = FirebaseFunctionsException(code: 'unavailable', message: 'Try again');
+    await open(tester, repo, TestAuth(), AppointmentProvider(repo));
+    await tester.tap(find.text('Cancel appointment'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('cancellation-reason')), 'Personal decision');
+    await tester.tap(find.text('Confirm cancellation'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('cancellation-reason'))).controller!.text, 'Personal decision');
+    expect(repo.item.status, 'requested');
+    await tester.tap(find.text('Keep appointment'));
+    await tester.pumpAndSettle();
+    expect(repo.agreementRequests, hasLength(1));
+    expect(repo.item.status, 'requested');
+  });
+
+  testWidgets('legacy proposals do not promise a retained reservation', (tester) async {
+    final repo = TestRepository()..item = appointment('reschedule_proposed').copyWith(hasScheduleRevision: false, proposalStatus: 'pending', proposedBy: 'counselor', proposedScheduledAt: appointment('confirmed').scheduledAt.add(const Duration(hours: 1)), proposedScheduledTime: '11:00 AM');
+    await open(tester, repo, TestAuth(), AppointmentProvider(repo));
+    expect(find.text('Current time stays reserved until you both agree.'), findsNothing);
+    expect(find.text('PACC must verify the reservation for this older proposal.'), findsOneWidget);
+    expect(find.text('Accept proposed time'), findsNothing);
+  });
+
+  testWidgets('student can cancel approved appointment without a reason', (tester) async {
+    final repo = TestRepository()..item = appointment('confirmed');
+    await open(tester, repo, TestAuth(), AppointmentProvider(repo));
+    await tester.tap(find.text('Cancel appointment'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reason (optional)'), findsOneWidget);
+    await tester.tap(find.text('Confirm cancellation'));
+    await tester.pumpAndSettle();
+    expect(repo.lastAgreementAction, 'cancel');
+    expect(repo.lastAgreementReason, '');
+    expect(repo.item.status, 'cancelled');
+  });
+
+  testWidgets('PACC proposal shows reserved and proposed times with student accept', (tester) async {
+    final repo = TestRepository()..item = appointment('confirmed').copyWith(proposalStatus: 'pending', proposedBy: 'counselor', proposalRevision: 2, proposedScheduledAt: appointment('confirmed').scheduledAt.add(const Duration(hours: 1)), proposedScheduledTime: '11:00 AM');
+    await open(tester, repo, TestAuth(), AppointmentProvider(repo));
+    expect(find.text('Your confirmation needed'), findsOneWidget);
+    expect(find.text('Current time stays reserved until you both agree.'), findsOneWidget);
+    await tester.ensureVisible(find.text('Accept proposed time'));
+    await tester.tap(find.text('Accept proposed time'));
+    await tester.pumpAndSettle();
+    expect(repo.lastAgreementAction, 'accept');
+    expect(repo.lastAgreementRevision, 2);
+  });
+
   testWidgets('open details follows live status and renders appointment activity', (tester) async {
     final repo = TestRepository()..item = appointment('requested');
     final provider = AppointmentProvider(repo);
@@ -183,7 +257,7 @@ void main() {
     expect(find.text('Change received'), findsOneWidget);
     await tester.tap(find.text('View appointment details'));
     await tester.pumpAndSettle();
-    expect(find.text('Awaiting confirmation'), findsOneWidget);
+    expect(find.text('Awaiting PACC confirmation'), findsOneWidget);
   });
 
   testWidgets('phone details footer stays reachable and schedule screens render', (tester) async {
@@ -315,7 +389,9 @@ void main() {
       repo.pending!.complete();
       await tester.pumpAndSettle();
       expect(provider.appointments.single.id, 'existing-id');
-      expect(provider.appointments.single.status, 'requested');
+      expect(provider.appointments.single.status, 'confirmed');
+      expect(provider.appointments.single.hasPendingScheduleChange, isTrue);
+      expect(provider.appointments.single.scheduledAt, opened.scheduledAt);
     },
   );
   testWidgets(

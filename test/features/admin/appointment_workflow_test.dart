@@ -84,7 +84,7 @@ void main() {
         appointment('confirmed', now.add(const Duration(days: 1))),
         now,
       ),
-      isFalse,
+      isTrue,
     );
     expect(canReviewAppointment(appointment('completed', now), now), isFalse);
     expect(

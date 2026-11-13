@@ -1,3 +1,4 @@
+import {handleAppointmentAgreement} from "./appointment_agreement";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
@@ -1505,6 +1506,8 @@ export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
   async (event) => {
     const before = event.data?.before.data() ?? {};
     const after = event.data?.after.data() ?? {};
+    // New agreement transactions already persist their notification intents.
+    if (typeof after.agreementRequestId === "string" && after.agreementRequestId !== before.agreementRequestId) return;
     const beforeStatus = canonicalAppointmentStatus(before.status);
     const afterStatus = canonicalAppointmentStatus(after.status);
     const isStudentProposal = afterStatus === "reschedule_proposed" && after.proposedBy === "student";
@@ -1702,6 +1705,11 @@ export function portalAppointmentQueueProjection(
     scheduledTime: String(appointment.scheduledTime ?? "").trim(),
     status: String(appointment.status ?? "requested").trim().toLowerCase(),
     scheduleRevision: appointment.scheduleRevision ?? null,
+    proposalRevision: appointment.proposalRevision ?? 0,
+    proposalStatus: appointment.proposalStatus ?? null,
+    proposedBy: appointment.proposedBy ?? null,
+    proposedScheduledAt: appointment.proposedScheduledAt ?? null,
+    proposedScheduledTime: appointment.proposedScheduledTime ?? null,
     assignedCounselor: String(appointment.counselorName ?? "").trim(),
     isArchived: appointment.archivedAt != null,
     sourceUpdatedAt: appointment.updatedAt ?? appointment.createdAt ?? Timestamp.now(),
@@ -1728,6 +1736,7 @@ async function projectCurrentAppointment(id: string): Promise<void> {
 
 // Compare status as well as revision: confirmation does not change the schedule.
 export function appointmentNotificationIsCurrent(note: FirebaseFirestore.DocumentData, data?: FirebaseFirestore.DocumentData): boolean {
+  if (note.proposalRevision != null && note.proposalRevision !== (data?.proposalRevision ?? 0)) return false;
   if (!data || (data.archivedAt && note.expectedStatus !== "cancelled") || !(data.scheduledAt instanceof Timestamp)) return false;
   if (note.scheduleRevision == null) {
     // Legacy reminder IDs are valid only for a legacy/baseline schedule, never
@@ -2049,74 +2058,28 @@ export const initializeAppointmentScheduleRevision = onCall(async (request) => {
   return {ok: true, refreshRequired: true};
 });
 
-export const rescheduleStudentAppointment = onCall(async (request) => {
-  const userId = requireAuthenticatedUser(request);
-  const input = (request.data ?? {}) as Record<string, unknown>;
-  const appointmentId = String(input.appointmentId ?? "").trim();
-  const requestId = String(input.requestId ?? "").trim();
-  const expected = Number(input.expectedScheduledAt);
-  const expectedRevision = input.expectedScheduleRevision;
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(appointmentId) ||
-      !/^[A-Za-z0-9_-]{8,100}$/.test(requestId) || !Number.isSafeInteger(expected) || !Number.isSafeInteger(expectedRevision) || (expectedRevision as number) < 0) {
-    throw new HttpsError("invalid-argument", "A valid appointment and request are required.");
-  }
-  let schedule: {millis: number; scheduledTime: string};
-  try { schedule = validateAppointmentTimestamp(input.scheduledAt); } catch (error) {
-    if (error instanceof AppointmentSchedulingValidationError) throw new HttpsError("invalid-argument", error.message);
-    throw error;
-  }
-  const appointment = db.collection("appointments").doc(appointmentId);
-  const replay = appointment.collection("schedule_edit_requests").doc(requestId);
-  const userLock = db.collection("appointment_user_locks").doc(userId);
-  const oldSlot = db.collection("appointment_slots").doc(appointmentSlotId(Timestamp.fromMillis(expected)));
-  const newSlot = db.collection("appointment_slots").doc(appointmentSlotId(Timestamp.fromMillis(schedule.millis)));
-  const availability = db.collection("pacc_availability").doc("current");
-  const policy = db.collection("appointment_policy").doc("current");
-  return db.runTransaction(async (tx) => {
-    const [current, prior, active, old, next, availabilitySnapshot, policySnapshot] = await Promise.all([
-      tx.get(appointment), tx.get(replay), tx.get(userLock), tx.get(oldSlot), tx.get(newSlot), tx.get(availability), tx.get(policy),
-    ]);
-    const data = current.data();
-    if (!data || data.userId !== userId) throw new HttpsError("permission-denied", "Appointment unavailable.");
-    if (prior.exists) {
-      const previous = prior.data()!;
-      if (previous.expected !== expected || previous.expectedRevision !== expectedRevision || previous.scheduledAt !== schedule.millis) throw new HttpsError("already-exists", "Request ID already used.");
-      return {ok: true, idempotentReplay: true};
-    }
-    const currentAt = data.scheduledAt instanceof Timestamp ? data.scheduledAt.toMillis() : 0;
-    const revision = data.scheduleRevision;
-    if (!Number.isSafeInteger(revision) || revision < 0 || revision >= Number.MAX_SAFE_INTEGER) throw new HttpsError("failed-precondition", "Appointment revision requires review.");
-    if (revision !== expectedRevision) throw new HttpsError("aborted", "The appointment changed. Refresh and try again.");
-    const status = canonicalAppointmentStatus(data.status);
-    if (data.archivedAt || currentAt <= Date.now() || (status !== "requested" && status !== "confirmed")) throw new HttpsError("failed-precondition", "This appointment cannot be changed.");
-    if (currentAt !== expected) throw new HttpsError("aborted", "The appointment changed. Refresh and try again.");
-    if (schedule.millis === expected) return {ok: true, unchanged: true};
-    if (active.data()?.appointmentId !== appointmentId || old.data()?.appointmentId !== appointmentId) throw new HttpsError("failed-precondition", "The existing appointment reservation needs review.");
-    if (next.exists) throw new HttpsError("already-exists", "This time is no longer available. Please choose another schedule.");
-    try { validatePaccAppointmentAvailability(schedule.millis, availabilitySnapshot.exists ? availabilitySnapshot.data() : null); } catch (error) {
-      if (error instanceof AppointmentAvailabilityValidationError) throw new HttpsError("failed-precondition", error.message);
-      throw error;
-    }
-    const violation = bookingPolicyViolation(appointmentBookingPolicy(policySnapshot.exists ? policySnapshot.data() : null), schedule.millis);
-    if (violation) throw new HttpsError("failed-precondition", violation);
-    tx.create(newSlot, {appointmentId, scheduledAt: Timestamp.fromMillis(schedule.millis), createdAt: FieldValue.serverTimestamp()});
-    tx.delete(oldSlot);
-    tx.update(appointment, {scheduledAt: Timestamp.fromMillis(schedule.millis), scheduledTime: schedule.scheduledTime, scheduleRevision: revision + 1, status: "requested", updatedAt: FieldValue.serverTimestamp(), reviewedAt: FieldValue.delete(), staffReply: FieldValue.delete(), proposedScheduledAt: FieldValue.delete(), proposedScheduledTime: FieldValue.delete(), proposedBy: FieldValue.delete(), proposalStatus: FieldValue.delete(), reminders: {}, studentScheduleRequestId: requestId});
-    tx.create(replay, {expected, expectedRevision, scheduledAt: schedule.millis, createdAt: FieldValue.serverTimestamp()});
-    createAppointmentEvent(tx, appointment, "student_schedule_changed", userId, status, "requested", {previousScheduledAt: data.scheduledAt, scheduledAt: Timestamp.fromMillis(schedule.millis)});
-    return {ok: true, idempotentReplay: false};
-  });
-});
+export const changeAppointmentAgreement = onCall(async (request) => handleAppointmentAgreement(
+  requireAuthenticatedUser(request), (request.data ?? {}) as Record<string, unknown>, requireClinicalAppointmentStaff,
+));
 
-export const respondToAppointment = onCall(async (request) => {
-  requireAuthenticatedUser(request);
-  throw new HttpsError("permission-denied", "Appointment schedule changes are finalized by PACC staff.");
-});
+export const rescheduleStudentAppointment = onCall(async (request) => handleAppointmentAgreement(
+  requireAuthenticatedUser(request), {...(request.data ?? {}), action: "propose"}, requireClinicalAppointmentStaff,
+));
+
+export const respondToAppointment = onCall(async (request) => handleAppointmentAgreement(
+  requireAuthenticatedUser(request), {...(request.data ?? {}), action: request.data?.action === "accept_reschedule" ? "accept" : request.data?.action}, requireClinicalAppointmentStaff,
+));
 
 export const reviewAppointment = onCall(async (request) => {
   const staffId = request.auth?.uid;
   if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
   const staff = await requireClinicalAppointmentStaff(staffId);
+  if (request.data?.action === "rescheduled") {
+    const input = request.data as Record<string, unknown>;
+    const schedule = staffProposalTimestamp(input);
+    return handleAppointmentAgreement(staffId, {...input, action: "propose", scheduledAt: schedule.millis, requestId: input.requestId ?? `staff_${createHash("sha256").update(JSON.stringify([staffId, input.appointmentId, input.expectedScheduledAt, input.expectedScheduleRevision, input.expectedProposalRevision ?? 0, schedule.millis])).digest("hex")}`}, requireClinicalAppointmentStaff);
+  }
+
   const input = request.data as Record<string, unknown>;
   const appointmentId = String(input.appointmentId ?? "").trim();
   const action = String(input.action ?? "").trim();
@@ -2161,6 +2124,7 @@ export const reviewAppointment = onCall(async (request) => {
     if (!Number.isSafeInteger(revision) || revision < 0 || !Number.isSafeInteger(input.expectedScheduleRevision) || input.expectedScheduleRevision !== revision || !(data.scheduledAt instanceof Timestamp) || input.expectedScheduledAt !== data.scheduledAt.toMillis() || input.expectedStatus !== before) {
       throw new HttpsError("aborted", "The appointment schedule changed. Refresh and review the current time.");
     }
+    if (action === "confirmed" && data.proposalStatus === "pending") throw new HttpsError("failed-precondition", "Resolve the current schedule proposal before confirming.");
     const nextStatus = action === "rescheduled" ? "confirmed" : action;
     if (before === "reschedule_proposed" && action !== "rescheduled") {
       throw new HttpsError("failed-precondition", "Use Re-schedule appointment to finalize this legacy schedule update.");
@@ -2197,6 +2161,7 @@ export const reviewAppointment = onCall(async (request) => {
       transaction.create(newSlot, {appointmentId, scheduledAt: Timestamp.fromMillis(proposal!.millis), createdAt: FieldValue.serverTimestamp()});
     }
     const patch: Record<string, unknown> = {
+      ...(["completed", "no_show"].includes(action) ? {proposalStatus: "closed", proposalRevision: (data.proposalRevision ?? 0) + 1} : {}),
       scheduleRevision: action === "rescheduled" && proposal!.millis !== (data.scheduledAt as Timestamp).toMillis() ? revision + 1 : revision,
       status: action === "rescheduled" ? "confirmed" : action,
       // Review activity and case ownership are distinct. A clinician may
@@ -2570,6 +2535,7 @@ export const expireStaleAppointmentRequests = onSchedule(
         const activeAppointmentLock = db.collection("appointment_user_locks").doc(userId);
         const activeLock = await transaction.get(activeAppointmentLock);
         transaction.update(appointment.ref, {
+          proposalStatus: "expired", proposalRevision: (data.proposalRevision ?? 0) + 1,
           status: "expired", expiredAt: FieldValue.serverTimestamp(),
           expiryReason: "Request expired before PACC review", updatedAt: FieldValue.serverTimestamp(),
         });

@@ -7,6 +7,24 @@ import 'package:mind_mates/providers/appointment_provider.dart';
 import 'package:mind_mates/repositories/appointment_repository.dart';
 
 void main() {
+  test('agreement preserves both revisions, optional reason and stale account safety', () async {
+    final repository = _FakeAppointmentRepository([])..agreementCompleter = Completer<void>();
+    final provider = AppointmentProvider(repository);
+    await provider.loadAppointments('user_1');
+    final item = _appointment('a1', 'user_1').copyWith(hasScheduleRevision: true, scheduleRevision: 4, proposalRevision: 6);
+    final pending = provider.changeAgreement(item, 'cancel', 'stable_cancel_request', reason: '');
+    expect(provider.isSaving, isTrue);
+    expect(await provider.changeAgreement(item, 'cancel', 'duplicate_cancel_request'), isFalse);
+    expect(repository.agreementCalls, 1);
+    expect(repository.agreementItem!.proposalRevision, 6);
+    expect(repository.agreementItem!.scheduleRevision, 4);
+    expect(repository.agreementReason, '');
+    await provider.loadAppointments('user_2');
+    repository.agreementCompleter!.complete();
+    expect(await pending, isFalse);
+    expect(provider.errorMessage, isNull);
+  });
+
   test('internal availability failures give a useful recovery message', () async {
     final repository = _AvailabilityRepository()..internal = true;
     final provider = AppointmentProvider(repository);
@@ -187,6 +205,12 @@ class _FakeAppointmentRepository extends AppointmentRepository {
   bool shouldFail = false;
   bool returnAllUsers = false;
   int createCalls = 0;
+  int agreementCalls = 0;
+  AppointmentModel? agreementItem;
+  String? agreementReason;
+  Completer<void>? agreementCompleter;
+  @override
+  Future<void> changeAgreement({required AppointmentModel appointment, required String action, required String requestId, String? reason}) async { agreementCalls++; agreementItem = appointment; agreementReason = reason; if (agreementCompleter != null) await agreementCompleter!.future; }
   String? lastRequestId;
   Completer<AppointmentModel>? saveCompleter;
   Completer<void>? editCompleter;
@@ -195,7 +219,7 @@ class _FakeAppointmentRepository extends AppointmentRepository {
   String? editRequestId;
 
   @override
-  Future<void> rescheduleAppointment({required String appointmentId, required DateTime expectedScheduledAt, required int expectedScheduleRevision, required DateTime scheduledAt, required String requestId}) async {
+  Future<void> rescheduleAppointment({required String appointmentId, required DateTime expectedScheduledAt, required int expectedScheduleRevision, int expectedProposalRevision = 0, required DateTime scheduledAt, required String requestId}) async {
     editRevision = expectedScheduleRevision;
     editOriginal = expectedScheduledAt;
     editRequestId = requestId;

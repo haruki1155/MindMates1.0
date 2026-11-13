@@ -147,6 +147,24 @@ class AppointmentProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> changeAgreement(AppointmentModel appointment, String action, String requestId, {String? reason}) async {
+    if (_isSaving || _loadedUserId != appointment.userId || !appointment.hasScheduleRevision || !{'accept', 'cancel'}.contains(action)) return false;
+    final generation = _loadGeneration;
+    _isSaving = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await _repository.changeAgreement(appointment: appointment, action: action, requestId: requestId, reason: reason);
+      return generation == _loadGeneration && _loadedUserId == appointment.userId;
+    } catch (error) {
+      if (generation == _loadGeneration) _errorMessage = FirebaseErrorMessage.describe(error, fallback: 'Unable to update this appointment. Please try again.');
+      return false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
   Future<bool> rescheduleAppointment(
     AppointmentModel appointment,
     DateTime selected,
@@ -162,6 +180,7 @@ class AppointmentProvider extends ChangeNotifier {
         appointmentId: appointment.id,
         expectedScheduledAt: appointment.scheduledAt,
         expectedScheduleRevision: appointment.scheduleRevision,
+        expectedProposalRevision: appointment.proposalRevision,
         scheduledAt: selected,
         requestId: requestId,
       );

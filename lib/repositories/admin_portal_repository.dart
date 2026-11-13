@@ -1081,12 +1081,22 @@ class AdminPortalRepository {
     });
   }
 
+  Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId) async {
+    await FirebaseFunctions.instance.httpsCallable('changeAppointmentAgreement').call({
+      'appointmentId': appointment.id, 'action': action, 'requestId': requestId,
+      'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
+      'expectedScheduleRevision': appointment.scheduleRevision,
+      'expectedProposalRevision': appointment.proposalRevision,
+    });
+  }
+
   Future<void> reviewAppointment({
     required String appointmentId,
     required String action,
     required String reply,
     int? expectedScheduledAt,
     required int expectedScheduleRevision,
+    int expectedProposalRevision = 0,
     required String expectedStatus,
     DateTime? proposedScheduledAt,
     String? proposedScheduledTime,
@@ -1101,6 +1111,7 @@ class AdminPortalRepository {
       'reply': reply,
       'expectedScheduledAt': ?expectedScheduledAt,
       'expectedScheduleRevision': expectedScheduleRevision,
+      'expectedProposalRevision': expectedProposalRevision,
       'expectedStatus': expectedStatus,
       if (proposedScheduledAt != null)
         'proposedScheduledAt': proposedScheduledAt.millisecondsSinceEpoch,

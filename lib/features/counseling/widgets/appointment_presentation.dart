@@ -55,12 +55,14 @@ String appointmentStatusLabel(AppointmentStatus status) => switch (status) {
 };
 
 class AppointmentStatusBadge extends StatelessWidget {
-  const AppointmentStatusBadge({super.key, required this.status});
+  const AppointmentStatusBadge({super.key, required this.status, this.pendingLabel});
   final AppointmentStatus status;
+  final String? pendingLabel;
 
   @override
   Widget build(BuildContext context) {
-    final (background, foreground) = switch (status) {
+    final effective = pendingLabel == null ? status : AppointmentStatus.requested;
+    final (background, foreground) = switch (effective) {
       AppointmentStatus.requested || AppointmentStatus.legacyRequested => (
         const Color(0xFFFFF3D7),
         const Color(0xFF91600B),
@@ -78,7 +80,7 @@ class AppointmentStatusBadge extends StatelessWidget {
     return Semantics(
       key: ValueKey('appointment-status-${status.name}'),
       liveRegion: true,
-      label: 'Appointment status: ${appointmentStatusLabel(status)}',
+      label: 'Appointment status: ${pendingLabel ?? appointmentStatusLabel(status)}',
       excludeSemantics: true,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -90,13 +92,13 @@ class AppointmentStatusBadge extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (status == AppointmentStatus.requested || status == AppointmentStatus.legacyRequested || status == AppointmentStatus.rescheduleProposed)
+            if (effective == AppointmentStatus.requested || effective == AppointmentStatus.legacyRequested || effective == AppointmentStatus.rescheduleProposed)
               const AppointmentProcessingIndicator()
             else Icon(status == AppointmentStatus.confirmed || status == AppointmentStatus.completed ? Icons.check_circle : Icons.info, size: 17, color: foreground),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
-                appointmentStatusLabel(status),
+                pendingLabel ?? appointmentStatusLabel(status),
                 style: TextStyle(
                   fontSize: 12,
                   height: 1.2,

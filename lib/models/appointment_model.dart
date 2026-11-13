@@ -84,6 +84,7 @@ class AppointmentModel {
     this.counselorName,
     this.updatedAt,
     this.scheduleRevision = 0,
+    this.proposalRevision = 0,
     this.hasScheduleRevision = false,
     this.assignedStaffId,
     this.staffReply,
@@ -126,6 +127,7 @@ class AppointmentModel {
   final DateTime createdAt;
   final DateTime? updatedAt;
   final int scheduleRevision;
+  final int proposalRevision;
   final bool hasScheduleRevision;
   final String? assignedStaffId;
   final String? staffReply;
@@ -143,6 +145,10 @@ class AppointmentModel {
   final String? followUpMessage;
   final String followUpStatus;
   final String? followUpAppointmentId;
+
+  bool get hasPendingScheduleChange => proposalStatus == 'pending' && const ['student', 'counselor'].contains(proposedBy) && proposedScheduledAt != null && isActive && !isArchived && scheduledAt.isAfter(DateTime.now());
+  bool get hasVerifiedPendingScheduleChange => hasPendingScheduleChange && proposalRevision > 0 && hasScheduleRevision;
+  String get pendingScheduleLabel => proposedBy == 'student' ? 'Awaiting PACC confirmation' : 'Your confirmation needed';
 
   bool get isArchived => archivedAt != null;
   AppointmentStatus get lifecycleStatus => AppointmentStatus.parse(status);
@@ -201,6 +207,7 @@ class AppointmentModel {
       assignedStaffId: _optionalString(json['assignedStaffId']),
       staffReply: _optionalString(json['staffReply']),
       reviewedAt: dateTimeFromFirestore(json['reviewedAt']),
+      proposalRevision: (json['proposalRevision'] as num?)?.toInt() ?? 0,
       proposedScheduledAt: dateTimeFromFirestore(json['proposedScheduledAt']),
       proposedScheduledTime: _optionalString(json['proposedScheduledTime']),
       proposedBy: _optionalString(json['proposedBy']),
@@ -241,6 +248,7 @@ class AppointmentModel {
       'assignedStaffId': assignedStaffId ?? '',
       'staffReply': staffReply ?? '',
       'reviewedAt': reviewedAt,
+      'proposalRevision': proposalRevision,
       'proposedScheduledAt': proposedScheduledAt,
       'proposedScheduledTime': proposedScheduledTime ?? '',
       'proposedBy': proposedBy ?? '',
@@ -283,6 +291,7 @@ class AppointmentModel {
     DateTime? createdAt,
     DateTime? updatedAt,
     int? scheduleRevision,
+    int? proposalRevision,
     bool? hasScheduleRevision,
     String? assignedStaffId,
     String? staffReply,
@@ -326,6 +335,7 @@ class AppointmentModel {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       scheduleRevision: scheduleRevision ?? this.scheduleRevision,
+      proposalRevision: proposalRevision ?? this.proposalRevision,
       hasScheduleRevision: hasScheduleRevision ?? this.hasScheduleRevision,
       assignedStaffId: assignedStaffId ?? this.assignedStaffId,
       staffReply: staffReply ?? this.staffReply,
