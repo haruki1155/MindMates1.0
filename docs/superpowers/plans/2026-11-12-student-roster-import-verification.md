@@ -109,6 +109,15 @@ asynchronously — wait for "Enabled" before step 2 of the rollout):
 Audit log (`admin_audit_logs`):
 - `actorId ASC, action ASC, createdAt DESC` — the "Student information viewed" audit filter (actor-scoped action).
 - `actorId ASC, category ASC, action ASC, createdAt DESC` — that filter combined with a module/category filter.
+- `targetId ASC, action ASC, createdAt DESC` — **compliance query: "who viewed student X's information".**
+  View audits carry `targetId` (the student) with `targetUserId: null`, so without this index the question
+  cannot be answered in production at all. Index only; no callable or UI reads it yet.
+
+TTL policy (`fieldOverrides`, same file and same deploy command):
+- `student_activation_attempts.expiresAt` with `ttl: true` — the attempts collection is written from an
+  **unauthenticated** endpoint, keyed by any canonical-shaped Student No., so without the policy enabled it
+  grows without bound. Each doc now carries `expiresAt` = now + lockout window (30 min) + 24 h. Confirm the
+  TTL policy reaches "Serving" in the Firestore console after the deploy; until it does, nothing is swept.
 
 Roster search and filters (`student_roster`):
 - `collegeId ASC, surnameNormalized ASC`
@@ -135,6 +144,15 @@ its load error instead of data.
    `Students activate accounts through the roster. Tap 'Activate student account'.`
 5. Run the one-time admin migration `backfillStudentInfoRequirement` (sets `personalInfoRequired: true` on
    existing student profiles without `student_personal_info` and reports students with no roster row).
+   **Ruling R19 — this step has no UI entry point and will not happen by itself.** `backfillStudentInfoRequirement`
+   is an admin callable with no button, link or menu item anywhere in the app or the admin portal; it must be
+   invoked deliberately at rollout from a console or script, authenticated as the configured `SUPER_ADMIN_UID`
+   (for example `firebase functions:shell` → `backfillStudentInfoRequirement({})`, or a small admin-SDK script
+   calling the callable). The first-login Student Information gate keys off `personalInfoRequired`, which legacy
+   student profiles do not have, so **until this migration is run the gate never fires for any legacy student** —
+   they reach Home with the mandatory consent form unfilled and the rollout is silently incomplete. Verify
+   afterwards by spot-checking that a known legacy student profile now carries `personalInfoRequired: true` and
+   is sent to the form on next sign in (both the password and the Google sign-in paths enforce it).
 6. Spot-check in production: one activation end to end, one counselor view (confirm the
    `STUDENT_PERSONAL_INFO_VIEWED` entry appears in the audit log), and one admin correction approval.
 
