@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 import 'package:excel_plus/excel_plus.dart' as excel;
 
 import '../../../models/student_roster_models.dart';
+import 'ooxml_namespace_fallback.dart';
 
 /// Header row of the downloadable roster template (also the expected import
 /// columns).
@@ -84,7 +85,7 @@ RosterParseResult parseRosterFile(String fileName, List<int> bytes) {
       grid = _parseCsv(utf8.decode(bytes, allowMalformed: true));
     } else if (lower.endsWith('.xlsx')) {
       date1904 = workbookUses1904(bytes);
-      final book = excel.Excel.decodeBytes(bytes);
+      final book = decodeXlsxWithNamespaceFallback(bytes);
       final sheet = book.tables.values.firstOrNull;
       grid = sheet == null
           ? const []
