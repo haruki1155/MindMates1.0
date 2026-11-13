@@ -1123,42 +1123,34 @@ class _TimeSelectionView extends StatelessWidget {
               onPressed: onBack,
               icon: const Icon(Icons.chevron_left, color: Colors.black),
             ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Choose Time', style: _PaccText.title),
-                Text(
-                  selectedDate == null
-                      ? 'Choose a date'
-                      : _formatWeekdayMonthDay(selectedDate!),
-                  style: _PaccText.subtitle,
-                ),
-              ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Choose Time', style: _PaccText.title),
+                  Text(
+                    selectedDate == null
+                        ? 'Choose a date'
+                        : _formatWeekdayMonthDay(selectedDate!),
+                    style: _PaccText.subtitle,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
         const SizedBox(height: 22),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final itemWidth = constraints.maxWidth >= 430
-                ? (constraints.maxWidth - 24) / 2
-                : constraints.maxWidth;
-            return Wrap(
-              spacing: 24,
-              runSpacing: 20,
-              children: [
-                for (final time in availableTimes)
-                  SizedBox(
-                    width: itemWidth,
-                    child: _TimeCard(
-                      time: time,
-                      selected: selectedTime == time,
-                      onTap: () => onTimeSelected(time),
-                    ),
-                  ),
-              ],
-            );
-          },
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final time in availableTimes)
+              _TimeChip(
+                time: time,
+                selected: selectedTime == time,
+                onTap: () => onTimeSelected(time),
+              ),
+          ],
         ),
         if (!isSaving && availableTimes.isEmpty)
           Padding(
@@ -1187,8 +1179,8 @@ class _TimeSelectionView extends StatelessWidget {
   }
 }
 
-class _TimeCard extends StatelessWidget {
-  const _TimeCard({
+class _TimeChip extends StatelessWidget {
+  const _TimeChip({
     required this.time,
     required this.selected,
     required this.onTap,
@@ -1201,28 +1193,29 @@ class _TimeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? const Color(0xFFFFF2BC) : Colors.white,
-      borderRadius: BorderRadius.circular(12),
+      key: Key('time-chip-$time'),
+      color: selected ? _PaccColors.sun : Colors.white,
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: selected ? _PaccColors.sunButton : const Color(0xFFE5C24D),
+          width: selected ? 1.5 : 1,
+        ),
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        customBorder: const StadiumBorder(),
         onTap: onTap,
         child: Container(
-          height: 104,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: selected ? _PaccColors.sunButton : const Color(0xFFE5C24D),
-            ),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
+          constraints: const BoxConstraints(minHeight: 44),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.schedule, size: 22),
-              const SizedBox(height: 8),
+              if (selected) ...[
+                const Icon(Icons.check, size: 16),
+                const SizedBox(width: 6),
+              ],
               Text(time, style: _PaccText.cardTitle),
-              const SizedBox(height: 2),
-              const Text('Available', style: _PaccText.body),
             ],
           ),
         ),
