@@ -2358,6 +2358,7 @@ export {
   listStudentRoster, listStudentRosterImports, previewStudentRosterImport, resetStudentActivationLock,
   revokeStudentActivation, setStudentRosterStatus, updateStudentRosterRecord,
 } from "./student_roster";
+export {importAcademicCatalog, previewAcademicCatalogImport} from "./academic_import";
 export {activateStudentAccount, activateStudentAccountDev} from "./student_activation";
 export {
   getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
