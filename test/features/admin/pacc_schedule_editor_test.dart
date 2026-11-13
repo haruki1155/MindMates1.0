@@ -35,10 +35,27 @@ Widget _editor({
 )));
 
 void main() {
-  Future<void> makeDirty(WidgetTester tester) async {
-    await tester.tap(find.byKey(const Key('edit-day-1')));
+  // Exercise the weekly-table action on narrow test viewports (horizontal scroll).
+  Future<void> openDayEditor(WidgetTester tester, int day) async {
+    final action = find.byKey(Key('edit-day-$day'));
+    await tester.ensureVisible(action);
     await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('day-1-opens')), '10:00');
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+  }
+
+  // Existing editor-flow tests set controlled times directly; separate
+  // PaccTimePickerField widget tests exercise the read-only picker interaction.
+  Future<void> setControlledTime(WidgetTester tester, Key key, String value) async {
+    final field = tester.widget<TextField>(find.byKey(key));
+    expect(field.readOnly, isTrue);
+    field.controller!.text = value;
+    await tester.pump();
+  }
+
+  Future<void> makeDirty(WidgetTester tester) async {
+    await openDayEditor(tester, 1);
+    await setControlledTime(tester, const Key('day-1-opens'), '10:00');
     await tester.tap(find.text('Apply'));
     await tester.pumpAndSettle();
   }
@@ -215,7 +232,8 @@ void main() {
     // padded right edge rather than following the heading text.
     expect(tester.getRect(find.text('Set multiple days')).right, closeTo(755, 1));
     expect(find.text('Special Dates'), findsOneWidget);
-    expect(find.text('09:00 AM – 05:00 PM'), findsNWidgets(5));
+    expect(find.text('9:00 AM'), findsNWidgets(5));
+    expect(find.text('5:00 PM'), findsNWidgets(5));
     expect(find.text('In office'), findsWidgets);
     expect(find.text('Appointments on'), findsWidgets);
     expect(find.text('Walk-ins off'), findsOneWidget);
@@ -255,10 +273,9 @@ void main() {
       saved = value;
       return const PaccAvailabilitySaveResult(revision: 5, conflicts: []);
     }));
-    await tester.tap(find.byKey(const Key('edit-day-1')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('day-1-opens')), '10:00');
-    await tester.enterText(find.byKey(const Key('day-1-closes')), '16:00');
+    await openDayEditor(tester, 1);
+    await setControlledTime(tester, const Key('day-1-opens'), '10:00');
+    await setControlledTime(tester, const Key('day-1-closes'), '16:00');
     await tester.tap(find.text('Apply'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Save schedule'));
@@ -277,9 +294,7 @@ void main() {
       saved = value;
       return const PaccAvailabilitySaveResult(revision: 5, conflicts: []);
     }));
-    await tester.ensureVisible(find.byKey(const Key('edit-day-4')));
-    await tester.tap(find.byKey(const Key('edit-day-4')));
-    await tester.pumpAndSettle();
+    await openDayEditor(tester, 4);
     await tester.tap(find.text('Out of office'));
     await tester.pump();
     await tester.tap(find.text('Apply'));
@@ -294,10 +309,11 @@ void main() {
 
   testWidgets('preserves a failed draft and gives an actionable save error', (tester) async {
     await tester.pumpWidget(_editor(onSave: (_, {confirmConflicts = false}) => Future.error(StateError('stale'))));
-    await tester.tap(find.byKey(const Key('edit-day-1')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('day-1-opens')), '10:00');
+    await openDayEditor(tester, 1);
+    await setControlledTime(tester, const Key('day-1-opens'), '10:00');
     await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save schedule'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save schedule'));
     await tester.pumpAndSettle();
@@ -308,10 +324,9 @@ void main() {
 
   testWidgets('requires an ordered HH:mm range before applying a weekday', (tester) async {
     await tester.pumpWidget(_editor());
-    await tester.tap(find.byKey(const Key('edit-day-1')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('day-1-opens')), '17:00');
-    await tester.enterText(find.byKey(const Key('day-1-closes')), '09:00');
+    await openDayEditor(tester, 1);
+    await setControlledTime(tester, const Key('day-1-opens'), '17:00');
+    await setControlledTime(tester, const Key('day-1-closes'), '09:00');
     await tester.tap(find.text('Apply'));
     await tester.pump();
     expect(find.text('Opening time must be before closing time.'), findsOneWidget);
@@ -328,7 +343,7 @@ void main() {
       revision: 5,
     )));
 
-    expect(find.textContaining('10:00 AM – 05:00 PM'), findsOneWidget);
+    expect(find.text('10:00 AM'), findsOneWidget);
     expect(find.text('Revision 5'), findsNothing);
   });
 
@@ -343,8 +358,8 @@ void main() {
     for (final day in [1, 2, 3]) {
       await tester.tap(find.byKey(Key('bulk-day-$day')));
     }
-    await tester.enterText(find.byKey(const Key('bulk-opens')), '10:00');
-    await tester.enterText(find.byKey(const Key('bulk-closes')), '16:00');
+    await setControlledTime(tester, const Key('bulk-opens'), '10:00');
+    await setControlledTime(tester, const Key('bulk-closes'), '16:00');
     await tester.tap(find.text('Apply to 3 days'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Save schedule'));

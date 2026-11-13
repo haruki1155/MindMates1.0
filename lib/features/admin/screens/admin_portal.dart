@@ -35,6 +35,7 @@ import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/pacc_schedule_editor_widgets.dart';
 
 const _yellow = AdminColors.accentStrong;
 const _cream = AdminColors.canvas;
@@ -3737,19 +3738,15 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
                   onChanged: (value) => setDialogState(() => closed = value),
                 ),
                 if (!closed) ...[
-                  TextField(
-                    key: const Key('override-opens'),
+                  PaccTimePickerField(
+                    fieldKey: const Key('override-opens'),
                     controller: opens,
-                    decoration: const InputDecoration(
-                      labelText: 'Opening time',
-                    ),
+                    label: 'Opening time',
                   ),
-                  TextField(
-                    key: const Key('override-closes'),
+                  PaccTimePickerField(
+                    fieldKey: const Key('override-closes'),
                     controller: closes,
-                    decoration: const InputDecoration(
-                      labelText: 'Closing time',
-                    ),
+                    label: 'Closing time',
                   ),
                   SwitchListTile(
                     title: const Text('Counselor in office'),
@@ -3871,8 +3868,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  SwitchListTile(
-                    title: const Text('Office open'),
+                  PaccOfficeHoursSelector(
                     value: draft.enabled,
                     onChanged: (value) => setDialogState(
                       () => draft = draft.copyWith(
@@ -3884,19 +3880,15 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
                       ),
                     ),
                   ),
-                  TextField(
-                    key: Key('day-$day-opens'),
+                  PaccTimePickerField(
+                    fieldKey: Key('day-$day-opens'),
                     controller: opens,
-                    decoration: const InputDecoration(
-                      labelText: 'Opening time',
-                    ),
+                    label: 'Opening time',
                   ),
-                  TextField(
-                    key: Key('day-$day-closes'),
+                  PaccTimePickerField(
+                    fieldKey: Key('day-$day-closes'),
                     controller: closes,
-                    decoration: const InputDecoration(
-                      labelText: 'Closing time',
-                    ),
+                    label: 'Closing time',
                   ),
                   RadioGroup<CounselorPresence>(
                     groupValue: draft.presence,
@@ -4117,8 +4109,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
                     ),
                   ),
                 ),
-                SwitchListTile(
-                  title: const Text('Office open'),
+                PaccOfficeHoursSelector(
                   value: draft.enabled,
                   onChanged: (value) => setDialogState(
                     () => draft = draft.copyWith(
@@ -4130,15 +4121,15 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
                     ),
                   ),
                 ),
-                TextField(
-                  key: const Key('bulk-opens'),
+                PaccTimePickerField(
+                  fieldKey: const Key('bulk-opens'),
                   controller: opens,
-                  decoration: const InputDecoration(labelText: 'Opening time'),
+                  label: 'Opening time',
                 ),
-                TextField(
-                  key: const Key('bulk-closes'),
+                PaccTimePickerField(
+                  fieldKey: const Key('bulk-closes'),
                   controller: closes,
-                  decoration: const InputDecoration(labelText: 'Closing time'),
+                  label: 'Closing time',
                 ),
                 SwitchListTile(
                   title: const Text('Appointments enabled'),
@@ -4546,14 +4537,6 @@ class _PolishedPaccScheduleLayout extends StatelessWidget {
   final Future<void> Function() onDiscard;
   final Future<void> Function() onSave;
 
-  static const _names = [
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-  ];
-
   @override
   Widget build(BuildContext context) {
     final actions = readOnly
@@ -4583,17 +4566,10 @@ class _PolishedPaccScheduleLayout extends StatelessWidget {
               icon: const Icon(Icons.edit_calendar_outlined, size: 18),
               label: const Text('Set multiple days'),
             ),
-      child: Column(
-        children: List.generate(5, (index) {
-          final day = index + 1;
-          return _PaccWeekdaySummary(
-            day: day,
-            name: _names[index],
-            schedule: days[day] ?? PaccDaySchedule.closed,
-            readOnly: readOnly,
-            onEdit: () => onEditDay(day),
-          );
-        }),
+      child: PaccWeeklyScheduleTable(
+        days: days,
+        readOnly: readOnly,
+        onEditDay: onEditDay,
       ),
     );
     final special = _PaccScheduleSection(
@@ -4770,117 +4746,6 @@ class _PaccStatusChip extends StatelessWidget {
     child: Text(
       label,
       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-    ),
-  );
-}
-
-class _PaccWeekdaySummary extends StatelessWidget {
-  const _PaccWeekdaySummary({
-    required this.day,
-    required this.name,
-    required this.schedule,
-    required this.readOnly,
-    required this.onEdit,
-  });
-  final int day;
-  final String name;
-  final PaccDaySchedule schedule;
-  final bool readOnly;
-  final VoidCallback onEdit;
-  @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 82),
-    padding: const EdgeInsets.symmetric(vertical: 12),
-    decoration: const BoxDecoration(
-      border: Border(bottom: BorderSide(color: AdminColors.border)),
-    ),
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final states = schedule.enabled
-            ? Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  const _PaccStatusChip(label: 'Open'),
-                  _PaccStatusChip(
-                    label: _paccRange(schedule.opensAt, schedule.closesAt),
-                  ),
-                  _PaccStatusChip(label: _paccPresence(schedule.presence)),
-                  _PaccStatusChip(
-                    label:
-                        'Appointments ${schedule.appointmentsEnabled ? 'on' : 'off'}',
-                  ),
-                  _PaccStatusChip(
-                    label: 'Walk-ins ${schedule.acceptsWalkIns ? 'on' : 'off'}',
-                  ),
-                ],
-              )
-            : const Wrap(
-                spacing: 6,
-                children: [
-                  _PaccStatusChip(label: 'Closed'),
-                  _PaccStatusChip(label: 'No office hours'),
-                ],
-              );
-        final edit = readOnly
-            ? const SizedBox.shrink()
-            : OutlinedButton.icon(
-                key: Key('edit-day-$day'),
-                onPressed: onEdit,
-                icon: const Icon(Icons.edit_outlined, size: 17),
-                label: const Text('Edit'),
-              );
-        final badge = Container(
-          width: 42,
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: AdminColors.surfaceMuted,
-            borderRadius: BorderRadius.circular(7),
-          ),
-          child: Text(
-            name.substring(0, 3).toUpperCase(),
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
-          ),
-        );
-        return constraints.maxWidth >= 620
-            ? Row(
-                children: [
-                  badge,
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 94,
-                    child: Text(
-                      name,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: states),
-                  const SizedBox(width: 12),
-                  edit,
-                ],
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      badge,
-                      const SizedBox(width: 10),
-                      Text(
-                        name,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const Spacer(),
-                      edit,
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  states,
-                ],
-              );
-      },
     ),
   );
 }
