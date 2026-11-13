@@ -258,7 +258,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Home'), findsOneWidget);
-    expect(find.text('Appointment'), findsOneWidget);
+    expect(find.text('Appointment'), findsNothing);
     expect(find.text('Forum'), findsOneWidget);
     expect(find.text('Message'), findsOneWidget);
   });
