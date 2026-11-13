@@ -18,6 +18,19 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
   String status = 'Active';
   bool _initializingCatalog = false;
   final Set<String> _updatingStructureIds = <String>{};
+  // Editor dialog controllers live as long as the page, so they can never be
+  // disposed while a dialog is still animating out.
+  final List<TextEditingController> _editorControllers = [];
+
+  @override
+  void dispose() {
+    for (final controller in _editorControllers) {
+      controller.dispose();
+    }
+    _editorControllers.clear();
+    super.dispose();
+  }
+
   List<College> _loadedColleges = const <College>[];
   List<Department> _loadedDepartments = const <Department>[];
 
@@ -190,20 +203,46 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           : PopupMenuButton<String>(
-              onSelected: (value) => value == 'edit'
-                  ? _edit('college', college: college)
-                  : _toggle('college', college),
+              onSelected: (value) {
+                switch (value) {
+                  case 'edit':
+                    _edit('college', college: college);
+                  case 'addDepartment':
+                    _edit('department', initialCollegeId: college.id);
+                  default:
+                    _toggle('college', college);
+                }
+              },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                const PopupMenuItem(
+                  value: 'addDepartment',
+                  child: Text('Add department'),
+                ),
                 PopupMenuItem(
                   value: 'toggle',
                   child: Text(college.active ? 'Archive' : 'Restore'),
                 ),
               ],
             ),
-      children: collegeDepartments
-          .map((department) => _departmentTile(department, courses))
-          .toList(),
+      children: collegeDepartments.isEmpty
+          ? [
+              Padding(
+                padding: const EdgeInsets.only(left: 22, bottom: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () =>
+                        _edit('department', initialCollegeId: college.id),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add department'),
+                  ),
+                ),
+              ),
+            ]
+          : collegeDepartments
+                .map((department) => _departmentTile(department, courses))
+                .toList(),
     );
   }
 
@@ -231,11 +270,26 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           : PopupMenuButton<String>(
-              onSelected: (value) => value == 'edit'
-                  ? _edit('department', department: department)
-                  : _toggle('department', department),
+              onSelected: (value) {
+                switch (value) {
+                  case 'edit':
+                    _edit('department', department: department);
+                  case 'addCourse':
+                    _edit(
+                      'course',
+                      initialCollegeId: department.collegeId,
+                      initialDepartmentId: department.id,
+                    );
+                  default:
+                    _toggle('department', department);
+                }
+              },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                const PopupMenuItem(
+                  value: 'addCourse',
+                  child: Text('Add course'),
+                ),
                 PopupMenuItem(
                   value: 'toggle',
                   child: Text(department.active ? 'Archive' : 'Restore'),
@@ -392,22 +446,23 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
     College? college,
     Department? department,
     Course? course,
+    String? initialCollegeId,
+    String? initialDepartmentId,
   }) async {
+    if (!mounted) return;
     final name = TextEditingController(
       text: college?.name ?? department?.name ?? course?.name,
     );
     final code = TextEditingController(
       text: college?.code ?? department?.code ?? course?.code,
     );
+    _editorControllers.addAll([name, code]);
     final colleges = _loadedColleges;
     final departments = _loadedDepartments;
-    if (!mounted) {
-      name.dispose();
-      code.dispose();
-      return;
-    }
-    String? collegeId = department?.collegeId ?? course?.collegeId;
-    String? departmentId = course?.departmentId;
+    if (!mounted) return;
+    String? collegeId =
+        department?.collegeId ?? course?.collegeId ?? initialCollegeId;
+    String? departmentId = course?.departmentId ?? initialDepartmentId;
     var active =
         college?.active ?? department?.active ?? course?.active ?? true;
     final result = await showDialog<bool>(
@@ -528,8 +583,6 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
         }
       }
     }
-    name.dispose();
-    code.dispose();
   }
 
   Future<void> _toggle(String kind, OrganizationRecord item) async {
