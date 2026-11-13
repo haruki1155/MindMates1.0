@@ -192,6 +192,37 @@ test("a file code colliding with another record errors; a differing code only wa
   assert.equal(stored.data()?.code, `${run}C2`);
 });
 
+test("a code the file names for a stored college is not derived for a new one", async () => {
+  await commit.run({auth, data: {fileName: "seed.xlsx", rows: [
+    {college: name("Boundary College"), collegeCode: `${run}B1`, department: name("Boundary Dept"),
+      course: name("BS Boundary")},
+  ]}});
+  const annex = name("Boundary Annex");
+  // The code the new college would otherwise derive: the first free candidate for its name.
+  const taken = new Set((await db.collection("colleges").get()).docs
+    .map((d) => String(d.data().code ?? "").toLowerCase()));
+  const base = deriveCode(annex);
+  let wanted = base;
+  for (let suffix = 2; taken.has(wanted.toLowerCase()); suffix++) wanted = `${base}${suffix}`;
+
+  const rows = [
+    {college: name("Boundary College"), collegeCode: wanted, department: name("Boundary Dept"),
+      course: name("BS Boundary")},
+    {college: annex, department: name("Annex Dept"), course: name("BS Annex")},
+  ];
+  for (const ordered of [rows, [rows[1], rows[0]]]) {
+    const out = await preview.run({auth, data: {fileName: "c.xlsx", rows: ordered}}) as PreviewOut;
+    const stated = out.rows[ordered.indexOf(rows[0])];
+    assert.equal(stated.kind, "exists", JSON.stringify(out.rows));
+    assert.match(stated.warnings.join(" "), /differs from the stored code/);
+    assert.equal(out.rows[ordered.indexOf(rows[1])].kind, "create");
+  }
+  await commit.run({auth, data: {fileName: "c.xlsx", rows}});
+  const colleges = await docsOf("colleges");
+  assert.equal((colleges.find((c) => c.name === name("Boundary College")) as Row).code, `${run}B1`);
+  assert.notEqual((colleges.find((c) => c.name === annex) as Row).code, wanted);
+});
+
 test("a sparse code column is read before any code is derived", async () => {
   const rows = [
     {college: name("Sparse College"), collegeCode: "", department: name("Sparse Dept"), course: name("BS Sparse A")},

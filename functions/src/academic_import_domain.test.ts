@@ -29,6 +29,37 @@ test("deriveCode takes initials from an ALL-CAPS registrar export", async () => 
   assert.equal(deriveCode("MINDMATE Institute of Technology"), "MIT");
 });
 
+test("a name whose initials come to one letter falls back to its first four characters", async () => {
+  const {deriveCode} = await load();
+  assert.equal(deriveCode("NURSING"), "NURS");
+  assert.equal(deriveCode("PHARMACY"), "PHAR");
+  assert.equal(deriveCode("Midwifery"), "MIDW");
+  // Still unchanged.
+  assert.equal(deriveCode("BS Information Technology"), "BSIT");
+  assert.equal(deriveCode("COLLEGE OF PHARMACY"), "CP");
+  assert.equal(deriveCode("BS NURSING"), "BN");
+  assert.equal(deriveCode("BACHELOR OF SCIENCE IN NURSING"), "BSN");
+});
+
+test("a file code given for a stored record is not displaced by a derived one", async () => {
+  const {validateCatalogRows} = await load();
+  const index = {
+    colleges: [{id: "x1", name: "College of Law", code: "CL", active: true}],
+    departments: [], courses: [],
+  };
+  const stated = {college: "College of Law", collegeCode: "CP", department: "Law Dept", course: "Juris Doctor"};
+  const fresh = {college: "City Park", department: "Annex Dept", course: "BS Annex"};
+  for (const rows of [[stated, fresh], [fresh, stated]]) {
+    const out = validateCatalogRows(rows, index);
+    const law = out.results[rows.indexOf(stated)];
+    assert.equal(law.ok, true, JSON.stringify(out.results));
+    assert.match(law.ok ? law.warnings.join(" ") : "", /differs from the stored code “CL”/);
+    assert.deepEqual(out.plan.colleges.map((c) => c.name), ["City Park"]);
+    // “CP” was named by the file for the stored college, so the new college cannot derive it.
+    assert.equal(out.plan.colleges[0].code, "CP2");
+  }
+});
+
 test("a sparse code column is read before any code is derived, in either row order", async () => {
   const {validateCatalogRows} = await load();
   const blankFirst = [

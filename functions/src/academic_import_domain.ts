@@ -14,6 +14,7 @@ const NAME_MAX = 120;
 const CODE_MIN = 1;
 const CODE_MAX = 30;
 const ACRONYM_MAX = 4;
+const SHORT_NAME_CODE = 4;
 const STOP_WORDS = new Set(["of", "and", "in", "the"]);
 
 export type CatalogRow = {
@@ -61,6 +62,8 @@ function cleanText(value: unknown): string {
  * A short word already written as an acronym inside a mixed-case name is kept whole, which is what makes
  * `BS Information Technology` → `BSIT`. A name written entirely in capitals carries no such signal — a
  * registrar export is often all upper case — so it is read as initials like any other name.
+ * A name of one significant word would yield a single letter, which makes a useless code, so it falls
+ * back to the name's first four characters (`NURSING` → `NURS`).
  */
 export function deriveCode(name: string): string {
   const clean = cleanText(name);
@@ -70,8 +73,8 @@ export function deriveCode(name: string): string {
   const acronym = (word: string) =>
     !shouting && word.length > 1 && word.length <= ACRONYM_MAX && word === word.toUpperCase();
   const code = words.map((word) => (acronym(word) ? word : word[0])).join("").toUpperCase();
-  const fallback = clean.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 3);
-  return (code || fallback || "X").slice(0, CODE_MAX);
+  const letters = clean.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+  return (code.length >= 2 ? code : letters.slice(0, SHORT_NAME_CODE) || code || "X").slice(0, CODE_MAX);
 }
 
 type LevelName = "colleges" | "departments" | "courses";
@@ -164,8 +167,12 @@ function resolveName(level: Level, parent: string, name: string, code: string, r
 /**
  * Pass two: every code the file gave is reserved first, then the rest are derived. Doing it the other way
  * round lets a code invented for an early row outrank a code the file wrote on a later one.
+ * `storedClaims` are the codes the file gave for records that already exist. Those codes are never
+ * written — the stored code is kept and the row only warns — but they are still reserved, under the stored
+ * record's own id, so that a code the file has named cannot be derived for an unrelated new record.
  */
-function assignCodes(level: Level, rowErrors: string[][]): void {
+function assignCodes(level: Level, rowErrors: string[][],
+  storedClaims: {stored: ExistingRecord; code: string}[]): void {
   for (const group of level.order) {
     const given = group.mentions.filter((mention) => mention.code);
     if (!given.length) continue;
@@ -186,6 +193,12 @@ function assignCodes(level: Level, rowErrors: string[][]): void {
     }
     group.code = first.code;
     level.codeOwner.set(codeKey, {id: group.key, name: group.name});
+  }
+  for (const claim of storedClaims) {
+    const codeKey = normalizeKey(claim.code);
+    // An already-owned code is left to pass three, which tells a warning from a genuine collision.
+    if (!codeKey || level.codeOwner.has(codeKey)) continue;
+    level.codeOwner.set(codeKey, {id: claim.stored.id, name: claim.stored.name});
   }
   for (const group of level.order) {
     if (group.code || group.blocked) continue;
@@ -263,8 +276,13 @@ export function validateCatalogRows(rows: CatalogRow[], index: AcademicCatalogIn
     return state;
   });
 
-  // Pass two: file codes first, derived codes after.
-  for (const level of [levels.colleges, levels.departments, levels.courses]) assignCodes(level, rowErrors);
+  // Pass two: file codes first — for planned records and for stored ones alike — derived codes after.
+  for (const level of [levels.colleges, levels.departments, levels.courses]) {
+    const claims = states.flatMap((state) => state.refs
+      .filter((ref) => ref.level === level && ref.stored && ref.code)
+      .map((ref) => ({stored: ref.stored as ExistingRecord, code: ref.code})));
+    assignCodes(level, rowErrors, claims);
+  }
 
   // Pass three: a row's outcome, now that every code is settled.
   const results: CatalogRowResult[] = states.map((state) => {
