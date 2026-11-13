@@ -47,6 +47,14 @@ export const AUDIT_ACTIONS = [
   "STUDENT_ACTIVATION_REVOKED", "STUDENT_INFO_REQUIREMENT_BACKFILLED",
 ] as const;
 
+/** Views of a student's record target the student, so the per-staff activity
+ * log lists them under the staff member who performed them (actorId). */
+export const ACTOR_SCOPED_AUDIT_ACTIONS: readonly string[] = ["STUDENT_PERSONAL_INFO_VIEWED"];
+
+export function auditLogOwnerField(action: string): "actorId" | "targetUserId" {
+  return ACTOR_SCOPED_AUDIT_ACTIONS.includes(action) ? "actorId" : "targetUserId";
+}
+
 export type AuditAction = typeof AUDIT_ACTIONS[number];
 
 function auditDocument(event: AuditWrite): Record<string, unknown> {

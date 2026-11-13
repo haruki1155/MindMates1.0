@@ -33,7 +33,7 @@ export {
 } from "./account_recovery";
 import {configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid as requireAuthenticatedUser} from "./access";
 import {randomBytes} from "node:crypto";
-import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
+import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, auditLogOwnerField, writeAudit} from "./audit";
 import {
   AppointmentSchedulingValidationError,
   formatAppointmentTime,
@@ -931,7 +931,7 @@ export const getAuditLogPage = onCall(async (request) => {
   const afterMillis = typeof request.data?.afterMillis === "number" ? request.data.afterMillis : null;
   const pageSize = Math.min(Math.max(Number(request.data?.pageSize ?? 25), 1), 50);
   let query: FirebaseFirestore.Query = db.collection("admin_audit_logs")
-    .where("targetUserId", "==", targetUserId).orderBy("createdAt", "desc").limit(pageSize);
+    .where(auditLogOwnerField(action), "==", targetUserId).orderBy("createdAt", "desc").limit(pageSize);
   if (category) query = query.where("category", "==", category);
   if (action) query = query.where("action", "==", action);
   if (afterMillis != null) query = query.where("createdAt", ">=", Timestamp.fromMillis(afterMillis));

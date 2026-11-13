@@ -1829,6 +1829,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
     'Appointment rescheduled',
     'Appointment completed',
     'Schedule adjustment requested',
+    'Student information viewed',
   ];
 
   @override
@@ -1899,6 +1900,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
     'Appointment rescheduled' => 'APPOINTMENT_RESCHEDULED',
     'Appointment completed' => 'APPOINTMENT_COMPLETED',
     'Schedule adjustment requested' => 'APPOINTMENT_ADJUSTMENT_REQUESTED',
+    'Student information viewed' => 'STUDENT_PERSONAL_INFO_VIEWED',
     _ => '',
   };
 
@@ -2088,6 +2090,7 @@ String _auditActionLabel(String action) => switch (action) {
   'STAFF_ACCOUNT_REACTIVATED' => 'Account reactivated',
   'STAFF_REGISTRATION_APPROVED' => 'Staff registration approved',
   'STAFF_REGISTRATION_REJECTED' => 'Staff registration removed',
+  'STUDENT_PERSONAL_INFO_VIEWED' => 'Student information viewed',
   'accessRoleAssigned' => 'Role changed',
   'staffAccountEnabled' => 'Account reactivated',
   'staffAccountDisabled' => 'Account suspended',
