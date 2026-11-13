@@ -37,7 +37,10 @@ void main() {
             ).copyWith(textScaler: const TextScaler.linear(1.8)),
             child: child!,
           ),
-          home: const LogMoodScreen(moodV2Enabled: true),
+          home: const LogMoodScreen(
+            moodV2Presentation: true,
+            moodV2WriterEnabled: true,
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -74,7 +77,8 @@ void main() {
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
       ),
     );
@@ -118,7 +122,8 @@ void main() {
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
       ),
     );
     await tester.pumpAndSettle();
@@ -161,7 +166,10 @@ void main() {
               ),
               child: child!,
             ),
-            home: const LogMoodScreen(moodV2Enabled: true),
+            home: const LogMoodScreen(
+              moodV2Presentation: true,
+              moodV2WriterEnabled: true,
+            ),
           ),
         );
         await tester.pumpAndSettle();
@@ -204,7 +212,8 @@ void main() {
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
       ),
     );
@@ -258,7 +267,8 @@ void main() {
               moodProvider: _RecordingMoodProvider(history: history),
               userProvider: UserProvider(_FakeUserRepository())
                 ..setUser(_user(id: 'user_1')),
-              moodV2Enabled: true,
+              moodV2Presentation: true,
+              moodV2WriterEnabled: true,
               nowProvider: () => now,
             ),
           );
@@ -311,7 +321,8 @@ void main() {
           moodProvider: MoodProvider(_FakeMoodRepository()),
           userProvider: UserProvider(_FakeUserRepository())
             ..setUser(_user(id: 'user_1')),
-          moodV2Enabled: true,
+          moodV2Presentation: true,
+          moodV2WriterEnabled: true,
           moodV2Writer: _FakeMoodV2Writer(),
         ),
       );
@@ -348,7 +359,8 @@ void main() {
           userProvider: UserProvider(_FakeUserRepository())
             ..setUser(_user(id: 'user_1')),
           insightsProvider: insights,
-          moodV2Enabled: true,
+          moodV2Presentation: true,
+          moodV2WriterEnabled: true,
           moodV2Writer: writer,
         ),
       );
@@ -394,7 +406,8 @@ void main() {
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
         insightsProvider: insights,
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
       ),
     );
@@ -411,40 +424,38 @@ void main() {
     expect(writer.levels, [5]);
   });
   for (final failing in [false, true]) {
-    testWidgets(
-      'confirmed V2 save records one mood check-in for the streak '
-      '(streak sync ${failing ? 'fails' : 'succeeds'})',
-      (tester) async {
-        await tester.binding.setSurfaceSize(const Size(900, 1400));
-        addTearDown(() => tester.binding.setSurfaceSize(null));
-        final users = _FakeUserRepository(throwOnRecordActivity: failing);
-        final writer = _FakeMoodV2Writer();
-        await tester.pumpWidget(
-          _logMoodApp(
-            moodProvider: _RecordingMoodProvider(),
-            userProvider: UserProvider(users)..setUser(_user(id: 'user_1')),
-            insightsProvider: _RecordingInsightsProvider(),
-            moodV2Enabled: true,
-            moodV2Writer: writer,
-          ),
-        );
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Great'));
-        await _skipReflection(tester);
-        await tester.pump();
-        await tester.tap(find.text('Save mood entry'));
-        await tester.pumpAndSettle();
+    testWidgets('confirmed V2 save records one mood check-in for the streak '
+        '(streak sync ${failing ? 'fails' : 'succeeds'})', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final users = _FakeUserRepository(throwOnRecordActivity: failing);
+      final writer = _FakeMoodV2Writer();
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: _RecordingMoodProvider(),
+          userProvider: UserProvider(users)..setUser(_user(id: 'user_1')),
+          insightsProvider: _RecordingInsightsProvider(),
+          moodV2Presentation: true,
+          moodV2WriterEnabled: true,
+          moodV2Writer: writer,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Great'));
+      await _skipReflection(tester);
+      await tester.pump();
+      await tester.tap(find.text('Save mood entry'));
+      await tester.pumpAndSettle();
 
-        expect(writer.levels, [5]);
-        expect(users.recordedActivities, [
-          ('user_1', UserActivityType.moodCheckIn),
-        ]);
-        expect(
-          find.text('Unable to save this mood entry. Try again.'),
-          findsNothing,
-        );
-      },
-    );
+      expect(writer.levels, [5]);
+      expect(users.recordedActivities, [
+        ('user_1', UserActivityType.moodCheckIn),
+      ]);
+      expect(
+        find.text('Unable to save this mood entry. Try again.'),
+        findsNothing,
+      );
+    });
   }
 
   testWidgets('renders all mood choices and note field', (tester) async {
@@ -452,7 +463,12 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
-      const MaterialApp(home: LogMoodScreen(moodV2Enabled: false)),
+      const MaterialApp(
+        home: LogMoodScreen(
+          moodV2Presentation: false,
+          moodV2WriterEnabled: false,
+        ),
+      ),
     );
 
     expect(find.text('How are you feeling?'), findsOneWidget);
@@ -477,7 +493,12 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
-      const MaterialApp(home: LogMoodScreen(moodV2Enabled: false)),
+      const MaterialApp(
+        home: LogMoodScreen(
+          moodV2Presentation: false,
+          moodV2WriterEnabled: false,
+        ),
+      ),
     );
 
     final angryCard = find.byKey(const ValueKey('mood-card-Angry'));
@@ -501,7 +522,8 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: LogMoodScreen(
-          moodV2Enabled: false,
+          moodV2Presentation: false,
+          moodV2WriterEnabled: false,
           expressionScreenBuilder: (context) => Scaffold(
             body: TextButton(
               onPressed: () => Navigator.of(context).pop(
@@ -588,7 +610,12 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
-      const MaterialApp(home: LogMoodScreen(moodV2Enabled: false)),
+      const MaterialApp(
+        home: LogMoodScreen(
+          moodV2Presentation: false,
+          moodV2WriterEnabled: false,
+        ),
+      ),
     );
 
     await tester.enterText(find.byType(TextField), 'Feeling steady today');
@@ -721,7 +748,8 @@ void main() {
         moodProvider: MoodProvider(_FakeMoodRepository(throwsOnToday: true)),
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
       ),
     );
@@ -740,7 +768,8 @@ void main() {
         moodProvider: MoodProvider(legacy),
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
       ),
     );
@@ -767,7 +796,8 @@ void main() {
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
       ),
     );
@@ -812,7 +842,8 @@ void main() {
           moodProvider: MoodProvider(_FakeMoodRepository()),
           userProvider: UserProvider(_FakeUserRepository())
             ..setUser(_user(id: 'user_${role.name}', populationRole: role)),
-          moodV2Enabled: true,
+          moodV2Presentation: true,
+          moodV2WriterEnabled: true,
           moodV2Writer: writer,
         ),
       );
@@ -839,7 +870,8 @@ void main() {
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
         moodV2RequestIdGenerator: () => '00000000-0000-4000-8000-000000000001',
       ),
@@ -878,7 +910,8 @@ void main() {
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
       ),
     );
@@ -910,7 +943,8 @@ void main() {
       _logMoodApp(
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: user,
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: _FakeMoodV2Writer(),
       ),
     );
@@ -944,7 +978,8 @@ void main() {
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: userProvider,
         insightsProvider: insights,
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
       ),
     );
@@ -1010,7 +1045,8 @@ void main() {
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
         nowProvider: () => now,
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
       ),
     );
@@ -1046,7 +1082,8 @@ void main() {
         moodProvider: mood,
         userProvider: user,
         nowProvider: () => now,
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
         moodV2RequestIdGenerator: () =>
             '00000000-0000-4000-8000-${(++sequence).toString().padLeft(12, '0')}',
@@ -1111,7 +1148,8 @@ void main() {
           userProvider: UserProvider(_FakeUserRepository())
             ..setUser(_user(id: 'user_1')),
           nowProvider: () => now,
-          moodV2Enabled: true,
+          moodV2Presentation: true,
+          moodV2WriterEnabled: true,
           moodV2Writer: writer,
         ),
       );
@@ -1160,7 +1198,8 @@ void main() {
         moodProvider: MoodProvider(_FakeMoodRepository()),
         userProvider: user,
         nowProvider: () => now,
-        moodV2Enabled: true,
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
         moodV2Writer: writer,
         moodV2RequestIdGenerator: () =>
             '00000000-0000-4000-8000-${(++sequence).toString().padLeft(12, '0')}',
@@ -1195,6 +1234,191 @@ void main() {
     expect(writer.notes.last, isEmpty);
     expect(writer.levels.last, 5);
   });
+
+  // --- Task 2: presentation separated from the protected writer ---------------
+  //
+  // Every test below runs in the staging default shape: presentation ON,
+  // protected writer OFF. Saving must go through the legacy writer.
+
+  testWidgets(
+    'presentation on and writer off: the V2 form saves through the legacy writer',
+    (tester) async {
+      final repository = _FakeMoodRepository();
+      final moodProvider = MoodProvider(repository);
+      final writer = _FakeMoodV2Writer();
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: moodProvider,
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_1')),
+          moodV2Presentation: true,
+          moodV2WriterEnabled: false,
+          moodV2Writer: writer,
+          nowProvider: () => DateTime(2026, 7, 7, 12),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The V2 presentation is what renders.
+      expect(find.text('How are you feeling right now?'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Skip'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save mood entry'));
+      await tester.pumpAndSettle();
+
+      // The legacy writer received it; the protected V2 writer was never called.
+      expect(repository.createdLevel, isNotNull);
+      expect(repository.createdLabel, 'Okay');
+      expect(writer.levels, isEmpty);
+      expect(writer.requestIds, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'presentation on and writer off: a failed legacy save surfaces and retries',
+    (tester) async {
+      final repository = _FakeMoodRepository(throwsOnCreate: true);
+      final moodProvider = MoodProvider(repository);
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: moodProvider,
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_1')),
+          moodV2Presentation: true,
+          moodV2WriterEnabled: false,
+          nowProvider: () => DateTime(2026, 7, 7, 12),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Skip'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save mood entry'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Unable to save mood.'), findsOneWidget);
+      // The save bar is reachable again for a retry.
+      expect(find.text('Save mood entry'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'presentation on and writer off: no second daily entry is offered',
+    (tester) async {
+      final repository = _FakeMoodRepository();
+      final moodProvider = MoodProvider(repository);
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: moodProvider,
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_1')),
+          moodV2Presentation: true,
+          moodV2WriterEnabled: false,
+          nowProvider: () => DateTime(2026, 7, 7, 12),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Skip'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save mood entry'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('mood-v2-add-entry')), findsNothing);
+      expect(find.text('Log another mood entry'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'presentation on and writer off: the day rolling over clears today',
+    (tester) async {
+      final repository = _FakeMoodRepository(hasToday: true);
+      final moodProvider = MoodProvider(repository);
+      var now = DateTime(2026, 7, 7, 23, 59, 30);
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: moodProvider,
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_1')),
+          moodV2Presentation: true,
+          moodV2WriterEnabled: false,
+          nowProvider: () => now,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('already logged'), findsOneWidget);
+
+      now = DateTime(2026, 7, 8, 0, 0, 2);
+      repository.hasToday = false;
+      await tester.pump(const Duration(minutes: 2));
+      await tester.pumpAndSettle();
+
+      // A fresh day offers the form again, not yesterday's entry.
+      expect(find.textContaining('already logged'), findsNothing);
+      expect(find.text('How are you feeling right now?'), findsOneWidget);
+    },
+  );
+
+  testWidgets('presentation off renders the legacy layout unchanged', (
+    tester,
+  ) async {
+    final repository = _FakeMoodRepository();
+    final moodProvider = MoodProvider(repository);
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: moodProvider,
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: false,
+        moodV2WriterEnabled: false,
+        nowProvider: () => DateTime(2026, 7, 7, 12),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('How are you feeling right now?'), findsNothing);
+    expect(
+      find.widgetWithText(ElevatedButton, 'Save mood check-in'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('writer on still routes the save to the protected V2 writer', (
+    tester,
+  ) async {
+    final repository = _FakeMoodRepository();
+    final moodProvider = MoodProvider(repository);
+    final writer = _FakeMoodV2Writer();
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: moodProvider,
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
+        moodV2Writer: writer,
+        nowProvider: () => DateTime(2026, 7, 7, 12),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+
+    expect(writer.levels, isNotEmpty);
+    expect(repository.createdLevel, isNull);
+  });
 }
 
 Widget _logMoodApp({
@@ -1204,7 +1428,8 @@ Widget _logMoodApp({
   InsightsProvider? insightsProvider,
   DateTime Function()? nowProvider,
   WidgetBuilder? expressionScreenBuilder,
-  bool moodV2Enabled = false,
+  bool moodV2Presentation = false,
+  bool moodV2WriterEnabled = false,
   MoodV2EntryWriter? moodV2Writer,
   String Function()? moodV2RequestIdGenerator,
 }) {
@@ -1222,7 +1447,8 @@ Widget _logMoodApp({
       home: LogMoodScreen(
         nowProvider: nowProvider,
         expressionScreenBuilder: expressionScreenBuilder,
-        moodV2Enabled: moodV2Enabled,
+        moodV2Presentation: moodV2Presentation,
+        moodV2WriterEnabled: moodV2WriterEnabled,
         moodV2Writer: moodV2Writer,
         moodV2RequestIdGenerator: moodV2RequestIdGenerator,
       ),
@@ -1301,7 +1527,7 @@ class _FakeMoodRepository extends MoodRepository {
   });
 
   final bool throwsOnToday;
-  final bool hasToday;
+  bool hasToday;
 
   final bool throwsOnCreate;
   String? createdUserId;
@@ -1332,7 +1558,16 @@ class _FakeMoodRepository extends MoodRepository {
 
   @override
   Future<MoodModel?> fetchTodayMood(String userId, {DateTime? now}) async {
-    return null;
+    if (throwsOnToday) throw StateError('today load failed');
+    if (!hasToday) return null;
+    return MoodModel(
+      id: 'daily_${userId}_20260707',
+      userId: userId,
+      level: 4,
+      label: 'Okay',
+      note: 'already logged',
+      createdAt: now ?? DateTime(2026, 7, 7, 9, 30),
+    );
   }
 
   @override

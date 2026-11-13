@@ -32,14 +32,22 @@ class LogMoodScreen extends StatefulWidget {
     DateTime Function()? nowProvider,
     this.expressionScreenBuilder,
     this.moodV2Writer,
-    this.moodV2Enabled = MoodV2FeatureFlag.enabled,
+    this.moodV2Presentation = MoodV2FeatureFlag.presentation,
+    this.moodV2WriterEnabled = MoodV2FeatureFlag.enabled,
     this.moodV2RequestIdGenerator,
   }) : _nowProvider = nowProvider ?? DateTime.now;
 
   final DateTime Function() _nowProvider;
   final WidgetBuilder? expressionScreenBuilder;
   final MoodV2EntryWriter? moodV2Writer;
-  final bool moodV2Enabled;
+
+  /// Whether the Mood V2 presentation is shown. Layout only — never
+  /// persistence.
+  final bool moodV2Presentation;
+
+  /// Whether saving uses the protected V2 writer. Persistence only — never
+  /// layout. Off means the legacy writer handles the save.
+  final bool moodV2WriterEnabled;
   final String Function()? moodV2RequestIdGenerator;
 
   @override
@@ -66,7 +74,10 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   }
 
   Future<void> _offerMoodReflection() async {
-    if (!widget.moodV2Enabled || _reflectionOffered || !mounted || _isSaving) {
+    if (!widget.moodV2Presentation ||
+        _reflectionOffered ||
+        !mounted ||
+        _isSaving) {
       return;
     }
     _reflectionOffered = true;
@@ -203,7 +214,8 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: MoodLogPalette.background,
-      bottomNavigationBar: widget.moodV2Enabled && _confirmedV2Entry == null
+      bottomNavigationBar:
+          widget.moodV2Presentation && _confirmedV2Entry == null
           ? SafeArea(
               top: false,
               child: Padding(
@@ -233,9 +245,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           slivers: [
             SliverToBoxAdapter(
               child: _MoodLogHeader(
-                v2: widget.moodV2Enabled,
+                v2: widget.moodV2Presentation,
                 now: _now,
-                showingResult: widget.moodV2Enabled
+                showingResult: widget.moodV2Presentation
                     ? _confirmedV2Entry != null
                     : _todayMood != null,
               ),
@@ -268,7 +280,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     final showV2History =
         MoodV2FeatureFlag.historyRead &&
         (moodProvider?.isMoodV2ReadEnabled ?? false);
-    if (widget.moodV2Enabled && _confirmedV2Entry != null) {
+    if (widget.moodV2Presentation && _confirmedV2Entry != null) {
       final entry = _confirmedV2Entry!;
       return _MoodSaved(
         entry: entry,
@@ -286,13 +298,13 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         },
       );
     }
-    if (!widget.moodV2Enabled && _isLoadingToday) {
+    if (!widget.moodV2WriterEnabled && _isLoadingToday) {
       return const SizedBox(
         height: 360,
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    if (!widget.moodV2Enabled && _todayError != null) {
+    if (!widget.moodV2WriterEnabled && _todayError != null) {
       return _MoodLoadError(
         message: _todayError!,
         onRetry: () {
@@ -301,14 +313,14 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         },
       );
     }
-    if (!widget.moodV2Enabled && _todayMood != null) {
+    if (!widget.moodV2WriterEnabled && _todayMood != null) {
       return Column(
         children: [
           _DailyMoodResult(
             mood: _todayMood!,
             currentStreak: _readProviderOrNull<UserProvider>()?.user?.dayStreak,
           ),
-          if (widget.moodV2Enabled) ...[
+          if (widget.moodV2WriterEnabled) ...[
             const SizedBox(height: 12),
             OutlinedButton.icon(
               key: const ValueKey('mood-v2-add-entry'),
@@ -317,7 +329,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
               label: const Text('Log another mood entry'),
             ),
           ],
-          if (showV2History && !widget.moodV2Enabled) ...[
+          if (showV2History && !widget.moodV2Presentation) ...[
             const SizedBox(height: 20),
             _buildMoodV2HistoryPanel(moodProvider),
           ],
@@ -327,7 +339,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (widget.moodV2Enabled && showV2History)
+        if (widget.moodV2Presentation && showV2History)
           Semantics(
             button: true,
             label: 'View My Mood Journey',
@@ -347,7 +359,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
               ),
             ),
           ),
-        if (widget.moodV2Enabled) ...[
+        if (widget.moodV2Presentation) ...[
           const SizedBox(height: 20),
           Text(
             'How are you feeling right now?',
@@ -364,7 +376,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           const _MoodLogIntro(),
         const SizedBox(height: 16),
         _MoodChoiceGrid(
-          compact: widget.moodV2Enabled,
+          compact: widget.moodV2Presentation,
           selectedMood: _selectedMood,
           isEnabled: !_isSaving,
           onSelected: (mood) {
@@ -372,7 +384,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
             unawaited(_offerMoodReflection());
           },
         ),
-        if (widget.moodV2Enabled) ...[
+        if (widget.moodV2Presentation) ...[
           const SizedBox(height: 16),
           _ThoughtsBox(
             key: _noteFieldKey,
@@ -389,7 +401,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                 defaultTargetPlatform == TargetPlatform.iOS)) ...[
           const SizedBox(height: 18),
           _ExpressionCheckInEntry(
-            compact: widget.moodV2Enabled,
+            compact: widget.moodV2Presentation,
             enabled: !_isSaving,
             onPressed: _openExpressionCheckIn,
           ),
@@ -410,11 +422,11 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ],
         ],
         const SizedBox(height: 18),
-        if (!widget.moodV2Enabled)
+        if (!widget.moodV2Presentation)
           _ThoughtsBox(
             controller: _noteController,
             characterCount: _noteLength,
-            compact: widget.moodV2Enabled,
+            compact: widget.moodV2Presentation,
             isEnabled: !_isSaving,
           ),
         if (_moodV2Error != null) ...[
@@ -426,7 +438,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ),
         ],
         const SizedBox(height: 18),
-        if (!widget.moodV2Enabled)
+        if (!widget.moodV2Presentation)
           _SaveMoodButton(
             isEnabled:
                 _selectedMood != null &&
@@ -435,11 +447,11 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                     _expressionSuggestionAccepted != null),
             isSaving: _isSaving,
             onPressed: _saveMood,
-            label: widget.moodV2Enabled
+            label: widget.moodV2Presentation
                 ? 'Save mood entry'
                 : 'Save mood check-in',
           ),
-        if (showV2History && !widget.moodV2Enabled) ...[
+        if (showV2History && !widget.moodV2Presentation) ...[
           const SizedBox(height: 20),
           _buildMoodV2HistoryPanel(moodProvider),
         ],
@@ -507,7 +519,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
 
   Future<void> _loadTodayMood(String userId) async {
     final generation = ++_todayLoadGeneration;
-    if (widget.moodV2Enabled) {
+    if (widget.moodV2WriterEnabled) {
       if (MoodV2FeatureFlag.historyRead) {
         await _readProviderOrNull<MoodProvider>()?.loadMoodV2History(
           userId,
@@ -549,7 +561,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     }
 
     setState(() => _isSaving = true);
-    if (widget.moodV2Enabled) {
+    if (widget.moodV2WriterEnabled) {
       await _saveMoodV2(userId, mood);
       return;
     }
@@ -756,7 +768,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       if (!mounted) return;
       // V2 requests represent intentional events, not daily check-ins. Keep
       // their draft, frozen retry payload and pending response valid overnight.
-      if (!widget.moodV2Enabled) {
+      if (!widget.moodV2WriterEnabled) {
         setState(() {
           _todayMood = null;
           _selectedMood = null;
