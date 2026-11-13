@@ -115,13 +115,17 @@ in error, with the reason. Nothing is written.
 
 **Decisions taken (marked T where the user decided, otherwise mine):**
 
-- **(T) Names are unique within their parent, not globally.** Two colleges may each have a department
-  called "Information Technology", or a course of the same name. This reflects how universities name
-  things, and the roster matcher already tolerates it
-  (`student_roster_domain.ts` resolves a course within its college).
+- **(T) Names are unique per college, not globally.** Two colleges may each have a department called
+  "Information Technology", or a course of the same name. This reflects how universities name things.
+  A **course name is unique within its college**, not within its department: `student_roster_domain.ts`
+  resolves a course inside the college it matched and takes the one candidate it finds there, so two
+  same-named courses in one college — which two department spellings of that college would produce —
+  could not be told apart, and every student in that programme would be filed under an arbitrary one of
+  them with the wrong `departmentId`. A course's department remains its write parent; only the
+  uniqueness scope is the college.
   **Consequence:** `saveOrganizationRecord`'s duplicate check is currently collection-wide
-  (`functions/src/index.ts`, the `normalizedName` query) and must become parent-scoped — a department
-  against others in its college, a course against others in its department — so that the single-record
+  (`functions/src/index.ts`, the `normalizedName` query) and must become college-scoped — a department
+  against others in its college, a course against others in its college — so that the single-record
   dialog and the importer agree. Without that change an administrator could not hand-create what the
   import creates. Colleges remain globally unique, having no parent.
 - **Codes stay globally unique within their collection.** The roster import matches a course or college
@@ -139,9 +143,11 @@ in error, with the reason. Nothing is written.
   under one department. Inheriting the value from the row above is the silent guesswork the anti-goals
   forbid, even though registrar spreadsheets often do leave repeated cells blank.
 - **Codes from the file are never altered.** When the code column is mapped, its value is used as given.
-  If it collides with a different existing record, or the file gives one code to two different names,
-  that row is an error — appending a digit would falsify the registrar's own numbering, which is the
-  part worth keeping. Only *derived* codes get a digit appended to resolve a collision.
+  If a code the file gives for a record being **created** collides with a different record, or the file
+  gives one code to two different names, that row is an error — appending a digit would falsify the
+  registrar's own numbering, which is the part worth keeping. Only *derived* codes get a digit appended
+  to resolve a collision. A code the file gives for a record that **already exists** is never persisted
+  (the stored code is kept, per Ruling R7), so it cannot collide with anything and can only warn.
 - **Derived codes.** When no code column is mapped: initials of the significant words, uppercased
   (`BS Information Technology` → `BSIT`, `College of Pharmacy` → `CP`), with a digit appended if taken.
   Every code stays editable afterwards.
