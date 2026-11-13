@@ -23,6 +23,13 @@ class AppEnvironmentConfig {
   };
 
   static bool get isStaging => current == AppEnvironment.staging;
+
+  /// Compile-time equivalent of [isStaging].
+  ///
+  /// [isStaging] is a getter and therefore cannot be used as a
+  /// `bool.fromEnvironment` `defaultValue`, which must be a constant. Flags
+  /// that default to "on in staging only" use this instead.
+  static const isStagingBuild = _name == 'staging';
   static const functionsRegion = 'us-central1';
   static const stagingAppCheckEnabled = bool.fromEnvironment(
     'ENABLE_STAGING_APP_CHECK',
