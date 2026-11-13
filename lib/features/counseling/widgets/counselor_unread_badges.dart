@@ -1,3 +1,4 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,9 @@ class CounselorInboxUnreadBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (Firebase.apps.isEmpty) {
+      return const SizedBox.shrink();
+    }
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
       return const SizedBox.shrink();
@@ -60,6 +64,9 @@ class StudentCounselorUnreadBadge extends StatelessWidget {
   const StudentCounselorUnreadBadge({super.key});
   @override
   Widget build(BuildContext context) {
+    if (Firebase.apps.isEmpty) {
+      return const SizedBox.shrink();
+    }
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
       return const SizedBox.shrink();

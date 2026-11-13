@@ -259,7 +259,7 @@ void main() {
 
     expect(find.text('Home'), findsOneWidget);
     expect(find.text('Appointment'), findsOneWidget);
-    expect(find.text('Secret Chat'), findsOneWidget);
+    expect(find.text('Forum'), findsOneWidget);
     expect(find.text('Message'), findsOneWidget);
   });
 
