@@ -2,12 +2,16 @@
 //
 // Rules enforced here (see the feature's global constraints):
 //  - names are unique within their parent (colleges are global, departments within a college,
-//    courses within a department); codes stay unique collection-wide;
+//    courses within a COLLEGE — the roster matcher resolves a course inside a college, so two
+//    same-named courses in one college would be indistinguishable to it; a course's department
+//    remains its write parent); codes stay unique collection-wide;
 //  - a name match means ALREADY EXISTS: the row is skipped, never updated, so re-running a file is a no-op;
 //  - codes given by the file are used as given and are reserved before any code is derived, so a sparse
 //    Code column reads the same whatever order the rows arrive in;
 //  - an unmapped Department column (absent key) invents one department per college, while a mapped but
 //    blank cell is an error row.
+
+import {normalizeName} from "./student_roster_domain";
 
 const NAME_MIN = 2;
 const NAME_MAX = 120;
@@ -86,7 +90,10 @@ type Group = {
   key: string;
   name: string;
   nameKey: string;
+  /** The record this group will be written under: a department for a course, a college for a department. */
   parent: string;
+  /** That parent's name, for a message that has to say where the other mention sits. */
+  parentName: string;
   mentions: Mention[];
   code: string;
   blocked: boolean;
@@ -96,7 +103,12 @@ type Group = {
 type Level = {
   label: "College" | "Department" | "Course";
   prefix: string;
-  /** `${parentRef}\u0000${nameKey}` -> stored record. */
+  /**
+   * The comparison key for a name at this level. Courses use the roster matcher's own normalisation,
+   * so `B.S. Nursing` and `BS Nursing` are one course here exactly as they are to the matcher.
+   */
+  nameKeyOf: (name: string) => string;
+  /** `${uniquenessParentRef}\u0000${nameKey}` -> stored record. */
   storedByName: Map<string, ExistingRecord>;
   /**
    * normalized code -> the record that will actually hold it: a stored record under its stored code, or
@@ -109,17 +121,21 @@ type Level = {
    * warns), so it must never be attributed to anyone either.
    */
   reserved: Set<string>;
-  /** `${parentRef}\u0000${nameKey}` -> planned group. */
+  /** `${uniquenessParentRef}\u0000${nameKey}` -> planned group. */
   groups: Map<string, Group>;
   order: Group[];
 };
 
-function buildLevel(label: Level["label"], prefix: string, records: ExistingRecord[], parented: boolean): Level {
-  const level: Level = {label, prefix, storedByName: new Map(), codeOwner: new Map(), reserved: new Set(),
-    groups: new Map(), order: []};
+/**
+ * `uniquenessParent` says which record a name must be unique inside: nothing for a college, the college
+ * for a department, and — for a course — the college too, reached through the stored department.
+ */
+function buildLevel(label: Level["label"], prefix: string, records: ExistingRecord[],
+  uniquenessParent: (stored: ExistingRecord) => string, nameKeyOf: (name: string) => string): Level {
+  const level: Level = {label, prefix, nameKeyOf, storedByName: new Map(), codeOwner: new Map(),
+    reserved: new Set(), groups: new Map(), order: []};
   for (const stored of records) {
-    const parent = parented ? `id:${stored.parentId ?? ""}` : "";
-    level.storedByName.set(`${parent}\u0000${normalizeKey(stored.name)}`, stored);
+    level.storedByName.set(`${uniquenessParent(stored)}\u0000${nameKeyOf(stored.name)}`, stored);
     const code = normalizeKey(stored.code);
     // Archived records keep their code too, so a new record can never shadow one.
     if (code && !level.codeOwner.has(code)) level.codeOwner.set(code, {id: stored.id, name: stored.name});
@@ -146,15 +162,18 @@ function freeDerivedCode(level: Level, name: string): string {
 type Resolution = {ref: string; level: Level; code: string; stored?: ExistingRecord; group?: Group};
 
 /**
- * Resolves one name under `parent` to a stored record or a planned group, without touching codes:
- * codes are assigned only once every row has been read. `duplicateInFile` makes a second mention of the
- * same name under the same parent an error, which is how a repeated course is caught while a repeated
- * college or department is simply reused.
+ * Resolves one name to a stored record or a planned group, without touching codes: codes are assigned
+ * only once every row has been read. `parent` is the record the name will be written under, while
+ * `uniquenessParent` is the record it must be unique inside — the two differ for a course, whose name is
+ * unique per college but written under a department. `duplicateInFile` makes a second mention of the
+ * same name inside the same uniqueness parent an error, which is how a repeated course is caught while a
+ * repeated college or department is simply reused.
  */
 function resolveName(level: Level, parent: string, name: string, code: string, row: number,
-  duplicateInFile: boolean, errors: string[]): Resolution | null {
-  const nameKey = normalizeKey(name);
-  const mapKey = `${parent}\u0000${nameKey}`;
+  duplicateInFile: boolean, errors: string[], parentName = "",
+  uniquenessParent: string = parent): Resolution | null {
+  const nameKey = level.nameKeyOf(name);
+  const mapKey = `${uniquenessParent}\u0000${nameKey}`;
   const stored = level.storedByName.get(mapKey);
   if (stored) {
     if (!stored.active) {
@@ -166,13 +185,17 @@ function resolveName(level: Level, parent: string, name: string, code: string, r
   const existing = level.groups.get(mapKey);
   if (existing) {
     if (duplicateInFile) {
-      errors.push(`${level.label} “${name}” appears more than once under the same parent in this file.`);
+      // The earlier mention may sit under a different department of the same college: say which, so the
+      // registrar can see the two spellings that have to be merged.
+      const where = existing.parentName ? ` under “${existing.parentName}”` : "";
+      errors.push(`${level.label} “${existing.name}” already appears in this file${where}. ` +
+        `A ${level.label.toLowerCase()} name must be unique within its college.`);
       return null;
     }
     existing.mentions.push({row, code});
     return {ref: `new:${existing.key}`, level, code, group: existing};
   }
-  const group: Group = {key: `${level.prefix}${level.order.length + 1}`, name, nameKey, parent,
+  const group: Group = {key: `${level.prefix}${level.order.length + 1}`, name, nameKey, parent, parentName,
     mentions: [{row, code}], code: "", blocked: false, used: false};
   level.groups.set(mapKey, group);
   level.order.push(group);
@@ -182,10 +205,13 @@ function resolveName(level: Level, parent: string, name: string, code: string, r
 /**
  * Pass two, step one: the codes the file gave for records it is creating. Those are the only file codes
  * anybody will write, so they are the only ones that take ownership — and the only ones that can be
- * blamed when two names claim the same code.
+ * blamed when two names claim the same code. A group every one of whose rows has already failed is
+ * skipped: the file is refused anyway, so it must not claim a code, be blamed for a collision, or deny a
+ * derived code to a group that survives.
  */
-function claimGivenCodes(level: Level, rowErrors: string[][]): void {
+function claimGivenCodes(level: Level, rowErrors: string[][], alive: (group: Group) => boolean): void {
   for (const group of level.order) {
+    if (!alive(group)) continue;
     const given = group.mentions.filter((mention) => mention.code);
     if (!given.length) continue;
     const first = given[0];
@@ -212,9 +238,9 @@ function claimGivenCodes(level: Level, rowErrors: string[][]): void {
  * Pass two, step two: derivation. Every code the file named — for a new record or for a stored one — is
  * already off the table by now, so an invented code can never take a code the file spoke for.
  */
-function deriveMissingCodes(level: Level): void {
+function deriveMissingCodes(level: Level, alive: (group: Group) => boolean): void {
   for (const group of level.order) {
-    if (group.code || group.blocked) continue;
+    if (group.code || group.blocked || !alive(group)) continue;
     group.code = freeDerivedCode(level, group.name);
     level.codeOwner.set(normalizeKey(group.code), {id: group.key, name: group.name});
   }
@@ -240,10 +266,15 @@ function mapped(row: CatalogRow, field: keyof CatalogRow): boolean {
 type RowState = {index: number; refs: Resolution[]; invented: string; resolved: boolean};
 
 export function validateCatalogRows(rows: CatalogRow[], index: AcademicCatalogIndex): CatalogValidation {
+  // A stored course carries its department; its college is reached through that department, which is
+  // what the course level keys its names by.
+  const collegeOfDepartment = new Map(index.departments.map((d) => [d.id, d.parentId ?? ""]));
   const levels: Record<LevelName, Level> = {
-    colleges: buildLevel("College", "c", index.colleges, false),
-    departments: buildLevel("Department", "d", index.departments, true),
-    courses: buildLevel("Course", "k", index.courses, true),
+    colleges: buildLevel("College", "c", index.colleges, () => "", normalizeKey),
+    departments: buildLevel("Department", "d", index.departments,
+      (stored) => `id:${stored.parentId ?? ""}`, normalizeKey),
+    courses: buildLevel("Course", "k", index.courses,
+      (stored) => `id:${collegeOfDepartment.get(stored.parentId ?? "") ?? ""}`, normalizeName),
   };
   const rowErrors: string[][] = rows.map(() => []);
 
@@ -279,10 +310,13 @@ export function validateCatalogRows(rows: CatalogRow[], index: AcademicCatalogIn
     if (!college) return state;
     // With no Department column, every college gets one department of its own name.
     state.invented = departmentMapped ? "" : (college.stored?.name ?? collegeName);
-    const department = resolveName(levels.departments, college.ref, departmentMapped ? departmentName : state.invented,
-      departmentCode, position, false, errors);
+    const departmentLabel = departmentMapped ? departmentName : state.invented;
+    const department = resolveName(levels.departments, college.ref, departmentLabel,
+      departmentCode, position, false, errors, college.stored?.name ?? collegeName);
     if (!department) return state;
-    const course = resolveName(levels.courses, department.ref, courseName, courseCode, position, true, errors);
+    // The department is the course's write parent; the college is where its name must be unique.
+    const course = resolveName(levels.courses, department.ref, courseName, courseCode, position, true, errors,
+      department.stored?.name ?? departmentLabel, college.ref);
     if (!course) return state;
     state.refs = [college, department, course];
     state.resolved = true;
@@ -292,7 +326,10 @@ export function validateCatalogRows(rows: CatalogRow[], index: AcademicCatalogIn
   // Pass two: codes. Every code the file gave is settled before a single one is derived, so a derived
   // code can never outrank a code the file wrote further down.
   const allLevels = [levels.colleges, levels.departments, levels.courses];
-  for (const level of allLevels) claimGivenCodes(level, rowErrors);
+  // A group only survives if some row that mentioned it is still standing after pass one.
+  const standing = rows.map((_, position) => rowErrors[position].length === 0);
+  const alive = (group: Group) => group.mentions.some((mention) => standing[mention.row]);
+  for (const level of allLevels) claimGivenCodes(level, rowErrors, alive);
   // A code named for a record that already exists is held out of derivation but owned by nobody: it is
   // never written. Claims from a row that has already failed are ignored, so a doomed row cannot deny a
   // code to a row that succeeds.
@@ -302,7 +339,7 @@ export function validateCatalogRows(rows: CatalogRow[], index: AcademicCatalogIn
       if (ref.stored && ref.code) ref.level.reserved.add(normalizeKey(ref.code));
     }
   }
-  for (const level of allLevels) deriveMissingCodes(level);
+  for (const level of allLevels) deriveMissingCodes(level, alive);
 
   // Pass three: a row's outcome, now that every code is settled.
   const results: CatalogRowResult[] = states.map((state) => {

@@ -223,3 +223,16 @@ test("constants", async () => {
   assert.equal(m.PRIVACY_POLICY_VERSION, "2026-11-ra10173-v1");
   assert.deepEqual([...m.CORRECTABLE_FIELDS], ["surname", "firstName", "middleName", "dateOfBirth", "college", "course", "yearLevel"]);
 });
+
+test("two courses of one college matching the same name is an error, not an arbitrary pick", async () => {
+  const {validateRosterRows} = await load();
+  const ambiguous = {
+    colleges: index.colleges,
+    courses: [...index.courses, {id: "k3", name: "BS Information Technology", code: "BSIT3",
+      collegeId: "c1", departmentId: "d9", departmentName: "IT Department"}],
+  };
+  const [row] = validateRosterRows([{...goodRow, course: "BS Information Technology"}], ambiguous);
+  assert.equal(row.ok, false);
+  assert.ok(!row.ok && row.errors.some((e) => e.includes("BS Information Technology")),
+    JSON.stringify(row));
+});

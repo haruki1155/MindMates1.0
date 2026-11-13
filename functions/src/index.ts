@@ -1009,11 +1009,12 @@ export const saveOrganizationRecord = onCall(async (request) => {
       throw new HttpsError("failed-precondition", "Choose a department under the selected college.");
     }
   }
-  // Names are unique within their parent (colleges are global); codes stay collection-wide unique
-  // because the roster import resolves a college or course by name OR code.
+  // Colleges are global, a department is unique within its college, and a COURSE is unique within its
+  // college too — the roster import resolves a course inside a college, so two same-named courses in one
+  // college could not be told apart, whatever departments they sit under. Codes stay collection-wide
+  // unique because the roster import resolves a college or course by name OR code.
   let nameQuery = db.collection(collection).where("normalizedName", "==", name.toLowerCase());
-  if (kind === "department") nameQuery = nameQuery.where("collegeId", "==", collegeId);
-  if (kind === "course") nameQuery = nameQuery.where("departmentId", "==", departmentId);
+  if (kind !== "college") nameQuery = nameQuery.where("collegeId", "==", collegeId);
   const duplicate = await nameQuery.limit(10).get();
   const duplicateCode = await db.collection(collection).where("normalizedCode", "==", code.toLowerCase()).limit(10).get();
   if (duplicate.docs.some((doc) => doc.id !== recordId) || duplicateCode.docs.some((doc) => doc.id !== recordId)) {

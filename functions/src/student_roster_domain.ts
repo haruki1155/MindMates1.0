@@ -87,9 +87,15 @@ export function validateRosterRows(rows: RosterRowInput[], index: AcademicIndex)
     const matches = courseText ?
       index.courses.filter((c) => normalizeName(c.name) === courseText || normalizeName(c.code) === courseText) :
       [];
-    let course = matches.find((c) => c.collegeId === college?.id);
+    // Course names are unique per college, so one candidate is expected. Should bad data ever put two
+    // in one college, the row is refused rather than filed under an arbitrary one of them.
+    const inCollege = matches.filter((c) => c.collegeId === college?.id);
+    let course = inCollege.length === 1 ? inCollege[0] : undefined;
     if (!matches.length) {
       errors.push("Course was not found.");
+    } else if (college && inCollege.length > 1) {
+      errors.push(`Course “${cleanText(row.course)}” matches more than one course in this college. ` +
+        "Ask the registrar to merge the duplicates first.");
     } else if (college && !course) {
       errors.push("Course is not under the selected college.");
     } else if (!college) {

@@ -62,11 +62,14 @@ test("a department name repeats under a different college but not within one", a
   await denied(save.run({auth, data: {kind: "department", name, code: `${run}IT3`, collegeId: collegeA}}), "already-exists");
 });
 
-test("a course name repeats across departments but not within one", async () => {
+// A course name is unique per COLLEGE, not per department: the roster matcher resolves a course inside
+// a college, so two same-named courses in one college would be indistinguishable to it.
+test("a course name repeats across colleges but not within one", async () => {
   const name = `${run} BS Information Technology`;
   await saveOk({kind: "course", name, code: `${run}K1`, collegeId: collegeA, departmentId: deptA});
-  await saveOk({kind: "course", name, code: `${run}K2`, collegeId: collegeA, departmentId: deptA2});
+  await denied(save.run({auth, data: {kind: "course", name, code: `${run}K2`, collegeId: collegeA, departmentId: deptA2}}), "already-exists");
   await denied(save.run({auth, data: {kind: "course", name, code: `${run}K3`, collegeId: collegeA, departmentId: deptA}}), "already-exists");
+  await saveOk({kind: "course", name, code: `${run}K4`, collegeId: collegeB, departmentId: deptB});
 });
 
 test("codes stay unique across parents", async () => {

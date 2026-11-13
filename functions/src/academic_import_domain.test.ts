@@ -280,3 +280,76 @@ test("one code given to two different names in the file is an error", async () =
   assert.equal(out.results[0].ok, true);
   assert.equal(out.results[1].ok, false);
 });
+
+test("the same course under two departments of one college is a duplicate error", async () => {
+  const {validateCatalogRows} = await load();
+  const out = validateCatalogRows([
+    {college: "College of Computing", department: "Information Technology", course: "BS Information Technology"},
+    {college: "College of Computing", department: "IT Department", course: "BS Information Technology"},
+  ], emptyIndex);
+  assert.equal(out.results[0].ok, true, JSON.stringify(out.results));
+  assert.equal(out.results[1].ok, false);
+  const message = out.results[1].ok ? "" : out.results[1].errors.join(" ");
+  assert.match(message, /BS Information Technology/);
+  assert.match(message, /Information Technology”/);
+  assert.equal(out.plan.courses.length, 1);
+});
+
+test("the same course name under two different colleges still creates two courses", async () => {
+  const {validateCatalogRows} = await load();
+  const out = validateCatalogRows([
+    {college: "College of Computing", department: "IT Dept", course: "BS Information Technology"},
+    {college: "College of Engineering", department: "CpE Dept", course: "BS Information Technology"},
+  ], emptyIndex);
+  assert.equal(out.results[0].ok, true, JSON.stringify(out.results));
+  assert.equal(out.results[1].ok, true, JSON.stringify(out.results));
+  assert.equal(out.plan.courses.length, 2);
+  assert.equal(out.counts.error, 0);
+});
+
+test("course names are compared with the roster matcher's normalisation", async () => {
+  const {validateCatalogRows} = await load();
+  const out = validateCatalogRows([
+    {college: "College of Nursing", department: "Nursing Dept", course: "B.S. Nursing"},
+    {college: "College of Nursing", department: "Nursing Dept", course: "BS Nursing"},
+  ], emptyIndex);
+  assert.equal(out.results[0].ok, true, JSON.stringify(out.results));
+  assert.equal(out.results[1].ok, false);
+  assert.equal(out.plan.courses.length, 1);
+
+  const index = {
+    colleges: [{id: "x1", name: "College of Nursing", code: "CN", active: true}],
+    departments: [{id: "d1", name: "Nursing Dept", code: "ND", active: true, parentId: "x1"}],
+    courses: [{id: "k1", name: "BS Nursing", code: "BSN", active: true, parentId: "d1"}],
+  };
+  const stored = validateCatalogRows(
+    [{college: "College of Nursing", department: "Nursing Dept", course: "B.S. Nursing"}], index);
+  assert.equal(stored.results[0].ok && stored.results[0].kind, "exists");
+  assert.equal(stored.plan.courses.length, 0);
+});
+
+test("a stored course is matched anywhere in its college, whatever department the file names", async () => {
+  const {validateCatalogRows} = await load();
+  const index = {
+    colleges: [{id: "x1", name: "College of Computing", code: "CC", active: true}],
+    departments: [{id: "d1", name: "IT Dept", code: "ITD", active: true, parentId: "x1"}],
+    courses: [{id: "k1", name: "BS Information Technology", code: "BSIT", active: true, parentId: "d1"}],
+  };
+  const out = validateCatalogRows(
+    [{college: "College of Computing", department: "IT Department", course: "BS Information Technology"}], index);
+  assert.equal(out.results[0].ok && out.results[0].kind, "exists");
+  assert.equal(out.plan.courses.length, 0);
+});
+
+test("a group mentioned only by failed rows is not named as a collision owner", async () => {
+  const {validateCatalogRows} = await load();
+  const out = validateCatalogRows([
+    {college: "C1", department: "Dept A", course: "BS IT"},
+    {college: "C1", department: "Dept B", departmentCode: "DX", course: "BS IT"},
+    {college: "C1", department: "Dept C", departmentCode: "DX", course: "BS Other"},
+  ], emptyIndex);
+  assert.equal(out.results[1].ok, false);
+  assert.equal(out.results[2].ok, true, JSON.stringify(out.results));
+  assert.doesNotMatch(JSON.stringify(out.results), /Dept B/);
+  assert.deepEqual(out.plan.departments.map((d) => `${d.name}:${d.code}`), ["Dept A:DA", "Dept C:DX"]);
+});
