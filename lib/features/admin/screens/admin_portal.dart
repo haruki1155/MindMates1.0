@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'counselor_messages_page.dart';
+import '../../counseling/widgets/counselor_unread_badges.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/admin_inquiry_model.dart';
@@ -748,6 +749,10 @@ class _Nav extends StatelessWidget {
                                     : AdminColors.muted,
                                 size: 21,
                               ),
+                              trailing:
+                                  item == AdminPortalPage.counselorMessages
+                                  ? const CounselorInboxUnreadBadge()
+                                  : null,
                               title: Text(
                                 item.workspaceLabel,
                                 style: const TextStyle(

@@ -277,26 +277,45 @@ function collegeDocumentId(name: string): string {
 async function resolveRegisteredCollege(
   department: string,
 ): Promise<string> {
-  if (!department.trim()) {
+  const registeredName = department.trim();
+
+  if (!registeredName) {
     throw new HttpsError(
       "failed-precondition",
       "Your registered college is missing.",
     );
   }
 
-  const id = collegeDocumentId(department.trim());
-  const snapshot = await db.collection("colleges").doc(id).get();
+  // Verified legacy registration alias.
+  // Do not accept a college ID supplied by the client.
+  const collegeAliases: Record<string, string> = {
+    "college of criminology": "College of Criminal Justice Education",
+    "college of information and technology education / college of computer studies":
+      "College of Information and Technology Education",
+  };
 
-  if (!snapshot.exists ||
-      snapshot.data()?.active !== true ||
-      snapshot.data()?.name !== department.trim()) {
+  const officialName =
+    collegeAliases[registeredName.toLowerCase()] ?? registeredName;
+
+  // Resolve against the existing admin-managed academic directory.
+  const snapshot = await db.collection("colleges")
+    .where("normalizedName", "==", officialName.toLowerCase())
+    .limit(3)
+    .get();
+
+  const matches = snapshot.docs.filter((doc) => {
+    const data = doc.data();
+    return data.name === officialName && data.active === true;
+  });
+
+  if (matches.length !== 1) {
     throw new HttpsError(
       "failed-precondition",
-      "Your registered college is not configured in the active academic directory. Contact the administrator.",
+      "Your registered college is not uniquely configured in the active academic directory. Contact the administrator.",
     );
   }
 
-  return id;
+  return matches[0].id;
 }
 
 export const repairMyStudentCollege = onCall(

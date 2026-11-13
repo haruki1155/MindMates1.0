@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/admin_theme.dart';
+import '../../counseling/widgets/counselor_unread_badges.dart';
 
 /// Approved counselor-only inbox. AI history is never merged into this thread.
 class CounselorMessagesPage extends StatefulWidget {
@@ -17,6 +18,25 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
   String selectedCollege = 'all';
   final messageController = TextEditingController();
   bool sending = false;
+  String? _readingUser;
+
+  Future<void> _markRead(String studentId) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || _readingUser == studentId) return;
+    _readingUser = studentId;
+    try {
+      await FirebaseFirestore.instance
+          .collection('counselor_inbox_reads')
+          .doc(uid)
+          .collection('threads')
+          .doc(studentId)
+          .set({'readAt': FieldValue.serverTimestamp()});
+    } catch (error) {
+      debugPrint('COUNSELOR_READ_ERROR: $error');
+    } finally {
+      _readingUser = null;
+    }
+  }
 
   @override
   void dispose() {
@@ -40,8 +60,13 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
       final db = FirebaseFirestore.instance;
       final thread = db.collection('counselor_threads').doc(userId);
       final batch = db.batch();
-      batch.update(thread, {'updatedAt': FieldValue.serverTimestamp()});
-      batch.set(thread.collection('messages').doc(), {
+      final message = thread.collection('messages').doc();
+      batch.update(thread, {
+        'updatedAt': FieldValue.serverTimestamp(),
+        'lastCounselorMessageAt': FieldValue.serverTimestamp(),
+        'lastCounselorMessageId': message.id,
+      });
+      batch.set(message, {
         'senderId': uid,
         'senderRole': 'counselor',
         'text': text,
@@ -49,6 +74,7 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
       });
       await batch.commit();
       messageController.clear();
+      await _markRead(userId);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -173,15 +199,48 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
                             ListTile(
                               selected: selectedUser == thread.id,
                               title: Text(
-                                'Student ${thread.id.length > 10 ? '${thread.id.substring(0, 10)}…' : thread.id}',
+                                (thread.data()['studentName'] as String?)
+                                            ?.trim()
+                                            .isNotEmpty ==
+                                        true
+                                    ? thread.data()['studentName'] as String
+                                    : 'Student ${thread.id.length > 10 ? '${thread.id.substring(0, 10)}…' : thread.id}',
                               ),
                               subtitle: Text(
                                 (thread.data()['collegeId'] ??
                                         'Unassigned college')
                                     .toString(),
                               ),
-                              onTap: () =>
-                                  setState(() => selectedUser = thread.id),
+                              trailing:
+                                  StreamBuilder<
+                                    DocumentSnapshot<Map<String, dynamic>>
+                                  >(
+                                    stream: db
+                                        .collection('counselor_inbox_reads')
+                                        .doc(
+                                          FirebaseAuth
+                                              .instance
+                                              .currentUser!
+                                              .uid,
+                                        )
+                                        .collection('threads')
+                                        .doc(thread.id)
+                                        .snapshots(),
+                                    builder: (context, receipt) =>
+                                        UnreadCountBadge(
+                                          count:
+                                              counselorThreadUnread(
+                                                thread.data(),
+                                                receipt.data?.data()?['readAt'],
+                                              )
+                                              ? 1
+                                              : 0,
+                                        ),
+                                  ),
+                              onTap: () {
+                                setState(() => selectedUser = thread.id);
+                                _markRead(thread.id);
+                              },
                             ),
                         ],
                       );
@@ -218,6 +277,50 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
                                         return const Center(
                                           child: CircularProgressIndicator(),
                                         );
+                                      }
+                                      final hasStudentMessages = snapshot
+                                          .data!
+                                          .docs
+                                          .any(
+                                            (doc) =>
+                                                doc.data()['senderRole'] ==
+                                                'user',
+                                          );
+                                      if (hasStudentMessages &&
+                                          selectedUser != null) {
+                                        final studentId = selectedUser!;
+                                        WidgetsBinding.instance
+                                            .addPostFrameCallback((_) async {
+                                              if (!mounted ||
+                                                  selectedUser != studentId ||
+                                                  _readingUser != null)
+                                                return;
+                                              final thread = await db
+                                                  .collection(
+                                                    'counselor_threads',
+                                                  )
+                                                  .doc(studentId)
+                                                  .get();
+                                              final uid = FirebaseAuth
+                                                  .instance
+                                                  .currentUser
+                                                  ?.uid;
+                                              if (uid == null) return;
+                                              final receipt = await db
+                                                  .collection(
+                                                    'counselor_inbox_reads',
+                                                  )
+                                                  .doc(uid)
+                                                  .collection('threads')
+                                                  .doc(studentId)
+                                                  .get();
+                                              if (counselorThreadUnread(
+                                                thread.data() ?? {},
+                                                receipt.data()?['readAt'],
+                                              )) {
+                                                await _markRead(studentId);
+                                              }
+                                            });
                                       }
                                       return ListView(
                                         children: [

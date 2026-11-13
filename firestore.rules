@@ -268,22 +268,81 @@ service cloud.firestore {
         && hasPortalAccess();
     }
 
+    function registeredCounselorName(userId) {
+      let profile = get(/databases/$(database)/documents/users/$(userId)).data;
+      let first = profile.get('firstName', '');
+      let middle = profile.get('middleName', '');
+      let last = profile.get('lastName', '');
+      return profile.get('name', '') == request.resource.data.studentName
+        || (first + ' ' + last) == request.resource.data.studentName
+        || (middle != '' && (first + ' ' + middle + ' ' + last) == request.resource.data.studentName);
+    }
+
+    // A badge timestamp must be tied to a NEW message in the same atomic batch.
+    function linkedCounselorMessage(userId, messageId, senderId, senderRole) {
+      return messageId is string
+        && messageId.size() > 0 && messageId.size() <= 160
+        && !exists(/databases/$(database)/documents/counselor_threads/$(userId)/messages/$(messageId))
+        && existsAfter(/databases/$(database)/documents/counselor_threads/$(userId)/messages/$(messageId))
+        && getAfter(/databases/$(database)/documents/counselor_threads/$(userId)/messages/$(messageId)).data.senderId == senderId
+        && getAfter(/databases/$(database)/documents/counselor_threads/$(userId)/messages/$(messageId)).data.senderRole == senderRole
+        && getAfter(/databases/$(database)/documents/counselor_threads/$(userId)/messages/$(messageId)).data.createdAt == request.time;
+    }
+
+    // Per-counselor read receipts prevent one counselor clearing another's badge.
+    match /counselor_inbox_reads/{counselorUid}/threads/{studentId} {
+      allow read: if isApprovedCounselor() && request.auth.uid == counselorUid;
+      allow create, update: if isApprovedCounselor()
+        && request.auth.uid == counselorUid
+        && exists(/databases/$(database)/documents/counselor_threads/$(studentId))
+        && request.resource.data.keys().hasOnly(['readAt'])
+        && request.resource.data.readAt == request.time;
+      allow delete: if false;
+    }
+
     match /counselor_threads/{userId} {
       allow get, list: if isOwner(userId) || isApprovedCounselor();
       allow create: if isOwner(userId)
-        && request.resource.data.keys().hasOnly(['userId', 'collegeId', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['userId', 'collegeId', 'updatedAt', 'studentName', 'lastStudentMessageAt', 'lastStudentMessageId'])
         && request.resource.data.userId == userId
         && exists(/databases/$(database)/documents/users/$(userId))
         && get(/databases/$(database)/documents/users/$(userId)).data.collegeId is string
         && request.resource.data.collegeId ==
           get(/databases/$(database)/documents/users/$(userId)).data.collegeId
-        && request.resource.data.updatedAt == request.time;
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.lastStudentMessageAt == request.time
+        && linkedCounselorMessage(userId, request.resource.data.lastStudentMessageId, userId, 'user')
+        && (!request.resource.data.keys().hasAny(['studentName'])
+          || (request.resource.data.studentName is string
+            && request.resource.data.studentName.size() <= 160
+            && registeredCounselorName(userId)));
       allow update: if (isOwner(userId) || isApprovedCounselor())
         && resource.data.userId == userId
         && request.resource.data.userId == userId
         && request.resource.data.collegeId == resource.data.collegeId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
-        && request.resource.data.updatedAt == request.time;
+        && (
+          (isOwner(userId)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+              ['updatedAt', 'lastStudentMessageAt', 'lastStudentMessageId', 'studentName', 'studentReadAt'])
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['updatedAt', 'lastStudentMessageAt', 'lastStudentMessageId'])
+              || (request.resource.data.updatedAt == request.time
+                && request.resource.data.lastStudentMessageAt == request.time
+                && request.resource.data.lastStudentMessageId != resource.data.get('lastStudentMessageId', '')
+                && linkedCounselorMessage(userId, request.resource.data.lastStudentMessageId, userId, 'user')))
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['studentReadAt'])
+              || request.resource.data.studentReadAt == request.time)
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['studentName'])
+              || (request.resource.data.studentName is string
+                && request.resource.data.studentName.size() <= 160
+                && registeredCounselorName(userId))))
+          || (isApprovedCounselor()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+              ['updatedAt', 'lastCounselorMessageAt', 'lastCounselorMessageId'])
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.lastCounselorMessageAt == request.time
+            && request.resource.data.lastCounselorMessageId != resource.data.get('lastCounselorMessageId', '')
+            && linkedCounselorMessage(userId, request.resource.data.lastCounselorMessageId, request.auth.uid, 'counselor'))
+        );
       allow delete: if false;
 
       match /messages/{messageId} {

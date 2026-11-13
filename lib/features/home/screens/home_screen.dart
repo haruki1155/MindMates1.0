@@ -20,6 +20,7 @@ import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
 import '../../quick_assessment/models/quick_assessment_models.dart';
 import '../../counseling/screens/pacc_counseling_screen.dart';
+import '../../counseling/widgets/counselor_unread_badges.dart';
 import '../../counseling/widgets/appointment_details_sheet.dart';
 import '../../../models/appointment_model.dart';
 import '../../../models/profile_roles.dart';
@@ -618,7 +619,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case _HomeNavDestination.services:
         _openServices();
       case _HomeNavDestination.messages:
-        Navigator.of(context).pushNamed(RouteNames.mindAid);
+        Navigator.of(context).pushNamed(RouteNames.messages);
       case _HomeNavDestination.appointments:
         setState(() {
           _activeDestination = _HomeNavDestination.appointments;
@@ -1210,7 +1211,7 @@ class _HomeBottomNav extends StatelessWidget {
                   ),
                   _HomeBottomNavItem(
                     icon: Icons.forum_outlined,
-                    label: 'Secret Chat',
+                    label: 'Forum',
                     isActive: active == _HomeNavDestination.secretChat,
                     onTap: () => onDestinationSelected?.call(
                       _HomeNavDestination.secretChat,
@@ -1218,7 +1219,6 @@ class _HomeBottomNav extends StatelessWidget {
                   ),
                   _HomeBottomNavItem(
                     icon: Icons.chat_bubble_outline,
-                    assetName: 'mail.png',
                     label: 'Message',
                     isActive: active == _HomeNavDestination.messages,
                     onTap: () => onDestinationSelected?.call(
@@ -1275,12 +1275,33 @@ class _HomeBottomNavItem extends StatelessWidget {
                       : null,
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: assetName == null
-                    ? Icon(icon, size: 20, color: HomePalette.text)
-                    : Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: HomeDashboardAssetImage(assetName: assetName!),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Center(
+                      child: assetName == null
+                          ? Icon(
+                              icon,
+                              size: 20,
+                              color: label == 'Message'
+                                  ? const Color(0xFF111827)
+                                  : HomePalette.text,
+                            )
+                          : Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: HomeDashboardAssetImage(
+                                assetName: assetName!,
+                              ),
+                            ),
+                    ),
+                    if (label == 'Message')
+                      const Positioned(
+                        right: -7,
+                        top: -7,
+                        child: StudentCounselorUnreadBadge(),
                       ),
+                  ],
+                ),
               ),
               const SizedBox(height: 2),
               FittedBox(

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../routes/route_names.dart';
+import '../../../routes/mindmate_back_navigation.dart';
+import '../widgets/counselor_unread_badges.dart';
 
 /// Keeps AI support and human counseling in separate conversations.
 /// Colors, typography and surfaces are inherited from the active MindMate theme.
@@ -10,7 +12,13 @@ class MessagesHubScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Messages')),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => MindMateBackNavigation.backToHome(context),
+        ),
+        title: const Text('Messages'),
+      ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
@@ -25,7 +33,8 @@ class MessagesHubScreen extends StatelessWidget {
           _ConversationEntry(
             itemKey: const Key('messages_counselor'),
             icon: Icons.support_agent_outlined,
-            title: 'Guidance Counselor',
+            title: 'Guidance Assistant',
+            badge: const StudentCounselorUnreadBadge(),
             subtitle: 'Private conversation with PACC',
             onTap: () =>
                 Navigator.of(context).pushNamed(RouteNames.counselorChat),
@@ -48,6 +57,7 @@ class _ConversationEntry extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.badge,
   });
 
   final Key itemKey;
@@ -55,6 +65,7 @@ class _ConversationEntry extends StatelessWidget {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final Widget? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -69,7 +80,14 @@ class _ConversationEntry extends StatelessWidget {
       ),
       title: Text(title, style: theme.textTheme.titleMedium),
       subtitle: Text(subtitle, style: theme.textTheme.bodySmall),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (badge != null) badge!,
+          const SizedBox(width: 6),
+          const Icon(Icons.chevron_right),
+        ],
+      ),
       onTap: onTap,
     );
   }

@@ -59,7 +59,7 @@ class MindMateBottomNavigation extends StatelessWidget {
               context,
               MindMateNavDestination.secretChat,
               Icons.forum_outlined,
-              'Secret Chat',
+              'Forum',
             ),
             _item(
               context,
