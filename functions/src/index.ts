@@ -1009,7 +1009,12 @@ export const saveOrganizationRecord = onCall(async (request) => {
       throw new HttpsError("failed-precondition", "Choose a department under the selected college.");
     }
   }
-  const duplicate = await db.collection(collection).where("normalizedName", "==", name.toLowerCase()).limit(10).get();
+  // Names are unique within their parent (colleges are global); codes stay collection-wide unique
+  // because the roster import resolves a college or course by name OR code.
+  let nameQuery = db.collection(collection).where("normalizedName", "==", name.toLowerCase());
+  if (kind === "department") nameQuery = nameQuery.where("collegeId", "==", collegeId);
+  if (kind === "course") nameQuery = nameQuery.where("departmentId", "==", departmentId);
+  const duplicate = await nameQuery.limit(10).get();
   const duplicateCode = await db.collection(collection).where("normalizedCode", "==", code.toLowerCase()).limit(10).get();
   if (duplicate.docs.some((doc) => doc.id !== recordId) || duplicateCode.docs.some((doc) => doc.id !== recordId)) {
     throw new HttpsError("already-exists", `A ${kind} with that name already exists.`);
