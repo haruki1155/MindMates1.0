@@ -172,6 +172,68 @@ void main() {
       expect(update.dayStreak, 3);
       expect(update.longestStreak, 10);
     });
+
+    test('only mood check-ins count toward the streak', () {
+      for (final type in UserActivityType.values) {
+        expect(
+          StreakCalculator.countsTowardStreak(type),
+          type == UserActivityType.moodCheckIn,
+          reason: type.name,
+        );
+      }
+    });
+
+    test('effective streak keeps today and yesterday, drops older', () {
+      final now = DateTime(2026, 11, 12, 9);
+      expect(
+        StreakCalculator.effectiveStreak(
+          storedStreak: 4,
+          lastActivityDateKey: '2026-11-12',
+          now: now,
+        ),
+        4,
+      );
+      expect(
+        StreakCalculator.effectiveStreak(
+          storedStreak: 4,
+          lastActivityDateKey: '2026-11-11',
+          now: now,
+        ),
+        4,
+      );
+      expect(
+        StreakCalculator.effectiveStreak(
+          storedStreak: 4,
+          lastActivityDateKey: '2026-11-10',
+          now: now,
+        ),
+        0,
+      );
+      expect(
+        StreakCalculator.effectiveStreak(
+          storedStreak: 4,
+          lastActivityDateKey: null,
+          now: now,
+        ),
+        0,
+      );
+      expect(
+        StreakCalculator.effectiveStreak(
+          storedStreak: 4,
+          lastActivityDateKey: 'bad',
+          now: now,
+        ),
+        0,
+      );
+      expect(
+        StreakCalculator.effectiveStreak(
+          storedStreak: -2,
+          lastActivityDateKey: '2026-11-12',
+          now: now,
+        ),
+        0,
+      );
+    });
   });
 }
 

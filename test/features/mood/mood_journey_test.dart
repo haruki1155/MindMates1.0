@@ -7,6 +7,7 @@ import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/features/mood/widgets/mood_v2_history_panel.dart';
 import 'package:mind_mates/features/mood/screens/mood_journey_screen.dart';
 import 'package:mind_mates/features/mood/widgets/mood_journey_summary.dart';
+import 'package:mind_mates/routes/route_names.dart';
 
 void main() {
   testWidgets(
@@ -204,6 +205,93 @@ void main() {
     expect(find.text('Most logged mood: Great'), findsOneWidget);
     expect(find.text('Based on loaded entries'), findsOneWidget);
   });
+  group('item 38 recap', () {
+    Future<void> pumpJourney(WidgetTester tester, {int? milestoneDays}) async {
+      await tester.binding.setSurfaceSize(const Size(900, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+            ChangeNotifierProvider<MoodProvider>.value(value: _RecapMood()),
+          ],
+          child: MaterialApp(
+            routes: {
+              RouteNames.mindfulBreathing: (_) =>
+                  const Scaffold(body: Text('Breathing target')),
+            },
+            home: MoodJourneyScreen(
+              nowProvider: () => DateTime.utc(2026, 11, 12, 4),
+              milestoneDays: milestoneDays,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('milestone banner only when opened from View recap', (
+      tester,
+    ) async {
+      await pumpJourney(tester, milestoneDays: 7);
+      expect(
+        find.text("🔥 7-day streak · Here's your week in moods"),
+        findsOneWidget,
+      );
+      await pumpJourney(tester);
+      expect(find.textContaining('-day streak · '), findsNothing);
+    });
+
+    testWidgets('mood streak card shows the colored flame', (tester) async {
+      await pumpJourney(tester);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('mood-streak-card')),
+          matching: find.byKey(const Key('streak-flame')),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('this week shows best day, a tip and the support note', (
+      tester,
+    ) async {
+      await pumpJourney(tester, milestoneDays: 7);
+      expect(find.text('Best day'), findsOneWidget);
+      expect(find.text('Tuesday · Great'), findsOneWidget);
+      expect(find.text('Notice what made it a good day.'), findsOneWidget);
+      expect(find.text('A gentle tip'), findsOneWidget);
+      expect(
+        find.text(
+          'Stress showed up a few times this week. A 2-minute breathing '
+          'session can help you reset.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          "This reflects your own check-ins. It is not a diagnosis. If you'd "
+          'like to talk to someone, PACC is here for you.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Book a PACC appointment'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Try breathing'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Try breathing'));
+      await tester.pumpAndSettle();
+      expect(find.text('Breathing target'), findsOneWidget);
+    });
+
+    testWidgets('this month hides the weekly recap cards', (tester) async {
+      await pumpJourney(tester);
+      await tester.tap(find.text('This Month'));
+      await tester.pumpAndSettle();
+      expect(find.text('Best day'), findsNothing);
+      expect(find.text('A gentle tip'), findsNothing);
+    });
+  });
   testWidgets('journey has a clear title and an empty state', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: MoodJourneyScreen()));
     expect(find.text('My Mood Journey'), findsOneWidget);
@@ -334,6 +422,30 @@ class _PeriodMood extends _JourneyMood {
           source: MoodEventSource.v2,
           label: 'Okay',
         ),
+    ],
+  );
+}
+
+class _RecapMood extends _JourneyMood {
+  NormalizedMoodEvent _event(String id, int day, int level, String label) =>
+      NormalizedMoodEvent(
+        id: id,
+        userId: 'account-a',
+        level: level,
+        dateKey: '2026-11-$day',
+        occurredAt: DateTime.utc(2026, 11, day, 2),
+        source: MoodEventSource.v2,
+        label: label,
+      );
+
+  @override
+  MoodHistoryWindow get v2History => MoodHistoryWindow(
+    coverage: MoodHistoryCoverage.complete,
+    events: [
+      _event('tue', 10, 5, 'Great'),
+      _event('wed-1', 11, 2, 'Stressed'),
+      _event('wed-2', 11, 2, 'Stressed'),
+      _event('thu', 12, 4, 'Okay'),
     ],
   );
 }

@@ -14,6 +14,7 @@ import '../../../providers/mood_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/sleep_provider.dart';
 import '../../../providers/user_provider.dart';
+import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
 import '../../mood/config/mood_v2_feature_flag.dart';
 import '../../mood/domain/mood_v2_analytics.dart';
@@ -340,6 +341,15 @@ class _ProfileScreenState extends State<ProfileScreen>
               )
             : null);
     if (effectiveUser == null) return null;
+    // Same streak as My Mood Journey when V2 reading is on; otherwise the
+    // stored counter, shown as 0 once a day has been missed.
+    final dayStreak =
+        moodV2Analytics?.streak.currentDays ??
+        StreakCalculator.effectiveStreak(
+          storedStreak: effectiveUser.dayStreak,
+          lastActivityDateKey: effectiveUser.lastActivityDateKey,
+          now: DateTime.now(),
+        );
 
     return ProfileViewData(
       displayName: effectiveUser.displayName,
@@ -350,7 +360,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       metrics: [
         ProfileMetricData(
           label: 'Day Streak',
-          value: '${effectiveUser.dayStreak}',
+          value: '$dayStreak',
           icon: Icons.local_fire_department,
         ),
         ProfileMetricData(
