@@ -61,7 +61,13 @@ bool studentThreadUnread(Map<String, dynamic> data) {
 }
 
 class StudentCounselorUnreadBadge extends StatelessWidget {
-  const StudentCounselorUnreadBadge({super.key});
+  const StudentCounselorUnreadBadge({
+    super.key,
+    this.backgroundColor,
+    this.foregroundColor,
+  });
+  final Color? backgroundColor;
+  final Color? foregroundColor;
   @override
   Widget build(BuildContext context) {
     if (Firebase.apps.isEmpty) {
@@ -82,6 +88,8 @@ class StudentCounselorUnreadBadge extends StatelessWidget {
         }
         return UnreadCountBadge(
           count: studentThreadUnread(snapshot.data!.data() ?? {}) ? 1 : 0,
+          backgroundColor: backgroundColor,
+          foregroundColor: foregroundColor,
         );
       },
     );
@@ -89,7 +97,14 @@ class StudentCounselorUnreadBadge extends StatelessWidget {
 }
 
 class UnreadCountBadge extends StatelessWidget {
-  const UnreadCountBadge({super.key, required this.count});
+  const UnreadCountBadge({
+    super.key,
+    required this.count,
+    this.backgroundColor,
+    this.foregroundColor,
+  });
+  final Color? backgroundColor;
+  final Color? foregroundColor;
   final int count;
   @override
   Widget build(BuildContext context) {
@@ -97,15 +112,15 @@ class UnreadCountBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.red.shade700,
+        color: backgroundColor ?? Colors.red.shade700,
         borderRadius: BorderRadius.circular(12),
       ),
       constraints: const BoxConstraints(minWidth: 19, minHeight: 19),
       child: Text(
         count > 99 ? '99+' : '$count',
         textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: foregroundColor ?? Colors.white,
           fontSize: 11,
           fontWeight: FontWeight.bold,
         ),

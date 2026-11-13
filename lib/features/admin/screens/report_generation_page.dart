@@ -148,7 +148,6 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
                   previewing: _previewing,
                   canDownload: snapshot.hasData,
                   showImport: _reportType == AdminReportType.appointments,
-                  onRefresh: _refresh,
                   onDownload: snapshot.hasData
                       ? () => _download(snapshot.requireData)
                       : null,
@@ -467,7 +466,6 @@ class _Header extends StatelessWidget {
     required this.previewing,
     required this.canDownload,
     required this.showImport,
-    required this.onRefresh,
     required this.onDownload,
     required this.onPreview,
     required this.onImport,
@@ -478,7 +476,6 @@ class _Header extends StatelessWidget {
   final bool previewing;
   final bool canDownload;
   final bool showImport;
-  final VoidCallback onRefresh;
   final VoidCallback? onDownload;
   final VoidCallback? onPreview;
   final VoidCallback? onImport;
@@ -506,11 +503,6 @@ class _Header extends StatelessWidget {
                   )
                 : const Icon(Icons.preview_outlined, size: 18),
             label: Text(previewing ? 'Preparing preview' : 'Preview PDF'),
-          ),
-          OutlinedButton.icon(
-            onPressed: loading ? null : onRefresh,
-            icon: const Icon(Icons.refresh, size: 18),
-            label: const Text('Refresh'),
           ),
           FilledButton.icon(
             onPressed: canDownload && !downloading ? onDownload : null,

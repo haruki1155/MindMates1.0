@@ -49,12 +49,13 @@ class MindMateBottomNavigation extends StatelessWidget {
               PhosphorIcons.briefcase(PhosphorIconsStyle.regular),
               'Services',
             ),
-            _item(
-              context,
-              MindMateNavDestination.appointments,
-              Icons.event_available_outlined,
-              'Appointment',
-            ),
+            if (active != MindMateNavDestination.services)
+              _item(
+                context,
+                MindMateNavDestination.appointments,
+                Icons.event_available_outlined,
+                'Appointment',
+              ),
             _item(
               context,
               MindMateNavDestination.secretChat,

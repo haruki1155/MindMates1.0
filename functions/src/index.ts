@@ -73,6 +73,7 @@ export {
   resolveMindAidEmergencyAlert,
 } from "./mind_aid_emergency";
 export {getReportAnalytics} from "./report_generation";
+export {getAssessmentParticipantDirectory} from "./assessment_participant_directory";
 export {
   importWalkInAppointments,
   listWalkInImports,
