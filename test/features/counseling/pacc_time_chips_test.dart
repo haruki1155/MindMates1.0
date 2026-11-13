@@ -16,9 +16,28 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = _AppointmentRepository();
-    await tester.pumpWidget(_app(repository: repository));
+    await tester.pumpWidget(_app(repository: repository, use24Hour: true));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('best-time-days-weekends')));
+    for (final entry in <String, String>{'best-time-start': '8'}.entries) {
+      await tester.tap(find.byKey(Key(entry.key)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.keyboard_outlined));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find
+            .descendant(
+              of: find.byType(TimePickerDialog),
+              matching: find.byType(TextField),
+            )
+            .first,
+        entry.value,
+      );
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('08:00'), findsOneWidget);
+    expect(find.text('12:00'), findsOneWidget);
     await _goToTime(tester);
     await tester.tap(find.byKey(const Key('time-chip-10:00 AM')));
     await tester.pumpAndSettle();
@@ -26,7 +45,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Confirm Appointment').last);
     await tester.pumpAndSettle();
-    expect(repository.created?.bestTime, 'Weekends, 9:00 AM – 12:00 PM');
+    expect(repository.created?.bestTime, 'Weekends, 8:00 AM – 12:00 PM');
   });
 
   testWidgets('shows compact offered hours and selects one', (tester) async {
@@ -111,31 +130,35 @@ Future<void> _goToTime(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-Widget _app({_AppointmentRepository? repository}) => MultiProvider(
-  providers: [
-    ChangeNotifierProvider(
-      create: (_) => UserProvider(_UserRepository())
-        ..setUser(
-          const UserModel(
-            id: 'user_1',
-            email: 'leo@example.com',
-            course: 'BS Information Technology',
+Widget _app({_AppointmentRepository? repository, bool use24Hour = false}) =>
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(
+          create: (_) => UserProvider(_UserRepository())
+            ..setUser(
+              const UserModel(
+                id: 'user_1',
+                email: 'leo@example.com',
+                course: 'BS Information Technology',
+              ),
+            ),
+        ),
+        ChangeNotifierProvider(
+          create: (_) =>
+              AppointmentProvider(repository ?? _AppointmentRepository()),
+        ),
+      ],
+      child: MaterialApp(
+        home: MediaQuery(
+          data: MediaQueryData(alwaysUse24HourFormat: use24Hour),
+          child: PaccCounselingScreen(
+            startBooking: true,
+            showBottomNavigation: false,
+            nowProvider: () => DateTime(2026, 4, 15, 9),
           ),
         ),
-    ),
-    ChangeNotifierProvider(
-      create: (_) =>
-          AppointmentProvider(repository ?? _AppointmentRepository()),
-    ),
-  ],
-  child: MaterialApp(
-    home: PaccCounselingScreen(
-      startBooking: true,
-      showBottomNavigation: false,
-      nowProvider: () => DateTime(2026, 4, 15, 9),
-    ),
-  ),
-);
+      ),
+    );
 
 class _UserRepository extends UserRepository {}
 

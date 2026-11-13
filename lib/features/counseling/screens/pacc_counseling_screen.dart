@@ -45,6 +45,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   final _facebookController = TextEditingController();
   final _concernController = TextEditingController();
   BestContactTime _bestTime = BestContactTime.defaults;
+  String? _legacyBestTime;
 
   late _PaccAppointmentTab _tab;
   _PaccAppointmentStep _step = _PaccAppointmentStep.intake;
@@ -92,6 +93,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _facebookController.clear();
       _concernController.text = widget.initialConcern?.trim() ?? '';
       _bestTime = BestContactTime.defaults;
+      _legacyBestTime = null;
       _sex = null;
       _course = user.course?.trim().isEmpty ?? true ? null : user.course;
       _yearLevel = null;
@@ -244,7 +246,10 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         facebookController: _facebookController,
         concernController: _concernController,
         bestTime: _bestTime,
-        onBestTimeChanged: (value) => setState(() => _bestTime = value),
+        onBestTimeChanged: (value) => setState(() {
+          _bestTime = value;
+          _legacyBestTime = null;
+        }),
         sex: _sex,
         course: _course,
         yearLevel: _yearLevel,
@@ -349,6 +354,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
           ? priorAppointment?.id
           : null;
       _bookingRequestId = _newBookingRequestId();
+      _legacyBestTime = null;
       if (priorAppointment != null) {
         _ageController.text = priorAppointment.age?.toString() ?? '';
         _addressController.text = priorAppointment.address ?? '';
@@ -356,9 +362,12 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         _emailController.text = priorAppointment.email;
         _facebookController.text = priorAppointment.facebook ?? '';
         _concernController.text = priorAppointment.concern;
-        _bestTime =
-            parseBestContactTime(priorAppointment.bestTime ?? '') ??
-            BestContactTime.defaults;
+        final previousBestTime = priorAppointment.bestTime ?? '';
+        final parsedBestTime = parseBestContactTime(previousBestTime);
+        _bestTime = parsedBestTime ?? BestContactTime.defaults;
+        if (previousBestTime.isNotEmpty && parsedBestTime == null) {
+          _legacyBestTime = previousBestTime;
+        }
         _sex = priorAppointment.sex;
         _course = priorAppointment.course;
         _yearLevel = priorAppointment.yearLevel;
@@ -428,7 +437,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       preferredContactMethod: _preferredContactMethod!,
       therapyBefore: _therapyBefore,
       concern: _concernController.text.trim(),
-      bestTime: formatBestContactTime(_bestTime),
+      bestTime: _legacyBestTime ?? formatBestContactTime(_bestTime),
       scheduledAt: _scheduledAt(_selectedDate!, _selectedTime!),
       scheduledTime: _selectedTime!,
       location: 'PACC Office, 2nd Floor, Main Building',
@@ -1539,16 +1548,18 @@ class _BestTimeField extends FormField<BestContactTime> {
            }
 
            Future<void> pickTime(BuildContext context, bool isStart) async {
+             final before = field.value ?? BestContactTime.defaults;
              final selected = await showTimePicker(
                context: context,
-               initialTime: isStart ? current.start : current.end,
+               initialTime: isStart ? before.start : before.end,
              );
              if (selected == null || !field.mounted) return;
+             final latest = field.value ?? BestContactTime.defaults;
              update(
                BestContactTime(
-                 days: current.days,
-                 start: isStart ? selected : current.start,
-                 end: isStart ? current.end : selected,
+                 days: latest.days,
+                 start: isStart ? selected : latest.start,
+                 end: isStart ? latest.end : selected,
                ),
              );
            }
