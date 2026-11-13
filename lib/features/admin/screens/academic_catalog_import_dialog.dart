@@ -1,3 +1,4 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/academic_import_models.dart';
@@ -66,6 +67,7 @@ class _AcademicCatalogImportDialogState
   CatalogParseResult? _parsed;
   int _sheetIndex = 0;
   Map<CatalogRole, int> _mapping = {};
+  int? _mappedSheetIndex;
   List<Map<String, String>> _rows = const [];
   CatalogPreview? _preview;
   CatalogImportResult? _result;
@@ -121,7 +123,11 @@ class _AcademicCatalogImportDialogState
 
   void _toMapping() {
     setState(() {
-      _mapping = Map.of(detectColumns(_sheet.headers));
+      // Only re-detect when the sheet changed; keep hand-corrected columns.
+      if (_mappedSheetIndex != _sheetIndex) {
+        _mapping = Map.of(detectColumns(_sheet.headers));
+        _mappedSheetIndex = _sheetIndex;
+      }
       _error = null;
       _step = _Step.mapping;
     });
@@ -172,16 +178,26 @@ class _AcademicCatalogImportDialogState
         _result = result;
         _step = _Step.result;
       });
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      final rejected =
+          e.code == 'invalid-argument' && (e.message ?? '').isNotEmpty;
+      setState(() {
+        _busy = false;
+        _error = rejected ? e.message : _partialWriteWarning;
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error =
-            'The import did not finish. Some records may already have been '
-            'created; preview the file again to see what is still missing.';
+        _error = _partialWriteWarning;
       });
     }
   }
+
+  static const _partialWriteWarning =
+      'The import did not finish. Some records may already have been '
+      'created; preview the file again to see what is still missing.';
 
   @override
   Widget build(BuildContext context) {
@@ -372,6 +388,13 @@ class _AcademicCatalogImportDialogState
     ];
   }
 
+  /// The true 1-based row of the source file; falls back to the position
+  /// below a header on row 1 when the parser supplied none.
+  int _fileRow(int index) {
+    final source = _sheet.sourceRows;
+    return index >= 0 && index < source.length ? source[index] : index + 2;
+  }
+
   Widget _previewRow(CatalogRowResult row) {
     final (label, color) = switch (row.kind) {
       CatalogRowKind.create => ('Create', AdminColors.success),
@@ -391,7 +414,7 @@ class _AcademicCatalogImportDialogState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Row ${row.index + 1} - $label',
+            'Row ${_fileRow(row.index)} of the file - $label',
             style: TextStyle(color: color, fontWeight: FontWeight.w600),
           ),
           for (final e in row.errors)

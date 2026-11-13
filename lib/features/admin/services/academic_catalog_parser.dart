@@ -19,11 +19,16 @@ class CatalogSheet {
     required this.name,
     required this.headers,
     required this.rows,
+    this.sourceRows = const [],
   });
 
   final String name;
   final List<String> headers;
   final List<List<String>> rows;
+
+  /// 1-based row number in the source file (as a spreadsheet shows it) of each
+  /// entry of [rows]. Parallel to [rows]; empty when unknown.
+  final List<int> sourceRows;
 }
 
 class CatalogParseResult {
@@ -116,10 +121,11 @@ CatalogSheet? _buildSheet(String name, List<List<String>> grid) {
   }
   if (headerAt < 0) return null;
 
-  final body = [
+  final bodyAt = [
     for (var r = headerAt + 1; r < grid.length; r++)
-      if (grid[r].any((c) => c.isNotEmpty)) grid[r],
+      if (grid[r].any((c) => c.isNotEmpty)) r,
   ];
+  final body = [for (final r in bodyAt) grid[r]];
   var width = grid[headerAt].length;
   for (final row in body) {
     if (row.length > width) width = row.length;
@@ -132,6 +138,7 @@ CatalogSheet? _buildSheet(String name, List<List<String>> grid) {
     name: name,
     headers: pad(grid[headerAt]),
     rows: [for (final row in body) pad(row)],
+    sourceRows: [for (final r in bodyAt) r + 1],
   );
 }
 

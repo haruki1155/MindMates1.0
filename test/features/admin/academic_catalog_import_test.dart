@@ -1,5 +1,8 @@
 import 'dart:typed_data';
 
+import 'dart:convert';
+
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/domain/admin_management_models.dart';
@@ -14,6 +17,7 @@ class _Repo extends AdminPortalRepository {
   final previews = <List<Map<String, String>>>[];
   final imports = <List<Map<String, String>>>[];
   CatalogPreview Function(List<Map<String, String>> rows)? previewBuilder;
+  Object? importError;
   CatalogImportResult importResult = const CatalogImportResult(
     importId: 'imp-1',
     counts: {'colleges': 1, 'departments': 2, 'courses': 3},
@@ -58,6 +62,7 @@ class _Repo extends AdminPortalRepository {
     required List<Map<String, String>> rows,
   }) async {
     imports.add(rows);
+    if (importError != null) throw importError!;
     return importResult;
   }
 }
@@ -289,5 +294,139 @@ void main() {
     expect(find.textContaining('split the file'), findsOneWidget);
     expect(_enabled(tester, 'Continue'), isFalse);
     expect(repo.previews, isEmpty);
+  });
+
+  testWidgets('selecting a different column maps it; clearing College gates', (
+    tester,
+  ) async {
+    final repo = _Repo();
+    await _open(
+      tester,
+      repo,
+      CatalogParseResult(sheets: [_sheet('A')], fileErrors: const []),
+    );
+    await _next(tester);
+    await tester.tap(find.byKey(const ValueKey('map-course')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Notes').last);
+    await tester.pumpAndSettle();
+    expect(find.text('e.g. x'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('map-college')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Not in file').last);
+    await tester.pumpAndSettle();
+    expect(_enabled(tester, 'Continue'), isFalse);
+  });
+
+  testWidgets('a corrected mapping survives Back/Continue on the same sheet', (
+    tester,
+  ) async {
+    final repo = _Repo();
+    await _open(
+      tester,
+      repo,
+      CatalogParseResult(sheets: [_sheet('A')], fileErrors: const []),
+    );
+    await _next(tester);
+    await tester.tap(find.byKey(const ValueKey('map-course')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Notes').last);
+    await tester.pumpAndSettle();
+    await _next(tester, 'Back');
+    await _next(tester);
+    expect(find.text('e.g. x'), findsOneWidget);
+    await _next(tester);
+    expect(repo.previews.single.first['course'], 'x');
+  });
+
+  testWidgets('preview renders an exists row', (tester) async {
+    final repo = _Repo()
+      ..previewBuilder = (rows) => const CatalogPreview(
+        rows: [
+          CatalogRowResult(
+            index: 0,
+            kind: CatalogRowKind.exists,
+            warnings: [
+              'Code differs from the stored code; the stored code was kept.',
+            ],
+          ),
+          CatalogRowResult(index: 1, kind: CatalogRowKind.create),
+        ],
+        counts: {
+          'create': 1,
+          'exists': 1,
+          'error': 0,
+          'colleges': 0,
+          'departments': 0,
+          'courses': 1,
+        },
+      );
+    await _open(
+      tester,
+      repo,
+      CatalogParseResult(sheets: [_sheet('A')], fileErrors: const []),
+    );
+    await _next(tester);
+    await _next(tester);
+    expect(find.textContaining('Exists'), findsOneWidget);
+    expect(find.textContaining('the stored code was kept'), findsOneWidget);
+    expect(find.textContaining('1 row(s) already exist'), findsOneWidget);
+  });
+
+  testWidgets('import rejection surfaces the server message', (tester) async {
+    final repo = _Repo()
+      ..importError = FirebaseFunctionsException(
+        code: 'invalid-argument',
+        message: '2 row(s) have errors. Fix them and try again.',
+      );
+    await _open(
+      tester,
+      repo,
+      CatalogParseResult(sheets: [_sheet('A')], fileErrors: const []),
+    );
+    await _next(tester);
+    await _next(tester);
+    await _next(tester, 'Import');
+    expect(
+      find.text('2 row(s) have errors. Fix them and try again.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Some records may already'), findsNothing);
+  });
+
+  testWidgets('a mid-write failure keeps the partial-write warning', (
+    tester,
+  ) async {
+    final repo = _Repo()..importError = Exception('boom');
+    await _open(
+      tester,
+      repo,
+      CatalogParseResult(sheets: [_sheet('A')], fileErrors: const []),
+    );
+    await _next(tester);
+    await _next(tester);
+    await _next(tester, 'Import');
+    expect(find.textContaining('Some records may already'), findsOneWidget);
+  });
+
+  test('parser records true 1-based file rows', () {
+    final csv = 'Catalogue 2026\n\nCollege,Course\nA,B\n\nC,D\n';
+    final r = parseCatalogFile('x.csv', utf8.encode(csv));
+    expect(r.sheets.single.sourceRows, [4, 6]);
+    final plain = parseCatalogFile(
+      'x.csv',
+      utf8.encode('College,Course\nA,B\nC,D\nE,F\n'),
+    );
+    expect(plain.sheets.single.sourceRows, [2, 3, 4]);
+  });
+
+  testWidgets('preview labels use the true file row', (tester) async {
+    final csv = 'Catalogue 2026\n\nCollege,Course\nA,B\n\nC,D\n';
+    final parsed = parseCatalogFile('x.csv', utf8.encode(csv));
+    await _open(tester, _Repo(), parsed);
+    await _next(tester);
+    await _next(tester);
+    expect(find.textContaining('Row 4 of the file'), findsOneWidget);
+    expect(find.textContaining('Row 6 of the file'), findsOneWidget);
   });
 }
