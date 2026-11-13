@@ -83,7 +83,7 @@ class _ConversationEntry extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (badge != null) badge!,
+          ?badge,
           const SizedBox(width: 6),
           const Icon(Icons.chevron_right),
         ],

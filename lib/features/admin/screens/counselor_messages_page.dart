@@ -293,8 +293,9 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
                                             .addPostFrameCallback((_) async {
                                               if (!mounted ||
                                                   selectedUser != studentId ||
-                                                  _readingUser != null)
+                                                  _readingUser != null) {
                                                 return;
+                                              }
                                               final thread = await db
                                                   .collection(
                                                     'counselor_threads',

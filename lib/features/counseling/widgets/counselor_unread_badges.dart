@@ -9,13 +9,16 @@ class CounselorInboxUnreadBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
+    if (uid == null) {
+      return const SizedBox.shrink();
+    }
     final db = FirebaseFirestore.instance;
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: db.collection('counselor_threads').snapshots(),
       builder: (context, threads) {
-        if (!threads.hasData || threads.hasError)
+        if (!threads.hasData || threads.hasError) {
           return const SizedBox.shrink();
+        }
         return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
           stream: db
               .collection('counselor_inbox_reads')
@@ -23,8 +26,9 @@ class CounselorInboxUnreadBadge extends StatelessWidget {
               .collection('threads')
               .snapshots(),
           builder: (context, receipts) {
-            if (!receipts.hasData || receipts.hasError)
+            if (!receipts.hasData || receipts.hasError) {
               return const SizedBox.shrink();
+            }
             final seen = {
               for (final doc in receipts.data!.docs)
                 doc.id: doc.data()['readAt'],
@@ -57,15 +61,18 @@ class StudentCounselorUnreadBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
+    if (uid == null) {
+      return const SizedBox.shrink();
+    }
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection('counselor_threads')
           .doc(uid)
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.hasError)
+        if (!snapshot.hasData || snapshot.hasError) {
           return const SizedBox.shrink();
+        }
         return UnreadCountBadge(
           count: studentThreadUnread(snapshot.data!.data() ?? {}) ? 1 : 0,
         );

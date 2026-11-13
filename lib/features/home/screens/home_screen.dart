@@ -1241,14 +1241,12 @@ class _HomeBottomNavItem extends StatelessWidget {
     required this.label,
     required this.isActive,
     required this.onTap,
-    this.assetName,
   });
 
   final IconData icon;
   final String label;
   final bool isActive;
   final VoidCallback onTap;
-  final String? assetName;
 
   @override
   Widget build(BuildContext context) {
@@ -1279,20 +1277,13 @@ class _HomeBottomNavItem extends StatelessWidget {
                   clipBehavior: Clip.none,
                   children: [
                     Center(
-                      child: assetName == null
-                          ? Icon(
-                              icon,
-                              size: 20,
-                              color: label == 'Message'
-                                  ? const Color(0xFF111827)
-                                  : HomePalette.text,
-                            )
-                          : Padding(
-                              padding: const EdgeInsets.all(4),
-                              child: HomeDashboardAssetImage(
-                                assetName: assetName!,
-                              ),
-                            ),
+                      child: Icon(
+                        icon,
+                        size: 20,
+                        color: label == 'Message'
+                            ? const Color(0xFF111827)
+                            : HomePalette.text,
+                      ),
                     ),
                     if (label == 'Message')
                       const Positioned(
