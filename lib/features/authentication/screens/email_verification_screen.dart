@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../models/profile_roles.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/user_provider.dart';
 import '../../../routes/route_names.dart';
 import '../../../services/firebase/firebase_error_message.dart';
+import '../auth_flow_routes.dart';
 
 class EmailVerificationScreen extends StatefulWidget {
   const EmailVerificationScreen({super.key});
@@ -95,10 +98,51 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen>
     }
   }
 
-  void _continueToProfile() {
-    Navigator.of(
-      context,
-    ).pushNamedAndRemoveUntil(RouteNames.profileSetup, (route) => false);
+  UserProvider? _userProviderOrNull() {
+    try {
+      return context.read<UserProvider>();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _isStudentAccount() async {
+    final userProvider = _userProviderOrNull();
+    if (userProvider == null) return false;
+    try {
+      final userId = context.read<AuthProvider>().userId;
+      if (userProvider.user == null && userId != null) {
+        await userProvider.loadProfile(userId);
+      }
+    } catch (_) {
+      // Unknown role: treat as an employee signup.
+    }
+    return userProvider.user?.effectivePopulationRole == PopulationRole.student;
+  }
+
+  /// Where a freshly verified account goes next: the first-login gate for
+  /// its profile, falling back to profile setup.
+  Future<String> _nextRoute() async {
+    final userProvider = _userProviderOrNull();
+    if (userProvider == null) return RouteNames.profileSetup;
+    try {
+      final userId = context.read<AuthProvider>().userId;
+      if (userId != null && await userProvider.loadProfile(userId)) {
+        final user = userProvider.user;
+        if (user != null) {
+          return gateRouteForUser(user) ?? RouteNames.profileSetup;
+        }
+      }
+    } catch (_) {
+      // Fall through to profile setup.
+    }
+    return RouteNames.profileSetup;
+  }
+
+  Future<void> _continueToProfile() async {
+    final route = await _nextRoute();
+    if (!mounted) return;
+    Navigator.of(context).pushNamedAndRemoveUntil(route, (route) => false);
   }
 
   Future<void> _checkVerification() async {
@@ -119,9 +163,9 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen>
         });
         await Future<void>.delayed(_verifiedHoldDuration);
         if (!mounted) return;
-        Navigator.of(
-          context,
-        ).pushNamedAndRemoveUntil(RouteNames.profileSetup, (route) => false);
+        final route = await _nextRoute();
+        if (!mounted) return;
+        Navigator.of(context).pushNamedAndRemoveUntil(route, (route) => false);
       } else {
         setState(() {
           _messageTone = _StatusTone.notVerified;
@@ -215,11 +259,15 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen>
       _message = null;
     });
     try {
-      await context.read<AuthProvider>().cancelPendingRegistration();
+      // Resolve before cancelling: the cancel signs the account out.
+      final auth = context.read<AuthProvider>();
+      final wasStudent = await _isStudentAccount();
+      await auth.cancelPendingRegistration();
       if (!mounted) return;
-      Navigator.of(
-        context,
-      ).pushNamedAndRemoveUntil(RouteNames.signup, (route) => false);
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        wasStudent ? RouteNames.studentActivation : RouteNames.signup,
+        (route) => false,
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() {

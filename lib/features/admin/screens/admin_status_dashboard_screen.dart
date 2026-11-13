@@ -251,7 +251,7 @@ class _StatusTable extends StatelessWidget {
               DataColumn(label: Text('Role')),
               DataColumn(label: Text('Engagement')),
               DataColumn(label: Text('Assessment')),
-              DataColumn(label: Text('Secret Chat')),
+              DataColumn(label: Text('Forum')),
               DataColumn(label: Text('Updated')),
             ],
             rows: [

@@ -59,4 +59,8 @@ BestContactTime? parseBestContactTime(String raw) {
     start: clock(match.group(2)!, match.group(3)!, match.group(4)!),
     end: clock(match.group(5)!, match.group(6)!, match.group(7)!),
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> origin/main

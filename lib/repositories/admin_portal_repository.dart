@@ -1,8 +1,10 @@
+// ignore_for_file: prefer_initializing_formals
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../database/firestore_collections.dart';
+import '../models/academic_import_models.dart';
 import '../models/admin_inquiry_model.dart';
 import '../models/admin_activity_analytics_model.dart';
 import '../models/admin_mind_aid_analytics_model.dart';
@@ -171,17 +173,59 @@ class PortalAccessEvaluation {
   bool get isGranted => state == PortalAccessState.granted;
 }
 
+/// Invokes a callable by name and returns its response data. Injectable so
+/// tests can fake the catalogue import callables.
+typedef AdminCallableInvoker =
+    Future<Object?> Function(String name, Map<String, Object?> data);
+
 class AdminPortalRepository {
   AdminPortalRepository({
     FirestoreService? firestoreService,
     PaccAvailabilityRepository? paccAvailabilityRepository,
-  }) : _firestoreService = firestoreService ?? FirestoreService(),
+    AdminCallableInvoker? callableInvoker,
+  }) : _callableInvoker = callableInvoker,
+       _firestoreService = firestoreService ?? FirestoreService(),
        _paccAvailabilityRepository =
            paccAvailabilityRepository ??
            PaccAvailabilityRepository(firestoreService: firestoreService);
 
   final FirestoreService _firestoreService;
   final PaccAvailabilityRepository _paccAvailabilityRepository;
+  final AdminCallableInvoker? _callableInvoker;
+
+  Future<Object?> _callCallable(String name, Map<String, Object?> data) {
+    final invoker = _callableInvoker;
+    if (invoker != null) return invoker(name, data);
+    return FirebaseFunctions.instanceFor(
+      region: 'us-central1',
+    ).routedCallable(name).call<Object?>(data).then((result) => result.data);
+  }
+
+  /// Dry-runs a catalogue file. [rows] are passed through untouched: an
+  /// unmapped role must be absent, a mapped blank cell must be `''`.
+  Future<CatalogPreview> previewCatalogImport({
+    required String fileName,
+    required String sheetName,
+    required List<Map<String, String>> rows,
+  }) async => CatalogPreview.fromJson(
+    await _callCallable('previewAcademicCatalogImport', {
+      'fileName': fileName,
+      'sheetName': sheetName,
+      'rows': rows,
+    }),
+  );
+
+  Future<CatalogImportResult> importCatalog({
+    required String fileName,
+    required String sheetName,
+    required List<Map<String, String>> rows,
+  }) async => CatalogImportResult.fromJson(
+    await _callCallable('importAcademicCatalog', {
+      'fileName': fileName,
+      'sheetName': sheetName,
+      'rows': rows,
+    }),
+  );
 
   Future<List<AppointmentSlot>> getAvailableAppointmentSlots(DateTime date) =>
       AppointmentRepository().getAvailableSlots(date);
@@ -577,10 +621,15 @@ class AdminPortalRepository {
           : <AdminAuditEvent>[];
       return (events: events, hasMore: result.data['hasMore'] == true);
     } catch (_) {
+      // Never report "no views" when the access-log query itself failed (for
+      // example a missing index); the client-side fallback cannot filter it.
+      if (action == 'STUDENT_PERSONAL_INFO_VIEWED') rethrow;
       // The caller is already an authorized portal administrator. Fall back to
       // the protected Firestore read while a callable/index is propagating.
       final items = await _firestoreService.getDocuments(
         FirestoreCollections.adminAuditLogs,
+        // View-filter queries rethrew above, so this fallback only ever serves
+        // target-scoped ones.
         whereEquals: {'targetUserId': targetUserId},
         orderBy: 'createdAt',
         limit: pageSize,

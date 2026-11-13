@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/profile_roles.dart';
 import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
 
 enum ProfileSort {
@@ -99,6 +100,10 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                   _SummaryRow(profiles: allProfiles),
                   const SizedBox(height: 18),
                   _DirectoryCard(
+                    canViewStudentInfo: widget
+                        .repository
+                        .currentAccessRole
+                        .canAccessClinicalData,
                     category: _category,
                     allProfiles: allProfiles,
                     categoryProfiles: categoryProfiles,
@@ -282,7 +287,9 @@ class _SummaryTile extends StatelessWidget {
 }
 
 class _DirectoryCard extends StatelessWidget {
+  final bool canViewStudentInfo;
   const _DirectoryCard({
+    required this.canViewStudentInfo,
     required this.category,
     required this.allProfiles,
     required this.categoryProfiles,
@@ -512,7 +519,11 @@ class _DirectoryCard extends StatelessWidget {
               ),
             )
           else
-            _ProfileResults(users: filteredProfiles, category: category),
+            _ProfileResults(
+              users: filteredProfiles,
+              category: category,
+              canViewStudentInfo: canViewStudentInfo,
+            ),
         ],
       ),
     );
@@ -618,7 +629,12 @@ class _ResultsToolbar extends StatelessWidget {
 }
 
 class _ProfileResults extends StatelessWidget {
-  const _ProfileResults({required this.users, required this.category});
+  const _ProfileResults({
+    required this.users,
+    required this.category,
+    required this.canViewStudentInfo,
+  });
+  final bool canViewStudentInfo;
   final List<UserModel> users;
   final PopulationRole category;
 
@@ -630,7 +646,11 @@ class _ProfileResults extends StatelessWidget {
           return Column(
             children: [
               for (var index = 0; index < users.length; index++) ...[
-                _ProfileCard(user: users[index], category: category),
+                _ProfileCard(
+                  user: users[index],
+                  category: category,
+                  canViewStudentInfo: canViewStudentInfo,
+                ),
                 if (index != users.length - 1) const Divider(height: 1),
               ],
             ],
@@ -657,7 +677,11 @@ class _ProfileResults extends StatelessWidget {
               for (final user in users)
                 DataRow(
                   key: ValueKey('profile-row-${user.id}'),
-                  onSelectChanged: (_) => showManagedUserProfile(context, user),
+                  onSelectChanged: (_) => showManagedUserProfile(
+                    context,
+                    user,
+                    canViewStudentInfo: canViewStudentInfo,
+                  ),
                   cells: [
                     DataCell(_UserCell(user: user)),
                     DataCell(Text(_identifier(user))),
@@ -731,7 +755,12 @@ class _UserCell extends StatelessWidget {
 }
 
 class _ProfileCard extends StatelessWidget {
-  const _ProfileCard({required this.user, required this.category});
+  const _ProfileCard({
+    required this.user,
+    required this.category,
+    required this.canViewStudentInfo,
+  });
+  final bool canViewStudentInfo;
   final UserModel user;
   final PopulationRole category;
 
@@ -740,7 +769,11 @@ class _ProfileCard extends StatelessWidget {
     final isStudent = category == PopulationRole.student;
     return InkWell(
       key: ValueKey('profile-card-${user.id}'),
-      onTap: () => showManagedUserProfile(context, user),
+      onTap: () => showManagedUserProfile(
+        context,
+        user,
+        canViewStudentInfo: canViewStudentInfo,
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -856,8 +889,14 @@ class _CompletenessBadge extends StatelessWidget {
 }
 
 class _ProfileDialog extends StatelessWidget {
-  const _ProfileDialog({required this.user});
+  const _ProfileDialog({
+    required this.user,
+    required this.canViewStudentInfo,
+    this.studentInfoLoader,
+  });
   final UserModel user;
+  final bool canViewStudentInfo;
+  final StudentPersonalInfoLoader? studentInfoLoader;
 
   @override
   Widget build(BuildContext context) {
@@ -985,6 +1024,14 @@ class _ProfileDialog extends StatelessWidget {
                   ),
                 ],
               ),
+              if (isStudent) ...[
+                const SizedBox(height: 16),
+                ViewStudentInformationButton(
+                  userId: user.id,
+                  canView: canViewStudentInfo,
+                  loader: studentInfoLoader,
+                ),
+              ],
             ],
           ),
         ),
@@ -1104,10 +1151,19 @@ class _MessageState extends StatelessWidget {
   );
 }
 
-void showManagedUserProfile(BuildContext context, UserModel user) {
+void showManagedUserProfile(
+  BuildContext context,
+  UserModel user, {
+  bool canViewStudentInfo = false,
+  StudentPersonalInfoLoader? studentInfoLoader,
+}) {
   showDialog<void>(
     context: context,
-    builder: (_) => _ProfileDialog(user: user),
+    builder: (_) => _ProfileDialog(
+      user: user,
+      canViewStudentInfo: canViewStudentInfo,
+      studentInfoLoader: studentInfoLoader,
+    ),
   );
 }
 

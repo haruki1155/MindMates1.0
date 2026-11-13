@@ -63,8 +63,8 @@ class _SignupBodyState extends State<_SignupBody> {
     return email.isNotEmpty && !email.endsWith('@mindmate.local');
   }
 
-  AssessmentRole get _registrationRole =>
-      AuthRepository.registrationRoleForEmail(_emailController.text);
+  /// Sign up is employee-only; students activate through the roster.
+  AssessmentRole get _registrationRole => AssessmentRole.faculty;
 
   @override
   void initState() {
@@ -191,13 +191,11 @@ class _SignupBodyState extends State<_SignupBody> {
             lastName: _lastNameController.text,
             schoolId: _schoolIdController.text,
             department: _selectedDepartment ?? '',
-            course: _selectedCourse ?? '',
-            yearLevel: _yearLevelController.text,
+            course: '',
+            yearLevel: '',
             dateOfBirth: birthDate,
             middleName: _middleNameController.text,
-            employeeId: role == AssessmentRole.faculty
-                ? _schoolIdController.text
-                : null,
+            employeeId: _schoolIdController.text,
             position: _positionController.text,
             role: role,
             gender: _selectedGender,
@@ -208,12 +206,10 @@ class _SignupBodyState extends State<_SignupBody> {
             lastName: _lastNameController.text,
             schoolId: _schoolIdController.text,
             department: _selectedDepartment ?? '',
-            course: _selectedCourse ?? '',
-            yearLevel: _yearLevelController.text,
+            course: '',
+            yearLevel: '',
             middleName: _middleNameController.text,
-            employeeId: role == AssessmentRole.faculty
-                ? _schoolIdController.text
-                : null,
+            employeeId: _schoolIdController.text,
             position: _positionController.text,
             role: role,
             dateOfBirth: birthDate,
@@ -263,11 +259,38 @@ class _SignupBodyState extends State<_SignupBody> {
     ).pushNamedAndRemoveUntil(destination, (route) => false);
   }
 
+  /// Leaves the signup form for sign in. A Google sign-in without a profile
+  /// arrives here by *replacing* login and leaves a live session behind, with a
+  /// read-only email the validator will never accept, so without this the
+  /// screen is a dead end: the form cannot be submitted and nothing can be
+  /// popped. Always available, on both the Google and password paths.
+  Future<void> _backToSignIn() async {
+    final navigator = Navigator.of(context);
+    await _signOutGoogleSession();
+    navigator.pushNamedAndRemoveUntil(RouteNames.login, (route) => false);
+  }
+
+  Future<void> _signOutGoogleSession() async {
+    if (!_isGoogleProfileSetup) return;
+    try {
+      await context.read<AuthProvider>().signOut();
+    } catch (_) {}
+  }
+
+  Future<void> _openStudentActivation() async {
+    final navigator = Navigator.of(context);
+    // A Google sign-in without a profile leaves a live session behind;
+    // activation needs a clean one.
+    await _signOutGoogleSession();
+    // Rebuild the stack on top of sign in rather than replacing this screen, so
+    // backing out of activation lands somewhere usable.
+    navigator.pushNamedAndRemoveUntil(RouteNames.login, (route) => false);
+    navigator.pushNamed(RouteNames.studentActivation);
+  }
+
   Future<bool> _confirmRegistrationEmail(String normalizedEmail) async {
-    final roleLabel =
-        AuthRepository.isInstitutionalEmployeeEmail(normalizedEmail)
-        ? 'This email identifies your account as Teaching Personnel.'
-        : 'This email identifies your account as a Student account.';
+    const roleLabel =
+        'This email identifies your account as an employee account.';
     return await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
@@ -295,7 +318,6 @@ class _SignupBodyState extends State<_SignupBody> {
     required AssessmentRole? role,
   }) {
     final usesSector = role == AssessmentRole.staff;
-    final isStudent = role == AssessmentRole.student;
     final populationRole = role?.populationRole;
     return UserModel(
       id: userId,
@@ -306,12 +328,10 @@ class _SignupBodyState extends State<_SignupBody> {
       middleName: _middleNameController.text.trim(),
       lastName: _lastNameController.text.trim(),
       schoolId: _schoolIdController.text.trim(),
-      employeeId: isStudent ? null : _schoolIdController.text.trim(),
+      employeeId: _schoolIdController.text.trim(),
       department: usesSector ? null : _selectedDepartment?.trim(),
-      course: isStudent ? _selectedCourse?.trim() : null,
-      yearLevel: isStudent ? _yearLevelController.text.trim() : null,
       sector: usesSector ? _selectedSector?.trim() : null,
-      position: isStudent ? null : _positionController.text.trim(),
+      position: _positionController.text.trim(),
       role: role?.name,
       populationRole: populationRole,
       declaredRole: populationRole,
@@ -381,6 +401,8 @@ class _SignupBodyState extends State<_SignupBody> {
                     },
                     onTermsTap: _handleTermsChanged,
                     onSignUp: _handleSignUp,
+                    onActivateStudent: _openStudentActivation,
+                    onBackToSignIn: _backToSignIn,
                     requiredValidator: _requiredValidator,
                     confirmPasswordValidator: _confirmPasswordValidator,
                   );
@@ -435,6 +457,8 @@ class _SignupFormCard extends StatelessWidget {
     required this.dateOfBirth,
     required this.onPickDateOfBirth,
     required this.emailController,
+    required this.onActivateStudent,
+    required this.onBackToSignIn,
   });
 
   final GlobalKey<FormState> formKey;
@@ -465,14 +489,12 @@ class _SignupFormCard extends StatelessWidget {
   final DateTime? dateOfBirth;
   final Future<void> Function() onPickDateOfBirth;
   final TextEditingController emailController;
+  final VoidCallback onActivateStudent;
+  final VoidCallback onBackToSignIn;
 
   @override
   Widget build(BuildContext context) {
-    final selectedCourses = registrationCoursesForDepartment(
-      selectedDepartment,
-    );
     final usesSector = role == AssessmentRole.staff;
-    final isStudent = role == AssessmentRole.student;
 
     return Container(
       width: 346,
@@ -506,11 +528,17 @@ class _SignupFormCard extends StatelessWidget {
                 if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(text)) {
                   return 'Enter a valid email address';
                 }
+                if (!AuthRepository.isInstitutionalEmployeeEmail(text)) {
+                  return 'Use your @ucu.edu.ph employee email address';
+                }
                 return null;
               },
             ),
             const SizedBox(height: 7),
-            _EmailGuide(kind: _emailKindFor(emailController.text)),
+            _EmailGuide(
+              kind: _emailKindFor(emailController.text),
+              onActivateStudent: onActivateStudent,
+            ),
             const SizedBox(height: 7),
             _SignupField(
               controller: firstNameController,
@@ -535,14 +563,11 @@ class _SignupFormCard extends StatelessWidget {
             const SizedBox(height: 7),
             _SignupField(
               controller: schoolIdController,
-              label: isStudent ? 'Student ID' : 'Employee ID',
+              label: 'Employee ID',
               icon: Icons.badge_outlined,
               keyboardType: TextInputType.text,
               textInputAction: TextInputAction.next,
-              validator: (value) => requiredValidator(
-                value,
-                isStudent ? 'Student ID' : 'Employee ID',
-              ),
+              validator: (value) => requiredValidator(value, 'Employee ID'),
             ),
             const SizedBox(height: 7),
             InkWell(
@@ -582,42 +607,16 @@ class _SignupFormCard extends StatelessWidget {
                 validator: (value) =>
                     requiredValidator(value, 'College or department'),
               ),
-              if (isStudent) ...[
-                const SizedBox(height: 7),
-                _SignupDropdownField(
-                  label: 'Course or Program',
-                  icon: Icons.school_outlined,
-                  value: selectedCourse,
-                  items: selectedCourses,
-                  onChanged: selectedDepartment == null
-                      ? null
-                      : onCourseChanged,
-                  validator: (value) =>
-                      requiredValidator(value, 'Course or program'),
-                ),
-              ],
             ],
             const SizedBox(height: 7),
-            if (isStudent)
-              _SignupDropdownField(
-                label: 'Year Level',
-                icon: Icons.timeline_outlined,
-                value: yearLevelController.text.isEmpty
-                    ? null
-                    : yearLevelController.text,
-                items: const ['1st Year', '2nd Year', '3rd Year', '4th Year'],
-                onChanged: (value) => yearLevelController.text = value ?? '',
-                validator: (value) => requiredValidator(value, 'Year level'),
-              )
-            else
-              _SignupField(
-                controller: positionController,
-                label: 'Position or Designation',
-                icon: Icons.work_outline,
-                textInputAction: TextInputAction.next,
-                validator: (value) =>
-                    requiredValidator(value, 'Position or designation'),
-              ),
+            _SignupField(
+              controller: positionController,
+              label: 'Position or Designation',
+              icon: Icons.work_outline,
+              textInputAction: TextInputAction.next,
+              validator: (value) =>
+                  requiredValidator(value, 'Position or designation'),
+            ),
             const SizedBox(height: 7),
             _SignupDropdownField(
               label: 'Sex / Gender',
@@ -656,6 +655,20 @@ class _SignupFormCard extends StatelessWidget {
             _TermsCheckbox(acceptedTerms: acceptedTerms, onTap: onTermsTap),
             const SizedBox(height: 23),
             _SignUpButton(onPressed: isLoading ? null : onSignUp),
+            const SizedBox(height: 4),
+            TextButton.icon(
+              key: const Key('signup-back-to-sign-in'),
+              onPressed: isLoading ? null : onBackToSignIn,
+              style: TextButton.styleFrom(
+                foregroundColor: _SignupColors.text,
+                textStyle: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              icon: const Icon(Icons.arrow_back_rounded, size: 16),
+              label: const Text('Back to sign in'),
+            ),
           ],
         ),
       ),
@@ -674,17 +687,18 @@ _EmailKind _emailKindFor(String email) {
 
 /// Guide under the Email Address field; its line follows the typed email.
 class _EmailGuide extends StatelessWidget {
-  const _EmailGuide({required this.kind});
+  const _EmailGuide({required this.kind, required this.onActivateStudent});
 
   final _EmailKind kind;
+  final VoidCallback onActivateStudent;
 
   @override
   Widget build(BuildContext context) {
     const title = 'Email guide';
     final message = switch (kind) {
-      _EmailKind.empty =>
-        'Use your personal email or your institutional email.',
-      _EmailKind.personal => 'Personal email detected.',
+      _EmailKind.empty => 'Use your @ucu.edu.ph employee email.',
+      _EmailKind.personal =>
+        "Students activate accounts through the roster. Tap 'Activate student account'.",
       _EmailKind.institutional => 'Institutional email detected.',
     };
     return Container(
@@ -725,6 +739,21 @@ class _EmailGuide extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                if (kind == _EmailKind.personal)
+                  TextButton(
+                    onPressed: onActivateStudent,
+                    style: TextButton.styleFrom(
+                      foregroundColor: _SignupColors.text,
+                      minimumSize: const Size(0, 32),
+                      padding: EdgeInsets.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      textStyle: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    child: const Text('Activate student account'),
+                  ),
               ],
             ),
           ),

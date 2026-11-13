@@ -445,8 +445,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Home'), findsOneWidget);
-    expect(find.text('Appointment'), findsOneWidget);
-    expect(find.text('Secret Chat'), findsOneWidget);
+    expect(find.text('Appointment'), findsNothing);
+    expect(find.text('Forum'), findsOneWidget);
     expect(find.text('Message'), findsOneWidget);
   });
 
@@ -896,8 +896,11 @@ Future<void> _fillCounselingForm(WidgetTester tester) async {
     find.byKey(const ValueKey('intake-concern')),
     'I feel overwhelmed and would like to talk to someone.',
   );
+<<<<<<< HEAD
   await tester.tap(find.byKey(const ValueKey('intake-best-time')));
   await _acceptTime(tester, 9);
+=======
+>>>>>>> origin/main
 }
 
 Future<void> _chooseVisibleOption(WidgetTester tester, String label) async {

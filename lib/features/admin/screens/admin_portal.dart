@@ -1,4 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
+
+import 'counselor_messages_page.dart';
+import '../../counseling/widgets/counselor_unread_badges.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../../models/admin_inquiry_model.dart';
@@ -8,12 +12,12 @@ import '../../../models/pacc_availability_model.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../domain/admin_management_models.dart';
+import '../services/admin_unload_guard.dart';
 import '../domain/appointment_workflow.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/appointment_repository.dart';
-import '../../../repositories/admin_status_repository.dart';
 import '../../../repositories/pacc_availability_repository.dart';
-import 'admin_assessment_detail_screen.dart';
+import 'admin_assessment_results_page.dart';
 import 'staff_registration_screen.dart';
 import 'user_management_page.dart';
 import 'profile_management_page.dart';
@@ -21,6 +25,7 @@ import 'report_generation_page.dart';
 import 'admin_notifications_page.dart';
 import 'admin_change_password_screen.dart';
 import 'academic_structure_page.dart';
+import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
 import 'staff_operations_dashboard.dart';
 import 'staff_appointments_page.dart';
@@ -28,7 +33,9 @@ import 'counselor_operations_dashboard.dart';
 import 'counselor_workflow_page.dart';
 import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
+import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/pacc_schedule_editor_widgets.dart';
 
 const _yellow = AdminColors.accentStrong;
 const _cream = AdminColors.canvas;
@@ -44,6 +51,7 @@ String _headerRoleLabel(AccessRole role) => switch (role) {
 enum AdminPortalPage {
   dashboard,
   users,
+  studentRoster,
   academicStructure,
   profiling,
   appointments,
@@ -53,6 +61,7 @@ enum AdminPortalPage {
   notifications,
   availability,
   inquiries,
+  counselorMessages,
   assessments,
   profile,
 }
@@ -61,6 +70,7 @@ extension on AdminPortalPage {
   String get label => switch (this) {
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
+    AdminPortalPage.studentRoster => 'Student Roster',
     AdminPortalPage.academicStructure => 'Academic Structure',
     AdminPortalPage.profiling => 'Profiling Management',
     AdminPortalPage.appointments => 'Appointments',
@@ -70,7 +80,8 @@ extension on AdminPortalPage {
     AdminPortalPage.notifications => 'Notifications',
     AdminPortalPage.availability => 'Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
-    AdminPortalPage.assessments => 'Assessment Results',
+    AdminPortalPage.counselorMessages => 'Counselor Messages',
+    AdminPortalPage.assessments => 'Assessment',
     AdminPortalPage.profile => 'Profile',
   };
 
@@ -84,6 +95,7 @@ extension on AdminPortalPage {
   IconData get icon => switch (this) {
     AdminPortalPage.dashboard => Icons.home_outlined,
     AdminPortalPage.users => Icons.group_outlined,
+    AdminPortalPage.studentRoster => Icons.school_outlined,
     AdminPortalPage.academicStructure => Icons.account_tree_outlined,
     AdminPortalPage.profiling => Icons.badge_outlined,
     AdminPortalPage.appointments => Icons.calendar_month_outlined,
@@ -93,6 +105,7 @@ extension on AdminPortalPage {
     AdminPortalPage.notifications => Icons.notifications_outlined,
     AdminPortalPage.availability => Icons.storefront_outlined,
     AdminPortalPage.inquiries => Icons.chat_bubble_outline_rounded,
+    AdminPortalPage.counselorMessages => Icons.forum_outlined,
     AdminPortalPage.assessments => Icons.assignment_outlined,
     AdminPortalPage.profile => Icons.account_circle_outlined,
   };
@@ -375,8 +388,18 @@ class _LoginField extends StatelessWidget {
 }
 
 class AdminPortalHome extends StatefulWidget {
-  const AdminPortalHome({super.key, this.repository});
+  const AdminPortalHome({
+    super.key,
+    this.repository,
+    this.registerUnload = registerUnloadGuard,
+    this.removeUnload = removeUnloadGuard,
+  });
   final AdminPortalRepository? repository;
+
+  /// Browser tab-close guard seams; the defaults are no-ops off the web.
+  final UnloadGuardRegistrar registerUnload;
+  final UnloadGuardRemover removeUnload;
+
   @override
   State<AdminPortalHome> createState() => _AdminPortalHomeState();
 }
@@ -385,15 +408,30 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   late final AdminPortalRepository _repository =
       widget.repository ?? AdminPortalRepository();
   AdminPortalPage _page = AdminPortalPage.dashboard;
+  final _rosterLeaveGuard = StudentRosterLeaveGuard();
   bool _navCollapsed = false;
   late final Stream<List<AppNotificationModel>> _notifications;
   final PaccScheduleEditorController _scheduleController =
       PaccScheduleEditorController();
 
+  Object? _unloadHandle;
+
   @override
   void initState() {
     super.initState();
     _notifications = _repository.watchPortalNotifications();
+    // Closing or refreshing the tab mid-import, or with slips still
+    // undownloaded, loses plain codes that are never shown again.
+    _unloadHandle = widget.registerUnload(
+      () => _rosterLeaveGuard.hasUndownloadedCodes,
+    );
+  }
+
+  @override
+  void dispose() {
+    widget.removeUnload(_unloadHandle);
+    _unloadHandle = null;
+    super.dispose();
   }
 
   @override
@@ -448,6 +486,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
                     notifications: _notifications,
                     onOpenNotifications: () =>
                         _setPage(AdminPortalPage.notifications),
+                    confirmLeave: _rosterLeaveGuard.confirmLeave,
                   ),
                   Expanded(child: _buildPage()),
                 ],
@@ -472,6 +511,12 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
     if (_page == AdminPortalPage.availability &&
         page != AdminPortalPage.availability &&
         !await _scheduleController.confirmLeave(context)) {
+      return;
+    }
+    if (!mounted) return;
+    if (_page == AdminPortalPage.studentRoster &&
+        page != AdminPortalPage.studentRoster &&
+        !await _rosterLeaveGuard.confirmLeave(context)) {
       return;
     }
     if (!mounted) {
@@ -501,6 +546,9 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
       onOpenAcademicStructure: () =>
           _setPage(AdminPortalPage.academicStructure),
+    ),
+    AdminPortalPage.studentRoster => StudentRosterPage(
+      leaveGuard: _rosterLeaveGuard,
     ),
     AdminPortalPage.academicStructure => AcademicStructurePage(
       repository: _repository,
@@ -537,6 +585,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       controller: _scheduleController,
     ),
     AdminPortalPage.inquiries => _InquiriesPage(repository: _repository),
+    AdminPortalPage.counselorMessages => const CounselorMessagesPage(),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
   };
@@ -560,6 +609,7 @@ class _Nav extends StatelessWidget {
 
   bool _allowed(AdminPortalPage page) => switch (page) {
     AdminPortalPage.users => isSuperAdmin,
+    AdminPortalPage.studentRoster => isSuperAdmin,
     AdminPortalPage.academicStructure => isSuperAdmin,
     // Counselor case/profile access must come through an assigned-case
     // surface. The legacy organization-wide profiling screen is admin-only.
@@ -573,6 +623,7 @@ class _Nav extends StatelessWidget {
     AdminPortalPage.assessments => accessRole.canAccessClinicalData,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
+    AdminPortalPage.counselorMessages => accessRole == AccessRole.counselor,
     AdminPortalPage.appointments =>
       accessRole.canUsePortal || accessRole == AccessRole.admin,
     _ => accessRole.canUsePortal || accessRole == AccessRole.admin,
@@ -583,6 +634,7 @@ class _Nav extends StatelessWidget {
       const _NavSection('Overview', [AdminPortalPage.dashboard]),
       const _NavSection('People', [
         AdminPortalPage.users,
+        AdminPortalPage.studentRoster,
         AdminPortalPage.profiling,
         AdminPortalPage.academicStructure,
       ]),
@@ -592,6 +644,7 @@ class _Nav extends StatelessWidget {
         AdminPortalPage.cases,
         AdminPortalPage.followUps,
         AdminPortalPage.inquiries,
+        AdminPortalPage.counselorMessages,
       ]),
       const _NavSection('Insights', [
         AdminPortalPage.assessments,
@@ -741,6 +794,10 @@ class _Nav extends StatelessWidget {
                                     : AdminColors.muted,
                                 size: 21,
                               ),
+                              trailing:
+                                  item == AdminPortalPage.counselorMessages
+                                  ? const CounselorInboxUnreadBadge()
+                                  : null,
                               title: Text(
                                 item.workspaceLabel,
                                 style: const TextStyle(
@@ -792,7 +849,12 @@ class _PortalHeader extends StatelessWidget {
     required this.repository,
     required this.notifications,
     required this.onOpenNotifications,
+    required this.confirmLeave,
   });
+
+  /// The roster leave guard: undownloaded activation codes or an import in
+  /// flight must be confirmed before the session ends.
+  final Future<bool> Function(BuildContext context) confirmLeave;
   final bool compact;
   final bool navCollapsed;
   final VoidCallback? onMenuPressed;
@@ -861,6 +923,8 @@ class _PortalHeader extends StatelessWidget {
                 ),
               );
               if (confirmed != true) return;
+              if (!context.mounted) return;
+              if (!await confirmLeave(context)) return;
               await repository.signOut();
               if (context.mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
@@ -2767,6 +2831,16 @@ class _AppointmentCard extends StatelessWidget {
                 item.userId,
                 style: const TextStyle(color: AdminColors.muted, fontSize: 12),
               ),
+              if (item.userId.trim().isNotEmpty &&
+                  repository.currentAccessRole.canAccessClinicalData)
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: ViewStudentInformationButton(
+                    userId: item.userId,
+                    canView: repository.currentAccessRole.canAccessClinicalData,
+                  ),
+                ),
             ],
           ),
         );
@@ -3667,19 +3741,15 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
                   onChanged: (value) => setDialogState(() => closed = value),
                 ),
                 if (!closed) ...[
-                  TextField(
-                    key: const Key('override-opens'),
+                  PaccTimePickerField(
+                    fieldKey: const Key('override-opens'),
                     controller: opens,
-                    decoration: const InputDecoration(
-                      labelText: 'Opening time',
-                    ),
+                    label: 'Opening time',
                   ),
-                  TextField(
-                    key: const Key('override-closes'),
+                  PaccTimePickerField(
+                    fieldKey: const Key('override-closes'),
                     controller: closes,
-                    decoration: const InputDecoration(
-                      labelText: 'Closing time',
-                    ),
+                    label: 'Closing time',
                   ),
                   SwitchListTile(
                     title: const Text('Counselor in office'),
@@ -3801,8 +3871,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  SwitchListTile(
-                    title: const Text('Office open'),
+                  PaccOfficeHoursSelector(
                     value: draft.enabled,
                     onChanged: (value) => setDialogState(
                       () => draft = draft.copyWith(
@@ -3814,19 +3883,15 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
                       ),
                     ),
                   ),
-                  TextField(
-                    key: Key('day-$day-opens'),
+                  PaccTimePickerField(
+                    fieldKey: Key('day-$day-opens'),
                     controller: opens,
-                    decoration: const InputDecoration(
-                      labelText: 'Opening time',
-                    ),
+                    label: 'Opening time',
                   ),
-                  TextField(
-                    key: Key('day-$day-closes'),
+                  PaccTimePickerField(
+                    fieldKey: Key('day-$day-closes'),
                     controller: closes,
-                    decoration: const InputDecoration(
-                      labelText: 'Closing time',
-                    ),
+                    label: 'Closing time',
                   ),
                   RadioGroup<CounselorPresence>(
                     groupValue: draft.presence,
@@ -4047,8 +4112,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
                     ),
                   ),
                 ),
-                SwitchListTile(
-                  title: const Text('Office open'),
+                PaccOfficeHoursSelector(
                   value: draft.enabled,
                   onChanged: (value) => setDialogState(
                     () => draft = draft.copyWith(
@@ -4060,15 +4124,15 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
                     ),
                   ),
                 ),
-                TextField(
-                  key: const Key('bulk-opens'),
+                PaccTimePickerField(
+                  fieldKey: const Key('bulk-opens'),
                   controller: opens,
-                  decoration: const InputDecoration(labelText: 'Opening time'),
+                  label: 'Opening time',
                 ),
-                TextField(
-                  key: const Key('bulk-closes'),
+                PaccTimePickerField(
+                  fieldKey: const Key('bulk-closes'),
                   controller: closes,
-                  decoration: const InputDecoration(labelText: 'Closing time'),
+                  label: 'Closing time',
                 ),
                 SwitchListTile(
                   title: const Text('Appointments enabled'),
@@ -4476,14 +4540,6 @@ class _PolishedPaccScheduleLayout extends StatelessWidget {
   final Future<void> Function() onDiscard;
   final Future<void> Function() onSave;
 
-  static const _names = [
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-  ];
-
   @override
   Widget build(BuildContext context) {
     final actions = readOnly
@@ -4513,17 +4569,10 @@ class _PolishedPaccScheduleLayout extends StatelessWidget {
               icon: const Icon(Icons.edit_calendar_outlined, size: 18),
               label: const Text('Set multiple days'),
             ),
-      child: Column(
-        children: List.generate(5, (index) {
-          final day = index + 1;
-          return _PaccWeekdaySummary(
-            day: day,
-            name: _names[index],
-            schedule: days[day] ?? PaccDaySchedule.closed,
-            readOnly: readOnly,
-            onEdit: () => onEditDay(day),
-          );
-        }),
+      child: PaccWeeklyScheduleTable(
+        days: days,
+        readOnly: readOnly,
+        onEditDay: onEditDay,
       ),
     );
     final special = _PaccScheduleSection(
@@ -4700,117 +4749,6 @@ class _PaccStatusChip extends StatelessWidget {
     child: Text(
       label,
       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-    ),
-  );
-}
-
-class _PaccWeekdaySummary extends StatelessWidget {
-  const _PaccWeekdaySummary({
-    required this.day,
-    required this.name,
-    required this.schedule,
-    required this.readOnly,
-    required this.onEdit,
-  });
-  final int day;
-  final String name;
-  final PaccDaySchedule schedule;
-  final bool readOnly;
-  final VoidCallback onEdit;
-  @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 82),
-    padding: const EdgeInsets.symmetric(vertical: 12),
-    decoration: const BoxDecoration(
-      border: Border(bottom: BorderSide(color: AdminColors.border)),
-    ),
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final states = schedule.enabled
-            ? Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  const _PaccStatusChip(label: 'Open'),
-                  _PaccStatusChip(
-                    label: _paccRange(schedule.opensAt, schedule.closesAt),
-                  ),
-                  _PaccStatusChip(label: _paccPresence(schedule.presence)),
-                  _PaccStatusChip(
-                    label:
-                        'Appointments ${schedule.appointmentsEnabled ? 'on' : 'off'}',
-                  ),
-                  _PaccStatusChip(
-                    label: 'Walk-ins ${schedule.acceptsWalkIns ? 'on' : 'off'}',
-                  ),
-                ],
-              )
-            : const Wrap(
-                spacing: 6,
-                children: [
-                  _PaccStatusChip(label: 'Closed'),
-                  _PaccStatusChip(label: 'No office hours'),
-                ],
-              );
-        final edit = readOnly
-            ? const SizedBox.shrink()
-            : OutlinedButton.icon(
-                key: Key('edit-day-$day'),
-                onPressed: onEdit,
-                icon: const Icon(Icons.edit_outlined, size: 17),
-                label: const Text('Edit'),
-              );
-        final badge = Container(
-          width: 42,
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: AdminColors.surfaceMuted,
-            borderRadius: BorderRadius.circular(7),
-          ),
-          child: Text(
-            name.substring(0, 3).toUpperCase(),
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
-          ),
-        );
-        return constraints.maxWidth >= 620
-            ? Row(
-                children: [
-                  badge,
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 94,
-                    child: Text(
-                      name,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: states),
-                  const SizedBox(width: 12),
-                  edit,
-                ],
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      badge,
-                      const SizedBox(width: 10),
-                      Text(
-                        name,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const Spacer(),
-                      edit,
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  states,
-                ],
-              );
-      },
     ),
   );
 }
@@ -5066,261 +5004,16 @@ class _AvailabilityPageState extends State<_AvailabilityPage> {
   );
 }
 
-class _AssessmentsPage extends StatefulWidget {
+class _AssessmentsPage extends StatelessWidget {
   const _AssessmentsPage({required this.repository});
   final AdminPortalRepository repository;
-  @override
-  State<_AssessmentsPage> createState() => _AssessmentsPageState();
-}
-
-class _AssessmentsPageState extends State<_AssessmentsPage> {
-  String typeFilter = 'All Types';
-  String yearFilter = 'All Years';
-  String statusFilter = 'All Statuses';
-  String roleFilter = 'All Roles';
-  String archiveFilter = 'Active';
-  final Set<String> _busyAssessmentIds = <String>{};
 
   @override
   Widget build(BuildContext context) => _Page(
-    title: 'Assessment Results',
-    subtitle: 'Review assessment results and historical assessment records',
-    child: StreamBuilder<List<AdminAssessmentRecord>>(
-      stream: widget.repository.watchAssessments(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) return const _AccessPanel();
-        final all = snapshot.data ?? const <AdminAssessmentRecord>[];
-        final years = {
-          for (final item in all) '${item.createdAt.year}',
-        }.toList()..sort((a, b) => b.compareTo(a));
-        final statuses = {for (final item in all) item.displayStatus}.toList()
-          ..sort();
-        final roles = {for (final item in all) item.role ?? 'User'}.toList()
-          ..sort();
-        final types = [
-          'All Types',
-          ...{for (final item in all) item.type},
-        ];
-        final items = all
-            .where(
-              (item) =>
-                  (archiveFilter == 'Archived'
-                      ? item.isArchived
-                      : !item.isArchived) &&
-                  (typeFilter == 'All Types' || item.type == typeFilter) &&
-                  (yearFilter == 'All Years' ||
-                      '${item.createdAt.year}' == yearFilter) &&
-                  (statusFilter == 'All Statuses' ||
-                      item.displayStatus == statusFilter) &&
-                  (roleFilter == 'All Roles' ||
-                      (item.role ?? 'User') == roleFilter),
-            )
-            .toList();
-        final active = all.where((item) => !item.isArchived).toList();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _CompactSummaryStrip(
-              values: {
-                'Active': active.length,
-                'With results': active
-                    .where((a) => (a.status ?? '').isNotEmpty)
-                    .length,
-                'Awaiting result': active
-                    .where((a) => (a.status ?? '').isEmpty)
-                    .length,
-                'Archived': all.where((a) => a.isArchived).length,
-              },
-            ),
-            const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: _box,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Filter records',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      _FilterField(
-                        label: 'Record state',
-                        value: archiveFilter,
-                        values: const ['Active', 'Archived'],
-                        onChanged: (value) =>
-                            setState(() => archiveFilter = value!),
-                      ),
-                      _FilterField(
-                        label: 'Year',
-                        value: yearFilter,
-                        values: ['All Years', ...years],
-                        onChanged: (value) =>
-                            setState(() => yearFilter = value!),
-                      ),
-                      _FilterField(
-                        label: 'Status',
-                        value: statusFilter,
-                        values: ['All Statuses', ...statuses],
-                        onChanged: (value) =>
-                            setState(() => statusFilter = value!),
-                      ),
-                      _FilterField(
-                        label: 'Role',
-                        value: roleFilter,
-                        values: ['All Roles', ...roles],
-                        onChanged: (value) =>
-                            setState(() => roleFilter = value!),
-                      ),
-                      _FilterField(
-                        label: 'Assessment',
-                        value: typeFilter,
-                        values: types,
-                        onChanged: (value) =>
-                            setState(() => typeFilter = value!),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            if (items.isEmpty)
-              _EmptyPanel(
-                message:
-                    'No ${archiveFilter.toLowerCase()} assessments match these filters.',
-              )
-            else
-              Container(
-                decoration: _box,
-                child: _ResponsiveTable(
-                  columns: const [
-                    'User reference',
-                    'Year',
-                    'Date',
-                    'Status',
-                    'Role',
-                    'Assessment Type',
-                    'Actions',
-                  ],
-                  rows: items
-                      .map(
-                        (assessment) => [
-                          _UserReference(value: assessment.userId),
-                          '${assessment.createdAt.year}',
-                          _date(assessment.createdAt),
-                          _Tag(
-                            label: _formalLabel(assessment.displayStatus),
-                            color: (assessment.status ?? '').isEmpty
-                                ? AdminColors.accentSoft
-                                : AdminColors.surfaceMuted,
-                          ),
-                          _formalLabel(assessment.role ?? 'User'),
-                          _formalLabel(assessment.type),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: 'View assessment results',
-                                onPressed: () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => AdminAssessmentDetailScreen(
-                                      userId: assessment.userId,
-                                      userLabel: assessment.userId,
-                                      assessmentId: assessment.id,
-                                      repository: AdminStatusRepository(),
-                                    ),
-                                  ),
-                                ),
-                                icon: const Icon(Icons.visibility_outlined),
-                              ),
-                              IconButton(
-                                tooltip: assessment.isArchived
-                                    ? 'Restore assessment'
-                                    : 'Archive assessment',
-                                onPressed:
-                                    _busyAssessmentIds.contains(assessment.id)
-                                    ? null
-                                    : () => _setArchived(assessment),
-                                icon: _busyAssessmentIds.contains(assessment.id)
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : Icon(
-                                        assessment.isArchived
-                                            ? Icons.unarchive_outlined
-                                            : Icons.archive_outlined,
-                                      ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      )
-                      .toList(),
-                ),
-              ),
-          ],
-        );
-      },
-    ),
+    title: 'Assessment',
+    subtitle: 'Review Quick and Full Assessment results',
+    child: AdminAssessmentResultsPage(repository: repository),
   );
-
-  Future<void> _setArchived(AdminAssessmentRecord assessment) async {
-    if (_busyAssessmentIds.contains(assessment.id)) return;
-    final archive = !assessment.isArchived;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('${archive ? 'Archive' : 'Restore'} assessment?'),
-        content: Text(
-          archive
-              ? 'This keeps the record securely stored but removes it from the active assessment list.'
-              : 'This returns the record to the active assessment list.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(archive ? 'Archive' : 'Restore'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    setState(() => _busyAssessmentIds.add(assessment.id));
-    try {
-      await widget.repository.setAssessmentArchived(assessment.id, archive);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              archive ? 'Assessment archived.' : 'Assessment restored.',
-            ),
-          ),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to update assessment: $error')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busyAssessmentIds.remove(assessment.id));
-    }
-  }
 }
 
 class _CompactSummaryStrip extends StatelessWidget {
@@ -5416,29 +5109,6 @@ class _FilterField extends StatelessWidget {
       onChanged: onChanged,
     ),
   );
-}
-
-class _UserReference extends StatelessWidget {
-  const _UserReference({required this.value});
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final abbreviated = value.length > 14
-        ? '${value.substring(0, 6)}…${value.substring(value.length - 5)}'
-        : value;
-    return Tooltip(
-      message: value,
-      child: Text(
-        abbreviated,
-        style: const TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
 }
 
 class _InquiriesPage extends StatefulWidget {

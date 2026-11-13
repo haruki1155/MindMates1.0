@@ -52,6 +52,8 @@ class UserModel {
     this.quickAssessmentCompleted = false,
     this.quickAssessmentCompletedAt,
     this.profileSetupCompleted = false,
+    this.personalInfoRequired = false,
+    this.rosterLinked = false,
   });
 
   final String id;
@@ -102,6 +104,8 @@ class UserModel {
   final bool quickAssessmentCompleted;
   final DateTime? quickAssessmentCompletedAt;
   final bool profileSetupCompleted;
+  final bool personalInfoRequired;
+  final bool rosterLinked;
 
   String get displayName {
     final parts =
@@ -217,6 +221,8 @@ class UserModel {
     bool? quickAssessmentCompleted,
     DateTime? quickAssessmentCompletedAt,
     bool? profileSetupCompleted,
+    bool? personalInfoRequired,
+    bool? rosterLinked,
   }) {
     return UserModel(
       id: id ?? this.id,
@@ -268,6 +274,8 @@ class UserModel {
           quickAssessmentCompletedAt ?? this.quickAssessmentCompletedAt,
       profileSetupCompleted:
           profileSetupCompleted ?? this.profileSetupCompleted,
+      personalInfoRequired: personalInfoRequired ?? this.personalInfoRequired,
+      rosterLinked: rosterLinked ?? this.rosterLinked,
     );
   }
 
@@ -352,6 +360,8 @@ class UserModel {
       profileSetupCompleted: json.containsKey('profileSetupCompleted')
           ? json['profileSetupCompleted'] == true
           : _intOrDefault(json['profileVersion'], 1) < 3,
+      personalInfoRequired: json['personalInfoRequired'] == true,
+      rosterLinked: json['rosterLinked'] == true,
     );
   }
 
@@ -408,6 +418,8 @@ class UserModel {
       'quickAssessmentCompletedAt': quickAssessmentCompletedAt
           ?.toIso8601String(),
       'profileSetupCompleted': profileSetupCompleted,
+      'personalInfoRequired': personalInfoRequired,
+      'rosterLinked': rosterLinked,
     };
   }
 

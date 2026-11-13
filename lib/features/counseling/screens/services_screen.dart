@@ -9,7 +9,7 @@ import 'service_detail_screen.dart';
 class ServicesScreen extends StatelessWidget {
   const ServicesScreen({super.key});
 
-  static const List<ServiceDetailData> _services = [
+  static const List<ServiceDetailData> services = [
     ServiceDetailData(
       title: 'Information Service',
       summary:
@@ -329,13 +329,13 @@ class ServicesScreen extends StatelessWidget {
                     child: Text('All Services', style: _ServicesText.heading),
                   ),
                   const SizedBox(height: 12),
-                  for (var index = 0; index < _services.length; index++) ...[
+                  for (var index = 0; index < services.length; index++) ...[
                     _AnimatedServicesSection(
                       delay: 70 + (index * 45),
                       child: _ServiceCard(
-                        service: _services[index],
+                        service: services[index],
                         onTap: () =>
-                            _openServiceDetail(context, _services[index]),
+                            _openServiceDetail(context, services[index]),
                       ),
                     ),
                     const SizedBox(height: 18),

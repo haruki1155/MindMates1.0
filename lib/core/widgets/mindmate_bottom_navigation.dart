@@ -49,17 +49,18 @@ class MindMateBottomNavigation extends StatelessWidget {
               PhosphorIcons.briefcase(PhosphorIconsStyle.regular),
               'Services',
             ),
-            _item(
-              context,
-              MindMateNavDestination.appointments,
-              Icons.event_available_outlined,
-              'Appointment',
-            ),
+            if (active != MindMateNavDestination.services)
+              _item(
+                context,
+                MindMateNavDestination.appointments,
+                Icons.event_available_outlined,
+                'Appointment',
+              ),
             _item(
               context,
               MindMateNavDestination.secretChat,
               Icons.forum_outlined,
-              'Secret Chat',
+              'Forum',
             ),
             _item(
               context,
@@ -131,7 +132,7 @@ class MindMateBottomNavigation extends StatelessWidget {
       MindMateNavDestination.appointments => RouteNames.home,
       MindMateNavDestination.services => RouteNames.services,
       MindMateNavDestination.secretChat => RouteNames.secretChat,
-      MindMateNavDestination.message => RouteNames.mindAid,
+      MindMateNavDestination.message => RouteNames.messages,
     };
     Navigator.of(context).pushNamedAndRemoveUntil(
       route,

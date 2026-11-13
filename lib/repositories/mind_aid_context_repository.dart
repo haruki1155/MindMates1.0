@@ -6,6 +6,7 @@ import '../models/report_model.dart';
 import '../services/firebase/firestore_service.dart';
 import '../features/mood/domain/mood_v2_compatibility.dart';
 import 'mood_combined_history_repository.dart';
+import 'user_repository.dart';
 
 class MindAidContextRepository {
   MindAidContextRepository({
@@ -66,6 +67,7 @@ class MindAidContextRepository {
     Map<String, dynamic>? latestAssessment,
     ReportModel? latestReport,
     Map<String, dynamic>? user,
+    DateTime? now,
   }) {
     final latestMood = moods.isEmpty ? null : moods.first;
     final recentMoodAverage = mixedMood?.recentAverage ?? _averageMood(moods);
@@ -115,8 +117,13 @@ class MindAidContextRepository {
       topConcernAreas: topConcernAreas,
       reportSummary: _emptyToNull(latestReport?.description),
       recommendedActions: recommendedActions,
-      currentStreak:
-          _intValue(user?['dayStreak']) ?? latestReport?.currentStreak ?? 0,
+      currentStreak: user == null
+          ? latestReport?.currentStreak ?? 0
+          : StreakCalculator.effectiveStreak(
+              storedStreak: _intValue(user['dayStreak']) ?? 0,
+              lastActivityDateKey: user['lastActivityDateKey']?.toString(),
+              now: now ?? DateTime.now(),
+            ),
       activeDayCount:
           latestReport?.activeDayCount ??
           _stringList(user?['activeDateKeys']).length,

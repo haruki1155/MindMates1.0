@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_assets.dart';
 import '../data/daily_affirmation_quotes.dart';
+import '../domain/home_streak_source.dart';
 import '../models/home_dashboard_data.dart';
+import 'streak_flame.dart';
 
 class HomePalette {
   const HomePalette._();
@@ -275,17 +277,15 @@ class HomeAssessmentBanner extends StatelessWidget {
     super.key,
     required this.data,
     required this.onStart,
-    required this.onClose,
   });
 
   final HomeAssessmentPromptData data;
   final VoidCallback onStart;
-  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: HomeDecor.card(
         color: const Color(0xFFF1F3FF),
         borderColor: const Color(0x665C7CFF),
@@ -331,12 +331,6 @@ class HomeAssessmentBanner extends StatelessWidget {
               ],
             ),
           ),
-          HomePlainIconButton(
-            icon: Icons.close,
-            assetName: 'x.png',
-            tooltip: 'Dismiss',
-            onTap: onClose,
-          ),
         ],
       ),
     );
@@ -352,6 +346,7 @@ class HomeWelcomeCard extends StatelessWidget {
     this.unreadNotificationCount = 0,
     required this.onCalendarTap,
     required this.onProfileTap,
+    this.onViewTodaysMood,
   });
 
   final HomeUserData user;
@@ -360,6 +355,9 @@ class HomeWelcomeCard extends StatelessWidget {
   final int unreadNotificationCount;
   final VoidCallback onCalendarTap;
   final VoidCallback onProfileTap;
+
+  /// Shown under today's mood once the user has checked in today (item 40).
+  final VoidCallback? onViewTodaysMood;
 
   @override
   Widget build(BuildContext context) {
@@ -453,6 +451,32 @@ class HomeWelcomeCard extends StatelessWidget {
                 ),
               ),
             ),
+            if (onViewTodaysMood != null) ...[
+              const SizedBox(height: 8),
+              OutlinedButton(
+                key: const Key('home-view-todays-mood'),
+                onPressed: onViewTodaysMood,
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: HomePalette.surface,
+                  foregroundColor: HomePalette.text,
+                  side: const BorderSide(color: HomePalette.sun),
+                  shape: const StadiumBorder(),
+                  minimumSize: const Size.fromHeight(44),
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(child: Text('View today’s mood')),
+                    SizedBox(width: 4),
+                    Icon(Icons.chevron_right, size: 20),
+                  ],
+                ),
+              ),
+            ],
           ],
         ],
       ),
@@ -695,14 +719,34 @@ class HomeAnnouncementCard extends StatelessWidget {
 }
 
 class HomeStreakCard extends StatelessWidget {
-  const HomeStreakCard({super.key, required this.data, required this.onTap});
+  const HomeStreakCard({
+    super.key,
+    required this.data,
+    required this.onTap,
+    this.onViewRecap,
+  });
 
   final HomeStreakData? data;
+
+  /// Card tap and the "Log mood" button.
   final VoidCallback onTap;
+
+  /// The milestone "View recap ›" button (opens My Mood Journey).
+  final VoidCallback? onViewRecap;
 
   @override
   Widget build(BuildContext context) {
     final streak = data;
+    final state = streak?.state;
+    final showLogMood =
+        streak != null &&
+        (state == HomeStreakState.notStarted ||
+            state == HomeStreakState.activeNotToday);
+    final showRecap =
+        streak != null &&
+        state == HomeStreakState.milestone &&
+        streak.canViewRecap &&
+        onViewRecap != null;
 
     return Material(
       color: Colors.transparent,
@@ -775,9 +819,12 @@ class HomeStreakCard extends StatelessWidget {
                               fontWeight: FontWeight.w900,
                             ),
                           ),
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 4),
-                            child: Text('days', style: HomeTextStyles.body),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text(
+                              streak.days == 1 ? 'day' : 'days',
+                              style: HomeTextStyles.body,
+                            ),
                           ),
                         ],
                       ),
@@ -789,19 +836,63 @@ class HomeStreakCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: HomeTextStyles.body,
                     ),
+                    if (showLogMood) ...[
+                      const SizedBox(height: 10),
+                      _StreakPill(
+                        label: 'Log mood',
+                        background: HomePalette.surface,
+                        foreground: HomePalette.text,
+                        onPressed: onTap,
+                      ),
+                    ],
+                    if (showRecap) ...[
+                      const SizedBox(height: 10),
+                      _StreakPill(
+                        label: 'View recap ›',
+                        background: HomePalette.surface,
+                        foreground: HomePalette.text,
+                        onPressed: onViewRecap!,
+                      ),
+                    ],
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
-              const HomeDashboardAssetImage(
-                assetName: 'fire_icon.png',
-                width: 46,
-                height: 46,
-              ),
+              const SizedBox(width: 8),
+              StreakFlame(days: streak?.days ?? 0),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _StreakPill extends StatelessWidget {
+  const _StreakPill({
+    required this.label,
+    required this.background,
+    required this.foreground,
+    required this.onPressed,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton(
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        backgroundColor: background,
+        foregroundColor: foreground,
+        minimumSize: const Size(0, 40),
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        shape: const StadiumBorder(),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+      ),
+      child: Text(label),
     );
   }
 }

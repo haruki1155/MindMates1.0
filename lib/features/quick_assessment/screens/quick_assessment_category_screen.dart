@@ -12,6 +12,7 @@ import '../models/quick_assessment_models.dart';
 import '../services/quick_assessment_action_policy.dart';
 import '../widgets/quick_assessment_widgets.dart';
 import '../widgets/quick_result_visuals.dart';
+import '../widgets/quick_result_explanations.dart';
 
 class QuickAssessmentCategoryScreen extends StatefulWidget {
   const QuickAssessmentCategoryScreen({super.key});
@@ -101,7 +102,7 @@ class _QuickAssessmentCategoryScreenState
           icon: const Icon(Icons.calendar_month_outlined, size: 34),
           title: const Text('Would you like to talk with a PACC counselor?'),
           content: const Text(
-            'Your quick check-in suggests that additional support may be helpful. Would you like to request a confidential counseling appointment with PACC?',
+            'Your answers suggest that extra support may help. Would you like to request a confidential counseling appointment with PACC?',
           ),
           actions: [
             TextButton(
@@ -155,12 +156,16 @@ class _DecisionContent extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          QuickRoleIcon(role: role, size: 30),
+          QuickRoleIcon(role: role, size: 18),
           if (provider.quickResult != null) ...[
             const SizedBox(height: 16),
-            const Text(
-              'Your quick well-being profile',
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+            Text(
+              '${role.label} · Quick check-in result',
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                color: QuickAssessmentPalette.secondaryText,
+              ),
             ),
             const SizedBox(height: 12),
             QuickResultIllustration(
@@ -172,7 +177,7 @@ class _DecisionContent extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: QuickAssessmentPalette.text,
-                fontSize: 19,
+                fontSize: 24,
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -182,161 +187,144 @@ class _DecisionContent extends StatelessWidget {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: QuickAssessmentPalette.secondaryText,
-                fontSize: 13,
-                height: 1.4,
+                fontSize: 15,
+                height: 1.45,
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Support option: ${provider.quickResult!.interpretation.supportPriority.label}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 14),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Your strengths',
-                style: TextStyle(fontWeight: FontWeight.w900),
+          ],
+          const SizedBox(height: 20),
+          Container(
+            key: const Key('quick-next-step-card'),
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: QuickAssessmentPalette.cream,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: QuickAssessmentPalette.primary,
+                width: 1.5,
               ),
             ),
-            for (final strength
-                in provider.quickResult!.interpretation.strengthInsights)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text('• $strength'),
-              ),
-            if (provider
-                .quickResult!
-                .interpretation
-                .focusInsights
-                .isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Areas to explore',
-                  style: TextStyle(fontWeight: FontWeight.w900),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'What to do next',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                 ),
-              ),
-              for (final focus
-                  in provider.quickResult!.interpretation.focusInsights)
-                Align(alignment: Alignment.centerLeft, child: Text('• $focus')),
-            ],
-            const SizedBox(height: 12),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Brief response indicators',
-                style: TextStyle(fontWeight: FontWeight.w900),
-              ),
-            ),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Each indicator is based on one answer and is not a complete category assessment.',
-                style: TextStyle(
-                  color: QuickAssessmentPalette.secondaryText,
-                  fontSize: 12,
+                const SizedBox(height: 8),
+                Text(
+                  actionPolicy?.heading ?? 'Full Assessment Optional',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: QuickAssessmentPalette.text,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    height: 1.08,
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            for (final indicator
-                in provider.quickResult!.interpretation.domainResults)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: QuickIndicatorRow(
-                  key: ValueKey('quick-indicator-${indicator.domain}'),
-                  indicator: indicator,
+                const SizedBox(height: 10),
+                Text(
+                  actionPolicy?.guidance ?? _messageFor(provider, role),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: QuickAssessmentPalette.secondaryText,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.42,
+                  ),
                 ),
-              ),
+                if (provider.quickResult != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Support level: ${provider.quickResult!.interpretation.supportPriority.label}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: QuickAssessmentPalette.secondaryText,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                if (actionPolicy?.showsFullAssessmentAction ?? true)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: QuickAssessmentPalette.cream,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: QuickAssessmentPalette.softBorder,
+                      ),
+                    ),
+                    child: Text(
+                      'You can take the full ${role.label.toLowerCase()} assessment now for deeper insights, or later from your dashboard.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: QuickAssessmentPalette.mutedText,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        height: 1.36,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 26),
+                if (actionPolicy?.showsFullAssessmentAction ?? true) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton(
+                      onPressed: () => _openFullAssessment(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: QuickAssessmentPalette.primary,
+                        foregroundColor: QuickAssessmentPalette.text,
+                        elevation: 4,
+                        shadowColor: QuickAssessmentPalette.shadow,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      child: const Text('Take Full Assessment'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (actionPolicy?.showsAppointmentAction ?? false) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    height: 44,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _openPaccBooking(context),
+                      icon: const Icon(Icons.calendar_month_outlined),
+                      label: const Text('Book a PACC appointment'),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ],
+            ),
+          ),
+          if (provider.quickResult != null) ...[
+            const SizedBox(height: 18),
+            QuickResultExplanations(result: provider.quickResult!),
             const SizedBox(height: 14),
             const Align(
               alignment: Alignment.centerLeft,
               child: QuickPatternLegend(),
             ),
-            const Divider(height: 28),
-          ],
-          const SizedBox(height: 20),
-          Text(
-            actionPolicy?.heading ?? 'Full Assessment Optional',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: QuickAssessmentPalette.text,
-              fontSize: 27,
-              fontWeight: FontWeight.w900,
-              height: 1.08,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            actionPolicy?.guidance ?? _messageFor(provider, role),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: QuickAssessmentPalette.secondaryText,
-              fontSize: 14.5,
-              fontWeight: FontWeight.w700,
-              height: 1.42,
-            ),
-          ),
-          const SizedBox(height: 18),
-          if (actionPolicy?.showsFullAssessmentAction ?? true)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: QuickAssessmentPalette.cream,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: QuickAssessmentPalette.softBorder),
-              ),
-              child: Text(
-                'You can answer the full ${role.label.toLowerCase()} assessment now for deeper insights, or take it later from your dashboard.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: QuickAssessmentPalette.mutedText,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  height: 1.36,
-                ),
-              ),
-            ),
-          const SizedBox(height: 26),
-          if (actionPolicy?.showsFullAssessmentAction ?? true) ...[
-            SizedBox(
-              width: double.infinity,
-              height: 46,
-              child: ElevatedButton(
-                onPressed: () => _openFullAssessment(context),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: QuickAssessmentPalette.primary,
-                  foregroundColor: QuickAssessmentPalette.text,
-                  elevation: 4,
-                  shadowColor: QuickAssessmentPalette.shadow,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  textStyle: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                child: const Text('Take Full Assessment'),
-              ),
-            ),
             const SizedBox(height: 12),
-          ],
-          if (actionPolicy?.showsAppointmentAction ?? false) ...[
-            SizedBox(
-              width: double.infinity,
-              height: 44,
-              child: OutlinedButton.icon(
-                onPressed: () => _openPaccBooking(context),
-                icon: const Icon(Icons.calendar_month_outlined),
-                label: const Text('Book a PACC appointment'),
+            const Text(
+              'This brief check-in looks at five areas of well-being. It is not a diagnosis. For a complete picture, take the Full Assessment.',
+              style: TextStyle(
+                fontSize: 12,
+                color: QuickAssessmentPalette.secondaryText,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
           ],
           SizedBox(
             width: double.infinity,
@@ -446,8 +434,18 @@ class _DecisionContent extends StatelessWidget {
       builder: (context) => AlertDialog(
         backgroundColor: QuickAssessmentPalette.card,
         title: const Text('Assessment limit reached'),
-        content: Text(
-          'You can take the full assessment up to 2 times in 7 days, with 2 days between attempts. $nextEligibleText',
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'You can take the full assessment up to 2 times in 7 days, with 2 school days between attempts. $nextEligibleText',
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'School days are Monday to Friday, so weekends are not counted.',
+            ),
+          ],
         ),
         actions: [
           FilledButton(
@@ -485,10 +483,6 @@ class _DecisionContent extends StatelessWidget {
     ];
 
     final local = date.toLocal();
-    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
-    final minute = local.minute.toString().padLeft(2, '0');
-    final period = local.hour >= 12 ? 'PM' : 'AM';
-
-    return '${weekdays[local.weekday - 1]}, ${months[local.month - 1]} ${local.day}, ${local.year} at $hour:$minute $period';
+    return '${weekdays[local.weekday - 1]}, ${months[local.month - 1]} ${local.day}, ${local.year}';
   }
 }

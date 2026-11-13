@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,9 @@ import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/repositories/mind_aid_context_repository.dart';
 import 'package:mind_mates/repositories/mind_aid_repository_screen.dart';
 import 'package:mind_mates/services/firebase/firestore_service.dart';
+import 'package:mind_mates/services/firebase/mind_aid_cloud_service.dart';
+import 'package:mind_mates/features/mind_aid/domain/mind_aid_integration_models.dart';
+import 'package:mind_mates/features/mind_aid/domain/mind_aid_companion_models.dart';
 
 void main() {
   group('MindAidDatasetLoader', () {
@@ -189,7 +193,7 @@ void main() {
       );
 
       expect(second.primaryIntent, 'academic_stress');
-      expect(second.text, contains('stay with academic stress'));
+      expect(second.text, contains('academic stress'));
     });
 
     test('asks a clarifying question for low-confidence input', () async {
@@ -199,7 +203,95 @@ void main() {
       );
 
       expect(result.primaryIntent, 'general_support');
-      expect(result.text, contains('Tell me a bit more about what happened'));
+      expect(result.text, MindAidChatEngine.defaultGreeting);
+      expect(result.requiresEscalation, isFalse);
+    });
+
+    test('returns default greeting for programming questions', () async {
+      final result = await MindAidChatEngine().respond(
+        const MindAidChatRequest(
+          userId: 'user_1',
+          text: 'Write Python code for me',
+        ),
+        dataset,
+      );
+
+      expect(result.text, MindAidChatEngine.defaultGreeting);
+      expect(result.requiresEscalation, isFalse);
+    });
+
+    test('returns default greeting for sports questions', () async {
+      final result = await MindAidChatEngine().respond(
+        const MindAidChatRequest(
+          userId: 'user_1',
+          text: 'Who won the NBA Finals?',
+        ),
+        dataset,
+      );
+
+      expect(result.text, MindAidChatEngine.defaultGreeting);
+    });
+
+    test('returns default greeting for mathematics', () async {
+      final result = await MindAidChatEngine().respond(
+        const MindAidChatRequest(userId: 'user_1', text: 'What is 50 x 20?'),
+        dataset,
+      );
+
+      expect(result.text, MindAidChatEngine.defaultGreeting);
+    });
+
+    test('responds to greetings with the default greeting', () async {
+      final result = await MindAidChatEngine().respond(
+        const MindAidChatRequest(userId: 'user_1', text: 'Hello!'),
+        dataset,
+      );
+
+      expect(result.text, MindAidChatEngine.defaultGreeting);
+    });
+
+    test('blocks unrelated short questions after a wellness topic', () async {
+      final engine = MindAidChatEngine();
+
+      await engine.respond(
+        const MindAidChatRequest(
+          userId: 'user_1',
+          text: 'I am stressed about exams',
+        ),
+        dataset,
+      );
+
+      final result = await engine.respond(
+        const MindAidChatRequest(userId: 'user_1', text: 'Who won?'),
+        dataset,
+      );
+
+      expect(result.text, MindAidChatEngine.defaultGreeting);
+    });
+
+    test('preserves mental wellness support', () async {
+      final result = await MindAidChatEngine().respond(
+        const MindAidChatRequest(
+          userId: 'user_1',
+          text: 'I am stressed about exams',
+        ),
+        dataset,
+      );
+
+      expect(result.text, isNot(MindAidChatEngine.defaultGreeting));
+    });
+
+    test('preserves crisis safety response', () async {
+      final result = await MindAidChatEngine().respond(
+        const MindAidChatRequest(
+          userId: 'user_1',
+          text: 'I want to end my life',
+        ),
+        dataset,
+      );
+
+      expect(result.requiresEscalation, isTrue);
+      expect(result.text, isNot(MindAidChatEngine.defaultGreeting));
     });
 
     test('safety override wins over other matched concerns', () async {
@@ -496,7 +588,8 @@ void main() {
             mindfulBreathingMinutes: 6,
             recommendedNextActions: const ['Talk to PACC'],
           ),
-          user: const {'dayStreak': 5},
+          user: const {'dayStreak': 5, 'lastActivityDateKey': '2026-07-04'},
+          now: DateTime(2026, 7, 4, 12),
         );
 
         expect(snapshot, isNotNull);
@@ -510,6 +603,16 @@ void main() {
         expect(snapshot.breathingSessionCount, 2);
       },
     );
+
+    test('streak drops to 0 when the last mood check-in is stale', () {
+      final snapshot = MindAidContextRepository.buildSnapshot(
+        user: const {'dayStreak': 5, 'lastActivityDateKey': '2026-07-01'},
+        now: DateTime(2026, 7, 4, 12),
+      );
+
+      expect(snapshot, isNotNull);
+      expect(snapshot!.currentStreak, 0);
+    });
 
     test('returns null when no wellness signals are available', () {
       final snapshot = MindAidContextRepository.buildSnapshot();
@@ -549,6 +652,171 @@ void main() {
   });
 
   group('MindAidRepository', () {
+    for (final source in ['gemini', 'dialogflow', 'controlled_safety']) {
+      test('cloud $source owns persistence and authoritative fields', () async {
+        final firestore = _CapturingFirestoreService();
+        final pending = Completer<MindAidCloudResponse>();
+        final entered = Completer<void>();
+        final cloud = _TestCloudService(() {
+          entered.complete();
+          return pending.future;
+        });
+        final repository = MindAidRepository(
+          datasetLoader: MindAidDatasetLoader(bundle: _MindAidTestBundle()),
+          firestoreService: firestore,
+          cloudService: cloud,
+        );
+        final sending = repository.sendMessage(
+          userId: 'auth_user_1',
+          text: 'I feel anxious',
+          preferences: _cloudPreferences,
+          requestId: 'request-12345678',
+        );
+        await entered.future;
+        expect(
+          firestore.createdDocuments,
+          isEmpty,
+          reason: 'No local user write may race server persistence',
+        );
+        pending.complete(
+          MindAidCloudResponse.fromMap({
+            'messageId': 'auth_user_1_request-12345678_assistant',
+            'text': 'Server support',
+            'intent': 'server_intent',
+            'confidence': 0.91,
+            'safetyLevel': 'crisisOrImmediateRisk',
+            'source': source,
+            'suggestions': ['Contact support'],
+            'actions': [
+              {'type': 'openCounselingServices', 'label': 'Support'},
+            ],
+            'requiresEscalation': true,
+            'fallbackReason': 'server_reason',
+            'effectiveConversationMode': 'supportive',
+            if (source == 'gemini') 'model': 'gemini-3.8-flash',
+          }),
+        );
+        final result = await sending;
+        expect(firestore.createdDocuments, isEmpty);
+        expect(result.userMessageSaved, isTrue);
+        expect(result.message.id, 'auth_user_1_request-12345678_assistant');
+        expect(result.message.text, 'Server support');
+        expect(result.message.primaryIntent, 'server_intent');
+        expect(result.message.confidence, 0.91);
+        expect(result.message.source, source);
+        expect(result.message.safetyLevel, 'crisisOrImmediateRisk');
+        expect(result.message.requiresEscalation, isTrue);
+        expect(result.message.status, 'urgent');
+        expect(result.message.fallbackReason, 'server_reason');
+        expect(result.message.effectiveConversationMode, 'supportive');
+        expect(result.chatResponse.effectiveConversationMode, 'supportive');
+        expect(
+          result.message.actions.single.type,
+          MindAidActionType.openCounselingServices,
+        );
+        expect(
+          result.message.model,
+          source == 'gemini' ? 'gemini-3.8-flash' : null,
+        );
+        expect(
+          result.chatResponse.safetyLevel,
+          MindAidSafetyLevel.crisisOrImmediateRisk,
+        );
+        expect(result.chatResponse.requiresEscalation, isTrue);
+        expect(result.chatResponse.followUpQuestions, ['Contact support']);
+      });
+    }
+
+    test('failed cloud call saves user then local assistant once', () async {
+      final firestore = _CapturingFirestoreService();
+      final repository = MindAidRepository(
+        datasetLoader: MindAidDatasetLoader(bundle: _MindAidTestBundle()),
+        firestoreService: firestore,
+        cloudService: _TestCloudService(() async {
+          throw StateError('cloud unavailable');
+        }),
+      );
+      final result = await repository.sendMessage(
+        userId: 'auth_user_1',
+        text: 'I feel anxious',
+        preferences: _cloudPreferences,
+        requestId: 'request-12345678',
+      );
+      expect(result.userMessageSaved, isTrue);
+      expect(firestore.createdDocuments, hasLength(2));
+      expect(firestore.createdDocuments.first['sender'], 'user');
+      expect(firestore.createdDocuments.first['text'], 'I feel anxious');
+      expect(firestore.createdDocuments.last['sender'], 'assistant');
+      expect(result.message.source, 'local');
+      expect(result.message.fallbackReason, 'cloud_unavailable');
+    });
+
+    test(
+      'lost cloud response cannot create duplicates or overwrite server safety',
+      () async {
+        final firestore = _CommittedTurnFirestoreService();
+        final repository = MindAidRepository(
+          datasetLoader: MindAidDatasetLoader(bundle: _MindAidTestBundle()),
+          firestoreService: firestore,
+          cloudService: _TestCloudService(() async {
+            // Model the callable transaction committing before transport fails.
+            firestore.documents.addAll({
+              'auth_user_1_request-12345678_user': {'text': 'I feel anxious'},
+              'auth_user_1_request-12345678_assistant': {
+                'text': 'Controlled support',
+                'safetyLevel': 'highDistress',
+                'requiresEscalation': true,
+              },
+            });
+            throw StateError('response lost after commit');
+          }),
+        );
+        await repository.sendMessage(
+          userId: 'auth_user_1',
+          text: 'I feel anxious',
+          preferences: _cloudPreferences,
+          requestId: 'request-12345678',
+        );
+        expect(firestore.documents, hasLength(2));
+        expect(
+          firestore.documents['auth_user_1_request-12345678_user']?['text'],
+          'I feel anxious',
+        );
+        expect(
+          firestore
+              .documents['auth_user_1_request-12345678_assistant']?['requiresEscalation'],
+          isTrue,
+        );
+        expect(
+          firestore
+              .documents['auth_user_1_request-12345678_assistant']?['safetyLevel'],
+          'highDistress',
+        );
+      },
+    );
+
+    test('local safety prevents cloud calls', () async {
+      final firestore = _CapturingFirestoreService();
+      var cloudCalled = false;
+      final repository = MindAidRepository(
+        datasetLoader: MindAidDatasetLoader(bundle: _MindAidTestBundle()),
+        firestoreService: firestore,
+        cloudService: _TestCloudService(() async {
+          cloudCalled = true;
+          throw StateError('must not call');
+        }),
+      );
+      final result = await repository.sendMessage(
+        userId: 'auth_user_1',
+        text: 'I want to end my life',
+        preferences: _cloudPreferences,
+      );
+      expect(cloudCalled, isFalse);
+      expect(result.chatResponse.requiresEscalation, isTrue);
+      expect(result.message.safetyLevel, 'crisisOrImmediateRisk');
+      expect(firestore.createdDocuments, hasLength(2));
+    });
+
     test('returns typed suggestions and assistant message models', () async {
       final repository = MindAidRepository(
         datasetLoader: MindAidDatasetLoader(bundle: _MindAidTestBundle()),
@@ -862,4 +1130,44 @@ Map<String, dynamic> _record({
 
 String _jsonRecords(List<Map<String, dynamic>> records) {
   return jsonEncode({'version': 1, 'records': records});
+}
+
+const _cloudPreferences = MindAidPreferences(
+  hasDecision: true,
+  cloudConsent: true,
+  personalizationEnabled: false,
+  conversationId: 'conversation-12345678',
+);
+
+class _TestCloudService implements MindAidCloudService {
+  _TestCloudService(this.respond);
+  final Future<MindAidCloudResponse> Function() respond;
+  @override
+  Future<MindAidCloudResponse> send({
+    required String requestId,
+    required String conversationId,
+    required String text,
+    required String launchContext,
+    required MindAidConversationMode conversationMode,
+    required bool explicitListening,
+    String? sessionInstanceId,
+    List<Map<String, String>> recentTurns = const [],
+  }) => respond();
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+// Mirrors the rules' create-only message persistence for client fallback writes.
+class _CommittedTurnFirestoreService extends FirestoreService {
+  final documents = <String, Map<String, dynamic>>{};
+  @override
+  Future<void> setDocument(
+    String collection,
+    String documentId,
+    Map<String, dynamic> data, {
+    bool merge = false,
+  }) async {
+    if (documents.containsKey(documentId)) throw StateError('update denied');
+    documents[documentId] = data;
+  }
 }

@@ -14,8 +14,10 @@ import '../../../providers/mood_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/sleep_provider.dart';
 import '../../../providers/user_provider.dart';
+import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
 import '../../mood/config/mood_v2_feature_flag.dart';
+import '../../student_info/screens/student_information_screen.dart';
 import '../../mood/domain/mood_v2_analytics.dart';
 
 typedef EditProfileImagePicker = Future<EditProfileImage?> Function();
@@ -44,6 +46,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _requestedReport = false;
   bool _requestedSleep = false;
   bool _isSigningOut = false;
+
+  static const _studentInformationAction = ProfileActionItem(
+    label: 'Student Information',
+    icon: Icons.badge_outlined,
+  );
 
   static const List<ProfileActionItem> _actions = [
     ProfileActionItem(
@@ -200,8 +207,26 @@ class _ProfileScreenState extends State<ProfileScreen>
                           _AnimatedProfileSection(
                             delay: 120,
                             child: _ActionListCard(
-                              actions: _actions,
+                              actions: [
+                                if (userProvider
+                                        .user
+                                        ?.effectivePopulationRole ==
+                                    PopulationRole.student)
+                                  _studentInformationAction,
+                                ..._actions,
+                              ],
                               onActionTap: (action) {
+                                if (action.label == 'Student Information') {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) =>
+                                          const StudentInformationScreen(
+                                            mode: StudentInfoMode.edit,
+                                          ),
+                                    ),
+                                  );
+                                  return;
+                                }
                                 if (action.label == 'Secret Chats profile') {
                                   Navigator.of(
                                     context,
@@ -340,6 +365,15 @@ class _ProfileScreenState extends State<ProfileScreen>
               )
             : null);
     if (effectiveUser == null) return null;
+    // Same streak as My Mood Journey when V2 reading is on; otherwise the
+    // stored counter, shown as 0 once a day has been missed.
+    final dayStreak =
+        moodV2Analytics?.streak.currentDays ??
+        StreakCalculator.effectiveStreak(
+          storedStreak: effectiveUser.dayStreak,
+          lastActivityDateKey: effectiveUser.lastActivityDateKey,
+          now: DateTime.now(),
+        );
 
     return ProfileViewData(
       displayName: effectiveUser.displayName,
@@ -350,7 +384,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       metrics: [
         ProfileMetricData(
           label: 'Day Streak',
-          value: '${effectiveUser.dayStreak}',
+          value: '$dayStreak',
           icon: Icons.local_fire_department,
         ),
         ProfileMetricData(

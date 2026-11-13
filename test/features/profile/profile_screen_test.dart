@@ -9,6 +9,7 @@ import 'package:mind_mates/features/profile/screens/profile_screen.dart';
 import 'package:mind_mates/models/mental_health_activity_summary.dart';
 import 'package:mind_mates/models/assessment_explanation_model.dart';
 import 'package:mind_mates/models/report_model.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/providers/mental_health_activity_provider.dart';
@@ -124,6 +125,38 @@ void main() {
     expect(find.text('--/10'), findsNWidgets(2));
   });
 
+  for (final (key, expected) in [('2000-01-01', '0'), (null, '5')]) {
+    testWidgets('profile day streak shows the effective streak ($expected)', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final provider = UserProvider(_FakeUserRepository())
+        ..setUser(
+          UserModel(
+            id: 'user_1',
+            email: 'leo@example.com',
+            role: 'student',
+            dayStreak: 5,
+            lastActivityDateKey:
+                key ?? StreakCalculator.dateKey(DateTime.now()),
+          ),
+        );
+
+      await tester.pumpWidget(_profileApp(provider));
+      await tester.pump();
+
+      final metric = find.ancestor(
+        of: find.text('Day Streak'),
+        matching: find.byType(Column),
+      );
+      expect(
+        find.descendant(of: metric.first, matching: find.text(expected)),
+        findsOneWidget,
+      );
+    });
+  }
+
   testWidgets('Edit Profile offers a photo upload action', (tester) async {
     final imageBytes = base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
@@ -144,10 +177,8 @@ void main() {
     await tester.pumpWidget(
       _profileApp(
         provider,
-        imagePicker: () async => EditProfileImage(
-          bytes: imageBytes,
-          contentType: 'image/png',
-        ),
+        imagePicker: () async =>
+            EditProfileImage(bytes: imageBytes, contentType: 'image/png'),
       ),
     );
     await tester.tap(find.byTooltip('Edit profile'));
@@ -207,6 +238,33 @@ void main() {
     expect(find.textContaining('Data Privacy Act of 2012'), findsOneWidget);
     expect(find.byKey(const Key('terms-close')), findsOneWidget);
   });
+
+  for (final student in [true, false]) {
+    testWidgets(
+      'Student Information tile is ${student ? 'shown' : 'hidden'} for ${student ? 'students' : 'employees'}',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(800, 4000));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final userProvider = UserProvider(_FakeUserRepository())
+          ..setUser(
+            UserModel(
+              id: 'user_1',
+              email: 'leo@example.com',
+              populationRole: student
+                  ? PopulationRole.student
+                  : PopulationRole.teaching,
+            ),
+          );
+        await tester.pumpWidget(
+          _profileApp(userProvider, data: _dataFrom(userProvider.user!)),
+        );
+        expect(
+          find.text('Student Information'),
+          student ? findsOneWidget : findsNothing,
+        );
+      },
+    );
+  }
 
   testWidgets('profile Log Out confirms, signs out, and opens login', (
     tester,
@@ -369,7 +427,8 @@ void main() {
         },
         'interpretation': {
           'userSummary': 'Saved teaching assessment summary.',
-          'overallResponseSummary': 'Saved overall response pattern.',
+          'overallResponseSummary':
+              'Saved overall response pattern. You answered 50 of 50 questions, giving this result high response completeness.',
           'domainSummaries': [
             {
               'domainId': 'teachingWorkloadDemands',
@@ -417,6 +476,7 @@ void main() {
       expect(find.text('Saved teaching assessment summary.'), findsOneWidget);
       expect(find.text('What Your Responses Suggest Overall'), findsOneWidget);
       expect(find.text('Saved overall response pattern.'), findsOneWidget);
+      expect(find.textContaining('response completeness'), findsNothing);
       expect(find.text('Teaching Workload & Role Demands'), findsOneWidget);
       expect(find.text('Saved workload reflection.'), findsOneWidget);
       expect(find.text('Saved focus insight.'), findsOneWidget);

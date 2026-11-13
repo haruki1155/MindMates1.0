@@ -33,7 +33,7 @@ class AdminAssessmentDetailScreen extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              'User reference: ${_abbreviate(userLabel)}',
+              'Name: $userLabel',
               style: const TextStyle(
                 color: AdminColors.muted,
                 fontSize: 11,
@@ -1218,11 +1218,6 @@ String _v4DomainStatusLabel(String? value) => switch (value) {
   'supportMayHelp' => 'Support may be helpful',
   _ => 'More responses needed',
 };
-
-String _abbreviate(String value) {
-  if (value.length <= 18) return value;
-  return '${value.substring(0, 8)}…${value.substring(value.length - 6)}';
-}
 
 String _date(Object? value) {
   final date = value is Timestamp

@@ -5,6 +5,8 @@ class RouteNames {
   static const onboarding = '/onboarding';
   static const login = '/login';
   static const signup = '/signup';
+  static const studentActivation = '/activate';
+  static const studentInformation = '/student-information';
   static const emailVerification = '/email-verification';
   static const profileSetup = '/profile-setup';
   static const forgotPassword = '/forgot-password';
@@ -13,6 +15,8 @@ class RouteNames {
   static const quickAssessmentCategory = '/quick-assessment/category';
   static const studentAssessment = '/student-assessment';
   static const studentAssessmentComplete = '/student-assessment/complete';
+  static const messages = '/messages';
+  static const counselorChat = '/messages/counselor';
   static const home = '/home';
   static const appointmentCalendar = '/home/appointment-calendar';
   static const services = '/services';
