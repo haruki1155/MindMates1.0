@@ -60,6 +60,55 @@ test("a file code given for a stored record is not displaced by a derived one", 
   }
 });
 
+test("two stored rows naming the same code both only warn", async () => {
+  const {validateCatalogRows} = await load();
+  const index = {
+    colleges: [
+      {id: "x1", name: "College of Law", code: "CL", active: true},
+      {id: "x2", name: "College of Arts", code: "CA", active: true},
+    ],
+    departments: [], courses: [],
+  };
+  const law = {college: "College of Law", collegeCode: "ZZ", department: "Law Dept", course: "Juris Doctor"};
+  const arts = {college: "College of Arts", collegeCode: "ZZ", department: "Arts Dept", course: "BA Arts"};
+  for (const rows of [[law, arts], [arts, law]]) {
+    const out = validateCatalogRows(rows, index);
+    assert.deepEqual(out.results.map((r) => r.ok), [true, true], JSON.stringify(out.results));
+    for (const result of out.results) {
+      assert.match(result.ok ? result.warnings.join(" ") : "", /differs from the stored code/);
+    }
+    assert.equal(out.counts.error, 0);
+  }
+});
+
+test("a file code given to a new record wins, and the stored row naming it only warns", async () => {
+  const {validateCatalogRows} = await load();
+  const index = {colleges: [{id: "x1", name: "College of Law", code: "CL", active: true}], departments: [], courses: []};
+  const fresh = {college: "City Park", collegeCode: "CP", department: "Park Dept", course: "BS Park"};
+  const stored = {college: "College of Law", collegeCode: "CP", department: "Law Dept", course: "Juris Doctor"};
+  for (const rows of [[fresh, stored], [stored, fresh]]) {
+    const out = validateCatalogRows(rows, index);
+    assert.deepEqual(out.results.map((r) => r.ok), [true, true], JSON.stringify(out.results));
+    const storedRow = out.results[rows.indexOf(stored)];
+    assert.match(storedRow.ok ? storedRow.warnings.join(" ") : "", /differs from the stored code “CL”/);
+    assert.deepEqual(out.plan.colleges.map((c) => [c.name, c.code]), [["City Park", "CP"]]);
+  }
+});
+
+test("a failed row's stored code claim does not deny that code to a successful row", async () => {
+  const {validateCatalogRows} = await load();
+  const index = {colleges: [{id: "x1", name: "College of Law", code: "CL", active: true}], departments: [], courses: []};
+  const out = validateCatalogRows([
+    // Claims DX for its department and plans "City Park", whose name derives CP.
+    {college: "City Park", department: "Park Dept", departmentCode: "DX", course: "BS Park"},
+    // Fails on the already-claimed department code, so its CP claim must not reserve anything.
+    {college: "College of Law", collegeCode: "CP", department: "Law Dept", departmentCode: "DX",
+      course: "Juris Doctor"},
+  ], index);
+  assert.deepEqual(out.results.map((r) => r.ok), [true, false], JSON.stringify(out.results));
+  assert.deepEqual(out.plan.colleges.map((c) => [c.name, c.code]), [["City Park", "CP"]]);
+});
+
 test("a sparse code column is read before any code is derived, in either row order", async () => {
   const {validateCatalogRows} = await load();
   const blankFirst = [

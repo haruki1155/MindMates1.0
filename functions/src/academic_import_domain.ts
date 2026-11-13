@@ -98,32 +98,47 @@ type Level = {
   prefix: string;
   /** `${parentRef}\u0000${nameKey}` -> stored record. */
   storedByName: Map<string, ExistingRecord>;
-  /** normalized code -> the record or planned group that owns it. */
+  /**
+   * normalized code -> the record that will actually hold it: a stored record under its stored code, or
+   * a planned group. Only an owner can be blamed for a collision.
+   */
   codeOwner: Map<string, {id: string; name: string}>;
+  /**
+   * Codes derivation must stay away from although nobody will write them — a code the file gave for a
+   * record that already exists. Such a code is never persisted (the stored code is kept and the row only
+   * warns), so it must never be attributed to anyone either.
+   */
+  reserved: Set<string>;
   /** `${parentRef}\u0000${nameKey}` -> planned group. */
   groups: Map<string, Group>;
   order: Group[];
 };
 
 function buildLevel(label: Level["label"], prefix: string, records: ExistingRecord[], parented: boolean): Level {
-  const level: Level = {label, prefix, storedByName: new Map(), codeOwner: new Map(), groups: new Map(), order: []};
+  const level: Level = {label, prefix, storedByName: new Map(), codeOwner: new Map(), reserved: new Set(),
+    groups: new Map(), order: []};
   for (const stored of records) {
     const parent = parented ? `id:${stored.parentId ?? ""}` : "";
     level.storedByName.set(`${parent}\u0000${normalizeKey(stored.name)}`, stored);
     const code = normalizeKey(stored.code);
-    // Archived records keep their code reserved, so a new record can never shadow one.
+    // Archived records keep their code too, so a new record can never shadow one.
     if (code && !level.codeOwner.has(code)) level.codeOwner.set(code, {id: stored.id, name: stored.name});
   }
   return level;
 }
 
+function taken(level: Level, code: string): boolean {
+  const codeKey = normalizeKey(code);
+  return level.codeOwner.has(codeKey) || level.reserved.has(codeKey);
+}
+
 function freeDerivedCode(level: Level, name: string): string {
   const base = deriveCode(name);
-  if (!level.codeOwner.has(normalizeKey(base))) return base;
+  if (!taken(level, base)) return base;
   for (let suffix = 2; ; suffix++) {
     const tail = String(suffix);
     const candidate = `${base.slice(0, CODE_MAX - tail.length)}${tail}`;
-    if (!level.codeOwner.has(normalizeKey(candidate))) return candidate;
+    if (!taken(level, candidate)) return candidate;
   }
 }
 
@@ -165,14 +180,11 @@ function resolveName(level: Level, parent: string, name: string, code: string, r
 }
 
 /**
- * Pass two: every code the file gave is reserved first, then the rest are derived. Doing it the other way
- * round lets a code invented for an early row outrank a code the file wrote on a later one.
- * `storedClaims` are the codes the file gave for records that already exist. Those codes are never
- * written — the stored code is kept and the row only warns — but they are still reserved, under the stored
- * record's own id, so that a code the file has named cannot be derived for an unrelated new record.
+ * Pass two, step one: the codes the file gave for records it is creating. Those are the only file codes
+ * anybody will write, so they are the only ones that take ownership — and the only ones that can be
+ * blamed when two names claim the same code.
  */
-function assignCodes(level: Level, rowErrors: string[][],
-  storedClaims: {stored: ExistingRecord; code: string}[]): void {
+function claimGivenCodes(level: Level, rowErrors: string[][]): void {
   for (const group of level.order) {
     const given = group.mentions.filter((mention) => mention.code);
     if (!given.length) continue;
@@ -194,12 +206,13 @@ function assignCodes(level: Level, rowErrors: string[][],
     group.code = first.code;
     level.codeOwner.set(codeKey, {id: group.key, name: group.name});
   }
-  for (const claim of storedClaims) {
-    const codeKey = normalizeKey(claim.code);
-    // An already-owned code is left to pass three, which tells a warning from a genuine collision.
-    if (!codeKey || level.codeOwner.has(codeKey)) continue;
-    level.codeOwner.set(codeKey, {id: claim.stored.id, name: claim.stored.name});
-  }
+}
+
+/**
+ * Pass two, step two: derivation. Every code the file named — for a new record or for a stored one — is
+ * already off the table by now, so an invented code can never take a code the file spoke for.
+ */
+function deriveMissingCodes(level: Level): void {
   for (const group of level.order) {
     if (group.code || group.blocked) continue;
     group.code = freeDerivedCode(level, group.name);
@@ -276,24 +289,31 @@ export function validateCatalogRows(rows: CatalogRow[], index: AcademicCatalogIn
     return state;
   });
 
-  // Pass two: file codes first — for planned records and for stored ones alike — derived codes after.
-  for (const level of [levels.colleges, levels.departments, levels.courses]) {
-    const claims = states.flatMap((state) => state.refs
-      .filter((ref) => ref.level === level && ref.stored && ref.code)
-      .map((ref) => ({stored: ref.stored as ExistingRecord, code: ref.code})));
-    assignCodes(level, rowErrors, claims);
+  // Pass two: codes. Every code the file gave is settled before a single one is derived, so a derived
+  // code can never outrank a code the file wrote further down.
+  const allLevels = [levels.colleges, levels.departments, levels.courses];
+  for (const level of allLevels) claimGivenCodes(level, rowErrors);
+  // A code named for a record that already exists is held out of derivation but owned by nobody: it is
+  // never written. Claims from a row that has already failed are ignored, so a doomed row cannot deny a
+  // code to a row that succeeds.
+  for (const state of states) {
+    if (rowErrors[state.index].length) continue;
+    for (const ref of state.refs) {
+      if (ref.stored && ref.code) ref.level.reserved.add(normalizeKey(ref.code));
+    }
   }
+  for (const level of allLevels) deriveMissingCodes(level);
 
   // Pass three: a row's outcome, now that every code is settled.
   const results: CatalogRowResult[] = states.map((state) => {
     const errors = rowErrors[state.index];
     const warnings: string[] = [];
+    // A code the file gives for a record that already exists is never written, so it cannot collide with
+    // anything: the stored code is kept and the row is told so. Only a code somebody will write — a
+    // planned record's — can be a collision, and that is settled in pass two.
     for (const ref of state.refs) {
       if (!ref.stored || !ref.code) continue;
-      const owner = ref.level.codeOwner.get(normalizeKey(ref.code));
-      if (owner && owner.id !== ref.stored.id) {
-        errors.push(`${ref.level.label} code “${ref.code}” is already used by “${owner.name}”.`);
-      } else if (normalizeKey(ref.code) !== normalizeKey(ref.stored.code)) {
+      if (normalizeKey(ref.code) !== normalizeKey(ref.stored.code)) {
         warnings.push(`${ref.level.label} code “${ref.code}” differs from the stored code ` +
           `“${ref.stored.code}”; the stored code was kept.`);
       }

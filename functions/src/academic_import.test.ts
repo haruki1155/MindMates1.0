@@ -165,7 +165,7 @@ test("a clean import creates the catalogue, audits once, and re-running is a no-
   assert.equal((await docsOf("colleges")).length, 2);
 });
 
-test("a file code colliding with another record errors; a differing code only warns", async () => {
+test("a new record cannot take a stored code, while a stored row naming one only warns", async () => {
   // Seeded by this test alone, so it neither reads nor depends on what another test created.
   await commit.run({auth, data: {fileName: "seed.xlsx", rows: [
     {college: name("Collide One"), collegeCode: `${run}C1`, department: name("Collide Dept One"),
@@ -176,11 +176,20 @@ test("a file code colliding with another record errors; a differing code only wa
   const two = (await docsOf("colleges")).find((c) => c.name === name("Collide Two")) as Row;
   assert.equal(two.code, `${run}C2`);
 
-  const collide = [{college: name("Collide Two"), collegeCode: `${run}c1`.toLowerCase(),
-    department: name("Collide Dept Two"), course: name("BS Collide Two")}];
+  // A code somebody will write — here a new college's — cannot take a stored record's code.
+  const collide = [{college: name("Collide Three"), collegeCode: `${run}c1`.toLowerCase(),
+    department: name("Collide Dept Three"), course: name("BS Collide Three")}];
   const out = await preview.run({auth, data: {fileName: "c.xlsx", rows: collide}}) as PreviewOut;
   assert.equal(out.rows[0].kind, "error");
   assert.match(out.rows[0].errors.join(" "), new RegExp(name("Collide One")));
+
+  // A code given for a record that already exists is never written, so naming another record's code on
+  // such a row is only a warning (ruling R7).
+  const onStored = [{college: name("Collide Two"), collegeCode: `${run}c1`.toLowerCase(),
+    department: name("Collide Dept Two"), course: name("BS Collide Two")}];
+  const warnedOnStored = await preview.run({auth, data: {fileName: "c.xlsx", rows: onStored}}) as PreviewOut;
+  assert.equal(warnedOnStored.rows[0].kind, "exists", JSON.stringify(warnedOnStored.rows));
+  assert.match(warnedOnStored.rows[0].warnings.join(" "), /differs from the stored code/);
 
   const differing = [{college: name("Collide Two"), collegeCode: `${run}ZZ`,
     department: name("Collide Dept Two"), course: name("BS Collide Two")}];
