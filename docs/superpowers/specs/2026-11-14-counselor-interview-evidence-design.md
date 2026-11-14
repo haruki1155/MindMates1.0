@@ -38,4 +38,5 @@ On Web → Appointments → Review Appointment → Mark session as completed:
 - Keep the existing `CounselorMessagesPage` thread semantics, Firestore collections, read receipts, selected-college filtering and send behavior unchanged; remove only duplicate standalone heading when embedded.
 - Preserve permissions: counselor gets Messages and Other services; admin continues to access its existing inquiries queue without newly gaining counselor messaging; portalStaff and appUser do not gain access to either.
 - Preserve the mobile-side Messages/MindAid and service inquiry flows; do not modify Firestore rules, Cloud Functions, appointment booking, or counseling file upload functionality for this navigation task.
+- Inquiry notifications must land on **Other services**, preserving the prior link behavior; sidebar navigation defaults to **Messages**.
 - Validation: UI switcher tests (Messages default, Other services navigation), public navigation/role assertions, existing counselor chat label tests, complete Task #10 Flutter/Functions/Storage suites, and staging web preview. **PR only after approval**.
