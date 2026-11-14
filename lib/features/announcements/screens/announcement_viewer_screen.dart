@@ -78,7 +78,7 @@ class _AnnouncementViewerScreenState extends State<AnnouncementViewerScreen> {
                 children: [
                   Text(widget.feed.error!),
                   TextButton(
-                    onPressed: () => widget.feed.load(),
+                    onPressed: widget.feed.retry,
                     child: const Text('Retry'),
                   ),
                 ],
@@ -121,8 +121,35 @@ class _AnnouncementViewerScreenState extends State<AnnouncementViewerScreen> {
           if (widget.feed.posts.isNotEmpty)
             Padding(
               padding: const EdgeInsets.all(12),
-              child: Text(
-                '${_index + 1} of ${widget.feed.posts.length} · Swipe up for more',
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Previous announcement',
+                    onPressed: _index > 0
+                        ? () => _pages.previousPage(
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeOut,
+                          )
+                        : null,
+                    icon: const Icon(Icons.arrow_upward),
+                  ),
+                  Expanded(
+                    child: Text(
+                      '${_index + 1} of ${widget.feed.posts.length} · Swipe or use arrows',
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Next announcement',
+                    onPressed: _index < widget.feed.posts.length - 1
+                        ? () => _pages.nextPage(
+                            duration: const Duration(milliseconds: 250),
+                            curve: Curves.easeOut,
+                          )
+                        : null,
+                    icon: const Icon(Icons.arrow_downward),
+                  ),
+                ],
               ),
             ),
           if (!widget.feed.loading &&

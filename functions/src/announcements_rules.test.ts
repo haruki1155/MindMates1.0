@@ -7,8 +7,8 @@ import {doc, getDoc, setDoc, collection, getDocs, query, where} from "firebase/f
 test("announcement Rules enforce publication boundary and deny client mutations", {skip: !process.env.FIRESTORE_EMULATOR_HOST}, async () => {
   const env = await initializeTestEnvironment({projectId: "demo-announcements", firestore: {rules: readFileSync(resolve(__dirname, "../../firestore.rules"), "utf8")}});
   try {
-    await env.withSecurityRulesDisabled(async ({firestore}) => {
-      const db = firestore();
+    await env.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
       for (const role of ["appUser", "portalStaff", "counselor", "admin"]) await setDoc(doc(db, "users", role), {accessRole: role, accountStatus: "active", staffAccountStatus: "approved"});
       await setDoc(doc(db, "announcements", "draft"), {status: "draft"});
       await setDoc(doc(db, "announcements", "public"), {status: "published"});

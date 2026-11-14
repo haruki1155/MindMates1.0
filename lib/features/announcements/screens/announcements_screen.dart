@@ -142,9 +142,7 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen>
                   children: [
                     Text(_feed.error!),
                     TextButton(
-                      onPressed: () => _feed.load(
-                        more: _feed.posts.isNotEmpty && _feed.cursor != null,
-                      ),
+                      onPressed: _feed.retry,
                       child: const Text('Retry'),
                     ),
                   ],

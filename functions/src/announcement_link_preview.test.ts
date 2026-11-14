@@ -1,6 +1,8 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {getAnnouncementLinkPreview, isPublicAddress, parseLinkMetadata} from "./announcement_link_preview";
+import {getAnnouncementLinkPreview, isPublicAddress, parseLinkMetadata, nextPreviewUsage, requestPinned} from "./announcement_link_preview";
+import {createServer} from "node:http";
+import {AddressInfo} from "node:net";
 test("reserved, mapped, loopback, private and documentation addresses are rejected", () => {
   for (const ip of ["127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "192.168.1.1", "192.0.2.1", "::1", "fc00::1", "fe80::1", "::ffff:127.0.0.1", "2001:db8::1", "2002:7f00:1::"]) assert.equal(isPublicAddress(ip), false, ip);
   assert.equal(isPublicAddress("8.8.8.8"), true);
@@ -29,4 +31,30 @@ test("unsafe URLs never connect and oversized, non-HTML and excessive redirects 
     const result = await getAnnouncementLinkPreview("https://example.com", {resolve: async () => [{address: "8.8.8.8", family: 4}], request: async () => response});
     assert.equal(result.available, false);
   }
+});
+test("preview usage is bounded per minute", () => {
+  assert.deepEqual(nextPreviewUsage({start:1000,count:9}, 2000), {start:1000,count:10});
+  assert.throws(() => nextPreviewUsage({start:1000,count:10}, 2000));
+  assert.deepEqual(nextPreviewUsage({start:1000,count:10}, 61000), {start:61000,count:1});
+});
+test("real pinned transport uses approved address, bounds bytes and aborts hanging responses", async () => {
+  const server = createServer((req,res) => {
+    if (req.url === "/hang") return;
+    res.setHeader("Content-Type", "text/html");
+    if (req.url === "/large") { res.write(Buffer.alloc(524288)); res.end(Buffer.alloc(1)); }
+    else res.end(`<title>${req.headers.host}</title>`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as AddressInfo).port;
+  const address = {address:"127.0.0.1",family:4};
+  try {
+    // No external lookup: the unresolvable hostname must connect via the supplied address.
+    const response = await requestPinned(new URL(`http://does-not-resolve.invalid:${port}/`), address, new AbortController().signal);
+    assert.match(response.body.toString(), /does-not-resolve.invalid/);
+    await assert.rejects(requestPinned(new URL(`http://does-not-resolve.invalid:${port}/large`), address, new AbortController().signal));
+    const abort = new AbortController();
+    const pending = requestPinned(new URL(`http://does-not-resolve.invalid:${port}/hang`), address, abort.signal);
+    setTimeout(() => abort.abort(), 25);
+    await assert.rejects(pending);
+  } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
 });

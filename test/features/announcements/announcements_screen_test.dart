@@ -16,6 +16,66 @@ Announcement post(String id, {bool link = false}) => Announcement.fromJson(id, {
   'publishedAt': DateTime.utc(2026, 11, 14),
 });
 void main() {
+  testWidgets('long posts provide reachable next and previous navigation', (
+    tester,
+  ) async {
+    final long = Announcement.fromJson('long', {
+      'kind': 'original',
+      'category': 'placements',
+      'title': 'Long announcement',
+      'body': List.filled(150, 'Long content to read.').join('\n'),
+      'status': 'published',
+      'revision': 1,
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AnnouncementsScreen(
+          repository: AnnouncementRepository(
+            fetch: (_) async => [long, post('next')],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('View full screen').first);
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(0, -1200),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Next announcement'));
+    await tester.pumpAndSettle();
+    expect(find.text('Post next').hitTestable(), findsOneWidget);
+    await tester.tap(find.byTooltip('Previous announcement'));
+    await tester.pumpAndSettle();
+    expect(find.text('Long announcement'), findsWidgets);
+  });
+  testWidgets(
+    'retry repeats a failed refresh instead of loading the next page',
+    (tester) async {
+      var fail = false;
+      final seen = <AnnouncementQuery>[];
+      final repo = AnnouncementRepository(
+        fetch: (q) async {
+          seen.add(q);
+          if (fail) throw StateError('offline');
+          return List.generate(20, (i) => post('item-$i'));
+        },
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: AnnouncementsScreen(repository: repo)),
+      );
+      await tester.pumpAndSettle();
+      fail = true;
+      await tester.tap(find.byTooltip('Refresh announcements'));
+      await tester.pumpAndSettle();
+      fail = false;
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(seen.last.after, isNull);
+    },
+  );
   testWidgets(
     'linked cards open source and separate full-screen action opens swipe viewer',
     (tester) async {

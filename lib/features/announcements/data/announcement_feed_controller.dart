@@ -11,6 +11,8 @@ class AnnouncementFeedController extends ChangeNotifier {
   AnnouncementCursor? cursor;
   bool loading = false;
   String? error;
+  bool _failedMore = false;
+  Future<void> retry() => load(more: _failedMore);
   int _generation = 0;
   bool _disposed = false;
   Future<void> selectCategory(AnnouncementCategory? value) async {
@@ -49,6 +51,7 @@ class AnnouncementFeedController extends ChangeNotifier {
       cursor = page.nextCursor;
     } catch (_) {
       if (!_disposed && generation == _generation) {
+        _failedMore = more;
         error = 'Unable to load announcements. Please retry.';
       }
     } finally {
