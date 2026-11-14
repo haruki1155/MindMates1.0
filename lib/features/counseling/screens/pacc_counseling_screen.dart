@@ -2119,10 +2119,15 @@ class _ConfirmationView extends StatelessWidget {
             Container(
               width: 104,
               height: 104,
-              decoration: const BoxDecoration(
-                color: Color(0xFFE0F3E9),
+              decoration: BoxDecoration(
+                // Primary-derived tint, matching AppointmentVisuals'
+                // confirmedSurface. The check icon on it stays at 4.2:1.
+                color: Color.alphaBlend(
+                  AppColors.primary.withValues(alpha: .12),
+                  const Color(0xFFFFFFFF),
+                ),
                 shape: BoxShape.circle,
-                boxShadow: [
+                boxShadow: const [
                   BoxShadow(
                     color: Color(0x08000000),
                     blurRadius: 6,
