@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,6 +36,7 @@ class FakeChat extends CounselorChatRepository {
   final calls = <String>[];
   Completer<void>? completion;
   bool fail = false;
+  Object? failure;
   @override
   Stream<List<CounselorMessage>> watch(String uid) async* {
     yield [];
@@ -46,6 +48,7 @@ class FakeChat extends CounselorChatRepository {
   @override
   Future<void> send(String uid, String id, String text) async {
     calls.add(id);
+    if (failure != null) throw failure!;
     if (fail) throw StateError('offline');
     await completion?.future;
   }
@@ -55,6 +58,43 @@ class FakeChat extends CounselorChatRepository {
 }
 
 void main() {
+  test(
+    'a failed retry logs type and Firebase code only, never the text',
+    () async {
+      const secret = 'my private counselor message';
+      final repo = FakeChat()
+        ..failure = FirebaseException(
+          plugin: 'cloud_firestore',
+          code: 'permission-denied',
+          message: 'denied for $secret',
+        );
+      final sender = CounselorSendController(
+        uid: 'student-uid-123',
+        repository: repo,
+        store: MemoryOutbox(),
+      );
+      addTearDown(sender.dispose);
+      await sender.restore();
+      sender.draft.text = secret;
+      final lines = <String>[];
+      final original = debugPrint;
+      debugPrint = (String? m, {int? wrapWidth}) {
+        if (m != null) lines.add(m);
+      };
+      addTearDown(() => debugPrint = original);
+      await sender.send();
+      final log = lines
+          .where((l) => l.contains('counselor_send_failed'))
+          .toList();
+      expect(log, hasLength(1));
+      expect(log.single, contains('FirebaseException'));
+      expect(log.single, contains('permission-denied'));
+      expect(log.single, contains('cloud_firestore'));
+      expect(log.single, isNot(contains(secret)));
+      expect(log.single, isNot(contains('student-uid-123')));
+    },
+  );
+
   test(
     'Sending is immediate, duplicate taps are ignored, and Sent awaits acknowledgment',
     () async {

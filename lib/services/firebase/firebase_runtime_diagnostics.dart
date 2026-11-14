@@ -13,6 +13,8 @@ class FirebaseRuntimeDiagnostics {
     Object? error,
     String? errorCode,
     String? correlationId,
+    String? errorType,
+    String? errorPlugin,
   }) {
     if (!kDebugMode) return;
 
@@ -25,6 +27,9 @@ class FirebaseRuntimeDiagnostics {
       'appCheckProvider': _appCheckProvider,
       'firebaseErrorCode': errorCode ?? firebaseErrorCode(error) ?? '',
       'correlationId': correlationId ?? correlationIdFrom(error) ?? '',
+      // Opt-in, non-personal failure descriptors (never message content).
+      'errorType': ?errorType,
+      'errorPlugin': ?errorPlugin,
     };
     debugPrint('FirebaseRuntime $metadata');
   }
