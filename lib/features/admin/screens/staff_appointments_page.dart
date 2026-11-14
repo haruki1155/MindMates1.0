@@ -67,12 +67,19 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
           builder: (context, collegeSnapshot) {
             // College catalog is public, but the queue remains the only
             // source of actual appointment/college associations.
+            final catalog = collegeSnapshot.data ?? const <College>[];
             final known = {
-              for (final college in collegeSnapshot.data ?? const <College>[])
-                college.id: college.name,
+              for (final college in catalog) college.id: college.name,
             };
-            final ids = records.map((r) => r.collegeId.trim())
-                .where((id) => id.isNotEmpty).toSet().toList()..sort();
+            // Offer every active college, including those with zero bookings,
+            // and preserve historical appointment IDs missing from the catalog.
+            final ids = <String>{
+              for (final college in catalog)
+                if (college.active) college.id,
+              for (final item in records)
+                if (item.collegeId.trim().isNotEmpty)
+                  item.collegeId.trim(),
+            }.toList()..sort((a, b) => (known[a] ?? a).compareTo(known[b] ?? b));
             final knownSelection = _college == 'all' ||
                 _college == 'unassigned' || ids.contains(_college);
             final selectedCollege = knownSelection ? _college : 'all';
