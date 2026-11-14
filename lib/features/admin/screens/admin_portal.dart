@@ -3720,7 +3720,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
       );
       return;
     }
-    var closed = existing?.closedAllDay ?? true;
+    final closed = existing?.closedAllDay ?? false;
     var schedule =
         existing?.schedule ??
         (_days[selected.weekday] ?? PaccDaySchedule.closed);
@@ -3740,11 +3740,13 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SwitchListTile(
-                  title: const Text('Closed all day'),
-                  value: closed,
-                  onChanged: (value) => setDialogState(() => closed = value),
-                ),
+                if (closed)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      'This saved date remains closed. You can edit its reason. To use opening hours, remove this date and add a new special date.',
+                    ),
+                  ),
                 if (!closed) ...[
                   PaccTimePickerField(
                     fieldKey: const Key('override-opens'),
@@ -4421,7 +4423,7 @@ class _PaccScheduleEditorState extends State<PaccScheduleEditor> {
               title: Text(override.date),
               subtitle: Text(
                 override.closedAllDay
-                    ? 'Closed all day${override.reason.isEmpty ? '' : ' • ${override.reason}'}'
+                    ? 'Closed${override.reason.isEmpty ? '' : ' • ${override.reason}'}'
                     : '${override.schedule!.opensAt}-${override.schedule!.closesAt} • ${override.schedule!.presence.label} • Appointments ${override.schedule!.appointmentsEnabled ? 'on' : 'off'} • Walk-ins ${override.schedule!.acceptsWalkIns ? 'on' : 'off'}${override.reason.isEmpty ? '' : ' • ${override.reason}'}',
               ),
               trailing: widget.readOnly
@@ -4863,7 +4865,7 @@ class _PaccSpecialDateSummary extends StatelessWidget {
                   const SizedBox(height: 3),
                   Text(
                     dateOverride.closedAllDay
-                        ? 'Closed all day'
+                        ? 'Closed'
                         : 'Custom schedule',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
