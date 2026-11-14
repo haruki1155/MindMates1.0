@@ -41,6 +41,15 @@ beforeEach(async () => {
       }),
       // Pre-lifecycle record: role only, no staffAccountStatus/accountStatus.
       setDoc(doc(firestore, "users/staff-legacy"), {accessRole: "portalStaff"}),
+      // Suspended while the stored clinical role string was left intact.
+      setDoc(doc(firestore, "users/counselor-suspended"), {
+        accessRole: "counselor", approvedRole: "counselor",
+        staffAccountStatus: "disabled", accountStatus: "suspended",
+      }),
+      setDoc(doc(firestore, "appointments/appointment-1/clinical_notes/session"), {
+        summary: "Sensitive clinical note",
+      }),
+      setDoc(doc(firestore, "mind_aid_emergency_alerts/alert-1"), {userId: "student"}),
       setDoc(doc(firestore, "users/staff-approved"), {
         accessRole: "portalStaff", approvedRole: "portalStaff",
         staffAccountStatus: "approved", accountStatus: "active",
@@ -102,6 +111,29 @@ test("approved counselor can list inquiries and appointments but not other profi
   await assertSucceeds(getDocs(collection(counselor, "appointments")));
   await assertFails(getDoc(doc(counselor, "users/student")));
   await assertFails(getDoc(doc(counselor, "users/staff-approved")));
+});
+
+test("clinical reads require the full staff lifecycle, not just the counselor role", async () => {
+  const approved = environment.authenticatedContext("counselor", verified).firestore();
+  await assertSucceeds(getDoc(doc(approved, "appointments/appointment-1")));
+  await assertSucceeds(getDoc(doc(approved, "appointments/appointment-1/clinical_notes/session")));
+  await assertSucceeds(getDocs(collection(approved, "mind_aid_emergency_alerts")));
+
+  const suspended = environment.authenticatedContext("counselor-suspended", verified).firestore();
+  await assertFails(getDoc(doc(suspended, "appointments/appointment-1")));
+  await assertFails(getDoc(doc(suspended, "appointments/appointment-1/clinical_notes/session")));
+  await assertFails(getDocs(collection(suspended, "appointments")));
+  await assertFails(getDocs(collection(suspended, "mind_aid_emergency_alerts")));
+
+  const unverifiedCounselor = environment.authenticatedContext("counselor", unverified).firestore();
+  await assertFails(getDoc(doc(unverifiedCounselor, "appointments/appointment-1")));
+  await assertFails(getDoc(doc(unverifiedCounselor, "appointments/appointment-1/clinical_notes/session")));
+  await assertFails(getDocs(collection(unverifiedCounselor, "appointments")));
+});
+
+test("administrator clinical reads require a verified email token", async () => {
+  await assertSucceeds(getDoc(doc(environment.authenticatedContext("admin", verified).firestore(), "appointments/appointment-1")));
+  await assertFails(getDoc(doc(environment.authenticatedContext("admin", unverified).firestore(), "appointments/appointment-1")));
 });
 
 test("pending staff registration cannot read any portal data", async () => {

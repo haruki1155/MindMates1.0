@@ -42,8 +42,12 @@ service cloud.firestore {
         );
     }
 
+    // Clinical reads mirror the server-side `requireClinical` gate: the role
+    // alone is not enough, the account must also pass the staff lifecycle
+    // (approved, active, verified email). A suspended or unverified record
+    // that still carries the role string must not read care data.
     function hasClinicalAccess() {
-      return currentAccessRole() in ['counselor', 'admin'];
+      return currentAccessRole() in ['counselor', 'admin'] && hasPortalAccess();
     }
 
     function isAdmin() {
