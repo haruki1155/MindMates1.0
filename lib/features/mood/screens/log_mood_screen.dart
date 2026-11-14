@@ -19,6 +19,7 @@ import '../../../models/mood_model.dart';
 import '../domain/mood_v2_analytics.dart';
 import '../../../repositories/mood_repository.dart';
 import '../../../repositories/mood_v2_repository.dart';
+import '../../../services/firebase/firebase_error_message.dart';
 import '../config/mood_v2_feature_flag.dart';
 import '../widgets/mood_v2_history_panel.dart';
 import '../widgets/mood_glyph.dart';
@@ -145,6 +146,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   String? _moodV2RequestId;
   _MoodV2Draft? _moodV2RetryDraft;
   String? _moodV2Error;
+  /// Set when a refused V2 write was rescued through the legacy writer, so the
+  /// confirmation can be rendered from [_todayMood] with the writer flag on.
+  bool _usedLegacyMoodFallback = false;
   int _moodV2RequestGeneration = 0;
   Timer? _midnightTimer;
 
@@ -522,7 +526,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   _ConfirmedMood? get _confirmation {
     final v2Entry = _confirmedV2Entry;
     if (v2Entry != null) return _ConfirmedMood.fromV2(v2Entry);
-    if (widget.moodV2WriterEnabled) return null;
+    if (widget.moodV2WriterEnabled && !_usedLegacyMoodFallback) return null;
     final today = _todayMood;
     return today == null ? null : _ConfirmedMood.fromLegacy(today);
   }
@@ -658,6 +662,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     setState(() {
       _confirmedV2Entry = null;
       _todayMood = null;
+      _usedLegacyMoodFallback = false;
       _moodV2RequestId = null;
       _moodV2RetryDraft = null;
       _moodV2Error = null;
@@ -667,8 +672,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
 
   Future<void> _saveMoodV2(String userId, _MoodChoice mood) async {
     final writer = widget.moodV2Writer ?? MoodV2Repository();
-    final requestId = _moodV2RequestId ??= _newMoodV2RequestId();
-    final draft = _moodV2RetryDraft ??= _MoodV2Draft(
+    final current = _MoodV2Draft(
       level: mood.level,
       label: mood.label,
       note: _noteController.text,
@@ -679,6 +683,17 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ? TfliteExpressionClassifier.modelVersion
           : null,
     );
+    // A true retry (same selection, same note) reuses the request ID so the
+    // server can never create a duplicate. The moment the student edits the
+    // selection or the note after a failure, the frozen draft would save a
+    // mood they no longer chose, so rotate the ID and save what they picked.
+    final previous = _moodV2RetryDraft;
+    if (previous == null || !previous.matches(current)) {
+      _moodV2RequestId = _newMoodV2RequestId();
+      _moodV2RetryDraft = current;
+    }
+    final requestId = _moodV2RequestId!;
+    final draft = _moodV2RetryDraft!;
     final requestGeneration = _moodV2RequestGeneration;
     try {
       final entry = await writer.create(
@@ -701,8 +716,14 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         _readProviderOrNull<UserProvider>()?.markMoodCheckIn(userId) ??
             Future<void>.value(),
       );
-    } catch (_) {
+    } catch (error) {
       if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
+      if (_isMoodV2Refusal(error)) {
+        // A refusal can never clear by retrying, so the check-in would be
+        // lost. Write it through the legacy path instead.
+        await _saveMoodV2ThroughLegacyWriter(userId, draft, requestGeneration);
+        return;
+      }
       setState(() {
         _isSaving = false;
         _moodV2Error = 'Unable to save this mood entry. Try again.';
@@ -724,6 +745,90 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     });
     _scrollToTop();
     unawaited(_refreshAfterConfirmedMoodV2Write(userId, requestGeneration));
+  }
+
+  /// True when the callable refused the write outright: retrying the same
+  /// request can never succeed, so the entry must go somewhere else.
+  ///
+  /// Transient failures (no network, timeout, `unavailable`, `internal`) are
+  /// NOT refusals: those keep the retryable error and the frozen draft.
+  static bool _isMoodV2Refusal(Object error) {
+    if (error is TimeoutException) return false;
+    if (FirebaseErrorMessage.isNetworkFailure(error)) return false;
+    if (FirebaseErrorMessage.isAppCheckFailure(error)) return true;
+    return const {
+      'permission-denied',
+      'failed-precondition',
+      'unauthenticated',
+    }.contains(FirebaseErrorMessage.codeOf(error));
+  }
+
+  /// Last-resort write for a refused V2 entry.
+  ///
+  /// Never records a confirmed V2 entry and never fabricates a [MoodV2Event]:
+  /// the legacy entry is shown through [_ConfirmedMood.fromLegacy] only.
+  Future<void> _saveMoodV2ThroughLegacyWriter(
+    String userId,
+    _MoodV2Draft draft,
+    int requestGeneration,
+  ) async {
+    final moodProvider = _readProviderOrNull<MoodProvider>();
+    if (moodProvider == null) {
+      setState(() {
+        _isSaving = false;
+        _moodV2Error = 'Unable to save this mood entry. Try again.';
+      });
+      return;
+    }
+    final assisted = draft.expressionAssistUsed;
+    final saved = await moodProvider.logDailyMood(
+      userId: userId,
+      level: draft.level,
+      label: draft.label,
+      note: draft.note,
+      entryMethod: assisted ? 'expression_assisted' : null,
+      expressionAssistUsed: assisted ? true : null,
+      expressionSuggestionAccepted: assisted
+          ? draft.expressionSuggestionAccepted
+          : null,
+      expressionModelVersion: draft.expressionModelVersion,
+      now: _now,
+    );
+    if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
+    if (!saved) {
+      setState(() {
+        _isSaving = false;
+        _moodV2Error = 'Unable to save this mood entry. Try again.';
+      });
+      return;
+    }
+    // The legacy writer accepts one check-in per day. `created == false` means
+    // today's entry already existed, so show that entry instead of claiming a
+    // new save.
+    final created = moodProvider.dailySaveResult?.created ?? true;
+    final entry = moodProvider.dailySaveResult?.mood ?? moodProvider.todayMood;
+    setState(() {
+      _isSaving = false;
+      _usedLegacyMoodFallback = true;
+      _todayMood = entry;
+      _confirmedV2Entry = null;
+      _reflectionOffered = false;
+      _moodV2RequestId = null;
+      _moodV2RetryDraft = null;
+      _moodV2Error = null;
+      _selectedMood = null;
+      _expressionCue = null;
+      _expressionCueSource = null;
+      _expressionSuggestionAccepted = null;
+      _noteController.clear();
+      _noteLength = 0;
+    });
+    _scrollToTop();
+    _showSnack(
+      created
+          ? 'Mood check-in saved.'
+          : 'You already have a check-in for today. Showing that entry.',
+    );
   }
 
   Future<void> _refreshAfterConfirmedMoodV2Write(
@@ -755,6 +860,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     _moodV2RequestId = null;
     _moodV2RetryDraft = null;
     _moodV2Error = null;
+    _usedLegacyMoodFallback = false;
     _isSaving = false;
   }
 
@@ -845,6 +951,17 @@ class _MoodV2Draft {
   final bool expressionAssistUsed;
   final bool expressionSuggestionAccepted;
   final String? expressionModelVersion;
+
+  /// Whether [other] would send the same payload, so a retry can safely reuse
+  /// the same client request ID.
+  bool matches(_MoodV2Draft other) =>
+      level == other.level &&
+      label == other.label &&
+      note == other.note &&
+      entryMethod == other.entryMethod &&
+      expressionAssistUsed == other.expressionAssistUsed &&
+      expressionSuggestionAccepted == other.expressionSuggestionAccepted &&
+      expressionModelVersion == other.expressionModelVersion;
 }
 
 class _ExpressionCheckInEntry extends StatelessWidget {

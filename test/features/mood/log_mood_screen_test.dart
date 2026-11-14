@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -859,7 +860,7 @@ void main() {
     }
   });
 
-  testWidgets('V2 retry preserves one request ID after a failed attempt', (
+  testWidgets('V2 retry of the same entry preserves one request ID', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
@@ -885,10 +886,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('mood-v2-save-error')), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField), 'Edited after failure');
-    await tester.tap(find.text('Great'));
-    await _skipReflection(tester);
-    await tester.pump();
+    // Nothing was edited, so this is a true retry: one request ID keeps the
+    // server from creating a duplicate entry.
     await tester.tap(find.text('Save mood entry'));
     await tester.pumpAndSettle();
     expect(writer.requestIds, [
@@ -897,6 +896,168 @@ void main() {
     ]);
     expect(writer.levels, [4, 4]);
     expect(writer.notes, ['', '']);
+  });
+
+  testWidgets('V2 retry after an edit saves the newly chosen mood and note', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final writer = _FakeMoodV2Writer(failuresRemaining: 1);
+    var issuedIds = 0;
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(_FakeMoodRepository()),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
+        moodV2Writer: writer,
+        moodV2RequestIdGenerator: () =>
+            '00000000-0000-4000-8000-00000000000${++issuedIds}',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
+    await tester.pump();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('mood-v2-save-error')), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'Edited after failure');
+    await tester.tap(find.text('Great'));
+    await _skipReflection(tester);
+    await tester.pump();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+    // The selection and the note changed, so the frozen draft must not be
+    // reused: a new request ID carries the mood the student actually chose.
+    expect(writer.requestIds, [
+      '00000000-0000-4000-8000-000000000001',
+      '00000000-0000-4000-8000-000000000002',
+    ]);
+    expect(writer.levels, [4, 5]);
+    expect(writer.notes, ['', 'Edited after failure']);
+  });
+
+  testWidgets('a refused V2 write falls back to the legacy writer', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = _FakeMoodRepository();
+    final moodProvider = _RecordingConfirmProvider(repository);
+    final writer = _FakeMoodV2Writer(
+      failuresRemaining: 1,
+      failure: FirebaseFunctionsException(
+        code: 'failed-precondition',
+        message: 'Mood V2 is limited to active app users.',
+      ),
+    );
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: moodProvider,
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'Saved anyway');
+    await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
+    await tester.pump();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mood-v2-save-error')), findsNothing);
+    expect(find.byKey(const ValueKey('mood-v2-confirmation')), findsOneWidget);
+    expect(repository.createdLevel, 4);
+    expect(repository.createdNote, 'Saved anyway');
+    // No phantom V2 event may enter combined history.
+    expect(moodProvider.recordedV2Entries, isEmpty);
+  });
+
+  testWidgets('a refused V2 write shows today’s existing legacy entry', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final moodProvider = _RecordingConfirmProvider(
+      _FakeMoodRepository(dailyCreated: false),
+    );
+    final writer = _FakeMoodV2Writer(
+      failuresRemaining: 1,
+      failure: FirebaseFunctionsException(
+        code: 'permission-denied',
+        message: 'Mood V2 profile role is inconsistent.',
+      ),
+    );
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: moodProvider,
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
+    await tester.pump();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mood-v2-confirmation')), findsOneWidget);
+    expect(
+      find.text('You already have a check-in for today. Showing that entry.'),
+      findsOneWidget,
+    );
+    expect(moodProvider.recordedV2Entries, isEmpty);
+  });
+
+  testWidgets('a transient V2 failure keeps the retryable error', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = _FakeMoodRepository();
+    final writer = _FakeMoodV2Writer(
+      failuresRemaining: 1,
+      failure: FirebaseFunctionsException(
+        code: 'unavailable',
+        message: 'backend unavailable',
+      ),
+    );
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(repository),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: true,
+        moodV2Writer: writer,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Okay'));
+    await _skipReflection(tester);
+    await tester.pump();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mood-v2-save-error')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mood-v2-confirmation')), findsNothing);
+    expect(repository.createdLevel, isNull);
   });
 
   testWidgets('V2 save prevents duplicate taps while a request is pending', (
@@ -1099,9 +1260,8 @@ void main() {
       await tester.tap(find.text('Save mood entry'));
       await tester.pumpAndSettle();
       expect(writer.requestIds, hasLength(1));
-      await tester.tap(find.text('Great'));
-      await _skipReflection(tester);
-      await tester.enterText(find.byType(TextField), 'Edited unsaved input');
+      // Nothing is edited, so the midnight rollover and the widget rebuild
+      // must not rotate the pending request ID or its payload.
       now = DateTime.utc(2026, 7, 7, 16, 0, 2);
       await tester.pump(const Duration(seconds: 7));
       await tester.pumpWidget(app());
@@ -1894,7 +2054,12 @@ class _FakeMoodRepository extends MoodRepository {
     this.throwsOnToday = false,
     this.hasToday = false,
     this.todayLabel = 'Okay',
+    this.dailyCreated = true,
   });
+
+  /// `false` reproduces the legacy one-check-in-per-day rule reporting that
+  /// today's entry already existed.
+  final bool dailyCreated;
 
   final String? todayLabel;
 
@@ -1972,7 +2137,7 @@ class _FakeMoodRepository extends MoodRepository {
         note: note,
         createdAt: now ?? DateTime(2026, 7, 7, 12),
       ),
-      created: true,
+      created: dailyCreated,
     );
   }
 
@@ -1991,10 +2156,18 @@ class _FakeMoodRepository extends MoodRepository {
 }
 
 class _FakeMoodV2Writer implements MoodV2EntryWriter {
-  _FakeMoodV2Writer({this.failuresRemaining = 0, this.pending = false});
+  _FakeMoodV2Writer({
+    this.failuresRemaining = 0,
+    this.pending = false,
+    this.failure,
+  });
 
   int failuresRemaining;
   final bool pending;
+
+  /// Thrown instead of the default transient [StateError] when set, so a test
+  /// can reproduce a server refusal.
+  final Object? failure;
   final List<String> requestIds = [];
   final List<int> levels = [];
   final List<String?> notes = [];
@@ -2027,7 +2200,7 @@ class _FakeMoodV2Writer implements MoodV2EntryWriter {
     });
     if (failuresRemaining > 0) {
       failuresRemaining--;
-      return Future<MoodV2Event>.error(StateError('offline'));
+      return Future<MoodV2Event>.error(failure ?? StateError('offline'));
     }
     if (pending) {
       return (_pendingResult ??= Completer<MoodV2Event>()).future;
