@@ -55,13 +55,15 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
     child: StreamBuilder<List<AppointmentQueueItem>>(
       stream: _queue,
       builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return const _Message('Unable to load appointments.');
-        }
-        if (!snapshot.hasData) {
+        if (!snapshot.hasData && !snapshot.hasError) {
           return const Center(child: CircularProgressIndicator());
         }
-        final records = snapshot.data!;
+        // Keep the operational table and filters visible even when the
+        // private-safe queue is temporarily unavailable. Never show stale
+        // or fabricated appointments as confirmed data.
+        final records = snapshot.hasError
+            ? const <AppointmentQueueItem>[]
+            : snapshot.data ?? const <AppointmentQueueItem>[];
         return StreamBuilder<List<College>>(
           stream: _colleges,
           builder: (context, collegeSnapshot) {
@@ -109,6 +111,13 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (snapshot.hasError) ...[
+                  const _Message(
+                    'Live appointments could not be loaded. '
+                    'Check Staff access, Firestore rules, or network connectivity.',
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -188,9 +197,10 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                 ),
                 const SizedBox(height: 12),
                 if (visible.isEmpty)
-                  const _Message('No appointments match these filters.')
-                else
-                  StaffAppointmentTable(items: visible, collegeNames: known),
+                  _Message(snapshot.hasError
+                      ? 'Appointment data is unavailable, not an empty schedule.'
+                      : 'No appointments match these filters.'),
+                StaffAppointmentTable(items: visible, collegeNames: known),
               ],
             );
           },
