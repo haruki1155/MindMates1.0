@@ -103,6 +103,14 @@ void main() {
     expect(BackupSummary.fromJobs(const []).latest, isNull);
   });
 
+  test('a non-super-admin repository surfaces backup history as an error', () {
+    final repository = AdminPortalRepository(
+      callableInvoker: (name, data) async => null,
+    );
+    expect(repository.isSuperAdmin, isFalse);
+    expect(repository.watchBackupJobs(), emitsError(isA<StateError>()));
+  });
+
   test('repository callables carry the expected names and arguments', () async {
     final calls = <(String, Map<String, Object?>)>[];
     final repository = AdminPortalRepository(

@@ -172,6 +172,21 @@ test("refreshBackup marks a finished export failed when its metadata object is m
   assert.ok((await auditRows("BACKUP_FAILED")) >= 1);
 });
 
+test("refreshBackup marks a job failed when its operation can no longer be read", {skip: !emulated}, async () => {
+  await clearJobs();
+  const deps = fakeDeps();
+  const {jobId} = await startBackup(deps, actor, "manual");
+  deps.exporter.checkExportDocumentsProgress = async () => { throw Object.assign(new Error("Operation not found"), {code: 5}); };
+  assert.equal((await refreshBackup(deps, actor, jobId)).status, "failed");
+  const job = (await db.doc(`backup_jobs/${jobId}`).get()).data()!;
+  assert.equal(job.error.code, "export-5");
+  assert.ok(job.completedAt instanceof Timestamp);
+  assert.ok((await auditRows("BACKUP_FAILED")) >= 1);
+  // A later request is no longer blocked by the stuck job.
+  const next = await startBackup(deps, actor, "manual");
+  assert.equal(next.status, "running");
+});
+
 test("the scheduler does nothing unless BACKUP_SCHEDULE_ENABLED is true", {skip: !emulated}, async () => {
   await clearJobs();
   const deps = fakeDeps({BACKUP_BUCKET: "test-bucket"});

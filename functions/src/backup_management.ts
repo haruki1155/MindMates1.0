@@ -195,8 +195,15 @@ export async function refreshBackup(deps: BackupDeps, actor: BackupActor, jobId:
   if (status !== "running") return {jobId, status};
   if (typeof data.operationName !== "string" || !data.operationName) return {jobId, status};
 
-  const operation = await deps.exporter.checkExportDocumentsProgress(data.operationName);
-  const next = applyOperationState(operation);
+  // An operation that can no longer be read (expired, deleted, permission
+  // lost) must not leave the job running forever and block every later
+  // backup: it is recorded as a failure with the sanitised reason.
+  let next: ReturnType<typeof applyOperationState>;
+  try {
+    next = applyOperationState(await deps.exporter.checkExportDocumentsProgress(data.operationName));
+  } catch (error) {
+    next = {status: "failed", error: sanitizeError(error)};
+  }
   const now = deps.now();
   const revision = Number(data.revision ?? 0);
   const metadataPath = String(data.verification?.metadataPath ?? "");

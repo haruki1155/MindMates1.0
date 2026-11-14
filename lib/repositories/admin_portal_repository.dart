@@ -583,9 +583,15 @@ class AdminPortalRepository {
 
   /// Firestore managed-export job history. Only the configured
   /// super-administrator may read `backup_jobs`; everyone else gets an
-  /// empty stream so the page never looks like "no backups".
+  /// error stream so the page shows "not authorized", never "no backups".
   Stream<List<BackupJob>> watchBackupJobs() {
-    if (!isSuperAdmin) return Stream.value(const <BackupJob>[]);
+    if (!isSuperAdmin) {
+      return Stream.error(
+        StateError(
+          'Backup history requires the configured super-administrator account.',
+        ),
+      );
+    }
     return _firestoreService
         .watchDocuments(
           FirestoreCollections.backupJobs,
