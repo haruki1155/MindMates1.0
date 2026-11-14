@@ -11,18 +11,12 @@ import '../services/clinical_file_download_stub.dart'
 class ClinicalInterviewEditor extends StatelessWidget {
   const ClinicalInterviewEditor({
     super.key,
-    required this.questions,
-    required this.requirements,
-    required this.materials,
     required this.files,
     required this.busy,
     required this.onChooseFiles,
     required this.onRemoveFile,
   });
 
-  final TextEditingController questions;
-  final TextEditingController requirements;
-  final TextEditingController materials;
   final List<PendingSessionEvidenceFile> files;
   final bool busy;
   final VoidCallback onChooseFiles;
@@ -33,56 +27,14 @@ class ClinicalInterviewEditor extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       const SizedBox(height: 16),
-      Text('Interview documentation',
+      Text('Session attachments',
           style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 6),
       const Text(
-        'Private counseling records. Visible only to authorized clinical staff, not the student.',
+        'Private counseling files. Visible only to authorized clinical staff, not the student.',
         style: TextStyle(fontSize: 12, color: Color(0xFF6B6660)),
       ),
       const SizedBox(height: 12),
-      TextField(
-        key: const Key('clinical-interview-questions'),
-        controller: questions,
-        enabled: !busy,
-        minLines: 2,
-        maxLines: 6,
-        maxLength: 4000,
-        decoration: const InputDecoration(
-          labelText: 'Interview questions asked',
-          hintText: 'Record questions used during the counseling session',
-          border: OutlineInputBorder(),
-        ),
-      ),
-      const SizedBox(height: 8),
-      TextField(
-        key: const Key('clinical-requirements-checked'),
-        controller: requirements,
-        enabled: !busy,
-        minLines: 2,
-        maxLines: 5,
-        maxLength: 2000,
-        decoration: const InputDecoration(
-          labelText: 'Student requirements checked',
-          hintText: 'List forms, consent or requirements checked',
-          border: OutlineInputBorder(),
-        ),
-      ),
-      const SizedBox(height: 8),
-      TextField(
-        key: const Key('clinical-materials-used'),
-        controller: materials,
-        enabled: !busy,
-        minLines: 2,
-        maxLines: 5,
-        maxLength: 2000,
-        decoration: const InputDecoration(
-          labelText: 'Materials used',
-          hintText: 'List worksheets, interview guides or instruments used',
-          border: OutlineInputBorder(),
-        ),
-      ),
-      const SizedBox(height: 8),
       OutlinedButton.icon(
         onPressed: busy || files.length >= maxSessionEvidenceFiles
             ? null
@@ -201,12 +153,6 @@ class _ClinicalInterviewRecordViewerState
                 Text('Private session documentation',
                     style: Theme.of(context).textTheme.titleMedium),
                 _PrivateField(label: 'Session summary', value: record.summary),
-                _PrivateField(label: 'Interview questions asked',
-                    value: record.interviewQuestions),
-                _PrivateField(label: 'Student requirements checked',
-                    value: record.requirementsChecked),
-                _PrivateField(label: 'Materials used',
-                    value: record.materialsUsed),
                 if (record.attachments.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   const Text('Private attachments',
