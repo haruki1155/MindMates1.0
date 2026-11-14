@@ -568,11 +568,21 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
       mode: CounselorWorkflowMode.cases,
       onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
+      onModeChanged: (mode) => _setPage(
+        mode == CounselorWorkflowMode.cases
+            ? AdminPortalPage.cases
+            : AdminPortalPage.followUps,
+      ),
     ),
     AdminPortalPage.followUps => CounselorWorkflowPage(
       repository: _repository,
       mode: CounselorWorkflowMode.followUps,
       onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
+      onModeChanged: (mode) => _setPage(
+        mode == CounselorWorkflowMode.cases
+            ? AdminPortalPage.cases
+            : AdminPortalPage.followUps,
+      ),
     ),
     AdminPortalPage.reports => ReportGenerationPage(repository: _repository),
     AdminPortalPage.notifications => AdminNotificationsPage(
@@ -642,7 +652,6 @@ class _Nav extends StatelessWidget {
         AdminPortalPage.appointments,
         AdminPortalPage.availability,
         AdminPortalPage.cases,
-        AdminPortalPage.followUps,
         AdminPortalPage.inquiries,
         AdminPortalPage.counselorMessages,
       ]),
