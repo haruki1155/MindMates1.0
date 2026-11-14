@@ -4,7 +4,7 @@
 
 **Goal:** In a staging build: a student can log more than one mood a day, messaging works, and the green surfaces in appointments and My Mood Journey use the app palette.
 
-**Architecture:** Three independent threads. (1) The server's pilot allowlist for `createMoodEntry` relaxes to "any `mindmate-staging` account", and the client's protected writer turns on in staging — the presentation/writer separation built earlier means the multi-entry UI returns with no UI surgery. (2) Three callables that are exported but never deployed get deployed, which unblocks messaging. (3) Off-palette greens are repointed at `AppColors`.
+**Architecture:** Three independent threads. (1) The server's existing `MOOD_V2_STAGING_STUDENT_ROLLOUT_ENABLED` parameter is switched on for staging — no server code changes — and the client's protected writer turns on in staging — the presentation/writer separation built earlier means the multi-entry UI returns with no UI surgery. (2) Three callables that are exported but never deployed get deployed, which unblocks messaging. (3) Off-palette greens are repointed at `AppColors`.
 
 **Tech Stack:** Firebase Functions v2 (TypeScript, `node:test`), Flutter, Firestore rules (unchanged).
 
@@ -32,8 +32,7 @@
 
 ## File Structure
 
-- Modify `functions/src/mood_entries.ts` — the pilot gate.
-- Test `functions/src/mood_entries.test.ts` — gate behaviour per project and account.
+- **No change to `functions/src/mood_entries.ts`** — the staging student rollout already exists; only its parameter is switched on.
 - Modify `lib/features/mood/config/mood_v2_feature_flag.dart` — `enabled` default.
 - Modify `test/features/mood/mood_v2_feature_flag_test.dart`, `test/features/mood/mood_v2_repository_test.dart` — the flag contract.
 - Modify `lib/features/counseling/widgets/appointment_presentation.dart`, `lib/features/counseling/screens/pacc_counseling_screen.dart`, and the Mood Journey green surfaces — colour tokens only.
@@ -41,31 +40,43 @@
 
 ---
 
-### Task 1: Relax the `createMoodEntry` gate to any staging account
+### Task 1: Switch on the staging student rollout (configuration, no code)
 
-**Files:**
-- Modify: `functions/src/mood_entries.ts` (the gate at ~line 59)
-- Test: `functions/src/mood_entries.test.ts`
+**Files:** none. **This task changes no source.**
 
-**Interfaces — Produces:** `createMoodEntry` accepts any authenticated uid when `projectId === "mindmate-staging"`, and refuses every uid otherwise.
+`functions/src/mood_entries.ts` already implements exactly what was asked, by design:
+`createMoodEntryForUser` accepts a **non-pilot** account when `projectId === "mindmate-staging"`,
+the caller passes `allowStudentRollout`, `gate.studentRolloutEnabled === true`, the account is
+active and its role fields are consistent. The callable handler at line 264 already passes
+`allowStudentRollout = true`, and the student-rollout path is already covered by
+`mood_entries.test.ts`. The only thing holding it shut is the parameter
+`MOOD_V2_STAGING_STUDENT_ROLLOUT_ENABLED` (`defineBoolean`, default `false`).
 
-- [ ] **Step 1: Read the current gate and its helper** (`gate.projectId`, `gate.pilotUserIds`) and find every other reader of `pilotUserIds`. If nothing else reads it, the allowlist plumbing may stay in place unused — do not delete it in this task.
-- [ ] **Step 2: Write the failing tests** in `functions/src/mood_entries.test.ts`:
-  - a non-pilot uid on `mindmate-staging` is **accepted**
-  - a pilot uid on `mindmate-staging` is still accepted
-  - any uid on `mind-mates-cd2cf` (production) is **refused** with `permission-denied`
-  - any uid on the dev project is **refused**
-  - an unauthenticated request is still refused
-- [ ] **Step 3: Run them to verify they fail** — `cd functions && npm test`. Expected: the non-pilot-on-staging case fails.
-- [ ] **Step 4: Implement** — drop the `!gate.pilotUserIds.has(uid)` clause so only the `projectId` check remains. Keep the error code and message shape.
-- [ ] **Step 5: Run to verify they pass**, then `cd functions && npm run build` and `npm run lint` if present.
-- [ ] **Step 6: Commit** `feat(mood): allow any staging account to use the V2 writer`
+So this is a configuration change plus a redeploy so the function picks the value up. **Do not edit
+the gate.** Removing the pilot clause by hand would throw away the role and account-status checks
+that this path performs and that the pilot path does not.
 
----
+- [ ] **Step 1: Confirm the current value** of `MOOD_V2_STAGING_STUDENT_ROLLOUT_ENABLED` on
+  `mindmate-staging`, and record it so it can be restored.
+- [ ] **Step 2: Run the existing functions tests** — `cd functions && npm test` — and confirm the
+  student-rollout cases already pass. No new test is needed for behaviour that is already pinned;
+  if a case is missing (a non-pilot active student on staging being accepted *with* the flag on,
+  and refused *with it off*), add just that one.
+- [ ] **Step 3: Set the parameter to `true` for `mindmate-staging` only**, via the project's
+  existing parameter mechanism (`.env.mindmate-staging` or the equivalent already in use — find how
+  the other params are set rather than inventing a new mechanism). Production must keep `false`.
+- [ ] **Step 4:** the deploy happens in Task 3. Do not deploy from this task.
+- [ ] **Step 5: Commit** only if a config file in the repo changed:
+  `chore(mood): enable the staging student rollout for Mood V2`
+
+**Note for the implementer:** the rollout path additionally requires `accountStatus` active and
+consistent role fields. An account with inconsistent legacy `role` vs `populationRole` will still be
+refused. If the user's test account is refused after this change, that is the reason — report it,
+do not loosen the role check.
 
 ### Task 2: Turn the protected writer on in staging builds
 
-**Do not start until Task 3's deploy has put Task 1's gate on `mindmate-staging`.** The branch is useless-to-harmful in between.
+**Do not start until Task 3's deploy has put Task 1's rollout flag live on `mindmate-staging`.** The branch is useless-to-harmful in between.
 
 **Files:**
 - Modify: `lib/features/mood/config/mood_v2_feature_flag.dart`
@@ -94,7 +105,7 @@
 firebase deploy --project mindmate-staging --only \
   functions:repairMyStudentCollege,functions:acknowledgeMindAidEmergencyAlert,functions:resolveMindAidEmergencyAlert,functions:createMoodEntry
 ```
-- [ ] **Step 4: Verify** — list functions again and confirm all four are present and the other 108 are untouched. Report the before/after counts.
+- [ ] **Step 4: Verify** — list functions again and confirm all four are present and the other 108 are untouched. Report the before/after counts, and confirm `createMoodEntry` picked up `MOOD_V2_STAGING_STUDENT_ROLLOUT_ENABLED=true`.
 - [ ] **Step 5: No commit** (nothing changed in the tree). Report the deploy result.
 
 ---
