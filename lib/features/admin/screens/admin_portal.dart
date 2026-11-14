@@ -4,6 +4,7 @@ import 'counselor_messages_page.dart';
 import '../../counseling/widgets/counselor_unread_badges.dart';
 
 import 'package:flutter/material.dart';
+import 'package:file_selector/file_selector.dart';
 
 import '../../../models/admin_inquiry_model.dart';
 import '../../../models/appointment_model.dart';
@@ -36,6 +37,8 @@ import '../../../services/firebase/firebase_error_message.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
 import '../widgets/pacc_schedule_editor_widgets.dart';
+import '../widgets/clinical_interview_widgets.dart';
+import '../domain/session_evidence.dart';
 
 const _yellow = AdminColors.accentStrong;
 const _cream = AdminColors.canvas;
@@ -2964,6 +2967,11 @@ class _AppointmentCard extends StatelessWidget {
     String reason = _appointmentReasons(action).first;
     final customReason = TextEditingController();
     final sessionSummary = TextEditingController();
+    final interviewQuestions = TextEditingController();
+    final requirementsChecked = TextEditingController();
+    final materialsUsed = TextEditingController();
+    final selectedClinicalFiles = <PendingSessionEvidenceFile>[];
+    List<SessionEvidenceAttachment>? uploadedClinicalFiles;
     final followUpMessage = TextEditingController();
     var offerFollowUp = false;
     DateTime? proposedDate;
@@ -3086,6 +3094,11 @@ class _AppointmentCard extends StatelessWidget {
                           ? 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.'
                           : 'This appointment has been finalized. The recorded decision is read-only.',
                     ),
+                    if (currentStatus == AppointmentStatus.completed)
+                      ClinicalInterviewRecordViewer(
+                        repository: repository,
+                        appointmentId: item.id,
+                      ),
                   ] else ...[
                     const Divider(height: 34),
                     const _AppointmentSectionHeader(
@@ -3251,11 +3264,81 @@ class _AppointmentCard extends StatelessWidget {
                         minLines: 3,
                         maxLines: 8,
                         maxLength: 2000,
+                        enabled: !submitting,
                         decoration: const InputDecoration(
                           labelText: 'Session summary (internal)',
                           helperText:
                               'Visible only to authorized clinical staff.',
                         ),
+                      ),
+                      ClinicalInterviewEditor(
+                        questions: interviewQuestions,
+                        requirements: requirementsChecked,
+                        materials: materialsUsed,
+                        files: selectedClinicalFiles,
+                        busy: submitting,
+                        onRemoveFile: (index) => setDialogState(() {
+                          selectedClinicalFiles.removeAt(index);
+                          uploadedClinicalFiles = null;
+                        }),
+                        onChooseFiles: () async {
+                          try {
+                            final chosen = await openFiles(
+                              acceptedTypeGroups: [
+                                const XTypeGroup(
+                                  label: 'Interview materials',
+                                  extensions: [
+                                    'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx',
+                                  ],
+                                ),
+                              ],
+                            );
+                            if (!dialogContext.mounted || chosen.isEmpty) return;
+                            if (selectedClinicalFiles.length + chosen.length >
+                                maxSessionEvidenceFiles) {
+                              throw const FormatException('Choose no more than five files.');
+                            }
+                            final incoming = <PendingSessionEvidenceFile>[];
+                            for (final file in chosen) {
+                              final name = file.name;
+                              final type = sessionEvidenceMimeType(name);
+                              final length = await file.length();
+                              if (!validSessionEvidenceFileName(name) ||
+                                  type == null ||
+                                  length == 0 ||
+                                  length > maxSessionEvidenceFileBytes) {
+                                throw const FormatException(
+                                  'Only PNG, JPG, PDF, DOC or DOCX files up to 5 MB are allowed.',
+                                );
+                              }
+                              final bytes = await file.readAsBytes();
+                              if (bytes.length != length) {
+                                throw const FormatException('File size changed during selection.');
+                              }
+                              incoming.add(PendingSessionEvidenceFile(
+                                name: name,
+                                contentType: type,
+                                bytes: bytes,
+                              ));
+                            }
+                            if (dialogContext.mounted) {
+                              setDialogState(() {
+                                selectedClinicalFiles.addAll(incoming);
+                                uploadedClinicalFiles = null;
+                              });
+                            }
+                          } catch (_) {
+                            if (dialogContext.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Unable to add files. Use PNG, JPG, PDF, DOC or DOCX up to 5 MB each (max five).',
+                                  ),
+                                ),
+                              );
+                            }
+                          }
+                        },
                       ),
                       CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
@@ -3358,6 +3441,15 @@ class _AppointmentCard extends StatelessWidget {
                           if (action == 'accept') {
                             await repository.changeAppointmentAgreement(item, 'accept', agreementRequestId);
                           } else {
+                          // Upload evidence only after the legacy schedule guard.
+                          // Reuse the uploaded manifest if a callable retry is needed.
+                          if (action == 'completed' && uploadedClinicalFiles == null) {
+                            uploadedClinicalFiles = await repository
+                                .uploadClinicalEvidenceFiles(
+                                  appointmentId: item.id,
+                                  files: selectedClinicalFiles,
+                                );
+                          }
                           await repository.reviewAppointment(
                             appointmentId: item.id,
                             expectedScheduledAt: item.scheduledAt.millisecondsSinceEpoch,
@@ -3374,6 +3466,18 @@ class _AppointmentCard extends StatelessWidget {
                             sessionSummary: action == 'completed'
                                 ? sessionSummary.text.trim()
                                 : null,
+                            interviewQuestions: action == 'completed'
+                                ? interviewQuestions.text.trim()
+                                : null,
+                            requirementsChecked: action == 'completed'
+                                ? requirementsChecked.text.trim()
+                                : null,
+                            materialsUsed: action == 'completed'
+                                ? materialsUsed.text.trim()
+                                : null,
+                            attachments: action == 'completed'
+                                ? uploadedClinicalFiles ?? const []
+                                : const [],
                             offerFollowUp:
                                 action == 'completed' && offerFollowUp,
                             followUpMessage:
@@ -3425,6 +3529,9 @@ class _AppointmentCard extends StatelessWidget {
     );
     customReason.dispose();
     sessionSummary.dispose();
+    interviewQuestions.dispose();
+    requirementsChecked.dispose();
+    materialsUsed.dispose();
     followUpMessage.dispose();
   }
 
