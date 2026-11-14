@@ -6,6 +6,12 @@ import '../theme/admin_theme.dart';
 import '../../counseling/widgets/counselor_unread_badges.dart';
 
 /// Approved counselor-only inbox. AI history is never merged into this thread.
+/// Human-readable label only. Never use the Firestore student UID as a label.
+String counselorConversationStudentLabel(String? name) {
+  final displayName = name?.trim() ?? '';
+  return displayName.isEmpty ? 'Student (name unavailable)' : displayName;
+}
+
 class CounselorMessagesPage extends StatefulWidget {
   const CounselorMessagesPage({super.key});
 
@@ -199,17 +205,9 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
                             ListTile(
                               selected: selectedUser == thread.id,
                               title: Text(
-                                (thread.data()['studentName'] as String?)
-                                            ?.trim()
-                                            .isNotEmpty ==
-                                        true
-                                    ? thread.data()['studentName'] as String
-                                    : 'Student ${thread.id.length > 10 ? '${thread.id.substring(0, 10)}…' : thread.id}',
-                              ),
-                              subtitle: Text(
-                                (thread.data()['collegeId'] ??
-                                        'Unassigned college')
-                                    .toString(),
+                                counselorConversationStudentLabel(
+                                  thread.data()['studentName'] as String?,
+                                ),
                               ),
                               trailing:
                                   StreamBuilder<
