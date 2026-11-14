@@ -64,6 +64,7 @@ import {
 import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
 import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_intake";
 import {canBookFollowUpFromParent, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
+import {validateSessionEvidence, verifySessionEvidenceObjects} from "./appointment_session_evidence";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -2045,6 +2046,7 @@ export const reviewAppointment = onCall(async (request) => {
   const reply = boundedText(input.reply, "Reply", 1_000, {required: true});
   let proposal: {millis: number; scheduledTime: string} | null = null;
   let completion: ReturnType<typeof validateCompletionInput> | null = null;
+  let sessionEvidence: ReturnType<typeof validateSessionEvidence> | null = null;
   if (!appointmentId || !["confirmed", "rescheduled", "completed", "no_show"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
@@ -2064,6 +2066,10 @@ export const reviewAppointment = onCall(async (request) => {
       offerFollowUp: input.offerFollowUp,
       followUpMessage: input.followUpMessage,
     });
+    sessionEvidence = validateSessionEvidence(input, appointmentId, staffId);
+    await verifySessionEvidenceObjects(sessionEvidence, appointmentId, staffId);
+  } else if (["interviewQuestions", "requirementsChecked", "materialsUsed", "attachments"].some((field) => input[field] != null)) {
+    throw new HttpsError("invalid-argument", "Private clinical documentation is permitted only when completing a session.");
   }
 
   const appointment = db.collection("appointments").doc(appointmentId);
@@ -2166,6 +2172,7 @@ export const reviewAppointment = onCall(async (request) => {
       transaction.set(clinicalNote, {
         appointmentId,
         summary: completion.summary,
+        attachments: sessionEvidence!.attachments,
         authorId: staffId,
         authorNameSnapshot: staffName,
         authorRoleSnapshot: staff.accessRole,

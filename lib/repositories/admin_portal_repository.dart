@@ -2,6 +2,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:typed_data';
 
 import '../database/firestore_collections.dart';
 import '../models/academic_import_models.dart';
@@ -9,6 +11,7 @@ import '../models/admin_inquiry_model.dart';
 import '../models/admin_activity_analytics_model.dart';
 import '../models/admin_mind_aid_analytics_model.dart';
 import '../models/appointment_model.dart';
+import '../features/admin/domain/session_evidence.dart';
 import '../models/appointment_queue_item.dart';
 import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
@@ -1139,6 +1142,76 @@ class AdminPortalRepository {
     });
   }
 
+  Future<SessionEvidenceRecord?> getClinicalSessionEvidence(
+    String appointmentId,
+  ) async {
+    final snapshot = await _firestoreService.firestore
+        .collection('appointments')
+        .doc(appointmentId)
+        .collection('clinical_notes')
+        .doc('session')
+        .get();
+    final data = snapshot.data();
+    return data == null ? null : SessionEvidenceRecord.fromJson(data);
+  }
+
+  /// No public Storage download token is produced. The authenticated SDK
+  /// checks Storage rules for every file read.
+  Future<Uint8List> getClinicalEvidenceBytes(String path) async {
+    if (!path.startsWith('counseling_session_files/')) {
+      throw const FormatException('Not a clinical attachment path.');
+    }
+    final data = await FirebaseStorage.instance
+        .ref(path)
+        .getData(maxSessionEvidenceFileBytes);
+    if (data == null) throw StateError('Attachment unavailable.');
+    return data;
+  }
+
+  /// Uploads are immutable and bound to the currently authenticated clinician.
+  /// They are referenced in clinical_notes only after server verification.
+  Future<List<SessionEvidenceAttachment>> uploadClinicalEvidenceFiles({
+    required String appointmentId,
+    required List<PendingSessionEvidenceFile> files,
+  }) async {
+    if (files.length > maxSessionEvidenceFiles) {
+      throw const FormatException('Choose no more than five files.');
+    }
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) throw StateError('Sign in again to upload attachments.');
+    final attachments = <SessionEvidenceAttachment>[];
+    for (final file in files) {
+      final mime = sessionEvidenceMimeType(file.name);
+      if (!validSessionEvidenceFileName(file.name) ||
+          mime == null ||
+          mime != file.contentType ||
+          file.size == 0 ||
+          file.size > maxSessionEvidenceFileBytes) {
+        throw const FormatException('Unsupported file or file size.');
+      }
+      final path = buildSessionEvidencePath(
+        appointmentId, uid, file.name,
+      );
+      await FirebaseStorage.instance.ref(path).putData(
+        file.bytes,
+        SettableMetadata(
+          contentType: file.contentType,
+          customMetadata: {
+            'uploadedBy': uid,
+            'appointmentId': appointmentId,
+          },
+        ),
+      );
+      attachments.add(SessionEvidenceAttachment(
+        path: path,
+        name: file.name,
+        contentType: file.contentType,
+        size: file.size,
+      ));
+    }
+    return attachments;
+  }
+
   Future<void> reviewAppointment({
     required String appointmentId,
     required String action,
@@ -1151,6 +1224,7 @@ class AdminPortalRepository {
     String? proposedScheduledTime,
     String? rescheduleReason,
     String? sessionSummary,
+    List<SessionEvidenceAttachment> attachments = const [],
     bool offerFollowUp = false,
     String? followUpMessage,
   }) async {
@@ -1172,7 +1246,10 @@ class AdminPortalRepository {
       data['proposedScheduledTime'] = proposedScheduledTime;
     }
     if (rescheduleReason != null) data['rescheduleReason'] = rescheduleReason;
-    if (sessionSummary != null) data['sessionSummary'] = sessionSummary;
+    if (sessionSummary != null) {
+      data['sessionSummary'] = sessionSummary;
+      data['attachments'] = attachments.map((file) => file.toJson()).toList();
+    }
     if (offerFollowUp) data['offerFollowUp'] = true;
     if (followUpMessage != null) data['followUpMessage'] = followUpMessage;
     await FirebaseFunctions.instance
