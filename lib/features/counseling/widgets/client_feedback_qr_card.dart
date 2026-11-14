@@ -44,6 +44,7 @@ Future<Uint8List> buildClientFeedbackQrPdf({required bool accessSheet}) async {
             pw.BarcodeWidget(
               barcode: pw.Barcode.qrCode(),
               data: clientFeedbackGoogleFormUrl,
+              drawText: false,
               width: accessSheet ? 235 : 285,
               height: accessSheet ? 235 : 285,
             ),
