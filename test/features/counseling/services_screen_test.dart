@@ -16,6 +16,14 @@ import 'package:mind_mates/routes/route_names.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('referral service shows the three pathways and asks PACC about forms', (tester) async {
+    final referral = ServicesScreen.services.firstWhere((service) => service.title == 'Referral Service');
+    await tester.pumpWidget(MaterialApp(home: ServiceDetailScreen(service: referral)));
+    expect(find.text('Academic challenges'), findsOneWidget);
+    expect(find.text('Nonconformity to school norms'), findsOneWidget);
+    expect(find.text('Psychosocial difficulties'), findsOneWidget);
+    expect(find.textContaining('flowchart does not provide a document checklist'), findsOneWidget);
+  });
   testWidgets('contact range picker preserves cancellation', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));

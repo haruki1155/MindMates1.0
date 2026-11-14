@@ -116,6 +116,10 @@ class ServiceDetailScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 18),
                     Text(service.description, style: _DetailText.body),
+                    if (service.title == 'Referral Service') ...[
+                      const SizedBox(height: 24),
+                      const _ReferralProcessGuide(),
+                    ],
                     const SizedBox(height: 16),
                     OutlinedButton.icon(
                       icon: const Icon(Icons.support_agent_outlined),
@@ -208,6 +212,34 @@ class ServiceDetailScreen extends StatelessWidget {
     Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const ClientFeedbackFormScreen()));
+  }
+}
+
+class _ReferralProcessGuide extends StatelessWidget {
+  const _ReferralProcessGuide();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _DetailSectionHeading(
+          title: 'Referral pathways',
+          subtitle: 'Teaching or non-teaching personnel identify a student concern and coordinate with the relevant office.',
+        ),
+        SizedBox(height: 14),
+        Text('Academic challenges', style: _DetailText.title),
+        Text('Academic Admission and Retention Officer and/or faculty or academic staff; Program Head or College Dean; and VP for Academic Affairs.', style: _DetailText.body),
+        SizedBox(height: 14),
+        Text('Nonconformity to school norms', style: _DetailText.title),
+        Text('Unit Head of the Character and Values Formation Unit, CSLD Director, Student Discipline Board, and the Grievance and Discipline Committee for Teaching and Non-Teaching Personnel.', style: _DetailText.body),
+        SizedBox(height: 14),
+        Text('Psychosocial difficulties', style: _DetailText.title),
+        Text('PACC is listed for psychosocial difficulties. The flowchart also shows a decision between PACC assessment or counseling and auxiliary services or external agencies; PACC can clarify how that decision applies.', style: _DetailText.body),
+        SizedBox(height: 14),
+        Text('Contact PACC to confirm the appropriate pathway, required forms, consent, and next steps. The referral flowchart does not provide a document checklist.', style: _DetailText.body),
+      ],
+    );
   }
 }
 
