@@ -1,5 +1,6 @@
 import {handleAppointmentAgreement} from "./appointment_agreement";
 export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callable";
+export {requestFirestoreBackup, refreshFirestoreBackupStatus, scheduledFirestoreBackup} from "./backup_management";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
