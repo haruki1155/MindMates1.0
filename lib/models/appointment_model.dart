@@ -83,6 +83,9 @@ class AppointmentModel {
     this.bestTime,
     this.counselorName,
     this.updatedAt,
+    this.scheduleRevision = 0,
+    this.proposalRevision = 0,
+    this.hasScheduleRevision = false,
     this.assignedStaffId,
     this.staffReply,
     this.reviewedAt,
@@ -123,6 +126,9 @@ class AppointmentModel {
   final String? counselorName;
   final DateTime createdAt;
   final DateTime? updatedAt;
+  final int scheduleRevision;
+  final int proposalRevision;
+  final bool hasScheduleRevision;
   final String? assignedStaffId;
   final String? staffReply;
   final DateTime? reviewedAt;
@@ -139,6 +145,10 @@ class AppointmentModel {
   final String? followUpMessage;
   final String followUpStatus;
   final String? followUpAppointmentId;
+
+  bool get hasPendingScheduleChange => proposalStatus == 'pending' && const ['student', 'counselor'].contains(proposedBy) && proposedScheduledAt != null && isActive && !isArchived && scheduledAt.isAfter(DateTime.now());
+  bool get hasVerifiedPendingScheduleChange => hasPendingScheduleChange && proposalRevision > 0 && hasScheduleRevision;
+  String get pendingScheduleLabel => proposedBy == 'student' ? 'Awaiting PACC confirmation' : 'Your confirmation needed';
 
   bool get isArchived => archivedAt != null;
   AppointmentStatus get lifecycleStatus => AppointmentStatus.parse(status);
@@ -192,9 +202,12 @@ class AppointmentModel {
       counselorName: _optionalString(json['counselorName']),
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
       updatedAt: dateTimeFromFirestore(json['updatedAt']),
+      scheduleRevision: json['scheduleRevision'] is int ? json['scheduleRevision'] as int : 0,
+      hasScheduleRevision: json['scheduleRevision'] is int,
       assignedStaffId: _optionalString(json['assignedStaffId']),
       staffReply: _optionalString(json['staffReply']),
       reviewedAt: dateTimeFromFirestore(json['reviewedAt']),
+      proposalRevision: (json['proposalRevision'] as num?)?.toInt() ?? 0,
       proposedScheduledAt: dateTimeFromFirestore(json['proposedScheduledAt']),
       proposedScheduledTime: _optionalString(json['proposedScheduledTime']),
       proposedBy: _optionalString(json['proposedBy']),
@@ -235,6 +248,7 @@ class AppointmentModel {
       'assignedStaffId': assignedStaffId ?? '',
       'staffReply': staffReply ?? '',
       'reviewedAt': reviewedAt,
+      'proposalRevision': proposalRevision,
       'proposedScheduledAt': proposedScheduledAt,
       'proposedScheduledTime': proposedScheduledTime ?? '',
       'proposedBy': proposedBy ?? '',
@@ -243,6 +257,7 @@ class AppointmentModel {
       'academicYearId': academicYearId ?? '',
       'createdAt': createdAt,
       'updatedAt': updatedAt,
+      'scheduleRevision': scheduleRevision,
       'parentAppointmentId': parentAppointmentId ?? '',
       'rescheduleReason': rescheduleReason ?? '',
       'followUpRecommended': followUpRecommended,
@@ -275,6 +290,9 @@ class AppointmentModel {
     String? counselorName,
     DateTime? createdAt,
     DateTime? updatedAt,
+    int? scheduleRevision,
+    int? proposalRevision,
+    bool? hasScheduleRevision,
     String? assignedStaffId,
     String? staffReply,
     DateTime? reviewedAt,
@@ -316,6 +334,9 @@ class AppointmentModel {
       counselorName: counselorName ?? this.counselorName,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      scheduleRevision: scheduleRevision ?? this.scheduleRevision,
+      proposalRevision: proposalRevision ?? this.proposalRevision,
+      hasScheduleRevision: hasScheduleRevision ?? this.hasScheduleRevision,
       assignedStaffId: assignedStaffId ?? this.assignedStaffId,
       staffReply: staffReply ?? this.staffReply,
       reviewedAt: reviewedAt ?? this.reviewedAt,

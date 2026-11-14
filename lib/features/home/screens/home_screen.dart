@@ -287,13 +287,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           SafeArea(
             bottom: false,
             child: _activeDestination == _HomeNavDestination.appointments
-                ? PaccCounselingScreen(
+                ? Padding(
+                  padding: EdgeInsets.only(bottom: 96 + MediaQuery.paddingOf(context).bottom),
+                  child: PaccCounselingScreen(
                     key: ValueKey('appointments_$_appointmentBookingRequested'),
                     startBooking: _appointmentBookingRequested,
                     initialAppointmentId: _pendingAppointmentId,
                     nowProvider: widget._nowProvider,
                     showBottomNavigation: false,
-                  )
+                  ))
                 : CustomScrollView(
                     controller: _scrollController,
                     physics: const BouncingScrollPhysics(),

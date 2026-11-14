@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -10,6 +12,7 @@ import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../home/screens/home_appointment_calendar_screen.dart';
 import '../widgets/appointment_details_sheet.dart';
 import '../widgets/appointment_list_view.dart';
+import '../widgets/appointment_presentation.dart';
 import '../../notifications/screens/notifications_screen.dart';
 import '../domain/best_contact_time.dart';
 
@@ -34,7 +37,54 @@ class PaccCounselingScreen extends StatefulWidget {
 }
 
 class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
-  final _formKey = GlobalKey<FormState>();
+  // Distinct keys keep stage-specific validators independent while
+  // AnimatedSwitcher temporarily retains an outgoing page.
+  static const _draftStorage = FlutterSecureStorage();
+  bool _personalDraftSaved = false;
+  Map<String, TextEditingController> get _personalFields => {
+    'lastName': _lastNameController, 'firstName': _firstNameController,
+    'middleInitial': _middleInitialController, 'age': _ageController,
+    'address': _addressController, 'phone': _contactNumberController,
+    'email': _emailController, 'facebook': _facebookController,
+  };
+
+  Future<void> _restorePersonal(String uid) async {
+    final before = _personalFields.map((key, value) => MapEntry(key, value.text));
+    try {
+      final raw = await _draftStorage.read(key: 'appointment_personal_v2_$uid');
+      if (!mounted || _currentUserId() != uid || raw == null) return;
+      final saved = jsonDecode(raw) as Map<String, dynamic>;
+      if (_personalFields.entries.any((entry) => entry.value.text != before[entry.key])) return;
+      setState(() {
+        for (final entry in _personalFields.entries) {
+          if (saved[entry.key] is String) entry.value.text = saved[entry.key] as String;
+        }
+        _sex = saved['sex'] as String?;
+        _course = saved['course'] as String?;
+        _yearLevel = saved['yearLevel'] as String?;
+        _personalDraftSaved = true;
+      });
+    } catch (_) { /* A missing/unavailable local store must not block booking. */ }
+  }
+
+  Future<void> _savePersonal() async {
+    final uid = _currentUserId();
+    if (uid == null) return;
+    try {
+      await _draftStorage.write(key: 'appointment_personal_v2_$uid', value: jsonEncode({
+        for (final entry in _personalFields.entries) entry.key: entry.value.text,
+        'sex': _sex, 'course': _course, 'yearLevel': _yearLevel,
+      }));
+      if (!mounted || _currentUserId() != uid) return;
+      setState(() => _personalDraftSaved = true);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Personal information saved on this device.')));
+    } catch (_) {
+      if (mounted && _currentUserId() == uid) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to save on this device. Your entries are still available in this form.')));
+    }
+  }
+
+  final _personalFormKey = GlobalKey<FormState>();
+  final _counselingFormKey = GlobalKey<FormState>();
   final _lastNameController = TextEditingController();
   final _firstNameController = TextEditingController();
   final _middleInitialController = TextEditingController();
@@ -64,8 +114,14 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   bool _initialBookingHandled = false;
   List<String> _availableTimes = const [];
   bool _loadingTimes = false;
+  int _slotRequestSequence = 0;
   String? _parentAppointmentId;
   String? _bookingRequestId;
+  bool _editingFromReview = false;
+  DateTime? _scheduleBeforeReviewEdit;
+  String? _timeBeforeReviewEdit;
+  List<String>? _slotsBeforeReviewEdit;
+  String? _slotMessageBeforeReviewEdit;
 
   DateTime get _today => DateUtils.dateOnly(widget._nowProvider());
 
@@ -101,6 +157,8 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _therapyBefore = null;
       _selectedDate = null;
       _selectedTime = null;
+      _personalDraftSaved = false;
+      _restorePersonal(user.id);
     }
     final userId = _currentUserId();
     final provider = _readProviderOrNull<AppointmentProvider>();
@@ -139,16 +197,39 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     _watchProviderOrNull<AppointmentProvider>();
     return Scaffold(
       backgroundColor: _PaccColors.background,
-      bottomNavigationBar: widget.showBottomNavigation
-          ? const MindMateBottomNavigation(
-              active: MindMateNavDestination.appointments,
-            )
-          : null,
+      bottomNavigationBar: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.showBottomNavigation && MediaQuery.viewInsetsOf(context).bottom == 0) const MindMateBottomNavigation(active: MindMateNavDestination.appointments),
+        ],
+      ),
+      ),
       body: SafeArea(
         bottom: false,
         child: Column(
           children: [
             _PaccHeader(
+              title: _tab == _PaccAppointmentTab.myAppointments ? 'My appointments' : switch (_step) {
+                _PaccAppointmentStep.intake => 'Your information',
+                _PaccAppointmentStep.counseling => 'Counseling details',
+                _PaccAppointmentStep.calendar || _PaccAppointmentStep.time => 'Choose date & time',
+                _PaccAppointmentStep.review => 'Review request',
+                _PaccAppointmentStep.confirmation => 'Request received',
+              },
+              onBack: _tab == _PaccAppointmentTab.myAppointments ? null : () {
+                if (_step == _PaccAppointmentStep.intake || _step == _PaccAppointmentStep.counseling) { _backFromIntake(); }
+                else if (_step == _PaccAppointmentStep.calendar || _step == _PaccAppointmentStep.time) { _backFromSchedule(); }
+                else if (_step == _PaccAppointmentStep.review) { setState(() => _step = _PaccAppointmentStep.calendar); }
+                else { setState(() { _tab = _PaccAppointmentTab.myAppointments; _step = _PaccAppointmentStep.intake; }); }
+              },
+              backTooltip: _editingFromReview ? 'Back to review' : switch (_step) {
+                _PaccAppointmentStep.intake => 'Back to appointments',
+                _PaccAppointmentStep.counseling => 'Back to personal information',
+                _PaccAppointmentStep.calendar || _PaccAppointmentStep.time => 'Back to counseling details',
+                _ => 'Back to date and time',
+              },
               unreadCount:
                   _watchProviderOrNull<NotificationProvider>()?.unreadCount ??
                   0,
@@ -156,23 +237,64 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
             ),
             Expanded(
               child: ListView(
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                 physics: const BouncingScrollPhysics(),
                 padding: EdgeInsets.fromLTRB(
                   20,
                   20,
                   20,
-                  104 + MediaQuery.paddingOf(context).bottom,
+                  24 + MediaQuery.paddingOf(context).bottom,
                 ),
-                children: [
+                children: [Align(alignment: Alignment.topCenter, child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 640), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   if (_tab == _PaccAppointmentTab.appointNew &&
                       _step != _PaccAppointmentStep.confirmation)
                     _BookingStepper(step: _step),
                   const SizedBox(height: 20),
                   AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
+                    duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 220),
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(begin: const Offset(0, .025), end: Offset.zero).animate(animation),
+                        child: child,
+                      ),
+                    ),
                     child: _buildBody(),
                   ),
-                ],
+          if (_tab == _PaccAppointmentTab.appointNew &&
+              (_step != _PaccAppointmentStep.calendar || _selectedDate != null))
+            SafeArea(top: false, child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                if (_step == _PaccAppointmentStep.intake) TextButton.icon(
+                  onPressed: _savePersonal,
+                  icon: Icon(_personalDraftSaved ? Icons.check_circle_outline : Icons.save_outlined),
+                  label: Text(_personalDraftSaved ? 'Saved on this device \u00b7 Save again' : 'Save personal information'),
+                ),
+                SizedBox(width: double.infinity, child: FilledButton(
+                key: const ValueKey('appointment-stage-action'),
+                style: AppointmentVisuals.primary,
+                onPressed: (_watchProviderOrNull<AppointmentProvider>()?.isSaving ?? false) || _loadingTimes ||
+                    ((_step == _PaccAppointmentStep.calendar || _step == _PaccAppointmentStep.time) && _selectedTime == null)
+                    ? null : () {
+                      FocusScope.of(context).unfocus();
+                      if (_step == _PaccAppointmentStep.intake || _step == _PaccAppointmentStep.counseling) { _validateIntakeForm(); }
+                      else if (_step == _PaccAppointmentStep.review) { _confirmAppointment(); }
+                      else if (_step == _PaccAppointmentStep.confirmation) { setState(() { _tab = _PaccAppointmentTab.myAppointments; _step = _PaccAppointmentStep.intake; _editingFromReview = false; }); }
+                      else { setState(() { _editingFromReview = false; _step = _PaccAppointmentStep.review; }); }
+                    },
+                child: Text(textAlign: TextAlign.center, switch (_step) {
+                  _PaccAppointmentStep.intake => _editingFromReview ? 'Save and return to review' : 'Continue to Counseling Details',
+                  _PaccAppointmentStep.counseling => _editingFromReview ? 'Save and return to review' : 'Continue to Date & Time',
+                  _PaccAppointmentStep.review => 'Send appointment request',
+                  _PaccAppointmentStep.confirmation => 'Back to Appointments',
+                  _ => 'Continue to Confirm',
+                }),
+              )),
+              ]),
+            )),
+                ])))],
               ),
             ),
           ],
@@ -213,7 +335,8 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         visibleMonth: _visibleMonth,
         minimumDate: _today,
         selectedDate: _selectedDate,
-        onBack: () => setState(() => _step = _PaccAppointmentStep.intake),
+        backToReview: _editingFromReview,
+        onBack: _backFromSchedule,
         onPreviousMonth: () => setState(() {
           _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month - 1);
         }),
@@ -221,6 +344,21 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
           _visibleMonth = DateTime(_visibleMonth.year, _visibleMonth.month + 1);
         }),
         onDateSelected: _selectDate,
+        timeSelection: _selectedDate == null ? null : _TimeSelectionView(
+          selectedDate: _selectedDate,
+          selectedTime: _selectedTime,
+          availableTimes: _availableTimes,
+          noSlotMessage: _noSlotMessage,
+          onRetry: () => _selectDate(_selectedDate!),
+          isSaving: (appointmentProvider?.isSaving ?? false) || _loadingTimes,
+          onBack: () {},
+          showBack: false,
+          onTimeSelected: (time) => setState(() => _selectedTime = time),
+          onNext: () => setState(() {
+            _editingFromReview = false;
+            _step = _PaccAppointmentStep.review;
+          }),
+        ),
       ),
       _PaccAppointmentStep.time => _TimeSelectionView(
         key: const ValueKey('time'),
@@ -228,14 +366,25 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         selectedTime: _selectedTime,
         availableTimes: _availableTimes,
         noSlotMessage: _noSlotMessage,
+        onRetry: () => _selectDate(_selectedDate!),
         isSaving: (appointmentProvider?.isSaving ?? false) || _loadingTimes,
         onBack: () => setState(() => _step = _PaccAppointmentStep.calendar),
         onTimeSelected: (time) => setState(() => _selectedTime = time),
-        onNext: () => setState(() => _step = _PaccAppointmentStep.review),
+        onNext: () => setState(() {
+            _editingFromReview = false;
+            _step = _PaccAppointmentStep.review;
+          }),
       ),
-      _PaccAppointmentStep.intake => _IntakeFormView(
-        key: const ValueKey('intake'),
-        formKey: _formKey,
+      _PaccAppointmentStep.intake || _PaccAppointmentStep.counseling =>
+          _IntakeFormView(
+        key: ValueKey(
+          _step == _PaccAppointmentStep.intake ? 'intake' : 'counselingDetails',
+        ),
+        formKey: _step == _PaccAppointmentStep.intake
+            ? _personalFormKey
+            : _counselingFormKey,
+        isPersonal: _step == _PaccAppointmentStep.intake,
+        editingFromReview: _editingFromReview,
         lastNameController: _lastNameController,
         firstNameController: _firstNameController,
         middleInitialController: _middleInitialController,
@@ -264,16 +413,33 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         onTherapyBeforeChanged: (value) {
           setState(() => _therapyBefore = value);
         },
-        onBack: () => setState(() => _tab = _PaccAppointmentTab.myAppointments),
+        onBack: _backFromIntake,
         onNext: _validateIntakeForm,
       ),
       _PaccAppointmentStep.review => _BookingReviewView(
         key: const ValueKey('review'),
         selectedDate: _selectedDate,
         selectedTime: _selectedTime,
+        fullName: '${_firstNameController.text.trim()} '
+            '${_middleInitialController.text.trim()} '
+            '${_lastNameController.text.trim()}'.trim(),
+        age: _ageController.text.trim(),
+        sex: _sex,
+        address: _addressController.text.trim(),
+        contactNumber: _contactNumberController.text.trim(),
+        email: _emailController.text.trim(),
+        facebook: _facebookController.text.trim(),
+        course: _course,
+        yearLevel: _yearLevel,
+        preferredContactMethod: _preferredContactMethod,
+        therapyBefore: _therapyBefore,
         concern: _concernController.text.trim(),
+        bestTime: _legacyBestTime ?? formatBestContactTime(_bestTime),
         isSaving: appointmentProvider?.isSaving ?? false,
-        onBack: () => setState(() => _step = _PaccAppointmentStep.time),
+        onBack: () => setState(() => _step = _PaccAppointmentStep.calendar),
+        onEditPersonal: () => _editReviewSection(_PaccAppointmentStep.intake),
+        onEditCounseling: () => _editReviewSection(_PaccAppointmentStep.counseling),
+        onEditSchedule: () => _editReviewSection(_PaccAppointmentStep.calendar),
         onConfirm: _confirmAppointment,
       ),
       _PaccAppointmentStep.confirmation => _ConfirmationView(
@@ -283,23 +449,24 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         onReturn: () => setState(() {
           _tab = _PaccAppointmentTab.myAppointments;
           _step = _PaccAppointmentStep.intake;
+          _editingFromReview = false;
         }),
       ),
     };
   }
 
   Future<void> _selectDate(DateTime date) async {
+    final requestSequence = ++_slotRequestSequence;
     setState(() {
       _selectedDate = date;
       _selectedTime = null;
       _availableTimes = const [];
       _noSlotMessage = null;
       _loadingTimes = true;
-      _step = _PaccAppointmentStep.time;
     });
     final provider = _readProviderOrNull<AppointmentProvider>();
     final slots = await provider?.getAvailableSlots(date) ?? const [];
-    if (!mounted || _selectedDate != date) return;
+    if (!mounted || requestSequence != _slotRequestSequence || _selectedDate != date) return;
     setState(() {
       _availableTimes = slots.map((slot) => slot.label).toList(growable: false);
       _noSlotMessage = slots.isEmpty
@@ -347,6 +514,11 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     setState(() {
       _tab = _PaccAppointmentTab.appointNew;
       _step = _PaccAppointmentStep.intake;
+      _editingFromReview = false;
+      _scheduleBeforeReviewEdit = null;
+      _timeBeforeReviewEdit = null;
+      _slotsBeforeReviewEdit = null;
+      _slotMessageBeforeReviewEdit = null;
       _selectedDate = null;
       _selectedTime = null;
       _visibleMonth = DateTime(today.year, today.month);
@@ -377,14 +549,84 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     });
   }
 
+  void _backFromIntake() {
+    setState(() {
+      if (_editingFromReview) {
+        _editingFromReview = false;
+        _step = _PaccAppointmentStep.review;
+      } else if (_step == _PaccAppointmentStep.counseling) {
+        _step = _PaccAppointmentStep.intake;
+      } else {
+        _tab = _PaccAppointmentTab.myAppointments;
+      }
+    });
+  }
+
+  void _backFromSchedule() {
+    setState(() {
+      if (_editingFromReview) {
+        // Leaving schedule editing without continuing restores the review's
+        // original slot, including when the user inspected another date.
+        ++_slotRequestSequence;
+        _selectedDate = _scheduleBeforeReviewEdit;
+        _selectedTime = _timeBeforeReviewEdit;
+        _availableTimes = _slotsBeforeReviewEdit ?? const [];
+        _noSlotMessage = _slotMessageBeforeReviewEdit;
+        _loadingTimes = false;
+        _editingFromReview = false;
+        _step = _PaccAppointmentStep.review;
+      } else {
+        _step = _PaccAppointmentStep.counseling;
+      }
+    });
+  }
+
+  void _editReviewSection(_PaccAppointmentStep destination) {
+    final saving = _readProviderOrNull<AppointmentProvider>()?.isSaving ?? false;
+    if (saving) return;
+    setState(() {
+      if (destination == _PaccAppointmentStep.calendar) {
+        _scheduleBeforeReviewEdit = _selectedDate;
+        _timeBeforeReviewEdit = _selectedTime;
+        _slotsBeforeReviewEdit = List<String>.of(_availableTimes);
+        _slotMessageBeforeReviewEdit = _noSlotMessage;
+      }
+      _editingFromReview = true;
+      _step = destination;
+    });
+  }
+
+  // Mirrors the existing visible validators. Review may be reached after a
+  // user presses Back from an edit, so submission must reject invalid drafts.
+  bool get _personalDataValid =>
+      _lastNameController.text.trim().isNotEmpty &&
+      _firstNameController.text.trim().isNotEmpty &&
+      _ageController.text.trim().isNotEmpty &&
+      _addressController.text.trim().isNotEmpty &&
+      _contactNumberController.text.trim().isNotEmpty &&
+      _emailController.text.trim().isNotEmpty &&
+      _emailController.text.contains('@') &&
+      _facebookController.text.trim().isNotEmpty &&
+      _sex != null &&
+      _course != null &&
+      _yearLevel != null;
+
+  bool get _counselingDataValid =>
+      _preferredContactMethod != null &&
+      _therapyBefore != null &&
+      _concernController.text.trim().isNotEmpty &&
+      _bestTime.isValidRange;
+
   void _validateIntakeForm() {
-    final isValid = _formKey.currentState?.validate() ?? false;
-    if (!isValid ||
-        _sex == null ||
-        _course == null ||
-        _yearLevel == null ||
-        _preferredContactMethod == null ||
-        _therapyBefore == null) {
+    final personal = _step == _PaccAppointmentStep.intake;
+    final formState = personal
+        ? _personalFormKey.currentState
+        : _counselingFormKey.currentState;
+    final fieldValid = formState?.validate() ?? false;
+    final selectionValid = personal
+        ? _sex != null && _course != null && _yearLevel != null
+        : _preferredContactMethod != null && _therapyBefore != null;
+    if (!fieldValid || !selectionValid) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete all required fields.')),
       );
@@ -392,10 +634,33 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       return;
     }
 
-    setState(() => _step = _PaccAppointmentStep.calendar);
+    setState(() {
+      if (_editingFromReview) {
+        _step = _PaccAppointmentStep.review;
+        _editingFromReview = false;
+      } else {
+        _step = personal
+            ? _PaccAppointmentStep.counseling
+            : _PaccAppointmentStep.calendar;
+      }
+    });
   }
 
   Future<void> _confirmAppointment() async {
+    final saving = _readProviderOrNull<AppointmentProvider>()?.isSaving ?? false;
+    if (saving) return;
+    if (!_personalDataValid || !_counselingDataValid) {
+      setState(() {
+        _editingFromReview = false;
+        _step = !_personalDataValid
+            ? _PaccAppointmentStep.intake
+            : _PaccAppointmentStep.counseling;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please complete all required fields.')),
+      );
+      return;
+    }
     if (_selectedDate == null || _selectedTime == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please choose a date and time first.')),
@@ -469,7 +734,13 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     showAppointmentDetailsSheet(
       context,
       appointment,
-      onBookAppointment: () => _startNewAppointment(appointment),
+      onBookAppointment: () {
+        final latest = _readProviderOrNull<AppointmentProvider>()?.appointments.where(
+          (item) => item.id == appointment.id && item.userId == _currentUserId(),
+        );
+        if (latest == null || latest.isEmpty) return;
+        _startNewAppointment(latest.first);
+      },
     );
   }
 
@@ -559,59 +830,21 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
 }
 
 class _PaccHeader extends StatelessWidget {
-  const _PaccHeader({
-    required this.unreadCount,
-    required this.onNotificationsTap,
-  });
-
+  const _PaccHeader({required this.title, required this.unreadCount, required this.onNotificationsTap, this.onBack, required this.backTooltip});
+  final String title, backTooltip;
   final int unreadCount;
   final VoidCallback onNotificationsTap;
-
+  final VoidCallback? onBack;
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
-      decoration: const BoxDecoration(color: _PaccColors.background),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('PACC Counseling', style: _PaccText.headerTitle),
-                    SizedBox(height: 4),
-                    Text(
-                      'Your well-being matters',
-                      style: _PaccText.headerSubtitle,
-                    ),
-                  ],
-                ),
-              ),
-              Semantics(
-                button: true,
-                label: unreadCount == 0
-                    ? 'Notifications'
-                    : '$unreadCount unread notifications',
-                child: IconButton(
-                  tooltip: 'Notifications',
-                  onPressed: onNotificationsTap,
-                  icon: Badge.count(
-                    isLabelVisible: unreadCount > 0,
-                    count: unreadCount,
-                    child: const Icon(Icons.notifications_none_rounded),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => AppointmentPageHeader(
+    title: title,
+    subtitle: onBack == null ? 'A space to plan your next conversation.' : title == 'Request received' ? 'Your request has been sent to PACC' : 'Request an appointment',
+    onBack: onBack, backTooltip: backTooltip,
+    trailing: onBack != null ? null : Semantics(
+      button: true, label: unreadCount == 0 ? 'Notifications' : '$unreadCount unread notifications',
+      child: IconButton(tooltip: 'Notifications', onPressed: onNotificationsTap, icon: Badge.count(isLabelVisible: unreadCount > 0, count: unreadCount, child: const Icon(Icons.notifications_none_rounded))),
+    ),
+  );
 }
 
 class _AppointmentLoading extends StatelessWidget {
@@ -987,6 +1220,8 @@ class _CalendarView extends StatelessWidget {
     required this.onPreviousMonth,
     required this.onNextMonth,
     required this.onDateSelected,
+    this.backToReview = false,
+    this.timeSelection,
   });
 
   final DateTime visibleMonth;
@@ -996,6 +1231,8 @@ class _CalendarView extends StatelessWidget {
   final VoidCallback onPreviousMonth;
   final VoidCallback onNextMonth;
   final ValueChanged<DateTime> onDateSelected;
+  final Widget? timeSelection;
+  final bool backToReview;
 
   @override
   Widget build(BuildContext context) {
@@ -1018,18 +1255,7 @@ class _CalendarView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              IconButton(
-                tooltip: 'Back to intake form',
-                onPressed: onBack,
-                icon: const Icon(Icons.chevron_left, color: Colors.black),
-              ),
-              const Expanded(
-                child: Text('Appointment Schedule', style: _PaccText.title),
-              ),
-            ],
-          ),
+          const Text('Appointment Schedule', style: _PaccText.title),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1081,16 +1307,19 @@ class _CalendarView extends StatelessWidget {
               final selected =
                   selectedDate != null &&
                   DateUtils.isSameDay(selectedDate, date);
-              final suggested = enabled && (day == 28 || day == 30);
               return _CalendarDayButton(
                 day: day,
                 selected: selected,
-                suggested: suggested,
+                suggested: false,
                 enabled: enabled,
                 onTap: () => onDateSelected(date),
               );
             },
           ),
+          if (timeSelection != null) ...[
+            const SizedBox(height: 24),
+            timeSelection!,
+          ],
         ],
       ),
     );
@@ -1104,20 +1333,24 @@ class _TimeSelectionView extends StatelessWidget {
     required this.selectedTime,
     required this.availableTimes,
     required this.noSlotMessage,
+    required this.onRetry,
     required this.isSaving,
     required this.onBack,
     required this.onTimeSelected,
     required this.onNext,
+    this.showBack = true,
   });
 
   final DateTime? selectedDate;
   final String? selectedTime;
   final List<String> availableTimes;
   final String? noSlotMessage;
+  final VoidCallback onRetry;
   final bool isSaving;
   final VoidCallback onBack;
   final ValueChanged<String> onTimeSelected;
   final VoidCallback onNext;
+  final bool showBack;
 
   @override
   Widget build(BuildContext context) {
@@ -1127,11 +1360,12 @@ class _TimeSelectionView extends StatelessWidget {
       children: [
         Row(
           children: [
-            IconButton(
-              tooltip: 'Back to calendar',
-              onPressed: onBack,
-              icon: const Icon(Icons.chevron_left, color: Colors.black),
-            ),
+            if (showBack)
+              IconButton(
+                tooltip: 'Back to calendar',
+                onPressed: onBack,
+                icon: const Icon(Icons.chevron_left),
+              ),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1148,41 +1382,42 @@ class _TimeSelectionView extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 22),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            for (final time in availableTimes)
-              _TimeChip(
-                time: time,
-                selected: selectedTime == time,
-                onTap: () => onTimeSelected(time),
-              ),
-          ],
+        const Text(
+          'Philippine Time (PHT)',
+          style: _PaccText.body,
         ),
-        if (!isSaving && availableTimes.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 20),
-            child: Text(
-              noSlotMessage ??
-                  'No appointment times are available for this date. Please choose another date.',
-              style: _PaccText.body,
-            ),
+        const SizedBox(height: 22),
+        if (isSaving)
+          const LinearProgressIndicator(
+            semanticsLabel: 'Loading appointment times',
+          )
+        else if (availableTimes.isEmpty) ...[
+          Text(
+            noSlotMessage ??
+                'No appointment times are available for this date. Please choose another date.',
+            style: _PaccText.body,
+          ),
+          TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry appointment times'),
+          ),
+        ] else
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final time in availableTimes)
+                _TimeChip(
+                  time: time,
+                  selected: selectedTime == time,
+                  onTap: () => onTimeSelected(time),
+                ),
+            ],
           ),
         const SizedBox(height: 34),
         const _ReminderCard(),
         const SizedBox(height: 34),
-        Center(
-          child: SizedBox(
-            width: 230,
-            child: _YellowButton(
-              label: isSaving ? 'Saving...' : 'Continue to Confirm',
-              onTap: onNext,
-              enabled: selectedTime != null && !isSaving,
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -1203,10 +1438,12 @@ class _TimeChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       key: Key('time-chip-$time'),
-      color: selected ? _PaccColors.sun : Colors.white,
+      color: selected ? const Color(0xFFFFF1C7) : Colors.white,
       shape: StadiumBorder(
         side: BorderSide(
-          color: selected ? _PaccColors.sunButton : const Color(0xFFE5C24D),
+          color: selected
+              ? _PaccColors.sunButton
+              : const Color(0xFFE5C24D),
           width: selected ? 1.5 : 1,
         ),
       ),
@@ -1215,10 +1452,12 @@ class _TimeChip extends StatelessWidget {
         onTap: onTap,
         child: Container(
           constraints: const BoxConstraints(minHeight: 44),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 8,
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (selected) ...[
                 const Icon(Icons.check, size: 16),
@@ -1247,7 +1486,7 @@ class _ReminderCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: const Text(
-        'Confidentiality Reminder: All counseling sessions are confidential and protected under professional ethics. Your privacy is our priority.',
+        'PACC handles your information with care. Ask your counselor about privacy and its limits.',
         style: _PaccText.body,
       ),
     );
@@ -1258,6 +1497,8 @@ class _IntakeFormView extends StatelessWidget {
   const _IntakeFormView({
     super.key,
     required this.formKey,
+    required this.isPersonal,
+    required this.editingFromReview,
     required this.lastNameController,
     required this.firstNameController,
     required this.middleInitialController,
@@ -1284,6 +1525,8 @@ class _IntakeFormView extends StatelessWidget {
   });
 
   final GlobalKey<FormState> formKey;
+  final bool isPersonal;
+  final bool editingFromReview;
   final TextEditingController lastNameController;
   final TextEditingController firstNameController;
   final TextEditingController middleInitialController;
@@ -1313,39 +1556,12 @@ class _IntakeFormView extends StatelessWidget {
     return Form(
       key: formKey,
       child: Column(
-        key: key,
         children: [
-          Row(
-            children: [
-              IconButton(
-                tooltip: 'Back to appointments',
-                onPressed: onBack,
-                icon: const Icon(Icons.arrow_back),
-              ),
-              const Expanded(
-                child: Text('Appointment Details', style: _PaccText.title),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
-            decoration: _PaccDecor.card(borderColor: _PaccColors.sunButton),
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Counseling Details', style: _PaccText.title),
-                SizedBox(height: 8),
-                Text(
-                  'Please fill out all required fields (*) to schedule your counseling session with the PACC office.',
-                  style: _PaccText.body,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-          _FormSection(
+          Align(alignment: Alignment.centerLeft, child: Text(isPersonal ? "Let's start with you" : 'How can we support you?', style: AppointmentVisuals.title.copyWith(fontSize: 21))),
+          const SizedBox(height: 10),
+          Text(isPersonal ? 'Some information is filled in from your profile. Please check it carefully and complete the remaining required fields.' : 'Share what you feel comfortable writing. This helps PACC understand your request before your session.', style: AppointmentVisuals.body),
+          const SizedBox(height: 22),
+          if (isPersonal) _FormSection(
             number: 1,
             title: 'Personal Information',
             child: Column(
@@ -1356,32 +1572,33 @@ class _IntakeFormView extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _PaccTextField(
-                        controller: lastNameController,
-                        hint: 'Last Name',
-                        validator: _required,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _PaccTextField(
+                        fieldKey: const ValueKey('intake-first-name'),
                         controller: firstNameController,
                         hint: 'First Name',
                         validator: _required,
                       ),
                     ),
                     const SizedBox(width: 8),
-                    SizedBox(
-                      width: 80,
+                    Expanded(
                       child: _PaccTextField(
-                        controller: middleInitialController,
-                        hint: 'M.I. (optional)',
+                        fieldKey: const ValueKey('intake-last-name'),
+                        controller: lastNameController,
+                        hint: 'Last Name',
+                        validator: _required,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 14),
+                _PaccTextField(
+                  fieldKey: const ValueKey('intake-middle-initial'),
+                  controller: middleInitialController,
+                  hint: 'M.I. (optional)',
+                ),
+                const SizedBox(height: 14),
                 const _FieldLabel('Age*'),
                 _PaccTextField(
+                  fieldKey: const ValueKey('intake-age'),
                   controller: ageController,
                   hint: 'e.g. 20',
                   keyboardType: TextInputType.number,
@@ -1402,6 +1619,7 @@ class _IntakeFormView extends StatelessWidget {
                 const SizedBox(height: 14),
                 const _FieldLabel('Complete Address*'),
                 _PaccTextField(
+                  fieldKey: const ValueKey('intake-address'),
                   controller: addressController,
                   hint: 'Your answer',
                   validator: _required,
@@ -1409,6 +1627,7 @@ class _IntakeFormView extends StatelessWidget {
                 const SizedBox(height: 14),
                 const _FieldLabel('Contact Number*'),
                 _PaccTextField(
+                  fieldKey: const ValueKey('intake-contact'),
                   controller: contactNumberController,
                   hint: 'Your answer',
                   keyboardType: TextInputType.phone,
@@ -1417,6 +1636,7 @@ class _IntakeFormView extends StatelessWidget {
                 const SizedBox(height: 14),
                 const _FieldLabel('Email Address*'),
                 _PaccTextField(
+                  fieldKey: const ValueKey('intake-email'),
                   controller: emailController,
                   hint: 'Your answer',
                   keyboardType: TextInputType.emailAddress,
@@ -1425,6 +1645,7 @@ class _IntakeFormView extends StatelessWidget {
                 const SizedBox(height: 14),
                 const _FieldLabel('Facebook Account Name and Link*'),
                 _PaccTextField(
+                  fieldKey: const ValueKey('intake-facebook'),
                   controller: facebookController,
                   hint: 'Your answer',
                   validator: _required,
@@ -1462,8 +1683,7 @@ class _IntakeFormView extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 26),
-          _FormSection(
+          if (!isPersonal) _FormSection(
             number: 2,
             title: 'Counseling Details',
             child: Column(
@@ -1495,6 +1715,7 @@ class _IntakeFormView extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 _PaccTextField(
+                  fieldKey: const ValueKey('intake-concern'),
                   controller: concernController,
                   hint: 'Share what you are experiencing...',
                   maxLines: 5,
@@ -1502,18 +1723,15 @@ class _IntakeFormView extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 const _FieldLabel('Best Time to Contact You*'),
-                _BestTimeField(value: bestTime, onChanged: onBestTimeChanged),
-                const SizedBox(height: 30),
-                SizedBox(
-                  width: double.infinity,
-                  child: _YellowButton(
-                    label: 'Continue to Date & Time',
-                    onTap: onNext,
-                  ),
+                _BestTimeField(
+                  value: bestTime,
+                  onChanged: onBestTimeChanged,
                 ),
               ],
             ),
           ),
+          const SizedBox(height: 24),
+
         ],
       ),
     );
@@ -1648,44 +1866,7 @@ class _FormSection extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: _PaccDecor.card(radius: 20),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-              decoration: const BoxDecoration(
-                color: _PaccColors.sun,
-                borderRadius: BorderRadius.vertical(
-                  bottom: Radius.circular(20),
-                ),
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black,
-                    child: Text('$number', style: _PaccText.cardTitleLarge),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(child: Text(title, style: _PaccText.title)),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 20, 18, 26),
-              child: child,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => child;
 }
 
 class _BookingReviewView extends StatelessWidget {
@@ -1693,17 +1874,47 @@ class _BookingReviewView extends StatelessWidget {
     super.key,
     required this.selectedDate,
     required this.selectedTime,
+    required this.fullName,
+    required this.age,
+    required this.sex,
+    required this.address,
+    required this.contactNumber,
+    required this.email,
+    required this.facebook,
+    required this.course,
+    required this.yearLevel,
+    required this.preferredContactMethod,
+    required this.therapyBefore,
     required this.concern,
+    required this.bestTime,
     required this.isSaving,
     required this.onBack,
+    required this.onEditPersonal,
+    required this.onEditCounseling,
+    required this.onEditSchedule,
     required this.onConfirm,
   });
 
   final DateTime? selectedDate;
   final String? selectedTime;
+  final String fullName;
+  final String age;
+  final String? sex;
+  final String address;
+  final String contactNumber;
+  final String email;
+  final String facebook;
+  final String? course;
+  final String? yearLevel;
+  final String? preferredContactMethod;
+  final String? therapyBefore;
   final String concern;
+  final String bestTime;
   final bool isSaving;
   final VoidCallback onBack;
+  final VoidCallback onEditPersonal;
+  final VoidCallback onEditCounseling;
+  final VoidCallback onEditSchedule;
   final VoidCallback onConfirm;
 
   @override
@@ -1715,61 +1926,116 @@ class _BookingReviewView extends StatelessWidget {
       key: key,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        const Text('One last look', style: AppointmentVisuals.title),
+        const SizedBox(height: 8),
+        const Text(
+          'Check your information before sending this appointment request.',
+          style: _PaccText.body,
+        ),
+        const SizedBox(height: 18),
+        _ReviewSection(
+          title: 'Personal Information',
+          onEdit: onEditPersonal,
+          isSaving: isSaving,
           children: [
-            IconButton(
-              tooltip: 'Back to date and time',
-              onPressed: isSaving ? null : onBack,
-              icon: const Icon(Icons.arrow_back),
-            ),
-            const Expanded(
-              child: Text('Confirm Appointment', style: _PaccText.title),
-            ),
+            _ReviewInfoRow(Icons.badge_outlined, 'Full name', fullName),
+            _ReviewInfoRow(Icons.cake_outlined, 'Age', age),
+            _ReviewInfoRow(Icons.person_outline, 'Sex', sex ?? 'Not provided'),
+            _ReviewInfoRow(Icons.home_outlined, 'Address', address),
+            _ReviewInfoRow(Icons.phone_outlined, 'Contact', contactNumber),
+            _ReviewInfoRow(Icons.email_outlined, 'Email', email),
+            _ReviewInfoRow(Icons.link_outlined, 'Facebook', facebook),
+            _ReviewInfoRow(Icons.school_outlined, 'Course', course ?? 'Not provided'),
+            _ReviewInfoRow(Icons.layers_outlined, 'Year level', yearLevel ?? 'Not provided'),
           ],
         ),
         const SizedBox(height: 16),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: _PaccDecor.card(radius: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        _ReviewSection(
+          title: 'Counseling Details',
+          onEdit: onEditCounseling,
+          isSaving: isSaving,
+          children: [
+            _ReviewInfoRow(Icons.contact_phone_outlined, 'Preferred contact',
+                preferredContactMethod ?? 'Not provided'),
+            _ReviewInfoRow(Icons.history_outlined, 'Prior therapy',
+                therapyBefore ?? 'Not provided'),
+            _ReviewInfoRow(Icons.schedule_outlined, 'Best contact time', bestTime),
+            const Divider(height: 24),
+            const Text('What brings you to seek help?', style: _PaccText.cardTitle),
+            const SizedBox(height: 8),
+            Text(concern, style: _PaccText.body),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _ReviewSection(
+          title: 'Schedule',
+          onEdit: onEditSchedule,
+          isSaving: isSaving,
+          children: [
+            _ReviewInfoRow(Icons.calendar_today_outlined, 'Date', date),
+            _ReviewInfoRow(Icons.schedule_outlined, 'Time',
+                selectedTime == null ? 'Not selected' : '$selectedTime (PHT)'),
+            const _ReviewInfoRow(
+              Icons.place_outlined,
+              'Location',
+              'PACC Office, 2nd Floor, Main Building',
+            ),
+            const _ReviewInfoRow(
+              Icons.person_outline,
+              'Counselor',
+              'To be assigned',
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+
+      ],
+    );
+  }
+}
+
+class _ReviewSection extends StatelessWidget {
+  const _ReviewSection({
+    required this.title,
+    required this.children,
+    required this.onEdit,
+    required this.isSaving,
+  });
+
+  final String title;
+  final List<Widget> children;
+  final VoidCallback onEdit;
+  final bool isSaving;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+      decoration: _PaccDecor.card(radius: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              _ReviewInfoRow(Icons.calendar_today_outlined, 'Date', date),
-              _ReviewInfoRow(
-                Icons.schedule_outlined,
-                'Time',
-                selectedTime ?? 'Not selected',
+              Expanded(child: Text(title, style: _PaccText.title)),
+              Tooltip(
+                message: 'Edit $title',
+                child: TextButton.icon(
+                  onPressed: isSaving ? null : onEdit,
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text('Edit'),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(64, 48),
+                  ),
+                ),
               ),
-              const _ReviewInfoRow(
-                Icons.place_outlined,
-                'Location',
-                'PACC Office, 2nd Floor, Main Building',
-              ),
-              const _ReviewInfoRow(
-                Icons.person_outline,
-                'Counselor',
-                'To be assigned',
-              ),
-              if (concern.isNotEmpty) ...[
-                const Divider(height: 32),
-                const Text('Concern', style: _PaccText.cardTitle),
-                const SizedBox(height: 6),
-                Text(concern, style: _PaccText.body),
-              ],
             ],
           ),
-        ),
-        const SizedBox(height: 24),
-        SizedBox(
-          width: double.infinity,
-          child: _YellowButton(
-            label: isSaving ? 'Confirming...' : 'Confirm Appointment',
-            enabled: !isSaving,
-            onTap: onConfirm,
-          ),
-        ),
-      ],
+          const Divider(height: 16),
+          ...children,
+        ],
+      ),
     );
   }
 }
@@ -1783,39 +2049,22 @@ class _BookingStepper extends StatelessWidget {
   Widget build(BuildContext context) {
     final active = switch (step) {
       _PaccAppointmentStep.intake => 0,
-      _PaccAppointmentStep.calendar || _PaccAppointmentStep.time => 1,
-      _PaccAppointmentStep.review => 2,
-      _PaccAppointmentStep.confirmation => 2,
+      _PaccAppointmentStep.counseling => 1,
+      _PaccAppointmentStep.calendar || _PaccAppointmentStep.time => 2,
+      _PaccAppointmentStep.review || _PaccAppointmentStep.confirmation => 3,
     };
-    const labels = ['Details', 'Date & Time', 'Confirm'];
+    const labels = ['Your information', 'Counseling details', 'Date & time', 'Review'];
     return Semantics(
-      label: 'Booking progress: step ${active + 1} of 3',
-      child: Row(
-        children: [
-          for (var index = 0; index < labels.length; index++) ...[
-            Expanded(
-              child: Column(
-                children: [
-                  Container(
-                    width: 30,
-                    height: 30,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: index <= active
-                          ? _PaccColors.sunButton
-                          : const Color(0xFFE5E7EB),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Text('${index + 1}', style: _PaccText.tinyBold),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(labels[index], style: _PaccText.body),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
+      label: 'Booking progress: step ${active + 1} of 4',
+      child: Column(children: [
+        Row(children: [
+          Expanded(child: Text('Step ${active + 1} of 4', style: _PaccText.muted)),
+          Flexible(child: Text(labels[active], textAlign: TextAlign.end, style: _PaccText.muted)),
+        ]),
+        const SizedBox(height: 10),
+        LinearProgressIndicator(value: (active + 1) / 4, minHeight: 3,
+          color: _PaccColors.sunButton, backgroundColor: const Color(0xFFE1E7E3)),
+      ]),
     );
   }
 }
@@ -1829,24 +2078,12 @@ class _ReviewInfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 14),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 20),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: _PaccText.body),
-              const SizedBox(height: 2),
-              Text(value, style: _PaccText.subtitle),
-            ],
-          ),
-        ),
-      ],
-    ),
+    padding: const EdgeInsets.symmetric(vertical: 10),
+    child: LayoutBuilder(builder: (context, constraints) {
+      final labelText = Text(label, style: AppointmentVisuals.body.copyWith(fontSize: 12));
+      if (constraints.maxWidth < 260 || MediaQuery.textScalerOf(context).scale(13) > 19) return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [labelText, const SizedBox(height: 4), Text(value, style: AppointmentVisuals.body.copyWith(color: AppointmentVisuals.ink, fontWeight: FontWeight.w700))]);
+      return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(flex: 2, child: labelText), const SizedBox(width: 12), Expanded(flex: 3, child: Text(value, textAlign: TextAlign.end, style: const TextStyle(color: AppointmentVisuals.ink, fontSize: 13, height: 1.5, fontWeight: FontWeight.w700)))]);
+    }),
   );
 }
 
@@ -1867,12 +2104,12 @@ class _ConfirmationView extends StatelessWidget {
     return Container(
       key: key,
       alignment: Alignment.center,
-      padding: const EdgeInsets.only(top: 80),
+      padding: const EdgeInsets.only(top: 24),
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(24, 34, 24, 30),
         decoration: BoxDecoration(
-          color: const Color(0xFFD9D9D9),
+          color: _PaccColors.background,
           borderRadius: BorderRadius.circular(24),
         ),
         child: Column(
@@ -1882,23 +2119,27 @@ class _ConfirmationView extends StatelessWidget {
               width: 104,
               height: 104,
               decoration: const BoxDecoration(
-                color: _PaccColors.sun,
+                color: Color(0xFFE0F3E9),
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: Color(0x44000000),
-                    blurRadius: 12,
+                    color: Color(0x08000000),
+                    blurRadius: 6,
                     offset: Offset(0, 8),
                   ),
                 ],
               ),
-              child: const Icon(Icons.check, size: 70, color: Colors.black),
+              child: const Icon(Icons.check, size: 48, color: Color(0xFF187557)),
             ),
             const SizedBox(height: 22),
             const Text(
-              'Appointment Request Sent!',
+              'Your request has been sent',
               style: _PaccText.confirmTitle,
             ),
+            const SizedBox(height: 8),
+            const Text('Awaiting confirmation', style: _PaccText.subtitle),
+            const SizedBox(height: 8),
+            const Text('Philippine Time (PHT)', style: _PaccText.body),
             const SizedBox(height: 12),
             const Text(
               "Your appointment request has been sent to PACC Counseling. We'll notify you once your schedule has been confirmed.",
@@ -1934,13 +2175,7 @@ class _ConfirmationView extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: _YellowButton(
-                label: 'Back to Appointments',
-                onTap: onReturn,
-              ),
-            ),
+
           ],
         ),
       ),
@@ -1966,6 +2201,7 @@ class _PaccTextField extends StatelessWidget {
   const _PaccTextField({
     required this.controller,
     required this.hint,
+    this.fieldKey,
     this.validator,
     this.keyboardType,
     this.maxLines = 1,
@@ -1973,6 +2209,7 @@ class _PaccTextField extends StatelessWidget {
 
   final TextEditingController controller;
   final String hint;
+  final Key? fieldKey;
   final String? Function(String?)? validator;
   final TextInputType? keyboardType;
   final int maxLines;
@@ -1980,11 +2217,19 @@ class _PaccTextField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TextFormField(
+      key: fieldKey,
       controller: controller,
       keyboardType: keyboardType,
       maxLines: maxLines,
-      style: _PaccText.input,
-      decoration: _PaccDecor.input(hint),
+      textInputAction:
+          maxLines > 1 ? TextInputAction.newline : TextInputAction.next,
+      style: _PaccText.input.copyWith(fontSize: 14),
+      decoration: _PaccDecor.input(hint).copyWith(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 17,
+        ),
+      ),
       validator: validator,
     );
   }
@@ -2047,24 +2292,29 @@ class _RadioGroup extends StatelessWidget {
           children: [
             Text(label, style: _PaccText.cardTitle),
             const SizedBox(height: 6),
-            for (final option in options)
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: () {
-                  onChanged(option);
-                  field.didChange(option);
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    children: [
-                      _ChoiceCircle(selected: value == option),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text(option, style: _PaccText.body)),
-                    ],
+            LayoutBuilder(builder: (context, constraints) {
+              final twoColumns = constraints.maxWidth >= 300 && MediaQuery.textScalerOf(context).scale(14) <= 20;
+              return Wrap(spacing: 10, runSpacing: 10, children: [
+                for (final option in options) SizedBox(
+                  width: twoColumns ? (constraints.maxWidth - 10) / 2 : constraints.maxWidth,
+                  child: Semantics(
+                    button: true, checked: value == option, inMutuallyExclusiveGroup: true,
+                    child: Material(
+                      color: value == option ? const Color(0xFFFFF3D7) : Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: value == option ? AppointmentVisuals.gold : AppointmentVisuals.line)),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () { onChanged(option); field.didChange(option); },
+                        child: ConstrainedBox(constraints: const BoxConstraints(minHeight: 48), child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                          child: Row(children: [_ChoiceCircle(selected: value == option), const SizedBox(width: 8), Expanded(child: Text(option, style: _PaccText.body))]),
+                        )),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ]);
+            }),
             if (field.hasError)
               Padding(
                 padding: const EdgeInsets.only(left: 12, top: 2),
@@ -2117,23 +2367,20 @@ class _YellowButton extends StatelessWidget {
   const _YellowButton({
     required this.label,
     required this.onTap,
-    this.enabled = true,
   });
 
   final String label;
   final VoidCallback onTap;
-  final bool enabled;
-
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: enabled ? _PaccColors.sunButton : const Color(0xFFD1C8AD),
+      color: _PaccColors.sunButton,
       borderRadius: BorderRadius.circular(999),
-      elevation: enabled ? 5 : 0,
+      elevation: 1,
       shadowColor: const Color(0x33000000),
       child: InkWell(
         borderRadius: BorderRadius.circular(999),
-        onTap: enabled ? onTap : null,
+        onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
           child: Center(
@@ -2249,7 +2496,7 @@ class _CalendarDayButton extends StatelessWidget {
         ? _PaccColors.sunButton
         : suggested
         ? const Color(0xFFFFE58B)
-        : const Color(0xFFC8C8CB);
+        : Colors.white;
     return Material(
       color: color,
       borderRadius: BorderRadius.circular(8),
@@ -2293,102 +2540,89 @@ class _DetailLine extends StatelessWidget {
 
 enum _PaccAppointmentTab { myAppointments, appointNew }
 
-enum _PaccAppointmentStep { calendar, time, intake, review, confirmation }
+enum _PaccAppointmentStep { calendar, time, intake, counseling, review, confirmation }
 
 class _PaccColors {
   const _PaccColors._();
 
-  static const background = Color(0xFFFAF5E8);
-  static const sun = Color(0xFFFFD447);
-  static const sunButton = Color(0xFFFFB800);
+  static const background = Color(0xFFF7F8F4);
+  static const sunButton = Color(0xFFF8BF3C);
 }
 
 class _PaccText {
   const _PaccText._();
 
-  static const headerTitle = TextStyle(
-    color: Color(0xFF111827),
-    fontSize: 22,
-    fontWeight: FontWeight.w800,
-  );
-
-  static const headerSubtitle = TextStyle(
-    color: Color(0xFF4B5563),
-    fontSize: 14,
-    fontWeight: FontWeight.w400,
-  );
-
   static const title = TextStyle(
-    color: Colors.black,
+    color: Color(0xFF172C35),
     fontSize: 16,
     fontWeight: FontWeight.w900,
   );
 
   static const subtitle = TextStyle(
-    color: Colors.black,
+    color: Color(0xFF172C35),
     fontSize: 15,
     fontWeight: FontWeight.w500,
   );
 
   static const monthTitle = TextStyle(
-    color: Colors.black,
+    color: Color(0xFF172C35),
     fontSize: 16,
     fontWeight: FontWeight.w900,
   );
 
   static const confirmTitle = TextStyle(
-    color: Colors.black,
+    color: Color(0xFF172C35),
     fontSize: 19,
     fontWeight: FontWeight.w900,
   );
 
   static const cardTitleLarge = TextStyle(
-    color: Colors.black,
+    color: Color(0xFF172C35),
     fontSize: 16,
     fontWeight: FontWeight.w900,
   );
 
   static const cardTitle = TextStyle(
-    color: Colors.black,
+    color: Color(0xFF172C35),
     fontSize: 13,
     fontWeight: FontWeight.w900,
   );
 
   static const body = TextStyle(
-    color: Colors.black,
-    fontSize: 12,
+    color: Color(0xFF172C35),
+    fontSize: 14,
     height: 1.35,
     fontWeight: FontWeight.w500,
   );
 
   static const muted = TextStyle(
-    color: Color(0xFF918979),
-    fontSize: 12,
+    color: Color(0xFF6F8185),
+    fontSize: 14,
     height: 1.3,
     fontWeight: FontWeight.w600,
   );
 
   static const tinyBold = TextStyle(
-    color: Colors.black,
+    color: Color(0xFF172C35),
     fontSize: 11,
     fontWeight: FontWeight.w900,
   );
 
   static const smallButton = TextStyle(
-    color: Colors.black,
-    fontSize: 12,
+    color: Color(0xFF172C35),
+    fontSize: 14,
     fontWeight: FontWeight.w900,
   );
 
   static const input = TextStyle(
-    color: Colors.black,
-    fontSize: 12,
+    color: Color(0xFF172C35),
+    fontSize: 14,
     fontWeight: FontWeight.w600,
   );
 
   static const inputHint = TextStyle(
     color: Color(0xFF9A927F),
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: FontWeight.w500,
   );
 }
@@ -2404,11 +2638,11 @@ class _PaccDecor {
     return BoxDecoration(
       color: color,
       borderRadius: BorderRadius.circular(radius),
-      border: borderColor == null ? null : Border.all(color: borderColor),
+      border: Border.all(color: borderColor ?? const Color(0xFFE8E9E5)),
       boxShadow: const [
         BoxShadow(
-          color: Color(0x26000000),
-          blurRadius: 12,
+          color: Color(0x06000000),
+          blurRadius: 6,
           offset: Offset(0, 6),
         ),
       ],
@@ -2421,15 +2655,15 @@ class _PaccDecor {
       hintStyle: _PaccText.inputHint,
       isDense: true,
       filled: true,
-      fillColor: const Color(0xFFFFF4CC),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      fillColor: Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: _PaccColors.sunButton),
+        borderSide: const BorderSide(color: Color(0xFFE8E9E5)),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: const BorderSide(color: _PaccColors.sunButton),
+        borderSide: const BorderSide(color: Color(0xFFE8E9E5)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),

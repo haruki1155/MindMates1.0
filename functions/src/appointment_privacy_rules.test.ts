@@ -94,3 +94,12 @@ test("clinical notes are visible to all clinical staff", async () => {
   await assertSucceeds(getDoc(doc(admin, note)));
   await assertFails(setDoc(doc(counselor, note), {summary: "Client write"}));
 });
+
+test("direct appointment revision, schedule, and reservation mutations are denied", async () => {
+  for (const uid of ["student", "other-student", "portal-staff", "counselor", "admin"]) {
+    const firestore = environment.authenticatedContext(uid).firestore();
+    await assertFails(setDoc(doc(firestore, "appointments/appointment-1"), {scheduleRevision: 0, status: "confirmed", scheduledAt: 123}, {merge: true}));
+    await assertFails(setDoc(doc(firestore, "appointment_slots/pacc_123"), {appointmentId: "appointment-1"}));
+    await assertFails(setDoc(doc(firestore, "appointment_user_locks/student"), {appointmentId: "appointment-1"}));
+  }
+});

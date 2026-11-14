@@ -18,7 +18,15 @@ void main() {
     final repository = _AppointmentRepository();
     await tester.pumpWidget(_app(repository: repository, use24Hour: true));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('best-time-days-weekends')));
+    await _enterCounseling(tester);
+
+    final weekends = find.byKey(
+      const Key('best-time-days-weekends'),
+    );
+    await tester.ensureVisible(weekends);
+    await tester.pumpAndSettle();
+    await tester.tap(weekends);
+    await tester.pumpAndSettle();
     for (final entry in <String, String>{'best-time-start': '8'}.entries) {
       await tester.tap(find.byKey(Key(entry.key)));
       await tester.pumpAndSettle();
@@ -38,12 +46,12 @@ void main() {
     }
     expect(find.text('08:00'), findsOneWidget);
     expect(find.text('12:00'), findsOneWidget);
-    await _goToTime(tester);
+    await _goToTime(tester, fromCounseling: true);
     await tester.tap(find.byKey(const Key('time-chip-10:00 AM')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Continue to Confirm'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm Appointment').last);
+    await tester.tap(find.text('Send appointment request'));
     await tester.pumpAndSettle();
     expect(repository.created?.bestTime, 'Weekends, 8:00 AM – 12:00 PM');
   });
@@ -70,7 +78,8 @@ void main() {
     );
     await tester.tap(find.text('Continue to Confirm'));
     await tester.pumpAndSettle();
-    expect(find.text('Confirm Appointment'), findsWidgets);
+    expect(find.text('Review request'), findsOneWidget);
+    expect(find.text('Send appointment request'), findsOneWidget);
   });
 
   testWidgets('chips wrap at 360 px with large text and 44 px targets', (
@@ -97,37 +106,98 @@ void main() {
   });
 }
 
-Future<void> _goToTime(WidgetTester tester) async {
+Future<void> _enterCounseling(WidgetTester tester) async {
   await tester.pumpAndSettle();
-  final fields = find.byType(TextFormField);
-  for (final entry in <int, String>{
-    0: 'Molar',
-    1: 'Leonardo',
-    3: '20',
-    4: 'Urdaneta',
-    5: '09123456789',
-    6: 'leo@example.com',
-    7: 'facebook.com/leo',
-    8: 'I need counseling',
-  }.entries) {
-    await tester.enterText(fields.at(entry.key), entry.value);
+
+  expect(
+    find.byKey(const ValueKey('intake')),
+    findsOneWidget,
+  );
+
+  const fields = <String, String>{
+    'intake-first-name': 'Leonardo',
+    'intake-last-name': 'Molar',
+    'intake-age': '20',
+    'intake-address': 'Urdaneta City',
+    'intake-contact': '09123456789',
+    'intake-email': 'leo@example.com',
+    'intake-facebook': 'facebook.com/leo',
+  };
+
+  for (final field in fields.entries) {
+    await tester.enterText(
+      find.byKey(ValueKey(field.key)),
+      field.value,
+    );
   }
-  for (final label in ['Male', 'Fourth Year', 'Email', 'No']) {
-    final option = find.text(label);
+
+  FocusManager.instance.primaryFocus?.unfocus();
+  await tester.pumpAndSettle();
+
+  for (final label in ['Male', 'Fourth Year']) {
+    final option = find.widgetWithText(InkWell, label);
+    expect(option, findsOneWidget);
     await tester.ensureVisible(option);
     await tester.pumpAndSettle();
     await tester.tap(option);
     await tester.pumpAndSettle();
   }
+
+  final next = find.text('Continue to Counseling Details');
+  await tester.ensureVisible(next);
+  await tester.pumpAndSettle();
+  await tester.tap(next);
+  await tester.pumpAndSettle();
+
+  expect(
+    find.byKey(const ValueKey('counselingDetails')),
+    findsOneWidget,
+  );
+}
+
+Future<void> _goToTime(
+  WidgetTester tester, {
+  bool fromCounseling = false,
+}) async {
+  if (!fromCounseling) {
+    await _enterCounseling(tester);
+  }
+
+  await tester.enterText(
+    find.byKey(const ValueKey('intake-concern')),
+    'I need counseling',
+  );
+
+  FocusManager.instance.primaryFocus?.unfocus();
+  await tester.pumpAndSettle();
+
+  for (final label in ['Email', 'No']) {
+    final option = find.widgetWithText(InkWell, label);
+    expect(option, findsOneWidget);
+    await tester.ensureVisible(option);
+    await tester.pumpAndSettle();
+    await tester.tap(option);
+    await tester.pumpAndSettle();
+  }
+
   final next = find.text('Continue to Date & Time');
   await tester.ensureVisible(next);
   await tester.pumpAndSettle();
   await tester.tap(next);
   await tester.pumpAndSettle();
-  await tester.ensureVisible(find.text('30'));
+
+  expect(find.text('Appointment Schedule'), findsOneWidget);
+
+  final date = find.text('30');
+  await tester.ensureVisible(date);
   await tester.pumpAndSettle();
-  await tester.tap(find.text('30'));
+  await tester.tap(date);
   await tester.pumpAndSettle();
+
+  expect(
+    find.byKey(const Key('time-chip-10:00 AM')),
+    findsOneWidget,
+  );
 }
 
 Widget _app({_AppointmentRepository? repository, bool use24Hour = false}) =>
