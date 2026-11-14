@@ -9,9 +9,6 @@ export interface ClinicalEvidenceAttachment {
 }
 
 export interface SessionEvidence {
-  interviewQuestions: string;
-  requirementsChecked: string;
-  materialsUsed: string;
   attachments: ClinicalEvidenceAttachment[];
 }
 
@@ -36,23 +33,18 @@ export function sessionEvidencePathFor(appointmentId: string, uploaderUid: strin
   return `counseling_session_files/${appointmentId}/${uploaderUid}/${nonce}.${extension}`;
 }
 
-function cleanText(value: unknown, label: string, maximum: number): string {
-  if (value == null) return "";
-  if (typeof value !== "string") throw new HttpsError("invalid-argument", `${label} must be text.`);
-  const text = value.trim();
-  if (text.length > maximum) throw new HttpsError("invalid-argument", `${label} is too long.`);
-  return text;
-}
-
 export function validateSessionEvidence(
   source: Record<string, unknown>,
   appointmentId: string,
   uploaderUid: string,
 ): SessionEvidence {
   if (!validId(appointmentId) || !validId(uploaderUid)) throw new HttpsError("invalid-argument", "Invalid appointment record.");
-  const interviewQuestions = cleanText(source.interviewQuestions, "Interview questions", 4000);
-  const requirementsChecked = cleanText(source.requirementsChecked, "Student requirements", 2000);
-  const materialsUsed = cleanText(source.materialsUsed, "Materials used", 2000);
+  // Reject obsolete text-only fields rather than silently storing them.
+  for (const field of ["interviewQuestions", "requirementsChecked", "materialsUsed"]) {
+    if (Object.prototype.hasOwnProperty.call(source, field)) {
+      throw new HttpsError("invalid-argument", "Unsupported interview text fields.");
+    }
+  }
   const raw = source.attachments ?? [];
   if (!Array.isArray(raw)) throw new HttpsError("invalid-argument", "Attachments must be a list.");
   if (raw.length > 5) throw new HttpsError("invalid-argument", "Upload at most five files.");
@@ -75,7 +67,7 @@ export function validateSessionEvidence(
     paths.add(path);
     return {path, name: name.trim(), contentType, size};
   });
-  return {interviewQuestions, requirementsChecked, materialsUsed, attachments};
+  return {attachments};
 }
 
 /** The privileged callable verifies each uploaded object before committing clinical references. */
