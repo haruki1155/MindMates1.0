@@ -13,3 +13,10 @@ Date: 2026-11-14 | Base commit: `f07eb59` | Scope revised per user screenshot
 - The private Storage rules and callable need to be deployed to a controlled staging environment before a real upload end-to-end test; no deployment has been performed.
 - Orphan drafts can remain if upload succeeds but completion fails. Review cleanup only after proving a safe distinction between failed and ambiguously successful commits.
 - Existing `functions/package-lock.json` vulnerabilities predate this branch; handle separately with a tested security-remediation PR, not a blind forced upgrade.
+
+## Continued workstream — integrate Counselor Messaging into Inquiries (same branch)
+8. Record a failing widget test for two Inquiries sections: Messages (default) and Other services, plus permission and no-standalone-navigation assertions.
+9. Reuse `CounselorMessagesPage` in embedded presentation mode; do not change conversations, send controller, Firestore collections or read receipts.
+10. Update the portal sidebar: remove the independent Counselor Messages destination; keep the Inquiries link and move the existing Counselor unread badge onto it. Introduce one role policy: counselor only.
+11. Wrap the existing submitted-inquiry queue as the Other services section for Counselor. Admin retains the existing inquiry queue; other roles receive no broadened permissions.
+12. RepoCheck the branch diff and stale navigation references, run targeted Flutter tests and analysis, test mobile messaging regression, Functions and Storage security regressions, then stage-flavored web preview. Update only the same branch; do not create another branch or PR until user accepts.
