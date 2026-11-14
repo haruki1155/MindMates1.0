@@ -29,6 +29,27 @@ class _Repository extends AdminPortalRepository {
 }
 
 void main() {
+  testWidgets('completed-session decision includes private interview documentation fields', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final record = _appointment(
+      'confirmed', DateTime.now().subtract(const Duration(hours: 4)), 'Student A',
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: AdminAppointmentsPage(
+        repository: _Repository([record]), onOpenAssessments: null,
+      )),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Review'));
+    await tester.pumpAndSettle();
+    expect(find.text('Session summary (internal)'), findsOneWidget);
+    expect(find.byKey(const Key('clinical-interview-questions')), findsOneWidget);
+    expect(find.byKey(const Key('clinical-requirements-checked')), findsOneWidget);
+    expect(find.byKey(const Key('clinical-materials-used')), findsOneWidget);
+    expect(find.text('Add images / documents'), findsOneWidget);
+  });
+
   testWidgets('PACC reopens its requested-time proposal with a valid counter action', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
