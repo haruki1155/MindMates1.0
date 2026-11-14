@@ -30,11 +30,14 @@ service cloud.firestore {
           // lifecycle. It is Auth-verified and is not an applicant request.
           currentAccessRole() == 'admin'
           ||
+          // Pre-lifecycle staff records have no status fields at all. Read
+          // them with get() so a missing key means "legacy", not an
+          // evaluation error that silently denies the whole request.
           !exists(/databases/$(database)/documents/users/$(request.auth.uid))
-          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.staffAccountStatus == null
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', null) == null
           || (
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.staffAccountStatus == 'approved'
-            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountStatus == 'active'
+            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', null) == 'approved'
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountStatus', null) == 'active'
           )
         );
     }
@@ -739,7 +742,9 @@ service cloud.firestore {
     // This is a server-generated, non-clinical scheduling projection. It is
     // the only appointment collection general PACC portal staff can read.
     match /appointment_queue/{appointmentId} {
-      allow read: if currentAccessRole() == 'portalStaff';
+      // Role alone is not enough: a suspended or unverified staff record can
+      // still carry the `portalStaff` string, so the lifecycle gates apply.
+      allow read: if currentAccessRole() == 'portalStaff' && hasPortalAccess();
       allow write: if false;
     }
 
