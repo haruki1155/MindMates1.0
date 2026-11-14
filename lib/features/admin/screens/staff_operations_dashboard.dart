@@ -159,8 +159,8 @@ class _DashboardContent extends StatelessWidget {
                   title: 'No appointments today',
                   message:
                       'There are currently no counseling appointments scheduled for today.',
-                  action: 'Open schedule',
-                  onPressed: () => onNavigate(AdminPortalPage.availability),
+                  action: 'View appointments',
+                  onPressed: () => onNavigate(AdminPortalPage.appointments),
                 )
               : Column(
                   children: today
@@ -177,14 +177,9 @@ class _DashboardContent extends StatelessWidget {
             runSpacing: 12,
             children: [
               OutlinedButton.icon(
-                onPressed: () => onNavigate(AdminPortalPage.dashboard),
+                onPressed: () => onNavigate(AdminPortalPage.appointments),
                 icon: const Icon(Icons.calendar_month_outlined),
                 label: const Text('View appointments'),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => onNavigate(AdminPortalPage.availability),
-                icon: const Icon(Icons.schedule_outlined),
-                label: const Text('Open schedule'),
               ),
             ],
           ),
