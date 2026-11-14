@@ -9,10 +9,12 @@ class CounselorInquiryWorkspace extends StatefulWidget {
     super.key,
     required this.messages,
     required this.otherServices,
+    this.initialSection = CounselorInquirySection.messages,
   });
 
   final Widget messages;
   final Widget otherServices;
+  final CounselorInquirySection initialSection;
 
   @override
   State<CounselorInquiryWorkspace> createState() =>
@@ -20,7 +22,13 @@ class CounselorInquiryWorkspace extends StatefulWidget {
 }
 
 class _CounselorInquiryWorkspaceState extends State<CounselorInquiryWorkspace> {
-  CounselorInquirySection _section = CounselorInquirySection.messages;
+  late CounselorInquirySection _section;
+
+  @override
+  void initState() {
+    super.initState();
+    _section = widget.initialSection;
+  }
 
   @override
   Widget build(BuildContext context) {
