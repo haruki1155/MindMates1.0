@@ -18,15 +18,17 @@
     "public-ids:dry-run": "npm run build && node lib/backfill_public_user_ids.js",
     "public-ids:apply": "npm run build && node lib/backfill_public_user_ids.js --apply",
     "admin:dry-run": "npm run build && node lib/provision_super_admin.js",
-    "admin:provision": "npm run build && node lib/provision_super_admin.js --apply"
-    ,"insight:seed:dry-run": "npm run build && node lib/seed_insight_role_content.js"
-    ,"insight:seed:staging": "npm run build && node lib/seed_insight_role_content.js --apply"
+    "admin:provision": "npm run build && node lib/provision_super_admin.js --apply",
+    "insight:seed:dry-run": "npm run build && node lib/seed_insight_role_content.js",
+    "insight:seed:staging": "npm run build && node lib/seed_insight_role_content.js --apply"
   },
   "dependencies": {
     "@google-cloud/dialogflow-cx": "^4.10.0",
     "@google/genai": "^2.24.0",
     "firebase-admin": "^13.10.0",
     "firebase-functions": "^7.2.5",
+    "htmlparser2": "^12.0.0",
+    "ipaddr.js": "^2.5.0",
     "nodemailer": "^7.0.13"
   },
   "devDependencies": {
