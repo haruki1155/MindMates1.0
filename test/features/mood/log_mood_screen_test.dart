@@ -1596,6 +1596,116 @@ void main() {
     // The writer path keeps its multi-entry affordance.
     expect(find.text('Log another mood'), findsOneWidget);
   });
+
+  // --- Review follow-ups ------------------------------------------------------
+
+  testWidgets('a blank legacy label falls back to the level label', (
+    tester,
+  ) async {
+    final repository = _FakeMoodRepository(hasToday: true, todayLabel: '');
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(repository),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: false,
+        nowProvider: () => DateTime(2026, 7, 7, 12),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Level 4 is unambiguously 'Okay', so the pill is never blank.
+    expect(find.byKey(const ValueKey('mood-v2-confirmation')), findsOneWidget);
+    expect(find.text('Okay'), findsOneWidget);
+  });
+
+  testWidgets('the save bar is disabled when a reload hides the form', (
+    tester,
+  ) async {
+    // The reviewer's scenario: pick a mood, background the app, and resume
+    // into a failed reload. The retry card replaces the form, so Save must
+    // not stay tappable.
+    final repository = _FakeMoodRepository();
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(repository),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: false,
+        nowProvider: () => DateTime(2026, 7, 7, 12),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ElevatedButton>(
+            find.widgetWithText(ElevatedButton, 'Save mood entry'),
+          )
+          .onPressed,
+      isNotNull,
+      reason: 'a selected mood is normally saveable',
+    );
+
+    repository.throwsOnToday = true;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Save mood entry'), findsOneWidget);
+    expect(
+      tester
+          .widget<ElevatedButton>(
+            find.widgetWithText(ElevatedButton, 'Save mood entry'),
+          )
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('the legacy save scrolls the confirmation into view', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(400, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repository = _FakeMoodRepository();
+    await tester.pumpWidget(
+      _logMoodApp(
+        moodProvider: MoodProvider(repository),
+        userProvider: UserProvider(_FakeUserRepository())
+          ..setUser(_user(id: 'user_1')),
+        moodV2Presentation: true,
+        moodV2WriterEnabled: false,
+        nowProvider: () => DateTime(2026, 7, 7, 12),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('mood-card-Okay')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -260));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save mood entry'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Your mood is recorded'), findsOneWidget);
+    final scrollable = tester.widget<Scrollable>(
+      find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(scrollable.controller?.offset ?? 0, 0);
+  });
 }
 
 /// Records any attempt to push a confirmed V2 entry into combined history, so
@@ -1715,9 +1825,12 @@ class _FakeMoodRepository extends MoodRepository {
     this.throwsOnCreate = false,
     this.throwsOnToday = false,
     this.hasToday = false,
+    this.todayLabel = 'Okay',
   });
 
-  final bool throwsOnToday;
+  final String? todayLabel;
+
+  bool throwsOnToday;
   bool hasToday;
 
   final bool throwsOnCreate;
@@ -1755,7 +1868,7 @@ class _FakeMoodRepository extends MoodRepository {
       id: 'daily_${userId}_20260707',
       userId: userId,
       level: 4,
-      label: 'Okay',
+      label: todayLabel,
       note: 'already logged',
       createdAt: now ?? DateTime(2026, 7, 7, 9, 30),
     );

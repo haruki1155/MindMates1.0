@@ -229,6 +229,10 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                   isEnabled:
                       _selectedMood != null &&
                       !_isSaving &&
+                      // The form is replaced by a spinner or the retry card
+                      // while today's mood reloads.
+                      !_isLoadingToday &&
+                      _todayError == null &&
                       (_expressionCue == null ||
                           _expressionSuggestionAccepted != null),
                   isSaving: _isSaving,
@@ -353,6 +357,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                 ),
               ),
               child: _MoodCheckInSummary(
+                canCheckInAgain: widget.moodV2WriterEnabled,
                 history: moodProvider?.v2History,
                 userId: _currentUserId(),
                 now: _now,
@@ -639,10 +644,12 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _expressionCue = null;
       _expressionCueSource = null;
       _expressionSuggestionAccepted = null;
+      _reflectionOffered = false;
       _noteController.clear();
       _noteLength = 0;
       _todayError = null;
     });
+    if (widget.moodV2Presentation) _scrollToTop();
     _showSnack(
       reportRefreshed
           ? 'Mood check-in saved.'
@@ -789,6 +796,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           _expressionCue = null;
           _expressionCueSource = null;
           _expressionSuggestionAccepted = null;
+          _reflectionOffered = false;
           _invalidateMoodV2Request();
           _noteController.clear();
         });
@@ -2145,8 +2153,13 @@ class _MoodCheckInSummary extends StatelessWidget {
     required this.userId,
     required this.now,
     required this.isLoading,
+    required this.canCheckInAgain,
     this.error,
   });
+
+  /// False when the protected writer is off: the legacy writer accepts one
+  /// check-in per day, so the copy must not invite another.
+  final bool canCheckInAgain;
   final MoodHistoryWindow? history;
   final String? userId;
   final DateTime now;
@@ -2229,11 +2242,13 @@ class _MoodCheckInSummary extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'You can check in again whenever you need.',
-          style: TextStyle(fontSize: 12, color: MoodLogPalette.bodyText),
-        ),
+        if (canCheckInAgain) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'You can check in again whenever you need.',
+            style: TextStyle(fontSize: 12, color: MoodLogPalette.bodyText),
+          ),
+        ],
       ],
     );
   }
@@ -2256,9 +2271,24 @@ class _ConfirmedMood {
 
   factory _ConfirmedMood.fromLegacy(MoodModel mood) => _ConfirmedMood(
     occurredAt: mood.createdAt,
-    label: mood.label,
+    // saveDailyMood stores `label?.trim() ?? ''`, so a legacy entry can carry
+    // a blank label. Fall back to the level's own label rather than render an
+    // empty pill with no emoji.
+    label: _nonBlank(mood.label) ?? _labelForLevel(mood.level),
     note: mood.note,
   );
+
+  static String? _nonBlank(String? value) {
+    final trimmed = (value ?? '').trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  /// Levels 1 and 2 are shared by more than one choice, so only an
+  /// unambiguous level yields a label.
+  static String? _labelForLevel(int level) {
+    final matches = _moodChoices.where((m) => m.level == level).toList();
+    return matches.length == 1 ? matches.single.label : null;
+  }
 
   final DateTime occurredAt;
   final String? label;
