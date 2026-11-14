@@ -170,7 +170,7 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  '${visible.length} appointments shown',
+                  '${visible.length} ${visible.length == 1 ? 'appointment' : 'appointments'} shown',
                   style: const TextStyle(color: AdminColors.muted),
                 ),
                 const SizedBox(height: 12),
