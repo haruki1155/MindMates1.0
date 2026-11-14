@@ -37,12 +37,16 @@ class _Repo extends AdminPortalRepository {
   @override
   AccessRole get currentAccessRole => role;
   @override
-  Stream<List<AppointmentModel>> watchAppointments() => Stream.value([
+  Stream<List<AppointmentModel>> watchAppointments() =>
+      throw StateError('My Cases must use assigned appointments.');
+
+  @override
+  Stream<List<AppointmentModel>> watchMyAssignedAppointments() => Stream.value([
     for (final id in userIds)
       AppointmentModel(
         id: 'a-$id',
         userId: id,
-        fullName: 'S',
+        fullName: 'Ana Dela Cruz',
         scheduledAt: DateTime(2026, 1, 1),
         scheduledTime: '10:00 AM',
         location: 'PACC',
@@ -116,6 +120,47 @@ void main() {
   testWidgets('counselor case card shows the action', (tester) async {
     await pumpWorkflow(tester, _Repo(AccessRole.counselor, ['u1']));
     expect(find.text('View Student Information'), findsOneWidget);
+  });
+
+  testWidgets('My Cases displays the recorded student name', (tester) async {
+    await pumpWorkflow(tester, _Repo(AccessRole.counselor, ['u1']));
+    expect(find.text('Ana Dela Cruz'), findsOneWidget);
+    expect(find.text('Student ••••u1'), findsNothing);
+  });
+
+  testWidgets('Follow-ups is accessible from My Cases', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1400, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    var selectedMode = CounselorWorkflowMode.cases;
+    final repository = _Repo(AccessRole.counselor, ['u1']);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) => Scaffold(
+            body: CounselorWorkflowPage(
+              repository: repository,
+              mode: selectedMode,
+              onOpenAppointments: () {},
+              onModeChanged: (next) => setState(() => selectedMode = next),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('My Cases'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'Assigned Cases'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Follow-ups'));
+    await tester.pumpAndSettle();
+
+    expect(selectedMode, CounselorWorkflowMode.followUps);
+    expect(find.text('My Cases'), findsOneWidget);
+    expect(find.text('No follow-ups due'), findsOneWidget);
   });
 
   testWidgets('portal staff never see the action', (tester) async {
