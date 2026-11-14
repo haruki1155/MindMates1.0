@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:async';
 import 'dart:typed_data';
 
 import '../database/firestore_collections.dart';
@@ -237,6 +238,7 @@ class AdminPortalRepository {
   bool _isSuperAdmin = false;
   bool get isSuperAdmin => _isSuperAdmin;
   bool _mustChangePassword = false;
+  bool _staffQueueRefreshAttempted = false;
   bool get mustChangePassword => _mustChangePassword;
 
   AccessRole _profileAccessRole(Map<String, dynamic>? profile) {
@@ -770,6 +772,22 @@ class AdminPortalRepository {
   Stream<List<AppointmentQueueItem>> watchPortalAppointmentQueue() {
     if (currentAccessRole != AccessRole.portalStaff) {
       return Stream.value(const <AppointmentQueueItem>[]);
+    }
+    // Best-effort catch-up for records created before the queue projection
+    // trigger was deployed. Never block reads on this Cloud Function.
+    // One attempt per repository instance avoids repeat requests on rebuild.
+    if (!_staffQueueRefreshAttempted) {
+      _staffQueueRefreshAttempted = true;
+      unawaited(
+        FirebaseFunctions.instance
+            .routedCallable('refreshPortalAppointmentQueue')
+            .call()
+            .then<void>((_) {})
+            .catchError((Object error, StackTrace stackTrace) {
+              // The Firestore queue listener remains authoritative and live.
+              // App Check / callable failures must not blank the Staff UI.
+            }),
+      );
     }
     return _firestoreService
         .watchDocuments(FirestoreCollections.appointmentQueue)
