@@ -33,7 +33,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1440, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final record = _appointment(
-      'confirmed', DateTime.now().subtract(const Duration(hours: 4)), 'Student A',
+      'confirmed', DateTime.now().subtract(const Duration(days: 1)), 'Student A',
     );
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: AdminAppointmentsPage(
@@ -41,6 +41,7 @@ void main() {
       )),
     ));
     await tester.pumpAndSettle();
+    expect(find.text('Needs action 1'), findsWidgets);
     await tester.tap(find.text('Review'));
     await tester.pumpAndSettle();
     expect(find.text('Session summary (internal)'), findsOneWidget);
