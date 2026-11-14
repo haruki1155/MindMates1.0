@@ -4,6 +4,7 @@ import '../data/announcement_repository.dart';
 import '../models/announcement.dart';
 import '../services/announcement_link_launcher.dart';
 import '../widgets/announcement_card.dart';
+import '../widgets/announcement_presentation.dart';
 import 'announcement_viewer_screen.dart';
 
 class AnnouncementsScreen extends StatefulWidget {
@@ -89,7 +90,12 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen>
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => Theme(
+    data: announcementMobileTheme(Theme.of(context)),
+    child: Builder(builder: (context) => _buildFeed(context)),
+  );
+
+  Widget _buildFeed(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('Announcements'),
       actions: [
@@ -105,88 +111,128 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen>
         animation: _feed,
         builder: (context, _) => RefreshIndicator(
           onRefresh: () => _feed.load(),
-          child: ListView(
-            controller: _scroll,
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(16),
-            children: [
-              Text(
-                'Opportunities start here',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text('Career guidance and placement updates from PACC.'),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: ListView(
+                controller: _scroll,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
                 children: [
-                  ChoiceChip(
-                    label: const Text('All'),
-                    selected: _feed.category == null,
-                    onSelected: (_) => _feed.selectCategory(null),
+                  Container(
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primaryContainer.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 8,
+                          children: [
+                            Icon(Icons.auto_awesome_outlined, size: 18),
+                            SizedBox(width: 8),
+                            Text(
+                              'FROM YOUR PACC TEAM',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Opportunities start here',
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Career guidance and placement updates from PACC.',
+                        ),
+                      ],
+                    ),
                   ),
-                  for (final category in AnnouncementCategory.values)
-                    ChoiceChip(
-                      label: Text(category.label),
-                      selected: _feed.category == category,
-                      onSelected: (_) => _feed.selectCategory(category),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('All'),
+                        selected: _feed.category == null,
+                        onSelected: (_) => _feed.selectCategory(null),
+                      ),
+                      for (final category in AnnouncementCategory.values)
+                        ChoiceChip(
+                          label: Text(category.label),
+                          selected: _feed.category == category,
+                          onSelected: (_) => _feed.selectCategory(category),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  if (_feed.error != null)
+                    AnnouncementStatusPanel(
+                      icon: Icons.cloud_off_outlined,
+                      title: 'No announcements yet',
+                      message:
+                          'You will be notified when there is an announcement.',
+                      actionLabel: 'Retry',
+                      onAction: _feed.retry,
+                    ),
+                  if (!_feed.loading &&
+                      _feed.error == null &&
+                      _feed.posts.isEmpty)
+                    const AnnouncementStatusPanel(
+                      icon: Icons.campaign_outlined,
+                      title: 'No announcements yet',
+                      message:
+                          'You will be notified when there is an announcement.',
+                    ),
+                  for (var i = 0; i < _feed.posts.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: AnnouncementCard(
+                        key: ValueKey(_feed.posts[i].id),
+                        announcement: _feed.posts[i],
+                        onOpenContent: _feed.loading
+                            ? null
+                            : _feed.posts[i].sourceUri != null
+                            ? () => _openSource(context, _feed.posts[i])
+                            : () => _view(i),
+                        onOpenViewer: _feed.loading ? null : () => _view(i),
+                      ),
+                    ),
+                  if (_feed.loading)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Column(
+                          children: [
+                            CircularProgressIndicator(
+                              semanticsLabel: "Loading announcements",
+                            ),
+                            SizedBox(height: 12),
+                            Text("Loading announcements?"),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (!_feed.loading && _feed.cursor != null)
+                    OutlinedButton(
+                      onPressed: () => _feed.load(more: true),
+                      child: const Text('Load more announcements'),
                     ),
                 ],
               ),
-              const SizedBox(height: 20),
-              if (_feed.error != null)
-                Column(
-                  children: [
-                    Text(_feed.error!),
-                    TextButton(
-                      onPressed: _feed.retry,
-                      child: const Text('Retry'),
-                    ),
-                  ],
-                ),
-              if (!_feed.loading && _feed.error == null && _feed.posts.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 60),
-                  child: Column(
-                    children: [
-                      Icon(Icons.campaign_outlined, size: 48),
-                      SizedBox(height: 16),
-                      Text('No announcements yet'),
-                      SizedBox(height: 8),
-                      Text('New opportunities will appear here.'),
-                    ],
-                  ),
-                ),
-              for (var i = 0; i < _feed.posts.length; i++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: AnnouncementCard(
-                    key: ValueKey(_feed.posts[i].id),
-                    announcement: _feed.posts[i],
-                    onOpenContent: _feed.loading
-                        ? null
-                        : _feed.posts[i].sourceUri != null
-                        ? () => _openSource(context, _feed.posts[i])
-                        : () => _view(i),
-                    onOpenViewer: _feed.loading ? null : () => _view(i),
-                  ),
-                ),
-              if (_feed.loading)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator(),
-                  ),
-                ),
-              if (!_feed.loading && _feed.cursor != null)
-                OutlinedButton(
-                  onPressed: () => _feed.load(more: true),
-                  child: const Text('Load more announcements'),
-                ),
-            ],
+            ),
           ),
         ),
       ),

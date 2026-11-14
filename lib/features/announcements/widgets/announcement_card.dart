@@ -42,12 +42,14 @@ class AnnouncementCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'PACC',
+                        'PACC ? Official update',
                         style: TextStyle(fontWeight: FontWeight.w800),
                       ),
                       Text(
                         '${post.content.category.label}${dateLabel.isEmpty ? '' : ' · $dateLabel'}',
-                        style: Theme.of(context).textTheme.bodySmall,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(height: 1.6),
                       ),
                     ],
                   ),
@@ -73,8 +75,9 @@ class AnnouncementCard extends StatelessWidget {
                     fit: BoxFit.contain,
                     errorBuilder: (_, _, _) => const Padding(
                       padding: EdgeInsets.all(24),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Icon(Icons.image_not_supported_outlined),
                           SizedBox(width: 8),
@@ -104,7 +107,8 @@ class AnnouncementCard extends StatelessWidget {
                       const SizedBox(height: 16),
                       if (post.sourceUri != null)
                         Wrap(
-                          spacing: 6,
+                          spacing: 8,
+                          runSpacing: 8,
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             const Icon(Icons.open_in_new, size: 16),

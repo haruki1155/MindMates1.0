@@ -16,6 +16,54 @@ Announcement post(String id, {bool link = false}) => Announcement.fromJson(id, {
   'publishedAt': DateTime.utc(2026, 11, 14),
 });
 void main() {
+  testWidgets(
+    'unavailable feed shows requested calm announcement state with retry',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AnnouncementsScreen(
+            repository: AnnouncementRepository(
+              fetch: (_) async => throw StateError('unavailable'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('No announcements yet'), findsOneWidget);
+      expect(
+        find.text('You will be notified when there is an announcement.'),
+        findsOneWidget,
+      );
+      expect(find.text('Retry'), findsOneWidget);
+      expect(find.text('Unable to load announcements'), findsNothing);
+    },
+  );
+  testWidgets('viewer arrows change pages immediately with reduced motion', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(disableAnimations: true),
+          child: child!,
+        ),
+        home: AnnouncementsScreen(
+          repository: AnnouncementRepository(
+            fetch: (_) async => [post('one'), post('two')],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('View full screen').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Next announcement'));
+    await tester.pump();
+    expect(tester.widget<PageView>(find.byType(PageView)).controller!.page, 1);
+    await tester.tap(find.byTooltip('Previous announcement'));
+    await tester.pump();
+    expect(tester.widget<PageView>(find.byType(PageView)).controller!.page, 0);
+  });
   testWidgets('long posts provide reachable next and previous navigation', (
     tester,
   ) async {
@@ -198,7 +246,11 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Post one'));
+      await tester.scrollUntilVisible(
+        find.text('Post one'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Post one'));
       await tester.pumpAndSettle();

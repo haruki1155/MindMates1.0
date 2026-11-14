@@ -7,6 +7,57 @@ import 'package:mind_mates/features/announcements/screens/manage_announcements_p
 import 'package:mind_mates/features/announcements/widgets/announcement_editor.dart';
 
 void main() {
+  testWidgets(
+    'destination updates immediately and pending publishing blocks duplicate actions',
+    (tester) async {
+      final pending = Completer<Map<String, dynamic>>();
+      var calls = 0;
+      final repository = AnnouncementRepository(
+        call: (_, data) {
+          calls++;
+          return pending.future;
+        },
+      );
+      await tester.pumpWidget(
+        MaterialApp(home: AnnouncementEditor(repository: repository)),
+      );
+      await tester.tap(find.text('Linked post'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Source link'),
+        'https://first.example/post',
+      );
+      await tester.pump();
+      expect(find.text('Destination: first.example'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Source link'),
+        'https://second.example/post',
+      );
+      await tester.pump();
+      expect(find.text('Destination: second.example'), findsOneWidget);
+      expect(find.text('Destination: first.example'), findsNothing);
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Title'),
+        'Test title',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Description'),
+        'Test details',
+      );
+      await tester.ensureVisible(find.text('Publish'));
+      await tester.tap(find.text('Publish'));
+      await tester.pump();
+      expect(find.text('Saving…'), findsOneWidget);
+      expect(calls, 1);
+      expect(
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        isNull,
+      );
+      pending.completeError(StateError('offline'));
+      await tester.pumpAndSettle();
+      expect(find.text('Test title'), findsOneWidget);
+    },
+  );
   testWidgets('publisher creates original post only through explicit publish', (
     tester,
   ) async {
@@ -47,13 +98,14 @@ void main() {
     final calls = <Map<String, dynamic>>[];
     final repo = AnnouncementRepository(
       call: (name, data) async {
-        if (name == 'previewAnnouncementLink')
+        if (name == 'previewAnnouncementLink') {
           return {
             'available': true,
             'title': 'Imported title',
             'description': 'Imported details',
             'sourceUrl': data['url'],
           };
+        }
         calls.add(data);
         return {'id': 'x', 'revision': 1};
       },

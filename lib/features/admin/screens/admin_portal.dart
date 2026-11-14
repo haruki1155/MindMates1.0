@@ -408,7 +408,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
         backgroundColor: _cream,
         drawer: compact
             ? Drawer(
-                child: _Nav(
+                child: PortalWorkspaceNavigation(
                   page: _page,
                   onChanged: _setPage,
                   compact: true,
@@ -429,7 +429,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
                       : constraints.maxWidth < 1120
                       ? 224
                       : 252,
-                  child: _Nav(
+                  child: PortalWorkspaceNavigation(
                     page: _page,
                     onChanged: _setPage,
                     collapsed: _navCollapsed,
@@ -549,8 +549,9 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   };
 }
 
-class _Nav extends StatelessWidget {
-  const _Nav({
+class PortalWorkspaceNavigation extends StatelessWidget {
+  const PortalWorkspaceNavigation({
+    super.key,
     required this.page,
     required this.onChanged,
     this.compact = false,

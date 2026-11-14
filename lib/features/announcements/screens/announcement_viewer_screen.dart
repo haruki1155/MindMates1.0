@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../data/announcement_feed_controller.dart';
 import '../models/announcement.dart';
 import '../widgets/announcement_card.dart';
+import '../widgets/announcement_presentation.dart';
 
 class AnnouncementViewerScreen extends StatefulWidget {
   const AnnouncementViewerScreen({
@@ -47,6 +48,15 @@ class _AnnouncementViewerScreenState extends State<AnnouncementViewerScreen> {
     setState(() {});
   }
 
+  void _goToPage(BuildContext context, int page) {
+    final duration = announcementTransitionDuration(context);
+    if (duration == Duration.zero) {
+      _pages.jumpToPage(page);
+    } else {
+      _pages.animateToPage(page, duration: duration, curve: Curves.easeOut);
+    }
+  }
+
   @override
   void dispose() {
     widget.feed.removeListener(_changed);
@@ -55,7 +65,11 @@ class _AnnouncementViewerScreenState extends State<AnnouncementViewerScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => Theme(
+    data: announcementMobileTheme(Theme.of(context)),
+    child: Builder(builder: (context) => _buildViewer(context)),
+  );
+  Widget _buildViewer(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('PACC announcements'),
       actions: [
@@ -126,10 +140,7 @@ class _AnnouncementViewerScreenState extends State<AnnouncementViewerScreen> {
                   IconButton(
                     tooltip: 'Previous announcement',
                     onPressed: _index > 0
-                        ? () => _pages.previousPage(
-                            duration: const Duration(milliseconds: 250),
-                            curve: Curves.easeOut,
-                          )
+                        ? () => _goToPage(context, _index - 1)
                         : null,
                     icon: const Icon(Icons.arrow_upward),
                   ),
@@ -142,10 +153,7 @@ class _AnnouncementViewerScreenState extends State<AnnouncementViewerScreen> {
                   IconButton(
                     tooltip: 'Next announcement',
                     onPressed: _index < widget.feed.posts.length - 1
-                        ? () => _pages.nextPage(
-                            duration: const Duration(milliseconds: 250),
-                            curve: Curves.easeOut,
-                          )
+                        ? () => _goToPage(context, _index + 1)
                         : null,
                     icon: const Icon(Icons.arrow_downward),
                   ),

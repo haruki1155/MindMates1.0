@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../admin/theme/admin_theme.dart';
+import 'announcement_presentation.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../data/announcement_repository.dart';
 import '../models/announcement.dart';
@@ -113,7 +115,11 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
+  Widget build(BuildContext context) => Theme(
+    data: AdminTheme.data.copyWith(visualDensity: VisualDensity.standard),
+    child: Builder(builder: (context) => _buildEditor(context)),
+  );
+  Widget _buildEditor(BuildContext context) => PopScope(
     canPop: !_saving,
     child: Scaffold(
       appBar: AppBar(
@@ -147,6 +153,16 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                       'Career guidance and placement updates from PACC. Publishing makes this visible to app users.',
                     ),
                     const SizedBox(height: 20),
+                    const Text(
+                      'POST DETAILS',
+                      style: TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     Wrap(
                       spacing: 10,
                       runSpacing: 8,
@@ -189,6 +205,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _source,
+                        onChanged: (_) => setState(() {}),
                         enabled: !_saving,
                         keyboardType: TextInputType.url,
                         decoration: const InputDecoration(
@@ -225,6 +242,18 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                     ],
+                    const SizedBox(height: 24),
+                    const Divider(),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'ANNOUNCEMENT CONTENT',
+                      style: TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _title,
@@ -278,20 +307,22 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                           ),
                         ),
                       ),
-                    if (_notice != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(_notice!),
-                      ),
+                    AnimatedSwitcher(
+                      duration: announcementTransitionDuration(context),
+                      child: _notice == null
+                          ? const SizedBox.shrink()
+                          : AnnouncementStatusPanel(
+                              key: ValueKey(_notice),
+                              icon: Icons.info_outline,
+                              title: 'Link preview',
+                              message: _notice!,
+                            ),
+                    ),
                     if (_error != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(
-                          _error!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
+                      AnnouncementStatusPanel(
+                        icon: Icons.error_outline,
+                        title: 'Changes not published',
+                        message: _error!,
                       ),
                     const SizedBox(height: 16),
                     Wrap(
@@ -304,13 +335,28 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                             onPressed: _saving || _previewing
                                 ? null
                                 : () => _save(AnnouncementAction.saveDraft),
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(48, 48),
+                            ),
                             child: const Text('Save draft'),
                           ),
                         FilledButton.icon(
                           onPressed: _saving || _previewing
                               ? null
                               : () => _save(AnnouncementAction.publish),
-                          icon: const Icon(Icons.campaign_outlined),
+                          icon: _saving
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    semanticsLabel: "Saving announcement",
+                                  ),
+                                )
+                              : const Icon(Icons.campaign_outlined),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(48, 48),
+                          ),
                           label: Text(
                             _saving
                                 ? 'Saving…'
