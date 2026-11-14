@@ -762,6 +762,19 @@ class AdminPortalRepository {
         );
   }
 
+  /// Explicitly backfill the staff-safe queue from canonical appointments.
+  /// This is a privileged Cloud Function; callers never receive clinical data.
+  /// On staging it requires the Function to be deployed and Staff approval.
+  Future<int> refreshPortalAppointmentQueue() async {
+    if (currentAccessRole != AccessRole.portalStaff) {
+      throw StateError('PACC Staff access is required.');
+    }
+    final result = await FirebaseFunctions.instance
+        .routedCallable('refreshPortalAppointmentQueue')
+        .call<Map<String, dynamic>>();
+    return (result.data['refreshed'] as num?)?.toInt() ?? 0;
+  }
+
   /// Read the existing staff-safe appointment projection directly.
   ///
   /// Do not gate the whole screen on `refreshPortalAppointmentQueue`: a
