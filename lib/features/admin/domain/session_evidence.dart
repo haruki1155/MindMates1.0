@@ -93,25 +93,16 @@ class SessionEvidenceAttachment {
 class SessionEvidenceRecord {
   const SessionEvidenceRecord({
     required this.summary,
-    required this.interviewQuestions,
-    required this.requirementsChecked,
-    required this.materialsUsed,
     required this.attachments,
   });
 
   final String summary;
-  final String interviewQuestions;
-  final String requirementsChecked;
-  final String materialsUsed;
   final List<SessionEvidenceAttachment> attachments;
 
   factory SessionEvidenceRecord.fromJson(Map<String, dynamic> json) {
     final raw = json['attachments'];
     return SessionEvidenceRecord(
       summary: json['summary']?.toString() ?? '',
-      interviewQuestions: json['interviewQuestions']?.toString() ?? '',
-      requirementsChecked: json['requirementsChecked']?.toString() ?? '',
-      materialsUsed: json['materialsUsed']?.toString() ?? '',
       attachments: raw is List
           ? raw.whereType<Map>().map((entry) =>
               SessionEvidenceAttachment.fromJson(
