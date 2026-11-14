@@ -173,6 +173,57 @@ void main() {
     expect(saved!.overrides, isEmpty);
   });
 
+  testWidgets('new special date shows custom fields without closure toggle', (tester) async {
+    await tester.pumpWidget(_editor());
+    await tester.ensureVisible(find.text('Add special date'));
+    await tester.tap(find.text('Add special date'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Closed all day'), findsNothing);
+    expect(find.byKey(const Key('override-opens')), findsOneWidget);
+    expect(find.byKey(const Key('override-closes')), findsOneWidget);
+    expect(find.text('Counselor in office'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add special date'), findsOneWidget);
+  });
+
+  testWidgets('editing an existing closed special date retains its closure', (tester) async {
+    const stored = PaccDateOverride(
+      date: '2099-03-02',
+      closedAllDay: true,
+      reason: 'Existing closure',
+    );
+    PaccAvailabilityModel? saved;
+    await tester.pumpWidget(_editor(
+      availability: _schedule(overrides: const [stored]),
+      onSave: (value, {confirmConflicts = false}) async {
+        saved = value;
+        return const PaccAvailabilitySaveResult(revision: 5, conflicts: []);
+      },
+    ));
+
+    expect(find.text('Closed all day'), findsNothing);
+    await tester.ensureVisible(find.text('2099-03-02'));
+    await tester.tap(find.text('2099-03-02'));
+    await tester.pumpAndSettle();
+    expect(find.text('Closed all day'), findsNothing);
+    expect(find.byKey(const Key('override-opens')), findsNothing);
+    expect(find.textContaining('This saved date remains closed.'), findsOneWidget);
+    await tester.tap(find.text('Apply'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(find.text('Save schedule'));
+    await tester.tap(find.text('Save schedule'));
+    await tester.pumpAndSettle();
+    expect(saved, isNotNull);
+    expect(saved!.overrides.single.closedAllDay, isTrue);
+    expect(saved!.overrides.single.schedule, isNull);
+  });
+
   testWidgets('duplicate special date is rejected without changing the existing override', (tester) async {
     final now = DateTime.now().toUtc().add(const Duration(hours: 8));
     final today = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
