@@ -2172,9 +2172,6 @@ export const reviewAppointment = onCall(async (request) => {
       transaction.set(clinicalNote, {
         appointmentId,
         summary: completion.summary,
-        interviewQuestions: sessionEvidence!.interviewQuestions,
-        requirementsChecked: sessionEvidence!.requirementsChecked,
-        materialsUsed: sessionEvidence!.materialsUsed,
         attachments: sessionEvidence!.attachments,
         authorId: staffId,
         authorNameSnapshot: staffName,
