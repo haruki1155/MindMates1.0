@@ -574,7 +574,8 @@ void main() {
     );
 
     expect(find.text('Mood check-ins'), findsNothing);
-    expect(find.byType(HomeWideButton), findsNothing);
+    expect(find.widgetWithText(HomeWideButton, 'Log mood'), findsNothing);
+    expect(find.widgetWithText(HomeWideButton, 'Announcements'), findsOneWidget);
     await tester.tap(
       find.descendant(
         of: find.byType(HomeStreakCard),

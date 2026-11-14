@@ -622,6 +622,7 @@ class HomeAnnouncementCard extends StatelessWidget {
     this.message =
         'Join our mental health talk live on Facebook at 6:00 AM today',
     this.isOpen,
+    this.sectionTitle = 'Announcement',
   });
 
   final VoidCallback onViewMore;
@@ -629,6 +630,7 @@ class HomeAnnouncementCard extends StatelessWidget {
   final String badge;
   final String message;
   final bool? isOpen;
+  final String sectionTitle;
 
   @override
   Widget build(BuildContext context) {
@@ -636,7 +638,7 @@ class HomeAnnouncementCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         HomeSectionHeader(
-          title: 'Announcement',
+          title: sectionTitle,
           actionLabel: 'View More',
           onAction: onViewMore,
         ),

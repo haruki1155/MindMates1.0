@@ -1,4 +1,5 @@
 import {handleAppointmentAgreement} from "./appointment_agreement";
+export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callable";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
@@ -16,6 +17,7 @@ export {
   previewAssessmentDomainDev,
 } from "./assessment/submissions";
 export {createMoodEntry, createMoodEntryDev} from "./mood_entries";
+
 export {
   provisionAppUserProfile,
   provisionAppUserProfileDev,

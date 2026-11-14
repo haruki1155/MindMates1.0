@@ -89,6 +89,22 @@ service cloud.firestore {
       allow delete: if isSystemAdmin();
     }
 
+    function announcementReader() {
+      return isVerifiedEmail()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountStatus', 'active') == 'active';
+    }
+    function announcementPublisher() {
+      return announcementReader()
+        && currentAccessRole() in ['portalStaff', 'admin']
+        && (currentAccessRole() == 'admin'
+          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', 'approved') == 'approved');
+    }
+    match /announcements/{postId} {
+      allow read: if announcementPublisher()
+        || (announcementReader() && resource.data.status == 'published');
+      allow write: if false;
+    }
     match /system_config/{documentId} {
       allow read: if signedIn() && documentId == 'security';
       allow write: if false;

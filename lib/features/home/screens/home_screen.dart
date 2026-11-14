@@ -31,6 +31,7 @@ import '../../../services/firebase/app_notification_service.dart';
 import '../../../models/pacc_availability_model.dart';
 import '../../../repositories/pacc_availability_repository.dart';
 import '../../notifications/screens/notifications_screen.dart';
+import '../../announcements/screens/announcements_screen.dart';
 import '../../notifications/widgets/appointment_notification_banner.dart';
 import '../models/home_dashboard_data.dart';
 import '../widgets/home_dashboard_widgets.dart';
@@ -68,6 +69,7 @@ class PaccHomeScheduleStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     if (availability == null) {
       return HomeAnnouncementCard(
+        sectionTitle: 'PACC Office Status',
         badge: 'PACC',
         message: 'PACC office availability has not been published yet.',
         onViewMore: onViewMore,
@@ -90,6 +92,7 @@ class PaccHomeScheduleStatus extends StatelessWidget {
         ? 'Office is open. Counselor is unavailable; appointments cannot be booked. ${resolved.acceptsWalkIns ? 'Walk-ins are accepted.' : 'Walk-ins are unavailable.'}'
         : 'Office is open. ${resolved.canBookAppointments ? 'Appointments are available.' : 'Appointments are unavailable.'} ${resolved.acceptsWalkIns ? 'Walk-ins are accepted.' : 'Walk-ins are unavailable.'}';
     return HomeAnnouncementCard(
+      sectionTitle: 'PACC Office Status',
       badge: badge,
       message: message,
       isOpen: resolved.isOfficeOpen,
@@ -349,7 +352,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   return PaccHomeScheduleStatus(
                                     availability: availability,
                                     now: widget._nowProvider(),
-                                    onViewMore: _openNotifications,
+                                    onViewMore: () => _showAvailabilityDetails(
+                                      availability,
+                                      widget._nowProvider(),
+                                    ),
                                     onViewDetail: () =>
                                         _showAvailabilityDetails(
                                           availability,
@@ -357,6 +363,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         ),
                                   );
                                 },
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            HomeWideButton(
+                              label: 'Announcements',
+                              icon: Icons.campaign_outlined,
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const AnnouncementsScreen()),
                               ),
                             ),
                             if (appointmentProvider != null) ...[

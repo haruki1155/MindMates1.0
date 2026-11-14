@@ -28,6 +28,7 @@ import 'admin_change_password_screen.dart';
 import 'academic_structure_page.dart';
 import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
+import '../../announcements/screens/manage_announcements_page.dart';
 import 'staff_operations_dashboard.dart';
 import 'staff_appointments_page.dart';
 import 'counselor_operations_dashboard.dart';
@@ -53,6 +54,7 @@ String _headerRoleLabel(AccessRole role) => switch (role) {
 };
 
 enum AdminPortalPage {
+  announcements,
   dashboard,
   users,
   studentRoster,
@@ -71,6 +73,7 @@ enum AdminPortalPage {
 
 extension on AdminPortalPage {
   String get label => switch (this) {
+    AdminPortalPage.announcements => 'Announcements',
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
     AdminPortalPage.studentRoster => 'Student Roster',
@@ -95,6 +98,7 @@ extension on AdminPortalPage {
   };
 
   IconData get icon => switch (this) {
+    AdminPortalPage.announcements => Icons.campaign_outlined,
     AdminPortalPage.dashboard => Icons.home_outlined,
     AdminPortalPage.users => Icons.group_outlined,
     AdminPortalPage.studentRoster => Icons.school_outlined,
@@ -444,7 +448,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
         backgroundColor: _cream,
         drawer: compact
             ? Drawer(
-                child: _Nav(
+                child: PortalWorkspaceNavigation(
                   page: _page,
                   onChanged: _setPage,
                   compact: true,
@@ -465,7 +469,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
                       : constraints.maxWidth < 1120
                       ? 224
                       : 252,
-                  child: _Nav(
+                  child: PortalWorkspaceNavigation(
                     page: _page,
                     onChanged: _setPage,
                     collapsed: _navCollapsed,
@@ -539,6 +543,9 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   }
 
   Widget _buildPage() => switch (_page) {
+    AdminPortalPage.announcements => _repository.currentAccessRole == AccessRole.portalStaff || _repository.currentAccessRole == AccessRole.admin
+        ? const ManageAnnouncementsPage()
+        : const Center(child: Text('Staff or administrator access is required.')),
     AdminPortalPage.dashboard =>
       _repository.currentAccessRole == AccessRole.portalStaff
           ? StaffOperationsDashboardPage(
@@ -628,8 +635,9 @@ bool canShowScheduleNavigation(AccessRole accessRole) =>
 bool canShowCounselorMessagingInInquiries(AccessRole role) =>
     role == AccessRole.counselor;
 
-class _Nav extends StatelessWidget {
-  const _Nav({
+class PortalWorkspaceNavigation extends StatelessWidget {
+  const PortalWorkspaceNavigation({
+    super.key,
     required this.page,
     required this.onChanged,
     this.compact = false,
@@ -645,6 +653,7 @@ class _Nav extends StatelessWidget {
   final bool isSuperAdmin;
 
   bool _allowed(AdminPortalPage page) => switch (page) {
+    AdminPortalPage.announcements => accessRole == AccessRole.portalStaff || accessRole == AccessRole.admin,
     AdminPortalPage.users => isSuperAdmin,
     AdminPortalPage.studentRoster => isSuperAdmin,
     AdminPortalPage.academicStructure => isSuperAdmin,
@@ -669,6 +678,7 @@ class _Nav extends StatelessWidget {
   Widget build(BuildContext context) {
     final sections = <_NavSection>[
       const _NavSection('Overview', [AdminPortalPage.dashboard]),
+      const _NavSection('Publishing', [AdminPortalPage.announcements]),
       const _NavSection('People', [
         AdminPortalPage.users,
         AdminPortalPage.studentRoster,
