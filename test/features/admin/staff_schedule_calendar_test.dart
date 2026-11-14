@@ -84,17 +84,26 @@ void main() {
     expect(find.textContaining('Testing dates are currently arranged outside MindMate'), findsNothing);
   });
 
-  testWidgets('calendar changes months without creating schedule data', (tester) async {
+  testWidgets('calendar changes months and scrolls on a short viewport without overflow', (tester) async {
+    // StaffOperationsDashboardPage hosts the reusable calendar inside
+    // SingleChildScrollView. Match that production layout on the default
+    // 800x600 test viewport rather than constraining a tall Column directly.
     await tester.pumpWidget(MaterialApp(home: Scaffold(
-      body: StaffScheduleCalendar(
-        counselingAppointments: const [],
-        initialMonth: DateTime(2026, 11, 1),
+      body: SingleChildScrollView(
+        child: StaffScheduleCalendar(
+          counselingAppointments: const [],
+          initialMonth: DateTime(2026, 11, 1),
+        ),
       ),
     )));
     expect(find.text('November 2026'), findsOneWidget);
     await tester.tap(find.byTooltip('Next month'));
     await tester.pumpAndSettle();
     expect(find.text('December 2026'), findsOneWidget);
-    expect(find.text('No confirmed counseling appointments on this date.'), findsOneWidget);
+    final emptyDay = find.text('No confirmed counseling appointments on this date.');
+    await tester.ensureVisible(emptyDay);
+    await tester.pumpAndSettle();
+    expect(emptyDay, findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }
