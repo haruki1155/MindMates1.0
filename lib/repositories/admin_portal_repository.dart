@@ -760,30 +760,30 @@ class AdminPortalRepository {
         );
   }
 
+  /// Read the existing staff-safe appointment projection directly.
+  ///
+  /// Do not gate the whole screen on `refreshPortalAppointmentQueue`: a
+  /// callable can be unavailable in staging, rate-limited, or fail App Check,
+  /// even when the user is authorized to read existing queue documents.
+  /// Projection refresh is a separate privileged operation, not a read
+  /// prerequisite. Firestore rules still enforce portalStaff-only access.
   Stream<List<AppointmentQueueItem>> watchPortalAppointmentQueue() {
     if (currentAccessRole != AccessRole.portalStaff) {
       return Stream.value(const <AppointmentQueueItem>[]);
     }
-    return Stream.fromFuture(
-      FirebaseFunctions.instance
-          .routedCallable('refreshPortalAppointmentQueue')
-          .call(),
-    ).asyncExpand(
-      (_) => _firestoreService
-          .watchDocuments(FirestoreCollections.appointmentQueue)
-          .map(
-            (items) =>
-                items
-                    .map(
-                      (item) => AppointmentQueueItem.fromJson(
-                        item,
-                        id: item['id']?.toString(),
-                      ),
-                    )
-                    .toList()
-                  ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
-          ),
-    );
+    return _firestoreService
+        .watchDocuments(FirestoreCollections.appointmentQueue)
+        .map(
+          (items) => items
+              .map(
+                (item) => AppointmentQueueItem.fromJson(
+                  item,
+                  id: item['id']?.toString(),
+                ),
+              )
+              .toList()
+            ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
+        );
   }
 
   Stream<List<AppNotificationModel>> watchPortalNotifications() =>
