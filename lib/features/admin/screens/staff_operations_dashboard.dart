@@ -53,6 +53,15 @@ class StaffOperationsDashboardPage extends StatelessWidget {
                     child: _ScheduleNotice(
                       'Loading the staff appointment schedule…',
                     ),
+                  )
+                else if (snapshot.data!.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: _ScheduleNotice(
+                      'No staff-safe schedule records are available. '
+                      'If Admin shows appointments, choose Refresh schedules '
+                      'to populate the Staff calendar.',
+                    ),
                   ),
                 _DashboardContent(
                   appointments: snapshot.hasError
