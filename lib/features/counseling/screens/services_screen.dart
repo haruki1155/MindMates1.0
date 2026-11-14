@@ -160,6 +160,7 @@ class ServicesScreen extends StatelessWidget {
           'This service helps determine the status of students who received assistance and maintains contact with graduates. It also determines the adequacy and sufficiency of the programs and services extended in meeting the needs of its clientele.',
       iconAsset: '-1.png',
       headerColor: Color(0xFFD9AEAA),
+      hasFeedbackQr: true,
       guides: [
         ServiceGuideData(
           title: 'Adding, Changing & Dropping Subjects',
