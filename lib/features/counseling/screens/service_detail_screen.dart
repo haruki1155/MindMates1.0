@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_assets.dart';
 import '../../../routes/route_names.dart';
 import 'client_feedback_form_screen.dart';
+import '../widgets/client_feedback_qr_card.dart';
 import 'guidance_satisfaction_survey_screen.dart';
 import 'pacc_counseling_screen.dart';
 
@@ -65,6 +66,7 @@ class ServiceDetailData {
     this.hasShiftingProcedure = false,
     this.hasSatisfactionSurvey = false,
     this.hasClientFeedbackForm = false,
+    this.hasFeedbackQr = false,
     this.guides = const [],
   });
 
@@ -79,6 +81,7 @@ class ServiceDetailData {
   final bool hasShiftingProcedure;
   final bool hasSatisfactionSurvey;
   final bool hasClientFeedbackForm;
+  final bool hasFeedbackQr;
   final List<ServiceGuideData> guides;
 }
 
@@ -179,6 +182,10 @@ class ServiceDetailScreen extends StatelessWidget {
                         buttonLabel: 'Open Client Feedback Form',
                         onTap: () => _openClientFeedbackForm(context),
                       ),
+                    ],
+                    if (service.hasFeedbackQr) ...[
+                      const SizedBox(height: 32),
+                      const ClientFeedbackQrCard(),
                     ],
                   ],
                 ),

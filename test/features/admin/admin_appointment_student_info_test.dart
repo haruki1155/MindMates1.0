@@ -53,6 +53,17 @@ void main() {
     expect(find.text(label), findsOneWidget);
   });
 
+  testWidgets(
+    'student name remains visible but Firebase UID is hidden',
+    (tester) async {
+      const uid = 'student-private-uid-123';
+      await _pump(tester, _Repo(AccessRole.counselor, uid));
+      expect(find.text('Ana Student'), findsOneWidget);
+      expect(find.text(uid), findsNothing);
+      expect(find.text('View Student Information'), findsOneWidget);
+    },
+  );
+
   testWidgets('hidden for portal staff', (tester) async {
     await _pump(tester, _Repo(AccessRole.portalStaff, 'uid-1'));
     expect(find.text(label), findsNothing);

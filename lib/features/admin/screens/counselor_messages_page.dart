@@ -6,8 +6,17 @@ import '../theme/admin_theme.dart';
 import '../../counseling/widgets/counselor_unread_badges.dart';
 
 /// Approved counselor-only inbox. AI history is never merged into this thread.
+/// Human-readable label only. Never use the Firestore student UID as a label.
+String counselorConversationStudentLabel(String? name) {
+  final displayName = name?.trim() ?? '';
+  return displayName.isEmpty ? 'Student (name unavailable)' : displayName;
+}
+
 class CounselorMessagesPage extends StatefulWidget {
-  const CounselorMessagesPage({super.key});
+  const CounselorMessagesPage({super.key, this.embedded = false});
+
+  /// Hide the standalone page heading when the inbox is inside Inquiries.
+  final bool embedded;
 
   @override
   State<CounselorMessagesPage> createState() => _CounselorMessagesPageState();
@@ -94,20 +103,22 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
   Widget build(BuildContext context) {
     final db = FirebaseFirestore.instance;
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(widget.embedded ? 0 : 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Counselor Messages',
-            style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Direct student conversations. MindAid AI history is separate.',
-            style: TextStyle(color: AdminColors.muted),
-          ),
-          const SizedBox(height: 20),
+          if (!widget.embedded) ...[
+            const Text(
+              'Counselor Messages',
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Direct student conversations. MindAid AI history is separate.',
+              style: TextStyle(color: AdminColors.muted),
+            ),
+            const SizedBox(height: 20),
+          ],
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: db.collection('colleges').snapshots(),
             builder: (context, collegeSnapshot) {
@@ -199,17 +210,9 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
                             ListTile(
                               selected: selectedUser == thread.id,
                               title: Text(
-                                (thread.data()['studentName'] as String?)
-                                            ?.trim()
-                                            .isNotEmpty ==
-                                        true
-                                    ? thread.data()['studentName'] as String
-                                    : 'Student ${thread.id.length > 10 ? '${thread.id.substring(0, 10)}…' : thread.id}',
-                              ),
-                              subtitle: Text(
-                                (thread.data()['collegeId'] ??
-                                        'Unassigned college')
-                                    .toString(),
+                                counselorConversationStudentLabel(
+                                  thread.data()['studentName'] as String?,
+                                ),
                               ),
                               trailing:
                                   StreamBuilder<

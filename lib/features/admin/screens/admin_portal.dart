@@ -4,6 +4,7 @@ import 'counselor_messages_page.dart';
 import '../../counseling/widgets/counselor_unread_badges.dart';
 
 import 'package:flutter/material.dart';
+import 'package:file_selector/file_selector.dart';
 
 import '../../../models/admin_inquiry_model.dart';
 import '../../../models/appointment_model.dart';
@@ -36,6 +37,9 @@ import '../../../services/firebase/firebase_error_message.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
 import '../widgets/pacc_schedule_editor_widgets.dart';
+import '../widgets/clinical_interview_widgets.dart';
+import '../widgets/counselor_inquiry_workspace.dart';
+import '../domain/session_evidence.dart';
 
 const _yellow = AdminColors.accentStrong;
 const _cream = AdminColors.canvas;
@@ -61,7 +65,6 @@ enum AdminPortalPage {
   notifications,
   availability,
   inquiries,
-  counselorMessages,
   assessments,
   profile,
 }
@@ -80,7 +83,6 @@ extension on AdminPortalPage {
     AdminPortalPage.notifications => 'Notifications',
     AdminPortalPage.availability => 'Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
-    AdminPortalPage.counselorMessages => 'Counselor Messages',
     AdminPortalPage.assessments => 'Assessment',
     AdminPortalPage.profile => 'Profile',
   };
@@ -105,7 +107,6 @@ extension on AdminPortalPage {
     AdminPortalPage.notifications => Icons.notifications_outlined,
     AdminPortalPage.availability => Icons.storefront_outlined,
     AdminPortalPage.inquiries => Icons.chat_bubble_outline_rounded,
-    AdminPortalPage.counselorMessages => Icons.forum_outlined,
     AdminPortalPage.assessments => Icons.assignment_outlined,
     AdminPortalPage.profile => Icons.account_circle_outlined,
   };
@@ -408,6 +409,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   late final AdminPortalRepository _repository =
       widget.repository ?? AdminPortalRepository();
   AdminPortalPage _page = AdminPortalPage.dashboard;
+  CounselorInquirySection _initialInquirySection = CounselorInquirySection.messages;
   final _rosterLeaveGuard = StudentRosterLeaveGuard();
   bool _navCollapsed = false;
   late final Stream<List<AppNotificationModel>> _notifications;
@@ -507,7 +509,10 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
     },
   );
 
-  Future<void> _setPage(AdminPortalPage page) async {
+  Future<void> _setPage(
+    AdminPortalPage page, {
+    CounselorInquirySection inquirySection = CounselorInquirySection.messages,
+  }) async {
     if (_page == AdminPortalPage.availability &&
         page != AdminPortalPage.availability &&
         !await _scheduleController.confirmLeave(context)) {
@@ -523,7 +528,14 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       return;
     }
     Navigator.of(context).maybePop();
-    if (mounted) setState(() => _page = page);
+    if (mounted) {
+      setState(() {
+        _page = page;
+        if (page == AdminPortalPage.inquiries) {
+          _initialInquirySection = inquirySection;
+        }
+      });
+    }
   }
 
   Widget _buildPage() => switch (_page) {
@@ -568,28 +580,53 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
       mode: CounselorWorkflowMode.cases,
       onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
+      onModeChanged: (mode) => _setPage(
+        mode == CounselorWorkflowMode.cases
+            ? AdminPortalPage.cases
+            : AdminPortalPage.followUps,
+      ),
     ),
     AdminPortalPage.followUps => CounselorWorkflowPage(
       repository: _repository,
       mode: CounselorWorkflowMode.followUps,
       onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
+      onModeChanged: (mode) => _setPage(
+        mode == CounselorWorkflowMode.cases
+            ? AdminPortalPage.cases
+            : AdminPortalPage.followUps,
+      ),
     ),
     AdminPortalPage.reports => ReportGenerationPage(repository: _repository),
     AdminPortalPage.notifications => AdminNotificationsPage(
       repository: _repository,
       onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
-      onOpenInquiries: () => _setPage(AdminPortalPage.inquiries),
+      onOpenInquiries: () => _setPage(
+        AdminPortalPage.inquiries,
+        inquirySection: CounselorInquirySection.otherServices,
+      ),
     ),
     AdminPortalPage.availability => _AvailabilityPage(
       repository: _repository,
       controller: _scheduleController,
     ),
-    AdminPortalPage.inquiries => _InquiriesPage(repository: _repository),
-    AdminPortalPage.counselorMessages => const CounselorMessagesPage(),
+    AdminPortalPage.inquiries => _InquiriesPage(
+      repository: _repository,
+      initialSection: _initialInquirySection,
+    ),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
   };
 }
+
+/// Schedule editing/navigation is reserved for counselors and administrators.
+/// This controls portal navigation only; backend authorization remains unchanged.
+bool canShowScheduleNavigation(AccessRole accessRole) =>
+    accessRole == AccessRole.counselor || accessRole == AccessRole.admin;
+
+/// Preserve the existing counselor-only chat access when moving its entry
+/// point inside the Inquiries workspace. Admins retain the inquiry queue.
+bool canShowCounselorMessagingInInquiries(AccessRole role) =>
+    role == AccessRole.counselor;
 
 class _Nav extends StatelessWidget {
   const _Nav({
@@ -623,9 +660,9 @@ class _Nav extends StatelessWidget {
     AdminPortalPage.assessments => accessRole.canAccessClinicalData,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
-    AdminPortalPage.counselorMessages => accessRole == AccessRole.counselor,
     AdminPortalPage.appointments =>
       accessRole.canUsePortal || accessRole == AccessRole.admin,
+    AdminPortalPage.availability => canShowScheduleNavigation(accessRole),
     _ => accessRole.canUsePortal || accessRole == AccessRole.admin,
   };
   @override
@@ -642,9 +679,7 @@ class _Nav extends StatelessWidget {
         AdminPortalPage.appointments,
         AdminPortalPage.availability,
         AdminPortalPage.cases,
-        AdminPortalPage.followUps,
         AdminPortalPage.inquiries,
-        AdminPortalPage.counselorMessages,
       ]),
       const _NavSection('Insights', [
         AdminPortalPage.assessments,
@@ -795,9 +830,10 @@ class _Nav extends StatelessWidget {
                                 size: 21,
                               ),
                               trailing:
-                                  item == AdminPortalPage.counselorMessages
-                                  ? const CounselorInboxUnreadBadge()
-                                  : null,
+                                  item == AdminPortalPage.inquiries &&
+                                          canShowCounselorMessagingInInquiries(accessRole)
+                                      ? const CounselorInboxUnreadBadge()
+                                      : null,
                               title: Text(
                                 item.workspaceLabel,
                                 style: const TextStyle(
@@ -2103,7 +2139,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                     onChanged: (_) => setState(() {}),
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.search),
-                      hintText: 'Search student name or ID',
+                      hintText: 'Search student name',
                     ),
                   ),
                 ),
@@ -2826,11 +2862,7 @@ class _AppointmentCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
-              const SizedBox(height: 3),
-              Text(
-                item.userId,
-                style: const TextStyle(color: AdminColors.muted, fontSize: 12),
-              ),
+              const SizedBox(height: 8),
               if (item.userId.trim().isNotEmpty &&
                   repository.currentAccessRole.canAccessClinicalData)
                 FittedBox(
@@ -2953,6 +2985,8 @@ class _AppointmentCard extends StatelessWidget {
     String reason = _appointmentReasons(action).first;
     final customReason = TextEditingController();
     final sessionSummary = TextEditingController();
+    final selectedClinicalFiles = <PendingSessionEvidenceFile>[];
+    List<SessionEvidenceAttachment>? uploadedClinicalFiles;
     final followUpMessage = TextEditingController();
     var offerFollowUp = false;
     DateTime? proposedDate;
@@ -3075,6 +3109,11 @@ class _AppointmentCard extends StatelessWidget {
                           ? 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.'
                           : 'This appointment has been finalized. The recorded decision is read-only.',
                     ),
+                    if (currentStatus == AppointmentStatus.completed)
+                      ClinicalInterviewRecordViewer(
+                        repository: repository,
+                        appointmentId: item.id,
+                      ),
                   ] else ...[
                     const Divider(height: 34),
                     const _AppointmentSectionHeader(
@@ -3240,11 +3279,78 @@ class _AppointmentCard extends StatelessWidget {
                         minLines: 3,
                         maxLines: 8,
                         maxLength: 2000,
+                        enabled: !submitting,
                         decoration: const InputDecoration(
                           labelText: 'Session summary (internal)',
                           helperText:
                               'Visible only to authorized clinical staff.',
                         ),
+                      ),
+                      ClinicalInterviewEditor(
+                        files: selectedClinicalFiles,
+                        busy: submitting,
+                        onRemoveFile: (index) => setDialogState(() {
+                          selectedClinicalFiles.removeAt(index);
+                          uploadedClinicalFiles = null;
+                        }),
+                        onChooseFiles: () async {
+                          try {
+                            final chosen = await openFiles(
+                              acceptedTypeGroups: [
+                                const XTypeGroup(
+                                  label: 'Interview materials',
+                                  extensions: [
+                                    'jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx',
+                                  ],
+                                ),
+                              ],
+                            );
+                            if (!dialogContext.mounted || chosen.isEmpty) return;
+                            if (selectedClinicalFiles.length + chosen.length >
+                                maxSessionEvidenceFiles) {
+                              throw const FormatException('Choose no more than five files.');
+                            }
+                            final incoming = <PendingSessionEvidenceFile>[];
+                            for (final file in chosen) {
+                              final name = file.name;
+                              final type = sessionEvidenceMimeType(name);
+                              final length = await file.length();
+                              if (!validSessionEvidenceFileName(name) ||
+                                  type == null ||
+                                  length == 0 ||
+                                  length > maxSessionEvidenceFileBytes) {
+                                throw const FormatException(
+                                  'Only PNG, JPG, PDF, DOC or DOCX files up to 5 MB are allowed.',
+                                );
+                              }
+                              final bytes = await file.readAsBytes();
+                              if (bytes.length != length) {
+                                throw const FormatException('File size changed during selection.');
+                              }
+                              incoming.add(PendingSessionEvidenceFile(
+                                name: name,
+                                contentType: type,
+                                bytes: bytes,
+                              ));
+                            }
+                            if (dialogContext.mounted) {
+                              setDialogState(() {
+                                selectedClinicalFiles.addAll(incoming);
+                                uploadedClinicalFiles = null;
+                              });
+                            }
+                          } catch (_) {
+                            if (dialogContext.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Unable to add files. Use PNG, JPG, PDF, DOC or DOCX up to 5 MB each (max five).',
+                                  ),
+                                ),
+                              );
+                            }
+                          }
+                        },
                       ),
                       CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
@@ -3347,6 +3453,15 @@ class _AppointmentCard extends StatelessWidget {
                           if (action == 'accept') {
                             await repository.changeAppointmentAgreement(item, 'accept', agreementRequestId);
                           } else {
+                          // Upload evidence only after the legacy schedule guard.
+                          // Reuse the uploaded manifest if a callable retry is needed.
+                          if (action == 'completed' && uploadedClinicalFiles == null) {
+                            uploadedClinicalFiles = await repository
+                                .uploadClinicalEvidenceFiles(
+                                  appointmentId: item.id,
+                                  files: selectedClinicalFiles,
+                                );
+                          }
                           await repository.reviewAppointment(
                             appointmentId: item.id,
                             expectedScheduledAt: item.scheduledAt.millisecondsSinceEpoch,
@@ -3363,6 +3478,9 @@ class _AppointmentCard extends StatelessWidget {
                             sessionSummary: action == 'completed'
                                 ? sessionSummary.text.trim()
                                 : null,
+                            attachments: action == 'completed'
+                                ? uploadedClinicalFiles ?? const []
+                                : const [],
                             offerFollowUp:
                                 action == 'completed' && offerFollowUp,
                             followUpMessage:
@@ -5112,8 +5230,12 @@ class _FilterField extends StatelessWidget {
 }
 
 class _InquiriesPage extends StatefulWidget {
-  const _InquiriesPage({required this.repository});
+  const _InquiriesPage({
+    required this.repository,
+    this.initialSection = CounselorInquirySection.messages,
+  });
   final AdminPortalRepository repository;
+  final CounselorInquirySection initialSection;
   @override
   State<_InquiriesPage> createState() => _InquiriesPageState();
 }
@@ -5136,8 +5258,23 @@ class _InquiriesPageState extends State<_InquiriesPage> {
   @override
   Widget build(BuildContext context) => _Page(
     title: 'Inquiries',
-    subtitle: 'Review, acknowledge, and resolve submitted inquiries.',
-    child: StreamBuilder<List<AdminInquiryModel>>(
+    subtitle: canShowCounselorMessagingInInquiries(
+            widget.repository.currentAccessRole,
+          )
+        ? 'Student messages and other PACC service inquiries.'
+        : 'Review, acknowledge, and resolve submitted inquiries.',
+    child: canShowCounselorMessagingInInquiries(
+            widget.repository.currentAccessRole,
+          )
+        ? CounselorInquiryWorkspace(
+            messages: const CounselorMessagesPage(embedded: true),
+            otherServices: _buildServiceInquiries(),
+            initialSection: widget.initialSection,
+          )
+        : _buildServiceInquiries(),
+  );
+
+  Widget _buildServiceInquiries() => StreamBuilder<List<AdminInquiryModel>>(
       stream: widget.repository.watchInquiries(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const _AccessPanel();
@@ -5216,8 +5353,7 @@ class _InquiriesPageState extends State<_InquiriesPage> {
           ],
         );
       },
-    ),
-  );
+    );
 }
 
 class _InquiryList extends StatelessWidget {
