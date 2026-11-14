@@ -40,15 +40,10 @@ class _FakeFirestore extends Fake implements FirebaseFirestore {
 }
 
 void main() {
-  const verifyWriterOnlyPilot = bool.fromEnvironment(
-    'VERIFY_MOOD_V2_WRITER_ONLY_PILOT',
-    defaultValue: false,
-  );
-
   test(
     'Mood V2 repository is inert while the writer flag is off',
     () async {
-      if (verifyWriterOnlyPilot || MoodV2FeatureFlag.enabled) return;
+      if (MoodV2FeatureFlag.enabled) return;
       final repository = MoodV2Repository();
 
       expect(MoodV2FeatureFlag.enabled, isFalse);
@@ -111,7 +106,6 @@ void main() {
   );
 
   test('the compatibility readers default to disabled', () {
-    if (verifyWriterOnlyPilot) return;
     // These stay false in every environment, staging included. The writer,
     // the five student-facing readers and the presentation flag follow the
     // staging build; see mood_v2_feature_flag_test.dart.
@@ -124,7 +118,6 @@ void main() {
   test(
     'writer, presentation and the five readers follow the staging build',
     () {
-      if (verifyWriterOnlyPilot) return;
       expect([
         MoodV2FeatureFlag.enabled,
         MoodV2FeatureFlag.presentation,
@@ -136,18 +129,4 @@ void main() {
       ], everyElement(equals(AppEnvironmentConfig.isStagingBuild)));
     },
   );
-
-  test('writer-only pilot does not enable any Mood V2 reader', () {
-    if (!verifyWriterOnlyPilot) return;
-    expect(MoodV2FeatureFlag.enabled, isTrue);
-    expect([
-      MoodV2FeatureFlag.providerRead,
-      MoodV2FeatureFlag.homeRead,
-      MoodV2FeatureFlag.profileRead,
-      MoodV2FeatureFlag.historyRead,
-      MoodV2FeatureFlag.insightsRead,
-      MoodV2ReadCompatibilityFlag.reportsEnabled,
-      MoodV2ReadCompatibilityFlag.mindAidEnabled,
-    ], everyElement(isFalse));
-  });
 }

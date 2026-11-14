@@ -6,14 +6,6 @@ import 'package:mind_mates/features/mood/config/mood_v2_feature_flag.dart';
 /// This suite asserts the *relationships* between them, which hold in every
 /// configuration; the two CI jobs (neutral and staging) exercise both states.
 void main() {
-  // The writer-only pilot verification build deliberately turns the protected
-  // writer on. Assertions that the writer is off, and the label that follows
-  // from it, do not apply in that shape.
-  const verifyWriterOnlyPilot = bool.fromEnvironment(
-    'VERIFY_MOOD_V2_WRITER_ONLY_PILOT',
-    defaultValue: false,
-  );
-
   test('isStagingBuild agrees with the resolved environment', () {
     expect(
       AppEnvironmentConfig.isStagingBuild,
@@ -43,12 +35,10 @@ void main() {
   });
 
   test('the protected writer follows the staging build', () {
-    if (verifyWriterOnlyPilot) return;
     expect(MoodV2FeatureFlag.enabled, AppEnvironmentConfig.isStagingBuild);
   });
 
   test('actionLabel still takes its default from the writer flag', () {
-    if (verifyWriterOnlyPilot) return;
     expect(
       MoodV2FeatureFlag.actionLabel(hasCheckedInToday: true),
       MoodV2FeatureFlag.enabled ? 'Log a mood' : 'View today’s mood',
