@@ -2967,9 +2967,6 @@ class _AppointmentCard extends StatelessWidget {
     String reason = _appointmentReasons(action).first;
     final customReason = TextEditingController();
     final sessionSummary = TextEditingController();
-    final interviewQuestions = TextEditingController();
-    final requirementsChecked = TextEditingController();
-    final materialsUsed = TextEditingController();
     final selectedClinicalFiles = <PendingSessionEvidenceFile>[];
     List<SessionEvidenceAttachment>? uploadedClinicalFiles;
     final followUpMessage = TextEditingController();
@@ -3272,9 +3269,6 @@ class _AppointmentCard extends StatelessWidget {
                         ),
                       ),
                       ClinicalInterviewEditor(
-                        questions: interviewQuestions,
-                        requirements: requirementsChecked,
-                        materials: materialsUsed,
                         files: selectedClinicalFiles,
                         busy: submitting,
                         onRemoveFile: (index) => setDialogState(() {
@@ -3466,15 +3460,6 @@ class _AppointmentCard extends StatelessWidget {
                             sessionSummary: action == 'completed'
                                 ? sessionSummary.text.trim()
                                 : null,
-                            interviewQuestions: action == 'completed'
-                                ? interviewQuestions.text.trim()
-                                : null,
-                            requirementsChecked: action == 'completed'
-                                ? requirementsChecked.text.trim()
-                                : null,
-                            materialsUsed: action == 'completed'
-                                ? materialsUsed.text.trim()
-                                : null,
                             attachments: action == 'completed'
                                 ? uploadedClinicalFiles ?? const []
                                 : const [],
@@ -3529,9 +3514,6 @@ class _AppointmentCard extends StatelessWidget {
     );
     customReason.dispose();
     sessionSummary.dispose();
-    interviewQuestions.dispose();
-    requirementsChecked.dispose();
-    materialsUsed.dispose();
     followUpMessage.dispose();
   }
 
