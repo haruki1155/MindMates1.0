@@ -38,7 +38,35 @@ class _StaffRepo extends AdminPortalRepository {
   ]);
 }
 
+class _UnavailableStaffRepo extends _StaffRepo {
+  @override
+  Stream<List<AppointmentQueueItem>> watchPortalAppointmentQueue() =>
+      Stream<List<AppointmentQueueItem>>.error(
+        StateError('Simulated appointment queue access failure'),
+      );
+}
+
 void main() {
+  testWidgets('appointments keep table and college filters on queue errors',
+      (tester) async {
+    tester.view.physicalSize = const Size(1550, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(MaterialApp(home: Scaffold(
+      body: StaffAppointmentsPage(repository: _UnavailableStaffRepo()),
+    )));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Live appointments could not be loaded'),
+        findsOneWidget);
+    expect(find.text('Filter by college'), findsOneWidget);
+    expect(find.byType(DataTable), findsOneWidget);
+    expect(find.text('Appointment data is unavailable, not an empty schedule.'),
+        findsOneWidget);
+  });
+
+
   testWidgets('staff appointment table filters verified college IDs, not free-text guesses', (tester) async {
     tester.view.physicalSize = const Size(1550, 1400);
     tester.view.devicePixelRatio = 1;
