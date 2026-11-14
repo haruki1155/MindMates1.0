@@ -1507,7 +1507,11 @@ void main() {
     (tester) async {
       final repository = _FakeMoodRepository(hasToday: true);
       final moodProvider = MoodProvider(repository);
-      var now = DateTime(2026, 7, 7, 23, 59, 30);
+      // UTC, so the Manila wall clock is the same on every machine:
+      // MoodRepository.manilaWallClock shifts the instant by +8h, so a bare
+      // local DateTime here would put midnight 16 hours away on a UTC runner
+      // and the rollover timer would never fire.
+      var now = DateTime.utc(2026, 7, 7, 15, 59, 55);
       await tester.pumpWidget(
         _logMoodApp(
           moodProvider: moodProvider,
@@ -1521,7 +1525,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('already logged'), findsOneWidget);
 
-      now = DateTime(2026, 7, 8, 0, 0, 2);
+      now = DateTime.utc(2026, 7, 7, 16, 0, 2);
       repository.hasToday = false;
       await tester.pump(const Duration(minutes: 2));
       await tester.pumpAndSettle();
