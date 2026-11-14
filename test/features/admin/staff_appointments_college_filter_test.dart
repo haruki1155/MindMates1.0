@@ -52,14 +52,14 @@ void main() {
     expect(find.text('3 appointments shown'), findsOneWidget);
     expect(find.text('Student Alpha'), findsOneWidget);
     expect(find.text('Student Beta'), findsOneWidget);
-    expect(find.text('Unassigned college'), findsOneWidget);
+    expect(find.text('Unassigned'), findsOneWidget);
 
     await tester.tap(find.text('All colleges'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('College A').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('1 appointments shown'), findsOneWidget);
+    expect(find.text('1 appointment shown'), findsOneWidget);
     expect(find.text('Student Alpha'), findsOneWidget);
     expect(find.text('Student Beta'), findsNothing);
     expect(repo.queueCalls, 1);
