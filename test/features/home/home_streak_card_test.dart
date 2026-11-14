@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/home/domain/home_streak_source.dart';
 import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
-import 'package:mind_mates/features/mood/config/mood_v2_feature_flag.dart';
 
 void main() {
   HomeStreakData data(
@@ -61,7 +60,7 @@ void main() {
     expect(find.text('Log your mood today to start a streak.'), findsOneWidget);
     expect(find.text('0'), findsOneWidget);
     expect(find.text('days'), findsOneWidget);
-    await tester.tap(find.text('Log your mood'));
+    await tester.tap(find.text('Log mood'));
     expect(result.taps, ['card']);
     expect(find.byKey(const Key('streak-flame')), findsOneWidget);
   });
@@ -70,7 +69,7 @@ void main() {
     await pump(tester, data(HomeStreakState.notStarted, 0));
     final button = tester.widget<FilledButton>(
       find.ancestor(
-        of: find.text('Log your mood'),
+        of: find.text('Log mood'),
         matching: find.byType(FilledButton),
       ),
     );
@@ -83,7 +82,7 @@ void main() {
     expect(find.text('4'), findsOneWidget);
     expect(find.text('days'), findsOneWidget);
     expect(find.text('Check in today to keep your streak.'), findsOneWidget);
-    expect(find.text('Log your mood'), findsOneWidget);
+    expect(find.text('Log mood'), findsOneWidget);
   });
 
   testWidgets('done today uses the singular day and no button', (tester) async {
@@ -92,7 +91,7 @@ void main() {
     expect(find.text('day'), findsOneWidget);
     expect(find.text('days'), findsNothing);
     expect(find.text('Done for today. See you tomorrow!'), findsOneWidget);
-    expect(find.text('Log your mood'), findsNothing);
+    expect(find.text('Log mood'), findsNothing);
     expect(find.byKey(const Key('streak-flame')), findsOneWidget);
   });
 
@@ -135,10 +134,7 @@ void main() {
         final checkedIn =
             state == HomeStreakState.doneToday ||
             state == HomeStreakState.milestone;
-        final label = MoodV2FeatureFlag.actionLabel(
-          hasCheckedInToday: checkedIn,
-          writerEnabled: writer,
-        );
+        const label = 'Log mood';
         final visible = writer || !checkedIn;
         testWidgets('writer ${writer ? 'on' : 'off'} + ${state.name}: '
             '${visible ? 'shows "$label"' : 'hides the pill'}', (tester) async {

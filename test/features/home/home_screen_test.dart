@@ -238,15 +238,7 @@ void main() {
 
     expect(find.text('Day streak'), findsOneWidget);
     expect(find.text('Log your mood today to start a streak.'), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byType(HomeStreakCard),
-        matching: find.text(
-          MoodV2FeatureFlag.actionLabel(hasCheckedInToday: false),
-        ),
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Log mood'), findsOneWidget);
   });
 
   for (final owner in ['user_1', 'someone_else']) {
@@ -586,9 +578,7 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byType(HomeStreakCard),
-        matching: find.text(
-          MoodV2FeatureFlag.actionLabel(hasCheckedInToday: false),
-        ),
+        matching: find.text('Log mood'),
       ),
     );
     await tester.pumpAndSettle();

@@ -846,12 +846,7 @@ class HomeStreakCard extends StatelessWidget {
                     if (showLogMood) ...[
                       const SizedBox(height: 10),
                       _StreakPill(
-                        label: MoodV2FeatureFlag.actionLabel(
-                          hasCheckedInToday:
-                              state == HomeStreakState.doneToday ||
-                              state == HomeStreakState.milestone,
-                          writerEnabled: allowsAdditionalEntries,
-                        ),
+                        label: 'Log mood',
                         background: HomePalette.surface,
                         foreground: HomePalette.text,
                         onPressed: onTap,
