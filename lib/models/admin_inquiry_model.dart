@@ -40,6 +40,7 @@ class AdminInquiryModel {
     this.formType,
     this.formData = const {},
     this.acknowledgedAt,
+    this.assignedStaffId,
   });
 
   final String id;
@@ -55,6 +56,10 @@ class AdminInquiryModel {
   final String? formType;
   final Map<String, dynamic> formData;
   final DateTime? acknowledgedAt;
+
+  /// Portal account that owns this inquiry, when one has been recorded.
+  /// Not written by any server flow yet; `null` means unassigned.
+  final String? assignedStaffId;
 
   bool get isFormSubmission => formType != null && formType!.isNotEmpty;
   bool get isAcknowledged => acknowledgedAt != null;
@@ -85,6 +90,7 @@ class AdminInquiryModel {
           ? Map<String, dynamic>.from(json['formData'] as Map)
           : const {},
       acknowledgedAt: dateTimeFromFirestore(json['acknowledgedAt']),
+      assignedStaffId: _optional(json['assignedStaffId']),
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
       status: InquiryStatus.fromValue(json['status']),
     );

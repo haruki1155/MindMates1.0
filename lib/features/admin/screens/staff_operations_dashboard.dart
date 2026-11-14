@@ -6,6 +6,7 @@ import '../../../repositories/admin_portal_repository.dart';
 import '../theme/admin_theme.dart';
 import '../widgets/staff_schedule_calendar.dart';
 import '../widgets/staff_queue_refresh_button.dart';
+import '../widgets/staff_queue_sync_notice.dart';
 import 'admin_portal.dart';
 
 /// Operational dashboard for PACC Staff. It deliberately does not query
@@ -53,6 +54,12 @@ class StaffOperationsDashboardPage extends StatelessWidget {
                     child: _ScheduleNotice(
                       'Loading the staff appointment schedule…',
                     ),
+                  )
+                else if (snapshot.data!.isEmpty &&
+                    repository.portalQueueSyncError.value != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: StaffQueueSyncNotice(repository: repository),
                   )
                 else if (snapshot.data!.isEmpty)
                   const Padding(
