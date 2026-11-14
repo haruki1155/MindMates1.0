@@ -1224,9 +1224,6 @@ class AdminPortalRepository {
     String? proposedScheduledTime,
     String? rescheduleReason,
     String? sessionSummary,
-    String? interviewQuestions,
-    String? requirementsChecked,
-    String? materialsUsed,
     List<SessionEvidenceAttachment> attachments = const [],
     bool offerFollowUp = false,
     String? followUpMessage,
@@ -1251,9 +1248,6 @@ class AdminPortalRepository {
     if (rescheduleReason != null) data['rescheduleReason'] = rescheduleReason;
     if (sessionSummary != null) {
       data['sessionSummary'] = sessionSummary;
-      data['interviewQuestions'] = interviewQuestions ?? '';
-      data['requirementsChecked'] = requirementsChecked ?? '';
-      data['materialsUsed'] = materialsUsed ?? '';
       data['attachments'] = attachments.map((file) => file.toJson()).toList();
     }
     if (offerFollowUp) data['offerFollowUp'] = true;
