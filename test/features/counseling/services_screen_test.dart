@@ -16,7 +16,7 @@ import 'package:mind_mates/routes/route_names.dart';
 import 'package:provider/provider.dart';
 
 void main() {
-  testWidgets('best contact time opens a picker and preserves cancellation', (tester) async {
+  testWidgets('contact range picker preserves cancellation', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_paccApp());
@@ -27,27 +27,28 @@ void main() {
     await _chooseVisibleOption(tester, 'Male');
     await _chooseVisibleOption(tester, 'Fourth Year');
     await _tapStageButton(tester, 'Continue to Counseling Details');
-    tester.view.physicalSize = const Size(430, 3200);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final field = find.byKey(const ValueKey('intake-best-time'));
-    expect(tester.widget<TextField>(find.descendant(of: field, matching: find.byType(TextField))).readOnly, isTrue);
-    await tester.tap(field);
+
+    final start = find.byKey(const Key('best-time-start'));
+    final end = find.byKey(const Key('best-time-end'));
+
+    expect(start, findsOneWidget);
+    expect(end, findsOneWidget);
+    expect(find.text('9:00 AM'), findsOneWidget);
+    expect(find.text('12:00 PM'), findsOneWidget);
+
+    await tester.ensureVisible(start);
     await tester.pumpAndSettle();
+    await tester.tap(start);
+    await tester.pumpAndSettle();
+
     expect(find.byType(TimePickerDialog), findsOneWidget);
-    await tester.tap(find.text('OK'));
-    await tester.pumpAndSettle();
-    final selected = tester.widget<TextFormField>(field).controller!.text;
-    expect(selected, '9:00 AM');
-    await tester.tap(field);
-    await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    expect(tester.widget<TextFormField>(field).controller!.text, selected);
-  });
 
-  testWidgets('appointment time uses one picker without slot chips', (tester) async {
+    expect(find.text('9:00 AM'), findsOneWidget);
+    expect(find.text('12:00 PM'), findsOneWidget);
+  });
+  testWidgets('appointment times show only offered slot chips', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_paccApp());
@@ -57,34 +58,43 @@ void main() {
     await _advanceToSchedule(tester);
     await tester.tap(find.text('30'));
     await tester.pumpAndSettle();
-    expect(find.byType(ChoiceChip), findsNothing);
-    expect(find.byKey(const ValueKey('appointment-time-picker')), findsOneWidget);
-    expect(find.text('9:00 AM - 11:00 AM'), findsOneWidget);
-    expect(find.text('1:00 PM'), findsOneWidget);
-    expect(find.text('9:00 AM - 1:00 PM'), findsNothing);
-    expect(find.textContaining('Available hours:'), findsNothing);
-  });
 
-  testWidgets('unavailable picker time is rejected without losing the selection', (tester) async {
+    for (final time in [
+      '9:00 AM', '10:00 AM', '11:00 AM', '1:00 PM'
+    ]) {
+      expect(find.byKey(Key('time-chip-$time')), findsOneWidget);
+    }
+
+    expect(find.byKey(const Key('time-chip-11:30 AM')), findsNothing);
+    expect(find.byKey(const Key('appointment-time-picker')), findsNothing);
+    expect(find.byType(ChoiceChip), findsNothing);
+    expect(find.text('Philippine Time (PHT)'), findsOneWidget);
+  });
+  testWidgets('unoffered times cannot replace the selected slot', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_paccApp());
     await tester.pumpAndSettle();
     await _reachReview(tester);
+
     await tester.tap(find.byTooltip('Edit Schedule'));
     await tester.pumpAndSettle();
-    await _pickAppointmentTime(tester, 11, minute: 30);
-    expect(find.textContaining('That time is unavailable'), findsOneWidget);
-    expect(find.text('11:00 AM'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('appointment-time-picker')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(find.text('11:00 AM'), findsOneWidget);
+
+    final selected = find.byKey(const Key('time-chip-11:00 AM'));
+    expect(selected, findsOneWidget);
+    expect(find.byKey(const Key('time-chip-11:30 AM')), findsNothing);
+
+    expect(
+      find.descendant(
+        of: selected,
+        matching: find.byIcon(Icons.check),
+      ),
+      findsOneWidget,
+    );
+
     await _tapStageButton(tester, 'Continue to Confirm');
     expect(find.text('11:00 AM (PHT)'), findsOneWidget);
   });
-
   testWidgets('availability retry retains intake and permits booking after recovery', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -103,12 +113,12 @@ void main() {
     await _pickAppointmentTime(tester, 11);
     await _tapStageButton(tester, 'Continue to Confirm');
     await _tapStageButton(tester, 'Send appointment request');
-    expect(repository.appointments.single.bestTime, '9:00 AM');
+    expect(repository.appointments.single.bestTime, 'Weekdays, 9:00 AM – 12:00 PM');
     expect(repository.appointments.single.scheduledTime, '11:00 AM');
     expect(repository.lastRequestId, isNotEmpty);
   });
 
-  testWidgets('compact appointment picker works on a narrow phone with large text', (tester) async {
+  testWidgets('compact slot chips remain accessible on a narrow phone', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(_paccApp());
@@ -116,26 +126,25 @@ void main() {
     await _reachReview(tester);
     await tester.tap(find.byTooltip('Edit Schedule'));
     await tester.pumpAndSettle();
-    await tester.binding.setSurfaceSize(const Size(320, 800));
-    tester.view.physicalSize = const Size(320, 800);
-    tester.view.devicePixelRatio = 1;
-    tester.platformDispatcher.textScaleFactorTestValue = 1.5;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    await tester.pumpAndSettle();
-    final picker = find.byKey(const ValueKey('appointment-time-picker'));
-    await tester.ensureVisible(picker);
-    await tester.pumpAndSettle();
-    expect(tester.getSize(picker).height, greaterThanOrEqualTo(48));
-    await tester.tap(picker);
-    await tester.pumpAndSettle();
-    expect(find.byType(TimePickerDialog), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(find.text('11:00 AM'), findsOneWidget);
-  });
 
+    await tester.binding.setSurfaceSize(const Size(320, 800));
+    tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(
+      tester.platformDispatcher.clearTextScaleFactorTestValue,
+    );
+    await tester.pumpAndSettle();
+
+    final chip = find.byKey(const Key('time-chip-11:00 AM'));
+    expect(chip, findsOneWidget);
+    await tester.ensureVisible(chip);
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(chip).height, greaterThanOrEqualTo(44));
+    expect(tester.takeException(), isNull);
+
+    await _tapStageButton(tester, 'Continue to Confirm');
+    expect(find.text('11:00 AM (PHT)'), findsOneWidget);
+  });
   testWidgets('picker accepts padded server hours and keeps the server label', (tester) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -145,7 +154,12 @@ void main() {
     await _reachReview(tester);
     await tester.tap(find.byTooltip('Edit Schedule'));
     await tester.pumpAndSettle();
-    await _pickAppointmentTime(tester, 9);
+    final padded = find.byKey(const Key('time-chip-09:00 AM'));
+    expect(padded, findsOneWidget);
+    await tester.ensureVisible(padded);
+    await tester.pumpAndSettle();
+    await tester.tap(padded);
+    await tester.pumpAndSettle();
     expect(find.text('09:00 AM'), findsOneWidget);
     await _tapStageButton(tester, 'Continue to Confirm');
     await _tapStageButton(tester, 'Send appointment request');
@@ -199,8 +213,8 @@ void main() {
     repository.calls[1].complete([]);
     await tester.pumpAndSettle();
     await _pickAppointmentTime(tester, 10);
-    expect(find.descendant(of: find.byKey(const ValueKey('appointment-time-picker')), matching: find.text('10:00 AM')), findsOneWidget);
-    expect(find.text('9:00 AM'), findsNothing);
+    expect(find.byKey(const Key('time-chip-10:00 AM')), findsOneWidget);
+    expect(find.byKey(const Key('time-chip-9:00 AM')), findsNothing);
   });
   testWidgets('services screen matches the mockup structure and actions', (
     tester,
@@ -540,11 +554,10 @@ void main() {
     await tester.tap(find.byTooltip('Back to counseling details'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('counselingDetails')), findsOneWidget);
-    expect(
-      tester.widget<TextFormField>(find.byKey(const ValueKey('intake-best-time')))
-          .controller!.text,
-      '9:00 AM',
-    );
+    expect(find.byKey(const Key('best-time-start')), findsOneWidget);
+    expect(find.byKey(const Key('best-time-end')), findsOneWidget);
+    expect(find.text('9:00 AM'), findsOneWidget);
+    expect(find.text('12:00 PM'), findsOneWidget);
   });
 
   testWidgets('appointment flow creates an in-memory appointment', (
@@ -618,7 +631,7 @@ void main() {
     expect(find.text('Review request'), findsOneWidget);
     expect(find.text('Mapandan, Pangasinan'), findsOneWidget);
     expect(find.text('11:00 AM (PHT)'), findsOneWidget);
-    expect(find.text('9:00 AM'), findsOneWidget);
+    expect(find.text('Weekdays, 9:00 AM – 12:00 PM'), findsOneWidget);
 
     await _tapStageButton(tester, 'Send appointment request');
     expect(repository.appointments.single.address, 'Mapandan, Pangasinan');
@@ -896,11 +909,6 @@ Future<void> _fillCounselingForm(WidgetTester tester) async {
     find.byKey(const ValueKey('intake-concern')),
     'I feel overwhelmed and would like to talk to someone.',
   );
-<<<<<<< HEAD
-  await tester.tap(find.byKey(const ValueKey('intake-best-time')));
-  await _acceptTime(tester, 9);
-=======
->>>>>>> origin/main
 }
 
 Future<void> _chooseVisibleOption(WidgetTester tester, String label) async {
@@ -974,24 +982,28 @@ class _FakeAppointmentRepository extends AppointmentRepository {
   }
 }
 
-Future<void> _acceptTime(WidgetTester tester, int hour, {int minute = 0}) async {
-  tester.view.physicalSize = const Size(430, 3200);
-  tester.view.devicePixelRatio = 1;
-  addTearDown(tester.view.resetPhysicalSize);
-  addTearDown(tester.view.resetDevicePixelRatio);
-  await tester.pumpAndSettle();
-  await tester.tap(find.byIcon(Icons.keyboard_outlined));
-  await tester.pumpAndSettle();
-  final inputs = find.descendant(of: find.byType(TimePickerDialog), matching: find.byType(TextField));
-  await tester.enterText(inputs.at(0), hour.toString());
-  await tester.enterText(inputs.at(1), minute.toString().padLeft(2, '0'));
-  await tester.tap(find.text('OK'));
-  await tester.pumpAndSettle();
-}
+Future<void> _pickAppointmentTime(
+  WidgetTester tester,
+  int hour, {
+  int minute = 0,
+}) async {
+  if (minute != 0) {
+    throw ArgumentError(
+      'The compact slot selector only offers server-provided time chips.',
+    );
+  }
 
-Future<void> _pickAppointmentTime(WidgetTester tester, int hour, {int minute = 0}) async {
-  await tester.tap(find.byKey(const ValueKey('appointment-time-picker')));
-  await _acceptTime(tester, hour, minute: minute);
+  final clockHour = hour % 12 == 0 ? 12 : hour % 12;
+  final period = hour < 12 ? 'AM' : 'PM';
+  final label = '$clockHour:00 $period';
+
+  final chip = find.byKey(Key('time-chip-$label'));
+
+  expect(chip, findsOneWidget);
+  await tester.ensureVisible(chip);
+  await tester.pumpAndSettle();
+  await tester.tap(chip);
+  await tester.pumpAndSettle();
 }
 
 class _RetrySlotsRepository extends _FakeAppointmentRepository {

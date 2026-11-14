@@ -34,15 +34,9 @@ export {
   requestStaffEmailVerification,
   requestStaffEmailVerificationDev,
 } from "./account_recovery";
-<<<<<<< HEAD
-import {defineString} from "firebase-functions/params";
-import {createHash, randomBytes} from "node:crypto";
-import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
-=======
 import {configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid as requireAuthenticatedUser} from "./access";
-import {randomBytes} from "node:crypto";
+import {createHash, randomBytes} from "node:crypto";
 import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, auditLogOwnerField, writeAudit} from "./audit";
->>>>>>> origin/main
 import {
   AppointmentSchedulingValidationError,
   formatAppointmentTime,

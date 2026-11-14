@@ -434,7 +434,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         preferredContactMethod: _preferredContactMethod,
         therapyBefore: _therapyBefore,
         concern: _concernController.text.trim(),
-        bestTime: _bestTimeController.text.trim(),
+        bestTime: _legacyBestTime ?? formatBestContactTime(_bestTime),
         isSaving: appointmentProvider?.isSaving ?? false,
         onBack: () => setState(() => _step = _PaccAppointmentStep.calendar),
         onEditPersonal: () => _editReviewSection(_PaccAppointmentStep.intake),
@@ -615,7 +615,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _preferredContactMethod != null &&
       _therapyBefore != null &&
       _concernController.text.trim().isNotEmpty &&
-      _bestTimeController.text.trim().isNotEmpty;
+      _bestTime.isValidRange;
 
   void _validateIntakeForm() {
     final personal = _step == _PaccAppointmentStep.intake;
@@ -1360,25 +1360,12 @@ class _TimeSelectionView extends StatelessWidget {
       children: [
         Row(
           children: [
-            if (showBack) IconButton(
-              tooltip: 'Back to calendar',
-              onPressed: onBack,
-              icon: const Icon(Icons.chevron_left, color: Colors.black),
-            ),
-<<<<<<< HEAD
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Choose Time', style: _PaccText.title),
-                Text(
-                  selectedDate == null
-                      ? 'Choose a date'
-                      : _formatWeekdayMonthDay(selectedDate!),
-                  style: _PaccText.subtitle,
-                ),
-              ],
-            )),
-=======
+            if (showBack)
+              IconButton(
+                tooltip: 'Back to calendar',
+                onPressed: onBack,
+                icon: const Icon(Icons.chevron_left),
+              ),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1393,80 +1380,21 @@ class _TimeSelectionView extends StatelessWidget {
                 ],
               ),
             ),
->>>>>>> origin/main
           ],
         ),
-        const Text('Philippine Time (PHT)', style: _PaccText.body),
+        const Text(
+          'Philippine Time (PHT)',
+          style: _PaccText.body,
+        ),
         const SizedBox(height: 22),
-<<<<<<< HEAD
         if (isSaving)
-          const LinearProgressIndicator(semanticsLabel: 'Loading appointment times')
-        else if (availableTimes.isNotEmpty) ...[
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              key: const ValueKey('appointment-time-picker'),
-              icon: const Icon(Icons.schedule),
-              style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
-              label: Text(selectedTime ?? 'Choose appointment time'),
-              onPressed: () async {
-                final picked = await showTimePicker(
-                  context: context,
-                  helpText: 'Appointment time (PHT)',
-                  initialTime: _parseClock(selectedTime ?? availableTimes.first),
-                );
-                if (picked == null || !context.mounted) return;
-                final matchingTimes = availableTimes.where((label) => _tryParseClock(label) == picked);
-                if (matchingTimes.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: const Text('That time is unavailable. Choose a whole-hour start within the displayed available ranges.'),
-                  ));
-                  return;
-                }
-                onTimeSelected(matchingTimes.first);
-              },
-=======
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            for (final time in availableTimes)
-              _TimeChip(
-                time: time,
-                selected: selectedTime == time,
-                onTap: () => onTimeSelected(time),
-              ),
-          ],
-        ),
-        if (!isSaving && availableTimes.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 20),
-            child: Text(
-              noSlotMessage ??
-                  'No appointment times are available for this date. Please choose another date.',
-              style: _PaccText.body,
->>>>>>> origin/main
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: const Color(0xFFF1F6F2), borderRadius: BorderRadius.circular(14)),
-            child: Column(children: [
-              const Text('Available appointment times', textAlign: TextAlign.center, style: AppointmentVisuals.section),
-              const SizedBox(height: 10),
-              for (final range in _availableTimeRanges(availableTimes)) Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Text(range, textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppointmentVisuals.teal)),
-              ),
-              const SizedBox(height: 8),
-              const Text('PHT - Whole-hour starts only', textAlign: TextAlign.center, style: AppointmentVisuals.body),
-            ]),
-          ),
-        ] else ...[
+          const LinearProgressIndicator(
+            semanticsLabel: 'Loading appointment times',
+          )
+        else if (availableTimes.isEmpty) ...[
           Text(
-            noSlotMessage ?? 'No appointment times are available for this date. Please choose another date.',
+            noSlotMessage ??
+                'No appointment times are available for this date. Please choose another date.',
             style: _PaccText.body,
           ),
           TextButton.icon(
@@ -1474,18 +1402,27 @@ class _TimeSelectionView extends StatelessWidget {
             icon: const Icon(Icons.refresh),
             label: const Text('Retry appointment times'),
           ),
-        ],
+        ] else
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final time in availableTimes)
+                _TimeChip(
+                  time: time,
+                  selected: selectedTime == time,
+                  onTap: () => onTimeSelected(time),
+                ),
+            ],
+          ),
         const SizedBox(height: 34),
         const _ReminderCard(),
         const SizedBox(height: 34),
-
       ],
     );
   }
 }
 
-<<<<<<< HEAD
-=======
 class _TimeChip extends StatelessWidget {
   const _TimeChip({
     required this.time,
@@ -1501,10 +1438,12 @@ class _TimeChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       key: Key('time-chip-$time'),
-      color: selected ? _PaccColors.sun : Colors.white,
+      color: selected ? const Color(0xFFFFF1C7) : Colors.white,
       shape: StadiumBorder(
         side: BorderSide(
-          color: selected ? _PaccColors.sunButton : const Color(0xFFE5C24D),
+          color: selected
+              ? _PaccColors.sunButton
+              : const Color(0xFFE5C24D),
           width: selected ? 1.5 : 1,
         ),
       ),
@@ -1513,10 +1452,12 @@ class _TimeChip extends StatelessWidget {
         onTap: onTap,
         child: Container(
           constraints: const BoxConstraints(minHeight: 44),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 8,
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (selected) ...[
                 const Icon(Icons.check, size: 16),
@@ -1531,7 +1472,6 @@ class _TimeChip extends StatelessWidget {
   }
 }
 
->>>>>>> origin/main
 class _ReminderCard extends StatelessWidget {
   const _ReminderCard();
 
@@ -1783,36 +1723,9 @@ class _IntakeFormView extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 const _FieldLabel('Best Time to Contact You*'),
-<<<<<<< HEAD
-                TextFormField(
-                  key: const ValueKey('intake-best-time'),
-                  controller: bestTimeController,
-                  readOnly: true,
-                  style: _PaccText.input.copyWith(fontSize: 14),
-                  decoration: _PaccDecor.input('Choose a contact time').copyWith(
-                    suffixIcon: const Icon(Icons.schedule),
-                    helperText: 'Philippine Time (PHT)',
-=======
-                _BestTimeField(value: bestTime, onChanged: onBestTimeChanged),
-                const SizedBox(height: 30),
-                SizedBox(
-                  width: double.infinity,
-                  child: _YellowButton(
-                    label: 'Continue to Date & Time',
-                    onTap: onNext,
->>>>>>> origin/main
-                  ),
-                  validator: _required,
-                  onTap: () async {
-                    final selected = await showTimePicker(
-                      context: context,
-                      helpText: 'Best time to contact you (PHT)',
-                      initialTime: _parseClock(bestTimeController.text),
-                    );
-                    if (selected != null && context.mounted) {
-                      bestTimeController.text = _clockLabel(selected);
-                    }
-                  },
+                _BestTimeField(
+                  value: bestTime,
+                  onChanged: onBestTimeChanged,
                 ),
               ],
             ),
@@ -2801,31 +2714,4 @@ String _weekdayName(int weekday) {
     'Sunday',
   ];
   return weekdays[weekday - 1];
-}
-
-TimeOfDay _parseClock(String value) =>
-    _tryParseClock(value) ?? const TimeOfDay(hour: 9, minute: 0);
-
-TimeOfDay? _tryParseClock(String value) {
-  final match = RegExp(r'^(\d{1,2}):([0-5]\d)\s*(AM|PM)$', caseSensitive: false).firstMatch(value.trim());
-  if (match == null || int.parse(match[1]!) < 1 || int.parse(match[1]!) > 12) return null;
-  return TimeOfDay(hour: int.parse(match[1]!) % 12 + (match[3]!.toUpperCase() == 'PM' ? 12 : 0), minute: int.parse(match[2]!));
-}
-
-String _clockLabel(TimeOfDay time) => '${time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod}:${time.minute.toString().padLeft(2, '0')} ${time.period == DayPeriod.am ? 'AM' : 'PM'}';
-
-List<String> _availableTimeRanges(List<String> labels) {
-  final minutes = labels.map(_tryParseClock).whereType<TimeOfDay>().map((t) => t.hour * 60 + t.minute).toSet().toList()..sort();
-  if (minutes.isEmpty) return const [];
-  String clock(int value) => _clockLabel(TimeOfDay(hour: value ~/ 60, minute: value % 60));
-  final ranges = <String>[];
-  var start = minutes.first;
-  var end = start;
-  void append() => ranges.add(start == end ? clock(start) : '${clock(start)} - ${clock(end)}');
-  for (final minute in minutes.skip(1)) {
-    if (minute == end + 60) { end = minute; }
-    else { append(); start = end = minute; }
-  }
-  append();
-  return ranges;
 }
