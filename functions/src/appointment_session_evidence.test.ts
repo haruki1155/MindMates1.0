@@ -7,26 +7,22 @@ const counselorId = "counselor-55";
 const path = `counseling_session_files/${appointmentId}/${counselorId}/0123456789abcdef0123456789abcdef.pdf`;
 const valid = {path, name: "Interview checklist.pdf", contentType: "application/pdf", size: 2456};
 
-test("bounded private interview documentation normalizes valid text and file manifest", () => {
-  const result = validateSessionEvidence({
-    interviewQuestions: "  What support helps you?  ",
-    requirementsChecked: "  Consent explained  ",
-    materialsUsed: "  Counseling worksheet  ",
-    attachments: [valid],
-  }, appointmentId, counselorId);
-  assert.equal(result.interviewQuestions, "What support helps you?");
-  assert.equal(result.requirementsChecked, "Consent explained");
-  assert.equal(result.materialsUsed, "Counseling worksheet");
-  assert.deepEqual(result.attachments, [valid]);
+test("private session evidence validates a file manifest without new text fields", () => {
+  const result = validateSessionEvidence({attachments: [valid]}, appointmentId, counselorId);
+  assert.deepEqual(result, {attachments: [valid]});
 });
 
-test("non-completed session cannot introduce private documentation", () => {
-  assert.deepEqual(validateSessionEvidence({}, appointmentId, counselorId), {
-    interviewQuestions: "", requirementsChecked: "", materialsUsed: "", attachments: [],
-  });
-  assert.throws(() => validateSessionEvidence({
-    interviewQuestions: "x".repeat(4001),
-  }, appointmentId, counselorId), /too long/);
+test("empty file manifests work and removed text fields are rejected", () => {
+  assert.deepEqual(
+    validateSessionEvidence({}, appointmentId, counselorId),
+    {attachments: []},
+  );
+  for (const field of ["interviewQuestions", "requirementsChecked", "materialsUsed"]) {
+    assert.throws(
+      () => validateSessionEvidence({[field]: "unsupported"}, appointmentId, counselorId),
+      {code: "invalid-argument"},
+    );
+  }
 });
 
 test("rejects mismatched owner, path traversal, MIME mismatch and oversized attachments", () => {
