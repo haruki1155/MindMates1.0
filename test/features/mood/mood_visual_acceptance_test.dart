@@ -72,7 +72,9 @@ void moodVisualAcceptance({Future<void> Function(String name)? screenshot}) {
     // Item 40: Home logs moods from the Day streak card's "Log mood".
     final log = find.descendant(
       of: find.byType(HomeStreakCard),
-      matching: find.text('Log mood'),
+      matching: find.text(
+        MoodV2FeatureFlag.actionLabel(hasCheckedInToday: false),
+      ),
     );
     expect(log, findsOneWidget);
     if (screenshot != null) await screenshot('01-home');

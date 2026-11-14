@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/home/domain/home_streak_source.dart';
 import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
+import 'package:mind_mates/features/mood/config/mood_v2_feature_flag.dart';
 
 void main() {
   HomeStreakData data(
@@ -26,6 +27,7 @@ void main() {
     WidgetTester tester,
     HomeStreakData streak, {
     double width = 390,
+    bool writer = false,
   }) async {
     final taps = <String>[];
     await tester.binding.setSurfaceSize(Size(width, 900));
@@ -42,6 +44,7 @@ void main() {
                   data: streak,
                   onTap: () => taps.add('card'),
                   onViewRecap: () => taps.add('recap'),
+                  allowsAdditionalEntries: writer,
                 ),
               ),
             ),
@@ -58,7 +61,7 @@ void main() {
     expect(find.text('Log your mood today to start a streak.'), findsOneWidget);
     expect(find.text('0'), findsOneWidget);
     expect(find.text('days'), findsOneWidget);
-    await tester.tap(find.text('Log mood'));
+    await tester.tap(find.text('Log your mood'));
     expect(result.taps, ['card']);
     expect(find.byKey(const Key('streak-flame')), findsOneWidget);
   });
@@ -67,7 +70,7 @@ void main() {
     await pump(tester, data(HomeStreakState.notStarted, 0));
     final button = tester.widget<FilledButton>(
       find.ancestor(
-        of: find.text('Log mood'),
+        of: find.text('Log your mood'),
         matching: find.byType(FilledButton),
       ),
     );
@@ -80,7 +83,7 @@ void main() {
     expect(find.text('4'), findsOneWidget);
     expect(find.text('days'), findsOneWidget);
     expect(find.text('Check in today to keep your streak.'), findsOneWidget);
-    expect(find.text('Log mood'), findsOneWidget);
+    expect(find.text('Log your mood'), findsOneWidget);
   });
 
   testWidgets('done today uses the singular day and no button', (tester) async {
@@ -89,7 +92,7 @@ void main() {
     expect(find.text('day'), findsOneWidget);
     expect(find.text('days'), findsNothing);
     expect(find.text('Done for today. See you tomorrow!'), findsOneWidget);
-    expect(find.text('Log mood'), findsNothing);
+    expect(find.text('Log your mood'), findsNothing);
     expect(find.byKey(const Key('streak-flame')), findsOneWidget);
   });
 
@@ -125,4 +128,37 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  group('log button with multiple entries per day', () {
+    for (final writer in [true, false]) {
+      for (final state in HomeStreakState.values) {
+        final checkedIn =
+            state == HomeStreakState.doneToday ||
+            state == HomeStreakState.milestone;
+        final label = MoodV2FeatureFlag.actionLabel(
+          hasCheckedInToday: checkedIn,
+          writerEnabled: writer,
+        );
+        final visible = writer || !checkedIn;
+        testWidgets('writer ${writer ? 'on' : 'off'} + ${state.name}: '
+            '${visible ? 'shows "$label"' : 'hides the pill'}', (tester) async {
+          await pump(
+            tester,
+            data(state, state == HomeStreakState.notStarted ? 0 : 3),
+            writer: writer,
+          );
+          expect(find.text(label), visible ? findsOneWidget : findsNothing);
+          if (visible) {
+            expect(
+              find.ancestor(
+                of: find.text(label),
+                matching: find.byType(FilledButton),
+              ),
+              findsOneWidget,
+            );
+          }
+        });
+      }
+    }
+  });
 }
