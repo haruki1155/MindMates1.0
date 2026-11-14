@@ -177,7 +177,7 @@ test("offline authorization: keeps flag, Dev, production and pilot boundaries", 
   assert.equal(await offlineAuthorization({...profile, accountStatus: null}, {...offlineGate, pilotUserIds: new Set(["offline-user"])}, false), "allowed");
 });
 
-test("offline authorization: exported protected handler permits roles while Dev stays pilot-only", async () => {
+test("offline authorization: exported protected and Dev handlers permit roles on staging only", async () => {
   const keys = ["GCLOUD_PROJECT", "MOOD_V2_STAGING_STUDENT_ROLLOUT_ENABLED", "MOOD_V2_STAGING_PILOT_UIDS"];
   const previous = keys.map((key) => process.env[key]);
   try {
@@ -188,6 +188,14 @@ test("offline authorization: exported protected handler permits roles while Dev 
       const profile = {accessRole: "appUser", populationRole, declaredRole: populationRole, role};
       const request = callable("offline-user", payload());
       assert.equal(await offlineAuthorization(profile, offlineGate, true, () => createMoodEntry.run(request)), "allowed");
+      assert.equal(await offlineAuthorization(profile, offlineGate, false, () => createMoodEntryDev.run(request)), "allowed");
+    }
+    // Outside mindmate-staging both exports still refuse, whatever the flag.
+    process.env.GCLOUD_PROJECT = "mind-mates-cd2cf";
+    for (const [populationRole, role] of [["student", "student"], ["teaching", "faculty"], ["nonTeaching", "staff"]]) {
+      const profile = {accessRole: "appUser", populationRole, declaredRole: populationRole, role};
+      const request = callable("offline-user", payload());
+      assert.equal(await offlineAuthorization(profile, offlineGate, true, () => createMoodEntry.run(request)), "permission-denied");
       assert.equal(await offlineAuthorization(profile, offlineGate, false, () => createMoodEntryDev.run(request)), "permission-denied");
     }
   } finally {
@@ -405,7 +413,7 @@ test("clients cannot submit authorization or execution-path overrides", () => {
   }
 });
 
-test("deployed exports select protected versus pilot-only handlers with server configuration", async () => {
+test("deployed exports accept the student rollout on staging only", async () => {
   const keys = ["GCLOUD_PROJECT", "MOOD_V2_STAGING_STUDENT_ROLLOUT_ENABLED", "MOOD_V2_STAGING_PILOT_UIDS"];
   const previous = keys.map((key) => process.env[key]);
   try {
@@ -420,7 +428,12 @@ test("deployed exports select protected versus pilot-only handlers with server c
     assert.equal(moodV2RolloutGate().studentRolloutEnabled, true);
     const result = await createMoodEntry.run(callable(uid, payload(111)));
     assert.equal(result.userId, uid);
-    await assert.rejects(() => createMoodEntryDev.run(callable(uid, payload(112))), {code: "permission-denied"});
+    const devResult = await createMoodEntryDev.run(callable(uid, payload(112)));
+    assert.equal(devResult.userId, uid);
+    process.env.GCLOUD_PROJECT = "mind-mates-cd2cf";
+    await assert.rejects(() => createMoodEntry.run(callable(uid, payload(113))), {code: "permission-denied"});
+    await assert.rejects(() => createMoodEntryDev.run(callable(uid, payload(113))), {code: "permission-denied"});
+    process.env.GCLOUD_PROJECT = "mindmate-staging";
     await assert.rejects(() => createMoodEntryDev.run(callable(undefined, payload(112))), {code: "unauthenticated"});
   } finally {
     keys.forEach((key, index) => {

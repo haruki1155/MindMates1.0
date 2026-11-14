@@ -866,6 +866,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final writer = _FakeMoodV2Writer(failuresRemaining: 1);
+    var issuedIds = 0;
     await tester.pumpWidget(
       _logMoodApp(
         moodProvider: MoodProvider(_FakeMoodRepository()),
@@ -874,7 +875,8 @@ void main() {
         moodV2Presentation: true,
         moodV2WriterEnabled: true,
         moodV2Writer: writer,
-        moodV2RequestIdGenerator: () => '00000000-0000-4000-8000-000000000001',
+        moodV2RequestIdGenerator: () =>
+            '00000000-0000-4000-8000-00000000000${++issuedIds}',
       ),
     );
     await tester.pumpAndSettle();
@@ -949,6 +951,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = _FakeMoodRepository();
     final moodProvider = _RecordingConfirmProvider(repository);
+    final insights = _RecordingInsightsProvider();
     final writer = _FakeMoodV2Writer(
       failuresRemaining: 1,
       failure: FirebaseFunctionsException(
@@ -959,6 +962,7 @@ void main() {
     await tester.pumpWidget(
       _logMoodApp(
         moodProvider: moodProvider,
+        insightsProvider: insights,
         userProvider: UserProvider(_FakeUserRepository())
           ..setUser(_user(id: 'user_1')),
         moodV2Presentation: true,
@@ -981,6 +985,8 @@ void main() {
     expect(repository.createdNote, 'Saved anyway');
     // No phantom V2 event may enter combined history.
     expect(moodProvider.recordedV2Entries, isEmpty);
+    // Home does not reload on its own, so the fallback must refresh too.
+    expect(insights.refreshedUsers, contains('user_1'));
   });
 
   testWidgets('a refused V2 write shows today’s existing legacy entry', (

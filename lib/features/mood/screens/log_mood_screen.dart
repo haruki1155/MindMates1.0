@@ -829,6 +829,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ? 'Mood check-in saved.'
           : 'You already have a check-in for today. Showing that entry.',
     );
+    // Home only reloads on account change, so refresh the dependent surfaces
+    // here; otherwise the streak card looks as if the save failed.
+    unawaited(_refreshAfterConfirmedMoodV2Write(userId, requestGeneration));
   }
 
   Future<void> _refreshAfterConfirmedMoodV2Write(

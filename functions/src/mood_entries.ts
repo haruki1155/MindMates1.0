@@ -211,8 +211,8 @@ export async function createMoodEntryForUser(
   allowStudentRollout = false,
 ): Promise<Record<string, unknown>> {
   const profile = await requireEligibleAppUser(uid);
-  // This capability is selected by server code, never request data. The Dev
-  // handler deliberately uses the default pilot-only path.
+  // This capability is selected by server code, never request data. Both
+  // handlers pass it as true; it only takes effect on mindmate-staging.
   if (gate.projectId === "mindmate-staging" && gate.pilotUserIds.has(uid)) {
     requireMoodV2StagingPilot(uid, gate);
   } else {

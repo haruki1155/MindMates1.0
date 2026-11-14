@@ -27,8 +27,8 @@ class MoodV2FeatureFlag {
   ///
   /// This controls persistence only and has no effect on presentation.
   ///
-  /// On in staging builds, where the server now accepts `createMoodEntry` from
-  /// any active account; off in development and production. Override with
+  /// On in staging builds, where the writer is routed to `createMoodEntryDev`,
+  /// which accepts any active account on the staging project; off in development and production. Override with
   /// `--dart-define=ENABLE_MOOD_V2=false|true`. With this off, saving goes
   /// through the legacy writer.
   static const enabled = bool.fromEnvironment(
