@@ -19,6 +19,11 @@ abstract final class AppointmentVisuals {
     const Color(0xFFFFFFFF),
   );
 
+  static final confirmedInk = Color.alphaBlend(
+    const Color(0xFF000000).withValues(alpha: .15),
+    AppColors.primary,
+  );
+
   /// (background, foreground) per status; pending/confirmed/cancelled stay distinct.
   static (Color, Color) statusColors(AppointmentStatus status) => switch (status) {
     AppointmentStatus.requested || AppointmentStatus.legacyRequested => (
@@ -27,7 +32,7 @@ abstract final class AppointmentVisuals {
     ),
     AppointmentStatus.confirmed || AppointmentStatus.completed => (
       confirmedSurface,
-      AppColors.primary,
+      confirmedInk,
     ),
     AppointmentStatus.cancelled || AppointmentStatus.declined => (
       const Color(0xFFFBECE9),
