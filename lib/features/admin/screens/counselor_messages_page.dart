@@ -13,7 +13,10 @@ String counselorConversationStudentLabel(String? name) {
 }
 
 class CounselorMessagesPage extends StatefulWidget {
-  const CounselorMessagesPage({super.key});
+  const CounselorMessagesPage({super.key, this.embedded = false});
+
+  /// Hide the standalone page heading when the inbox is inside Inquiries.
+  final bool embedded;
 
   @override
   State<CounselorMessagesPage> createState() => _CounselorMessagesPageState();
@@ -100,20 +103,22 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
   Widget build(BuildContext context) {
     final db = FirebaseFirestore.instance;
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(widget.embedded ? 0 : 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Counselor Messages',
-            style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Direct student conversations. MindAid AI history is separate.',
-            style: TextStyle(color: AdminColors.muted),
-          ),
-          const SizedBox(height: 20),
+          if (!widget.embedded) ...[
+            const Text(
+              'Counselor Messages',
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Direct student conversations. MindAid AI history is separate.',
+              style: TextStyle(color: AdminColors.muted),
+            ),
+            const SizedBox(height: 20),
+          ],
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: db.collection('colleges').snapshots(),
             builder: (context, collegeSnapshot) {
