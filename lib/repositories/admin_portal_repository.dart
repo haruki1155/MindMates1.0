@@ -3,8 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:async';
-import 'dart:typed_data';
 
 import '../database/firestore_collections.dart';
 import '../models/academic_import_models.dart';
@@ -21,6 +21,7 @@ import '../models/pacc_availability_model.dart';
 import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
 import '../features/admin/domain/admin_management_models.dart';
+import '../features/admin/domain/inquiry_scope.dart';
 import '../features/admin/domain/report_generation_models.dart';
 import '../services/firebase/firebase_callable_router.dart';
 import '../services/firebase/firestore_service.dart';
@@ -240,6 +241,14 @@ class AdminPortalRepository {
   bool _mustChangePassword = false;
   bool _staffQueueRefreshAttempted = false;
   bool get mustChangePassword => _mustChangePassword;
+
+  /// Error code from the last best-effort `refreshPortalAppointmentQueue`
+  /// catch-up, or `null` when it succeeded or has not run. Staff screens use
+  /// this to tell "the sync Function is missing/denied" apart from "no
+  /// appointments exist".
+  final ValueNotifier<String?> portalQueueSyncError = ValueNotifier<String?>(
+    null,
+  );
 
   AccessRole _profileAccessRole(Map<String, dynamic>? profile) {
     final storedAccessRole = profile?['accessRole']?.toString().trim();
@@ -795,10 +804,15 @@ class AdminPortalRepository {
         FirebaseFunctions.instance
             .routedCallable('refreshPortalAppointmentQueue')
             .call()
-            .then<void>((_) {})
+            .then<void>((_) => portalQueueSyncError.value = null)
             .catchError((Object error, StackTrace stackTrace) {
               // The Firestore queue listener remains authoritative and live.
-              // App Check / callable failures must not blank the Staff UI.
+              // App Check / callable failures must not blank the Staff UI,
+              // but they must be visible: a missing or denied sync Function
+              // is the usual reason the queue projection is empty.
+              portalQueueSyncError.value = error is FirebaseFunctionsException
+                  ? error.code
+                  : 'unavailable';
             }),
       );
     }
@@ -1120,23 +1134,24 @@ class AdminPortalRepository {
     );
   }
 
+  /// Counselors see the unassigned pool plus their own assignments; see
+  /// [scopeInquiriesForRole]. Access itself is enforced by Firestore rules.
   Stream<List<AdminInquiryModel>> watchInquiries() => _firestoreService
-      .watchDocuments(
-        FirestoreCollections.inquiries,
-        whereEquals: currentAccessRole == AccessRole.counselor
-            ? {'assignedStaffId': currentAuthUser?.uid ?? ''}
-            : const {},
-      )
+      .watchDocuments(FirestoreCollections.inquiries)
       .map(
         (items) =>
-            items
-                .map(
-                  (item) => AdminInquiryModel.fromJson(
-                    item,
-                    id: item['id']?.toString(),
-                  ),
-                )
-                .toList()
+            scopeInquiriesForRole(
+                items
+                    .map(
+                      (item) => AdminInquiryModel.fromJson(
+                        item,
+                        id: item['id']?.toString(),
+                      ),
+                    )
+                    .toList(),
+                role: currentAccessRole,
+                uid: currentAuthUser?.uid,
+              )
               ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
       );
 

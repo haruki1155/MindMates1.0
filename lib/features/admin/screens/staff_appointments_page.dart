@@ -6,6 +6,7 @@ import '../domain/admin_management_models.dart';
 import '../domain/portal_appointment_metrics.dart';
 import '../theme/admin_theme.dart';
 import '../widgets/staff_queue_refresh_button.dart';
+import '../widgets/staff_queue_sync_notice.dart';
 
 /// Staff-only operational projection. No direct clinical appointment reads.
 class StaffAppointmentsPage extends StatefulWidget {
@@ -117,6 +118,7 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                   child: StaffQueueRefreshButton(repository: widget.repository),
                 ),
                 const SizedBox(height: 12),
+                StaffQueueSyncNotice(repository: widget.repository),
                 if (snapshot.hasError) ...[
                   const _Message(
                     'Live appointments could not be loaded. '

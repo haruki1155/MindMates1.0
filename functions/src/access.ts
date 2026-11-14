@@ -20,16 +20,20 @@ export async function requireStaff(uid: string): Promise<FirebaseFirestore.Docum
   if (!["portalStaff", "counselor", "admin"].includes(accessRole)) {
     throw new HttpsError("permission-denied", "Staff access is required.");
   }
-  // New PACC access requests must pass all three gates.  Older privileged
-  // records remain readable while they are migrated, but no newly registered
-  // staff account can reach protected functions until verification is synced.
-  if (accessRole !== "admin" && profile.staffAccountStatus != null) {
-    const authUser = await getAuth().getUser(uid);
-    if (profile.staffAccountStatus !== "approved" ||
-        profile.accountStatus !== "active" ||
-        !authUser.emailVerified) {
-      throw new HttpsError("permission-denied", "Your PACC portal access is not active.");
-    }
+  // Mirrors firestore.rules::hasPortalAccess. Every privileged account,
+  // including administrators and pre-lifecycle (legacy) records, must be an
+  // enabled, email-verified Auth user. A legacy record has no
+  // `accountStatus`/`staffAccountStatus` and is treated as active; any
+  // explicit non-active status denies, and applicant requests must be
+  // approved before they reach protected functions.
+  const authUser = await getAuth().getUser(uid);
+  const accountStatus = profile.accountStatus == null ? "active" : String(profile.accountStatus);
+  const staffAccountStatus = profile.staffAccountStatus == null ? null : String(profile.staffAccountStatus);
+  if (authUser.disabled ||
+      !authUser.emailVerified ||
+      accountStatus !== "active" ||
+      (accessRole !== "admin" && staffAccountStatus != null && staffAccountStatus !== "approved")) {
+    throw new HttpsError("permission-denied", "Your PACC portal access is not active.");
   }
   return {...profile, accessRole};
 }

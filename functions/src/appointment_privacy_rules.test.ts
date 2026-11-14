@@ -59,9 +59,9 @@ after(async () => environment.cleanup());
 test("appointment and history reads allow all clinical staff", async () => {
   const student = environment.authenticatedContext("student").firestore();
   const otherStudent = environment.authenticatedContext("other-student").firestore();
-  const counselor = environment.authenticatedContext("counselor").firestore();
-  const otherCounselor = environment.authenticatedContext("other-counselor").firestore();
-  const admin = environment.authenticatedContext("admin").firestore();
+  const counselor = environment.authenticatedContext("counselor", {email_verified: true}).firestore();
+  const otherCounselor = environment.authenticatedContext("other-counselor", {email_verified: true}).firestore();
+  const admin = environment.authenticatedContext("admin", {email_verified: true}).firestore();
 
   await assertSucceeds(getDoc(doc(student, "appointments/appointment-1")));
   await assertFails(getDoc(doc(otherStudent, "appointments/appointment-1")));
@@ -73,16 +73,16 @@ test("appointment and history reads allow all clinical staff", async () => {
 });
 
 test("portal staff can read only the minimal appointment queue", async () => {
-  const portalStaff = environment.authenticatedContext("portal-staff").firestore();
+  const portalStaff = environment.authenticatedContext("portal-staff", {email_verified: true}).firestore();
   await assertFails(getDoc(doc(portalStaff, "appointments/appointment-1")));
   await assertFails(getDoc(doc(portalStaff, "appointments/appointment-1/history/terminal")));
   await assertSucceeds(getDoc(doc(portalStaff, "appointment_queue/appointment-1")));
 });
 
 test("portal staff may list only safe appointment projections, counselors may list canonical appointments", async () => {
-  const portalStaff = environment.authenticatedContext("portal-staff").firestore();
-  const counselor = environment.authenticatedContext("counselor").firestore();
-  const admin = environment.authenticatedContext("admin").firestore();
+  const portalStaff = environment.authenticatedContext("portal-staff", {email_verified: true}).firestore();
+  const counselor = environment.authenticatedContext("counselor", {email_verified: true}).firestore();
+  const admin = environment.authenticatedContext("admin", {email_verified: true}).firestore();
   const student = environment.authenticatedContext("student").firestore();
 
   await assertSucceeds(getDocs(collection(portalStaff, "appointment_queue")));
@@ -94,10 +94,10 @@ test("portal staff may list only safe appointment projections, counselors may li
 
 test("clinical notes are visible to all clinical staff", async () => {
   const student = environment.authenticatedContext("student").firestore();
-  const portalStaff = environment.authenticatedContext("portal-staff").firestore();
-  const counselor = environment.authenticatedContext("counselor").firestore();
-  const otherCounselor = environment.authenticatedContext("other-counselor").firestore();
-  const admin = environment.authenticatedContext("admin").firestore();
+  const portalStaff = environment.authenticatedContext("portal-staff", {email_verified: true}).firestore();
+  const counselor = environment.authenticatedContext("counselor", {email_verified: true}).firestore();
+  const otherCounselor = environment.authenticatedContext("other-counselor", {email_verified: true}).firestore();
+  const admin = environment.authenticatedContext("admin", {email_verified: true}).firestore();
   const note = "appointments/appointment-1/clinical_notes/session";
 
   await assertFails(getDoc(doc(student, note)));

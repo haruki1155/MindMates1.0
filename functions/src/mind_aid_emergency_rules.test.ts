@@ -20,8 +20,8 @@ test("emergency alerts are clinical-read-only", async () => {
   });
   const student = environment.authenticatedContext("student").firestore();
   const staff = environment.authenticatedContext("staff").firestore();
-  const counselor = environment.authenticatedContext("counselor").firestore();
-  const admin = environment.authenticatedContext("admin").firestore();
+  const counselor = environment.authenticatedContext("counselor", {email_verified: true}).firestore();
+  const admin = environment.authenticatedContext("admin", {email_verified: true}).firestore();
   await assertFails(getDoc(doc(student, alertPath)));
   await assertFails(getDoc(doc(staff, alertPath)));
   await assertSucceeds(getDoc(doc(counselor, alertPath)));
