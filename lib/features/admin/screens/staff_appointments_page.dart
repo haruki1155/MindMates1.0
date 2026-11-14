@@ -86,12 +86,18 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
             final query = _search.text.trim().toLowerCase();
             final now = DateTime.now();
             final visible = records.where((item) {
-              if (!_matches(item, now, _filter)) return false;
+              if (!_matches(item, now, _filter)) {
+                return false;
+              }
               if (selectedCollege == 'unassigned' &&
-                  item.collegeId.trim().isNotEmpty) return false;
+                  item.collegeId.trim().isNotEmpty) {
+                return false;
+              }
               if (selectedCollege != 'all' &&
                   selectedCollege != 'unassigned' &&
-                  item.collegeId != selectedCollege) return false;
+                  item.collegeId != selectedCollege) {
+                return false;
+              }
               return query.isEmpty ||
                   item.studentDisplayName.toLowerCase().contains(query) ||
                   (item.assignedCounselor ?? '').toLowerCase().contains(query);
