@@ -606,6 +606,11 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
 bool canShowScheduleNavigation(AccessRole accessRole) =>
     accessRole == AccessRole.counselor || accessRole == AccessRole.admin;
 
+/// Preserve the existing counselor-only chat access when moving its entry
+/// point inside the Inquiries workspace. Admins retain the inquiry queue.
+bool canShowCounselorMessagingInInquiries(AccessRole role) =>
+    role == AccessRole.counselor;
+
 class _Nav extends StatelessWidget {
   const _Nav({
     required this.page,
@@ -809,7 +814,7 @@ class _Nav extends StatelessWidget {
                               ),
                               trailing:
                                   item == AdminPortalPage.inquiries &&
-                                          accessRole == AccessRole.counselor
+                                          canShowCounselorMessagingInInquiries(accessRole)
                                       ? const CounselorInboxUnreadBadge()
                                       : null,
                               title: Text(
@@ -5232,10 +5237,14 @@ class _InquiriesPageState extends State<_InquiriesPage> {
   @override
   Widget build(BuildContext context) => _Page(
     title: 'Inquiries',
-    subtitle: widget.repository.currentAccessRole == AccessRole.counselor
+    subtitle: canShowCounselorMessagingInInquiries(
+            widget.repository.currentAccessRole,
+          )
         ? 'Student messages and other PACC service inquiries.'
         : 'Review, acknowledge, and resolve submitted inquiries.',
-    child: widget.repository.currentAccessRole == AccessRole.counselor
+    child: canShowCounselorMessagingInInquiries(
+            widget.repository.currentAccessRole,
+          )
         ? CounselorInquiryWorkspace(
             messages: const CounselorMessagesPage(embedded: true),
             otherServices: _buildServiceInquiries(),
