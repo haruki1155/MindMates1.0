@@ -55,8 +55,11 @@ void moodVisualAcceptance({Future<void> Function(String name)? screenshot}) {
         child: MaterialApp(
           theme: AppTheme.light,
           routes: {
-            RouteNames.logMood: (_) =>
-                LogMoodScreen(moodV2Enabled: true, moodV2Writer: writer),
+            RouteNames.logMood: (_) => LogMoodScreen(
+              moodV2Presentation: true,
+              moodV2WriterEnabled: true,
+              moodV2Writer: writer,
+            ),
             RouteNames.mentalHealthInsights: (_) =>
                 const Scaffold(body: Text('Existing inSIGHT destination')),
           },

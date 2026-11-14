@@ -19,6 +19,7 @@ import '../../../models/mood_model.dart';
 import '../domain/mood_v2_analytics.dart';
 import '../../../repositories/mood_repository.dart';
 import '../../../repositories/mood_v2_repository.dart';
+import '../../../services/firebase/firebase_error_message.dart';
 import '../config/mood_v2_feature_flag.dart';
 import '../widgets/mood_v2_history_panel.dart';
 import '../widgets/mood_glyph.dart';
@@ -32,14 +33,22 @@ class LogMoodScreen extends StatefulWidget {
     DateTime Function()? nowProvider,
     this.expressionScreenBuilder,
     this.moodV2Writer,
-    this.moodV2Enabled = MoodV2FeatureFlag.enabled,
+    this.moodV2Presentation = MoodV2FeatureFlag.presentation,
+    this.moodV2WriterEnabled = MoodV2FeatureFlag.enabled,
     this.moodV2RequestIdGenerator,
   }) : _nowProvider = nowProvider ?? DateTime.now;
 
   final DateTime Function() _nowProvider;
   final WidgetBuilder? expressionScreenBuilder;
   final MoodV2EntryWriter? moodV2Writer;
-  final bool moodV2Enabled;
+
+  /// Whether the Mood V2 presentation is shown. Layout only — never
+  /// persistence.
+  final bool moodV2Presentation;
+
+  /// Whether saving uses the protected V2 writer. Persistence only — never
+  /// layout. Off means the legacy writer handles the save.
+  final bool moodV2WriterEnabled;
   final String Function()? moodV2RequestIdGenerator;
 
   @override
@@ -66,7 +75,10 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   }
 
   Future<void> _offerMoodReflection() async {
-    if (!widget.moodV2Enabled || _reflectionOffered || !mounted || _isSaving) {
+    if (!widget.moodV2Presentation ||
+        _reflectionOffered ||
+        !mounted ||
+        _isSaving) {
       return;
     }
     _reflectionOffered = true;
@@ -134,6 +146,9 @@ class _LogMoodScreenState extends State<LogMoodScreen>
   String? _moodV2RequestId;
   _MoodV2Draft? _moodV2RetryDraft;
   String? _moodV2Error;
+  /// Set when a refused V2 write was rescued through the legacy writer, so the
+  /// confirmation can be rendered from [_todayMood] with the writer flag on.
+  bool _usedLegacyMoodFallback = false;
   int _moodV2RequestGeneration = 0;
   Timer? _midnightTimer;
 
@@ -201,9 +216,10 @@ class _LogMoodScreenState extends State<LogMoodScreen>
 
   @override
   Widget build(BuildContext context) {
+    final confirmation = _confirmation;
     return Scaffold(
       backgroundColor: MoodLogPalette.background,
-      bottomNavigationBar: widget.moodV2Enabled && _confirmedV2Entry == null
+      bottomNavigationBar: widget.moodV2Presentation && confirmation == null
           ? SafeArea(
               top: false,
               child: Padding(
@@ -217,6 +233,10 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                   isEnabled:
                       _selectedMood != null &&
                       !_isSaving &&
+                      // The form is replaced by a spinner or the retry card
+                      // while today's mood reloads.
+                      !_isLoadingToday &&
+                      _todayError == null &&
                       (_expressionCue == null ||
                           _expressionSuggestionAccepted != null),
                   isSaving: _isSaving,
@@ -233,10 +253,10 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           slivers: [
             SliverToBoxAdapter(
               child: _MoodLogHeader(
-                v2: widget.moodV2Enabled,
+                v2: widget.moodV2Presentation,
                 now: _now,
-                showingResult: widget.moodV2Enabled
-                    ? _confirmedV2Entry != null
+                showingResult: widget.moodV2Presentation
+                    ? confirmation != null
                     : _todayMood != null,
               ),
             ),
@@ -268,11 +288,13 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     final showV2History =
         MoodV2FeatureFlag.historyRead &&
         (moodProvider?.isMoodV2ReadEnabled ?? false);
-    if (widget.moodV2Enabled && _confirmedV2Entry != null) {
-      final entry = _confirmedV2Entry!;
+    final confirmation = _confirmation;
+    if (widget.moodV2Presentation && confirmation != null) {
       return _MoodSaved(
-        entry: entry,
-        onAnother: _startAdditionalMoodEntry,
+        confirmation: confirmation,
+        onAnother: widget.moodV2WriterEnabled
+            ? _startAdditionalMoodEntry
+            : null,
         onJourney: () => Navigator.of(context).push(
           MaterialPageRoute<void>(builder: (_) => const MoodJourneyScreen()),
         ),
@@ -286,13 +308,13 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         },
       );
     }
-    if (!widget.moodV2Enabled && _isLoadingToday) {
+    if (!widget.moodV2WriterEnabled && _isLoadingToday) {
       return const SizedBox(
         height: 360,
         child: Center(child: CircularProgressIndicator()),
       );
     }
-    if (!widget.moodV2Enabled && _todayError != null) {
+    if (!widget.moodV2WriterEnabled && _todayError != null) {
       return _MoodLoadError(
         message: _todayError!,
         onRetry: () {
@@ -301,23 +323,14 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         },
       );
     }
-    if (!widget.moodV2Enabled && _todayMood != null) {
+    if (!widget.moodV2WriterEnabled && _todayMood != null) {
       return Column(
         children: [
           _DailyMoodResult(
             mood: _todayMood!,
             currentStreak: _readProviderOrNull<UserProvider>()?.user?.dayStreak,
           ),
-          if (widget.moodV2Enabled) ...[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              key: const ValueKey('mood-v2-add-entry'),
-              onPressed: _isSaving ? null : _startAdditionalMoodEntry,
-              icon: const Icon(Icons.add_circle_outline_rounded),
-              label: const Text('Log another mood entry'),
-            ),
-          ],
-          if (showV2History && !widget.moodV2Enabled) ...[
+          if (showV2History && !widget.moodV2Presentation) ...[
             const SizedBox(height: 20),
             _buildMoodV2HistoryPanel(moodProvider),
           ],
@@ -327,7 +340,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (widget.moodV2Enabled && showV2History)
+        if (widget.moodV2Presentation && showV2History)
           Semantics(
             button: true,
             label: 'View My Mood Journey',
@@ -339,6 +352,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                 ),
               ),
               child: _MoodCheckInSummary(
+                canCheckInAgain: widget.moodV2WriterEnabled,
                 history: moodProvider?.v2History,
                 userId: _currentUserId(),
                 now: _now,
@@ -347,7 +361,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
               ),
             ),
           ),
-        if (widget.moodV2Enabled) ...[
+        if (widget.moodV2Presentation) ...[
           const SizedBox(height: 20),
           Text(
             'How are you feeling right now?',
@@ -364,7 +378,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           const _MoodLogIntro(),
         const SizedBox(height: 16),
         _MoodChoiceGrid(
-          compact: widget.moodV2Enabled,
+          compact: widget.moodV2Presentation,
           selectedMood: _selectedMood,
           isEnabled: !_isSaving,
           onSelected: (mood) {
@@ -372,7 +386,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
             unawaited(_offerMoodReflection());
           },
         ),
-        if (widget.moodV2Enabled) ...[
+        if (widget.moodV2Presentation) ...[
           const SizedBox(height: 16),
           _ThoughtsBox(
             key: _noteFieldKey,
@@ -389,7 +403,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                 defaultTargetPlatform == TargetPlatform.iOS)) ...[
           const SizedBox(height: 18),
           _ExpressionCheckInEntry(
-            compact: widget.moodV2Enabled,
+            compact: widget.moodV2Presentation,
             enabled: !_isSaving,
             onPressed: _openExpressionCheckIn,
           ),
@@ -410,11 +424,11 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ],
         ],
         const SizedBox(height: 18),
-        if (!widget.moodV2Enabled)
+        if (!widget.moodV2Presentation)
           _ThoughtsBox(
             controller: _noteController,
             characterCount: _noteLength,
-            compact: widget.moodV2Enabled,
+            compact: widget.moodV2Presentation,
             isEnabled: !_isSaving,
           ),
         if (_moodV2Error != null) ...[
@@ -426,7 +440,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ),
         ],
         const SizedBox(height: 18),
-        if (!widget.moodV2Enabled)
+        if (!widget.moodV2Presentation)
           _SaveMoodButton(
             isEnabled:
                 _selectedMood != null &&
@@ -435,11 +449,11 @@ class _LogMoodScreenState extends State<LogMoodScreen>
                     _expressionSuggestionAccepted != null),
             isSaving: _isSaving,
             onPressed: _saveMood,
-            label: widget.moodV2Enabled
+            label: widget.moodV2Presentation
                 ? 'Save mood entry'
                 : 'Save mood check-in',
           ),
-        if (showV2History && !widget.moodV2Enabled) ...[
+        if (showV2History && !widget.moodV2Presentation) ...[
           const SizedBox(height: 20),
           _buildMoodV2HistoryPanel(moodProvider),
         ],
@@ -505,9 +519,21 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     if (suggestion != null) unawaited(_offerMoodReflection());
   }
 
+  /// Today's confirmed mood, whichever writer produced it.
+  ///
+  /// `didChangeDependencies` clears both sources on an account switch, so this
+  /// never carries another account's entry.
+  _ConfirmedMood? get _confirmation {
+    final v2Entry = _confirmedV2Entry;
+    if (v2Entry != null) return _ConfirmedMood.fromV2(v2Entry);
+    if (widget.moodV2WriterEnabled && !_usedLegacyMoodFallback) return null;
+    final today = _todayMood;
+    return today == null ? null : _ConfirmedMood.fromLegacy(today);
+  }
+
   Future<void> _loadTodayMood(String userId) async {
     final generation = ++_todayLoadGeneration;
-    if (widget.moodV2Enabled) {
+    if (widget.moodV2WriterEnabled) {
       if (MoodV2FeatureFlag.historyRead) {
         await _readProviderOrNull<MoodProvider>()?.loadMoodV2History(
           userId,
@@ -549,7 +575,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     }
 
     setState(() => _isSaving = true);
-    if (widget.moodV2Enabled) {
+    if (widget.moodV2WriterEnabled) {
       await _saveMoodV2(userId, mood);
       return;
     }
@@ -613,10 +639,12 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _expressionCue = null;
       _expressionCueSource = null;
       _expressionSuggestionAccepted = null;
+      _reflectionOffered = false;
       _noteController.clear();
       _noteLength = 0;
       _todayError = null;
     });
+    if (widget.moodV2Presentation) _scrollToTop();
     _showSnack(
       reportRefreshed
           ? 'Mood check-in saved.'
@@ -634,6 +662,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     setState(() {
       _confirmedV2Entry = null;
       _todayMood = null;
+      _usedLegacyMoodFallback = false;
       _moodV2RequestId = null;
       _moodV2RetryDraft = null;
       _moodV2Error = null;
@@ -643,8 +672,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
 
   Future<void> _saveMoodV2(String userId, _MoodChoice mood) async {
     final writer = widget.moodV2Writer ?? MoodV2Repository();
-    final requestId = _moodV2RequestId ??= _newMoodV2RequestId();
-    final draft = _moodV2RetryDraft ??= _MoodV2Draft(
+    final current = _MoodV2Draft(
       level: mood.level,
       label: mood.label,
       note: _noteController.text,
@@ -655,6 +683,17 @@ class _LogMoodScreenState extends State<LogMoodScreen>
           ? TfliteExpressionClassifier.modelVersion
           : null,
     );
+    // A true retry (same selection, same note) reuses the request ID so the
+    // server can never create a duplicate. The moment the student edits the
+    // selection or the note after a failure, the frozen draft would save a
+    // mood they no longer chose, so rotate the ID and save what they picked.
+    final previous = _moodV2RetryDraft;
+    if (previous == null || !previous.matches(current)) {
+      _moodV2RequestId = _newMoodV2RequestId();
+      _moodV2RetryDraft = current;
+    }
+    final requestId = _moodV2RequestId!;
+    final draft = _moodV2RetryDraft!;
     final requestGeneration = _moodV2RequestGeneration;
     try {
       final entry = await writer.create(
@@ -677,8 +716,14 @@ class _LogMoodScreenState extends State<LogMoodScreen>
         _readProviderOrNull<UserProvider>()?.markMoodCheckIn(userId) ??
             Future<void>.value(),
       );
-    } catch (_) {
+    } catch (error) {
       if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
+      if (_isMoodV2Refusal(error)) {
+        // A refusal can never clear by retrying, so the check-in would be
+        // lost. Write it through the legacy path instead.
+        await _saveMoodV2ThroughLegacyWriter(userId, draft, requestGeneration);
+        return;
+      }
       setState(() {
         _isSaving = false;
         _moodV2Error = 'Unable to save this mood entry. Try again.';
@@ -699,6 +744,93 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       _noteLength = 0;
     });
     _scrollToTop();
+    unawaited(_refreshAfterConfirmedMoodV2Write(userId, requestGeneration));
+  }
+
+  /// True when the callable refused the write outright: retrying the same
+  /// request can never succeed, so the entry must go somewhere else.
+  ///
+  /// Transient failures (no network, timeout, `unavailable`, `internal`) are
+  /// NOT refusals: those keep the retryable error and the frozen draft.
+  static bool _isMoodV2Refusal(Object error) {
+    if (error is TimeoutException) return false;
+    if (FirebaseErrorMessage.isNetworkFailure(error)) return false;
+    if (FirebaseErrorMessage.isAppCheckFailure(error)) return true;
+    return const {
+      'permission-denied',
+      'failed-precondition',
+      'unauthenticated',
+    }.contains(FirebaseErrorMessage.codeOf(error));
+  }
+
+  /// Last-resort write for a refused V2 entry.
+  ///
+  /// Never records a confirmed V2 entry and never fabricates a [MoodV2Event]:
+  /// the legacy entry is shown through [_ConfirmedMood.fromLegacy] only.
+  Future<void> _saveMoodV2ThroughLegacyWriter(
+    String userId,
+    _MoodV2Draft draft,
+    int requestGeneration,
+  ) async {
+    final moodProvider = _readProviderOrNull<MoodProvider>();
+    if (moodProvider == null) {
+      setState(() {
+        _isSaving = false;
+        _moodV2Error = 'Unable to save this mood entry. Try again.';
+      });
+      return;
+    }
+    final assisted = draft.expressionAssistUsed;
+    final saved = await moodProvider.logDailyMood(
+      userId: userId,
+      level: draft.level,
+      label: draft.label,
+      note: draft.note,
+      entryMethod: assisted ? 'expression_assisted' : null,
+      expressionAssistUsed: assisted ? true : null,
+      expressionSuggestionAccepted: assisted
+          ? draft.expressionSuggestionAccepted
+          : null,
+      expressionModelVersion: draft.expressionModelVersion,
+      now: _now,
+    );
+    if (!_isCurrentMoodV2Request(userId, requestGeneration)) return;
+    if (!saved) {
+      setState(() {
+        _isSaving = false;
+        _moodV2Error = 'Unable to save this mood entry. Try again.';
+      });
+      return;
+    }
+    // The legacy writer accepts one check-in per day. `created == false` means
+    // today's entry already existed, so show that entry instead of claiming a
+    // new save.
+    final created = moodProvider.dailySaveResult?.created ?? true;
+    final entry = moodProvider.dailySaveResult?.mood ?? moodProvider.todayMood;
+    setState(() {
+      _isSaving = false;
+      _usedLegacyMoodFallback = true;
+      _todayMood = entry;
+      _confirmedV2Entry = null;
+      _reflectionOffered = false;
+      _moodV2RequestId = null;
+      _moodV2RetryDraft = null;
+      _moodV2Error = null;
+      _selectedMood = null;
+      _expressionCue = null;
+      _expressionCueSource = null;
+      _expressionSuggestionAccepted = null;
+      _noteController.clear();
+      _noteLength = 0;
+    });
+    _scrollToTop();
+    _showSnack(
+      created
+          ? 'Mood check-in saved.'
+          : 'You already have a check-in for today. Showing that entry.',
+    );
+    // Home only reloads on account change, so refresh the dependent surfaces
+    // here; otherwise the streak card looks as if the save failed.
     unawaited(_refreshAfterConfirmedMoodV2Write(userId, requestGeneration));
   }
 
@@ -731,6 +863,7 @@ class _LogMoodScreenState extends State<LogMoodScreen>
     _moodV2RequestId = null;
     _moodV2RetryDraft = null;
     _moodV2Error = null;
+    _usedLegacyMoodFallback = false;
     _isSaving = false;
   }
 
@@ -756,13 +889,14 @@ class _LogMoodScreenState extends State<LogMoodScreen>
       if (!mounted) return;
       // V2 requests represent intentional events, not daily check-ins. Keep
       // their draft, frozen retry payload and pending response valid overnight.
-      if (!widget.moodV2Enabled) {
+      if (!widget.moodV2WriterEnabled) {
         setState(() {
           _todayMood = null;
           _selectedMood = null;
           _expressionCue = null;
           _expressionCueSource = null;
           _expressionSuggestionAccepted = null;
+          _reflectionOffered = false;
           _invalidateMoodV2Request();
           _noteController.clear();
         });
@@ -820,6 +954,17 @@ class _MoodV2Draft {
   final bool expressionAssistUsed;
   final bool expressionSuggestionAccepted;
   final String? expressionModelVersion;
+
+  /// Whether [other] would send the same payload, so a retry can safely reuse
+  /// the same client request ID.
+  bool matches(_MoodV2Draft other) =>
+      level == other.level &&
+      label == other.label &&
+      note == other.note &&
+      entryMethod == other.entryMethod &&
+      expressionAssistUsed == other.expressionAssistUsed &&
+      expressionSuggestionAccepted == other.expressionSuggestionAccepted &&
+      expressionModelVersion == other.expressionModelVersion;
 }
 
 class _ExpressionCheckInEntry extends StatelessWidget {
@@ -2119,8 +2264,13 @@ class _MoodCheckInSummary extends StatelessWidget {
     required this.userId,
     required this.now,
     required this.isLoading,
+    required this.canCheckInAgain,
     this.error,
   });
+
+  /// False when the protected writer is off: the legacy writer accepts one
+  /// check-in per day, so the copy must not invite another.
+  final bool canCheckInAgain;
   final MoodHistoryWindow? history;
   final String? userId;
   final DateTime now;
@@ -2203,36 +2353,84 @@ class _MoodCheckInSummary extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'You can check in again whenever you need.',
-          style: TextStyle(fontSize: 12, color: MoodLogPalette.bodyText),
-        ),
+        if (canCheckInAgain) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'You can check in again whenever you need.',
+            style: TextStyle(fontSize: 12, color: MoodLogPalette.bodyText),
+          ),
+        ],
       ],
     );
   }
 }
 
+/// A saved mood, with no claim about which writer produced it.
+///
+/// Built from a [MoodV2Event] when the protected writer is on, and from the
+/// legacy [MoodModel] when it is off. Nothing fabricates a [MoodV2Event] from
+/// a legacy entry: a synthetic event would carry an invented id, dateKey and
+/// clientRequestId and could leak into combined history.
+class _ConfirmedMood {
+  const _ConfirmedMood({required this.occurredAt, this.label, this.note});
+
+  factory _ConfirmedMood.fromV2(MoodV2Event entry) => _ConfirmedMood(
+    occurredAt: entry.occurredAt,
+    label: entry.label,
+    note: entry.note,
+  );
+
+  factory _ConfirmedMood.fromLegacy(MoodModel mood) => _ConfirmedMood(
+    occurredAt: mood.createdAt,
+    // saveDailyMood stores `label?.trim() ?? ''`, so a legacy entry can carry
+    // a blank label. Fall back to the level's own label rather than render an
+    // empty pill with no emoji.
+    label: _nonBlank(mood.label) ?? _labelForLevel(mood.level),
+    note: mood.note,
+  );
+
+  static String? _nonBlank(String? value) {
+    final trimmed = (value ?? '').trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  /// Levels 1 and 2 are shared by more than one choice, so only an
+  /// unambiguous level yields a label.
+  static String? _labelForLevel(int level) {
+    final matches = _moodChoices.where((m) => m.level == level).toList();
+    return matches.length == 1 ? matches.single.label : null;
+  }
+
+  final DateTime occurredAt;
+  final String? label;
+  final String? note;
+}
+
 class _MoodSaved extends StatelessWidget {
   const _MoodSaved({
-    required this.entry,
+    required this.confirmation,
     required this.onAnother,
     required this.onJourney,
     required this.onHome,
     this.historyError,
     required this.onRetryHistory,
   });
-  final MoodV2Event entry;
-  final VoidCallback onAnother, onJourney, onHome, onRetryHistory;
+  final _ConfirmedMood confirmation;
+
+  /// Null when the protected writer is off: the legacy writer accepts one
+  /// check-in per day, so a second entry must not be offered.
+  final VoidCallback? onAnother;
+  final VoidCallback onJourney, onHome, onRetryHistory;
   final String? historyError;
   @override
   Widget build(BuildContext context) {
     final choice = _moodChoices
-        .where((m) => m.label == entry.label)
+        .where((m) => m.label == confirmation.label)
         .firstOrNull;
     final time = TimeOfDay.fromDateTime(
-      MoodRepository.manilaWallClock(entry.occurredAt),
+      MoodRepository.manilaWallClock(confirmation.occurredAt),
     ).format(context);
+    final note = (confirmation.note ?? '').trim();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2282,13 +2480,25 @@ class _MoodSaved extends StatelessWidget {
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: Text(
-                  entry.label ?? 'Mood entry',
+                  confirmation.label ?? 'Mood entry',
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
+              if (note.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  note,
+                  key: const ValueKey('mood-confirmation-note'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    color: MoodLogPalette.bodyText,
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               const Text(
                 'Thank you for checking in with yourself.',
@@ -2303,41 +2513,45 @@ class _MoodSaved extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: MoodLogPalette.goldSoft,
-            borderRadius: BorderRadius.circular(16),
+        if (onAnother != null) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: MoodLogPalette.goldSoft,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Row(
+              children: [
+                Icon(
+                  Icons.event_available_outlined,
+                  color: MoodLogPalette.goldText,
+                ),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'You can check in again if your feelings change.',
+                  ),
+                ),
+              ],
+            ),
           ),
-          child: const Row(
-            children: [
-              Icon(
-                Icons.event_available_outlined,
-                color: MoodLogPalette.goldText,
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text('You can check in again if your feelings change.'),
-              ),
-            ],
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            key: const ValueKey('mood-v2-add-entry'),
+            onPressed: onAnother,
+            style: FilledButton.styleFrom(
+              backgroundColor: MoodLogPalette.gold,
+              foregroundColor: MoodLogPalette.ink,
+              minimumSize: const Size.fromHeight(52),
+            ),
+            icon: const Icon(Icons.add),
+            label: const Text(
+              'Log another mood',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
           ),
-        ),
-        const SizedBox(height: 20),
-        FilledButton.icon(
-          key: const ValueKey('mood-v2-add-entry'),
-          onPressed: onAnother,
-          style: FilledButton.styleFrom(
-            backgroundColor: MoodLogPalette.gold,
-            foregroundColor: MoodLogPalette.ink,
-            minimumSize: const Size.fromHeight(52),
-          ),
-          icon: const Icon(Icons.add),
-          label: const Text(
-            'Log another mood',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-          ),
-        ),
+        ],
         const SizedBox(height: 12),
         OutlinedButton(
           onPressed: onJourney,

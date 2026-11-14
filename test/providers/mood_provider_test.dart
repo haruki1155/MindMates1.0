@@ -657,6 +657,138 @@ void main() {
       expect(provider.v2HistoryErrorMessage, isNull);
     },
   );
+
+  // --- Task 4: the read surfaces with legacy-only and mixed history ----------
+  //
+  // The headline goal is that a staging build turns the five readers on for
+  // ordinary accounts whose mood history lives entirely in the legacy store.
+  // These pin that; without them a V2-only reader would pass CI.
+
+  test('legacy-only history yields entries and a streak', () async {
+    final provider = MoodProvider(
+      _FakeMoodRepository(),
+      nowProvider: () => DateTime.utc(2026, 11, 12, 3),
+      useMoodV2Read: true,
+      combinedHistoryRepository: MoodCombinedHistoryRepository(
+        identity: const _MoodIdentity('user_1'),
+        legacySource: _MoodSource(MoodEventSource.legacy, [
+          _event(
+            'l-today',
+            DateTime.utc(2026, 11, 12, 1),
+            4,
+            MoodEventSource.legacy,
+          ),
+          _event(
+            'l-yesterday',
+            DateTime.utc(2026, 11, 11, 1),
+            3,
+            MoodEventSource.legacy,
+          ),
+          _event(
+            'l-earlier',
+            DateTime.utc(2026, 11, 10, 1),
+            5,
+            MoodEventSource.legacy,
+          ),
+        ]),
+        v2Source: const _MoodSource(MoodEventSource.v2, []),
+      ),
+    );
+    provider.bindAuthenticatedUser('user_1');
+    await provider.loadMoodV2History('user_1');
+
+    expect(provider.v2History, isNotNull);
+    expect(provider.v2History!.events, hasLength(3));
+    expect(
+      provider.v2History!.events.every(
+        (e) => e.source == MoodEventSource.legacy,
+      ),
+      isTrue,
+    );
+    // The Journey, profile and insights all read this snapshot.
+    expect(provider.v2Analytics, isNotNull);
+    expect(provider.v2Analytics!.streak.currentDays, 3);
+    // The home card's today lookup finds the legacy entry.
+    expect(
+      provider.latestMoodForToday(now: DateTime.utc(2026, 11, 12, 3))?.id,
+      'l-today',
+    );
+  });
+
+  test('legacy and V2 history merge in order without duplicates', () async {
+    final provider = MoodProvider(
+      _FakeMoodRepository(),
+      nowProvider: () => DateTime.utc(2026, 11, 12, 3),
+      useMoodV2Read: true,
+      combinedHistoryRepository: MoodCombinedHistoryRepository(
+        identity: const _MoodIdentity('user_1'),
+        legacySource: _MoodSource(MoodEventSource.legacy, [
+          _event(
+            'l-10',
+            DateTime.utc(2026, 11, 10, 1),
+            3,
+            MoodEventSource.legacy,
+          ),
+          _event(
+            'l-12',
+            DateTime.utc(2026, 11, 12, 1),
+            4,
+            MoodEventSource.legacy,
+          ),
+        ]),
+        v2Source: _MoodSource(MoodEventSource.v2, [
+          _event('v-11', DateTime.utc(2026, 11, 11, 1), 5, MoodEventSource.v2),
+        ]),
+      ),
+    );
+    provider.bindAuthenticatedUser('user_1');
+    await provider.loadMoodV2History('user_1');
+
+    final ids = provider.v2History!.events.map((e) => e.id).toList();
+    expect(ids, hasLength(3));
+    expect(ids.toSet(), hasLength(ids.length), reason: 'no duplicates');
+    expect(ids, containsAll(<String>['l-10', 'l-12', 'v-11']));
+    // A pilot account keeps both sources, not one.
+    expect(
+      provider.v2History!.events.map((e) => e.source).toSet().containsAll(
+        <MoodEventSource>{MoodEventSource.legacy, MoodEventSource.v2},
+      ),
+      isTrue,
+    );
+  });
+
+  test('another account history never reaches the readers', () async {
+    final identity = _MutableMoodIdentity('user_1');
+    final provider = MoodProvider(
+      _FakeMoodRepository(),
+      nowProvider: () => DateTime.utc(2026, 11, 12, 3),
+      useMoodV2Read: true,
+      combinedHistoryRepository: MoodCombinedHistoryRepository(
+        identity: identity,
+        legacySource: _MoodSource(MoodEventSource.legacy, [
+          _event(
+            'l-today',
+            DateTime.utc(2026, 11, 12, 1),
+            4,
+            MoodEventSource.legacy,
+          ),
+        ]),
+        v2Source: const _MoodSource(MoodEventSource.v2, []),
+      ),
+    );
+    provider.bindAuthenticatedUser('user_1');
+    await provider.loadMoodV2History('user_1');
+    expect(provider.v2History!.events, isNotEmpty);
+
+    // Switching account must not leave the previous account's history behind.
+    identity.currentUserId = 'user_2';
+    provider.bindAuthenticatedUser('user_2');
+    expect(provider.v2History?.events ?? const [], isEmpty);
+    expect(
+      provider.latestMoodForToday(now: DateTime.utc(2026, 11, 12, 3)),
+      isNull,
+    );
+  });
 }
 
 NormalizedMoodEvent _event(

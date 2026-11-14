@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import '../data/guidance_satisfaction_survey.dart';
+import '../../../core/constants/app_colors.dart';
 import '../../../repositories/inquiry_repository.dart';
 
 class GuidanceSatisfactionSurveyScreen extends StatefulWidget {
@@ -690,7 +691,7 @@ class _SurveyColors {
   static const sun = Color(0xFFFFCD3A);
   static const sunDark = Color(0xFFE6A900);
   static const sunSoft = Color(0xFFFFF0B8);
-  static const green = Color(0xFF3F8A70);
+  static const green = AppColors.primary;
   static const ink = Color(0xFF191712);
   static const muted = Color(0xFF6E6A60);
   static const choice = Color(0xFF777267);

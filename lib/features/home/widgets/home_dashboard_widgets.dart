@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_assets.dart';
 import '../data/daily_affirmation_quotes.dart';
 import '../domain/home_streak_source.dart';
+import '../../mood/config/mood_v2_feature_flag.dart';
 import '../models/home_dashboard_data.dart';
 import 'streak_flame.dart';
 
@@ -724,9 +725,14 @@ class HomeStreakCard extends StatelessWidget {
     required this.data,
     required this.onTap,
     this.onViewRecap,
+    this.allowsAdditionalEntries = MoodV2FeatureFlag.enabled,
   });
 
   final HomeStreakData? data;
+
+  /// Whether the student may log more than one mood per day (the protected
+  /// Mood V2 writer). When true the log button stays visible in every state.
+  final bool allowsAdditionalEntries;
 
   /// Card tap and the "Log mood" button.
   final VoidCallback onTap;
@@ -740,7 +746,8 @@ class HomeStreakCard extends StatelessWidget {
     final state = streak?.state;
     final showLogMood =
         streak != null &&
-        (state == HomeStreakState.notStarted ||
+        (allowsAdditionalEntries ||
+            state == HomeStreakState.notStarted ||
             state == HomeStreakState.activeNotToday);
     final showRecap =
         streak != null &&

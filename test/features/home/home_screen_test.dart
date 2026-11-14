@@ -585,7 +585,8 @@ void main() {
 
     expect(
       find.text(
-        MoodV2FeatureFlag.enabled
+        // The heading is presentation, not persistence.
+        MoodV2FeatureFlag.presentation
             ? 'How are you feeling right now?'
             : 'How are you feeling?',
       ),
@@ -593,7 +594,7 @@ void main() {
     );
     expect(find.byType(TextField), findsOneWidget);
     expect(
-      find.text(MoodV2FeatureFlag.enabled ? '0/300' : '0/300 characters'),
+      find.text(MoodV2FeatureFlag.presentation ? '0/300' : '0/300 characters'),
       findsOneWidget,
     );
   });

@@ -32,8 +32,10 @@ void main() {
     );
     expect(
       FirebaseCallableRouter.name('createMoodEntry'),
-      'createMoodEntry',
-      reason: 'Mood V2 always uses the App Check-protected callable.',
+      environment == 'staging' ? 'createMoodEntryDev' : 'createMoodEntry',
+      reason:
+          'Staging installs no App Check provider, so it must use the Dev '
+          'callable; every other environment keeps the protected one.',
     );
   });
 
