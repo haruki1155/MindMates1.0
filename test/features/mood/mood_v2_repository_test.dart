@@ -65,7 +65,7 @@ void main() {
   );
 
   test(
-    'writer on: create reaches the createMoodEntry callable',
+    'writer on: create reaches the routed createMoodEntry callable',
     () async {
       final functions = _FakeFunctions();
       final repository = MoodV2Repository(functions: functions);
@@ -78,7 +78,14 @@ void main() {
         throwsA(isA<_Reached>()),
       );
       expect(functions.calls, hasLength(1));
-      expect(functions.calls.single.$1, 'createMoodEntry');
+      // Staging installs no App Check provider, so the protected name is
+      // aliased to the Dev callable there and only there.
+      expect(
+        functions.calls.single.$1,
+        AppEnvironmentConfig.isStaging
+            ? 'createMoodEntryDev'
+            : 'createMoodEntry',
+      );
       expect(
         functions.calls.single.$2,
         containsPair('clientRequestId', '00000000-0000-4000-8000-000000000001'),
