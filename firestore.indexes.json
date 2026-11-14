@@ -1,5 +1,8 @@
 {
   "indexes": [
+    {"collectionGroup":"announcements","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"publishedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},
+    {"collectionGroup":"announcements","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"category","order":"ASCENDING"},{"fieldPath":"publishedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},
+    {"collectionGroup":"announcements","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"updatedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},
     {
       "collectionGroup": "appointments",
       "queryScope": "COLLECTION",
@@ -255,13 +258,19 @@
       "collectionGroup": "_password_reset_limits",
       "fieldPath": "expiresAt",
       "ttl": true,
-      "indexes": []
+      "indexes": [
+    {"collectionGroup":"announcements","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"publishedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},
+    {"collectionGroup":"announcements","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"category","order":"ASCENDING"},{"fieldPath":"publishedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},
+    {"collectionGroup":"announcements","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"updatedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},]
     },
     {
       "collectionGroup": "notifications",
       "fieldPath": "expiresAt",
       "ttl": true,
-      "indexes": []
+      "indexes": [
+    {"collectionGroup":"announcements","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"publishedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},
+    {"collectionGroup":"announcements","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"category","order":"ASCENDING"},{"fieldPath":"publishedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},
+    {"collectionGroup":"announcements","queryScope":"COLLECTION","fields":[{"fieldPath":"status","order":"ASCENDING"},{"fieldPath":"updatedAt","order":"DESCENDING"},{"fieldPath":"__name__","order":"DESCENDING"}]},]
     }
   ]
 }

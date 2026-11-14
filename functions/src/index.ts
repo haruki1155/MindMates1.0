@@ -1,4 +1,5 @@
 import {handleAppointmentAgreement} from "./appointment_agreement";
+import {saveAnnouncement as persistAnnouncement} from "./announcements";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
@@ -16,6 +17,11 @@ export {
   previewAssessmentDomainDev,
 } from "./assessment/submissions";
 export {createMoodEntry, createMoodEntryDev} from "./mood_entries";
+
+export const saveAnnouncement = onCall({maxInstances: 5}, async (request) => {
+  if (!request.auth || request.auth.token.email_verified !== true) throw new HttpsError("permission-denied", "Sign in with a verified email.");
+  return persistAnnouncement(getFirestore(), request.auth.uid, request.data ?? {});
+});
 export {
   provisionAppUserProfile,
   provisionAppUserProfileDev,
