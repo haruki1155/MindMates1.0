@@ -46,16 +46,28 @@ class _CounselorPage extends StatelessWidget {
             return StreamBuilder<List<AppointmentModel>>(
               stream: repository.watchMyAssignedAppointments(),
               builder: (context, myCasesSnapshot) {
-                if (myCasesSnapshot.hasError) {
-                  return const _Message(
-                    title: 'Unable to load your assigned caseload',
-                    body: 'Please try again or contact an administrator.',
-                  );
-                }
-                return _Content(
-                  appointments: snapshot.data!,
-                  myAppointments: myCasesSnapshot.data ?? const [],
-                  onNavigate: onNavigate,
+                // A failed assigned-caseload query must not hide the
+                // organization-wide appointments that already loaded.
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (myCasesSnapshot.hasError)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 16),
+                        child: _Message(
+                          title: 'Assigned caseload unavailable',
+                          body: 'Your full PACC appointment overview is still '
+                              'available. Check assigned-case access or query indexes.',
+                        ),
+                      ),
+                    _Content(
+                      appointments: snapshot.data!,
+                      myAppointments: myCasesSnapshot.hasError
+                          ? const <AppointmentModel>[]
+                          : myCasesSnapshot.data ?? const <AppointmentModel>[],
+                      onNavigate: onNavigate,
+                    ),
+                  ],
                 );
               },
             );
