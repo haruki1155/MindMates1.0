@@ -29,3 +29,13 @@ On Web → Appointments → Review Appointment → Mark session as completed:
 4. On completion, metadata stored only inside private clinical notes; access denied to student/general Staff.
 5. Completed appointments can read and download private attachments via authenticated SDK.
 6. Flutter/widget tests, Dart analyze, Functions tests, Storage rules emulator tests, and web preview pass; create a PR only after review and approval.
+
+## Continued Task #10 scope — Counselor Messages inside Inquiries
+- Continue **this same feature branch**, with the upload-only Session Attachments and preserved Session Summary already implemented and tested in earlier checkpoints.
+- Consolidate the existing counselor-facing `Counselor Messages` sidebar destination into **Inquiries**. Do not create a second messaging data layer or new message documents.
+- When a Guidance Counselor opens Inquiries, show **Messages** by default with the existing `CounselorMessagesPage`; provide **Other services** as the second section containing the pre-existing inquiries queue (status/category filters, details, PDF downloads, status updates).
+- Remove the standalone `AdminPortalPage.counselorMessages` destination and redirect its sidebar unread badge to the existing **Inquiries** item for counselors.
+- Keep the existing `CounselorMessagesPage` thread semantics, Firestore collections, read receipts, selected-college filtering and send behavior unchanged; remove only duplicate standalone heading when embedded.
+- Preserve permissions: counselor gets Messages and Other services; admin continues to access its existing inquiries queue without newly gaining counselor messaging; portalStaff and appUser do not gain access to either.
+- Preserve the mobile-side Messages/MindAid and service inquiry flows; do not modify Firestore rules, Cloud Functions, appointment booking, or counseling file upload functionality for this navigation task.
+- Validation: UI switcher tests (Messages default, Other services navigation), public navigation/role assertions, existing counselor chat label tests, complete Task #10 Flutter/Functions/Storage suites, and staging web preview. **PR only after approval**.
