@@ -29,6 +29,28 @@ class _Repository extends AdminPortalRepository {
 }
 
 void main() {
+  testWidgets('follow-up offer requires a suggested date and time', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final record = _appointment('confirmed', DateTime.now().subtract(const Duration(hours: 2)), 'Follow-up student');
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AdminAppointmentsPage(repository: _Repository([record]), onOpenAssessments: null))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('All active 1'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Review'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Session summary (internal)'), 'Session summary');
+    final offer = find.text('Offer a follow-up session');
+    await tester.ensureVisible(offer);
+    await tester.tap(offer);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'Client message'), 'Please return for a follow-up.');
+    expect(find.text('Suggested date'), findsOneWidget);
+    expect(find.text('Suggested time'), findsOneWidget);
+    await tester.tap(find.text('Send decision'));
+    await tester.pump();
+    expect(find.text('Choose a suggested follow-up date and time.'), findsOneWidget);
+  });
   testWidgets('PACC reopens its requested-time proposal with a valid counter action', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));

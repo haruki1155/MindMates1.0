@@ -2943,9 +2943,17 @@ class _AppointmentCard extends StatelessWidget {
     final currentStatus = item.lifecycleStatus;
     final canReview = canReviewAppointment(item, DateTime.now());
     final future = item.scheduledAt.isAfter(DateTime.now());
-    final pendingStudent = item.hasPendingScheduleChange && item.proposedBy == 'student';
-    final agreementRequestId = 'staff_accept_${DateTime.now().microsecondsSinceEpoch}';
-    var action = pendingStudent ? 'accept' : item.hasPendingScheduleChange ? 'rescheduled' : currentStatus == AppointmentStatus.confirmed && future ? 'rescheduled' : currentStatus == AppointmentStatus.confirmed
+    final pendingStudent =
+        item.hasPendingScheduleChange && item.proposedBy == 'student';
+    final agreementRequestId =
+        'staff_accept_${DateTime.now().microsecondsSinceEpoch}';
+    var action = pendingStudent
+        ? 'accept'
+        : item.hasPendingScheduleChange
+        ? 'rescheduled'
+        : currentStatus == AppointmentStatus.confirmed && future
+        ? 'rescheduled'
+        : currentStatus == AppointmentStatus.confirmed
         ? 'completed'
         : currentStatus == AppointmentStatus.rescheduleProposed
         ? 'rescheduled'
@@ -2955,6 +2963,8 @@ class _AppointmentCard extends StatelessWidget {
     final sessionSummary = TextEditingController();
     final followUpMessage = TextEditingController();
     var offerFollowUp = false;
+    DateTime? followUpDate;
+    TimeOfDay? followUpTime;
     DateTime? proposedDate;
     List<AppointmentSlot> proposedSlots = const [];
     AppointmentSlot? proposedSlot;
@@ -2998,11 +3008,24 @@ class _AppointmentCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   if (item.hasPendingScheduleChange) ...[
-                    Text(item.hasVerifiedPendingScheduleChange ? 'Current reserved time' : 'Current recorded time', style: const TextStyle(fontWeight: FontWeight.w700)),
+                    Text(
+                      item.hasVerifiedPendingScheduleChange
+                          ? 'Current reserved time'
+                          : 'Current recorded time',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     Text('${item.scheduledAt} - ${item.scheduledTime}'),
                     const SizedBox(height: 8),
-                    Text('Proposed time: ${item.proposedScheduledAt} - ${item.proposedScheduledTime ?? ''}'),
-                    Text(!item.hasVerifiedPendingScheduleChange ? 'Older proposal: verify its current reservation before proposing another time.' : pendingStudent ? 'Student is awaiting your agreement. The current time remains reserved.' : 'Awaiting student agreement. The current time remains reserved.'),
+                    Text(
+                      'Proposed time: ${item.proposedScheduledAt} - ${item.proposedScheduledTime ?? ''}',
+                    ),
+                    Text(
+                      !item.hasVerifiedPendingScheduleChange
+                          ? 'Older proposal: verify its current reservation before proposing another time.'
+                          : pendingStudent
+                          ? 'Student is awaiting your agreement. The current time remains reserved.'
+                          : 'Awaiting student agreement. The current time remains reserved.',
+                    ),
                     const Divider(height: 28),
                   ],
                   const _AppointmentSectionHeader(
@@ -3086,12 +3109,33 @@ class _AppointmentCard extends StatelessWidget {
                       initialValue: action,
                       decoration: const InputDecoration(labelText: 'Action'),
                       items: [
-                        if (pendingStudent) const DropdownMenuItem(value: 'accept', child: Text('Accept student proposed time')),
-                        if (!item.hasPendingScheduleChange && currentStatus != AppointmentStatus.confirmed && currentStatus != AppointmentStatus.rescheduleProposed) const DropdownMenuItem(value: 'confirmed', child: Text('Confirm appointment')),
-                        const DropdownMenuItem(value: 'rescheduled', child: Text('Re-schedule appointment')),
-                        if (currentStatus == AppointmentStatus.confirmed && !future) ...[
-                          const DropdownMenuItem(value: 'completed', child: Text('Mark session as completed')),
-                          const DropdownMenuItem(value: 'no_show', child: Text('Mark as Did Not Attend')),
+                        if (pendingStudent)
+                          const DropdownMenuItem(
+                            value: 'accept',
+                            child: Text('Accept student proposed time'),
+                          ),
+                        if (!item.hasPendingScheduleChange &&
+                            currentStatus != AppointmentStatus.confirmed &&
+                            currentStatus !=
+                                AppointmentStatus.rescheduleProposed)
+                          const DropdownMenuItem(
+                            value: 'confirmed',
+                            child: Text('Confirm appointment'),
+                          ),
+                        const DropdownMenuItem(
+                          value: 'rescheduled',
+                          child: Text('Re-schedule appointment'),
+                        ),
+                        if (currentStatus == AppointmentStatus.confirmed &&
+                            !future) ...[
+                          const DropdownMenuItem(
+                            value: 'completed',
+                            child: Text('Mark session as completed'),
+                          ),
+                          const DropdownMenuItem(
+                            value: 'no_show',
+                            child: Text('Mark as Did Not Attend'),
+                          ),
                         ],
                       ],
                       onChanged: submitting
@@ -3256,7 +3300,7 @@ class _AppointmentCard extends StatelessWidget {
                               ),
                         title: const Text('Offer a follow-up session'),
                       ),
-                      if (offerFollowUp)
+                      if (offerFollowUp) ...[
                         TextField(
                           controller: followUpMessage,
                           minLines: 2,
@@ -3266,6 +3310,76 @@ class _AppointmentCard extends StatelessWidget {
                             labelText: 'Client message',
                           ),
                         ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: submitting
+                                  ? null
+                                  : () async {
+                                      final manilaNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+                                      final now = DateTime(manilaNow.year, manilaNow.month, manilaNow.day);
+                                      final picked = await showDatePicker(
+                                        context: dialogContext,
+                                        initialDate:
+                                            followUpDate ??
+                                            now.add(const Duration(days: 1)),
+                                        firstDate: DateUtils.dateOnly(now),
+                                        lastDate: now.add(
+                                          const Duration(days: 365),
+                                        ),
+                                      );
+                                      if (picked != null &&
+                                          dialogContext.mounted) {
+                                        setDialogState(
+                                          () => followUpDate = picked,
+                                        );
+                                      }
+                                    },
+                              icon: const Icon(Icons.calendar_today_outlined),
+                              label: Text(
+                                followUpDate == null
+                                    ? 'Suggested date'
+                                    : _date(followUpDate),
+                              ),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: submitting
+                                  ? null
+                                  : () async {
+                                      final picked = await showTimePicker(
+                                        context: dialogContext,
+                                        initialTime:
+                                            followUpTime ??
+                                            const TimeOfDay(hour: 9, minute: 0),
+                                      );
+                                      if (picked != null &&
+                                          dialogContext.mounted) {
+                                        setDialogState(
+                                          () => followUpTime = picked,
+                                        );
+                                      }
+                                    },
+                              icon: const Icon(Icons.schedule),
+                              label: Text(
+                                followUpTime == null
+                                    ? 'Suggested time'
+                                    : followUpTime!.format(dialogContext),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Philippine time. This is a suggestion; the student still needs to book an available appointment.',
+                          style: TextStyle(
+                            color: AdminColors.muted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ],
                   ],
                 ],
@@ -3324,6 +3438,58 @@ class _AppointmentCard extends StatelessWidget {
                           );
                           return;
                         }
+                        String? clientFollowUpMessage;
+                        if (action == 'completed' && offerFollowUp) {
+                          if (followUpDate == null || followUpTime == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Choose a suggested follow-up date and time.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          final suggested = DateTime.utc(
+                            followUpDate!.year,
+                            followUpDate!.month,
+                            followUpDate!.day,
+                            followUpTime!.hour,
+                            followUpTime!.minute,
+                          );
+                          final manilaNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+                          if (!suggested.isAfter(manilaNow)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Choose a future follow-up date and time.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          final hour = followUpTime!.hourOfPeriod == 0
+                              ? 12
+                              : followUpTime!.hourOfPeriod;
+                          final minute = followUpTime!.minute
+                              .toString()
+                              .padLeft(2, '0');
+                          final period = followUpTime!.period == DayPeriod.am
+                              ? 'AM'
+                              : 'PM';
+                          clientFollowUpMessage =
+                              '${followUpMessage.text.trim()}\n\nSuggested follow-up: ${_date(followUpDate)} at $hour:$minute $period (Philippine time). Please book an available appointment.';
+                          if (clientFollowUpMessage.length > 1000) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Shorten the client message to include the suggested date and time.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                        }
                         if (action == 'rescheduled' &&
                             (proposedDate == null || proposedSlot == null)) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -3338,38 +3504,54 @@ class _AppointmentCard extends StatelessWidget {
                         setDialogState(() => submitting = true);
                         try {
                           if (!item.hasScheduleRevision) {
-                            await repository.initializeAppointmentScheduleRevision(appointmentId: item.id, scheduledAt: item.scheduledAt, status: item.lifecycleStatus.value);
+                            await repository
+                                .initializeAppointmentScheduleRevision(
+                                  appointmentId: item.id,
+                                  scheduledAt: item.scheduledAt,
+                                  status: item.lifecycleStatus.value,
+                                );
                             if (!context.mounted) return;
                             Navigator.of(context).pop();
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Appointment prepared. Refresh and review it before confirming.')));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Appointment prepared. Refresh and review it before confirming.',
+                                ),
+                              ),
+                            );
                             return;
                           }
                           if (action == 'accept') {
-                            await repository.changeAppointmentAgreement(item, 'accept', agreementRequestId);
+                            await repository.changeAppointmentAgreement(
+                              item,
+                              'accept',
+                              agreementRequestId,
+                            );
                           } else {
-                          await repository.reviewAppointment(
-                            appointmentId: item.id,
-                            expectedScheduledAt: item.scheduledAt.millisecondsSinceEpoch,
-                            expectedScheduleRevision: item.scheduleRevision,
-                            expectedProposalRevision: item.proposalRevision,
-                            expectedStatus: item.lifecycleStatus.value,
-                            action: action,
-                            reply: action == 'completed'
-                                ? 'Appointment completed.'
-                                : rescheduleReason ?? reason,
-                            proposedScheduledAt: proposedSlot?.start,
-                            proposedScheduledTime: proposedSlot?.label,
-                            rescheduleReason: rescheduleReason,
-                            sessionSummary: action == 'completed'
-                                ? sessionSummary.text.trim()
-                                : null,
-                            offerFollowUp:
-                                action == 'completed' && offerFollowUp,
-                            followUpMessage:
-                                action == 'completed' && offerFollowUp
-                                ? followUpMessage.text.trim()
-                                : null,
-                          );
+                            await repository.reviewAppointment(
+                              appointmentId: item.id,
+                              expectedScheduledAt:
+                                  item.scheduledAt.millisecondsSinceEpoch,
+                              expectedScheduleRevision: item.scheduleRevision,
+                              expectedProposalRevision: item.proposalRevision,
+                              expectedStatus: item.lifecycleStatus.value,
+                              action: action,
+                              reply: action == 'completed'
+                                  ? 'Appointment completed.'
+                                  : rescheduleReason ?? reason,
+                              proposedScheduledAt: proposedSlot?.start,
+                              proposedScheduledTime: proposedSlot?.label,
+                              rescheduleReason: rescheduleReason,
+                              sessionSummary: action == 'completed'
+                                  ? sessionSummary.text.trim()
+                                  : null,
+                              offerFollowUp:
+                                  action == 'completed' && offerFollowUp,
+                              followUpMessage:
+                                  action == 'completed' && offerFollowUp
+                                  ? clientFollowUpMessage
+                                  : null,
+                            );
                           }
                           if (dialogContext.mounted) {
                             Navigator.pop(dialogContext);
