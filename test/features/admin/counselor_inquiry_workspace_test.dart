@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/screens/admin_portal.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/features/admin/widgets/counselor_inquiry_workspace.dart';
 
 void main() {
@@ -31,10 +32,16 @@ void main() {
     expect(find.text('Existing counselor conversation inbox'), findsOneWidget);
   });
 
-  test('Counselor Messages has no separate portal navigation destination', () {
-    expect(AdminPortalPage.values.map((value) => value.name),
-        isNot(contains('counselorMessages')));
-    expect(AdminPortalPage.values.map((value) => value.name),
-        contains('inquiries'));
+  test('Counselor Messages is inside Inquiries, not a sidebar destination', () {
+    final destinations = AdminPortalPage.values.map((value) => value.name);
+    expect(destinations, isNot(contains('counselorMessages')));
+    expect(destinations, contains('inquiries'));
+  });
+
+  test('messaging access remains counselor-only after moving into Inquiries', () {
+    expect(canShowCounselorMessagingInInquiries(AccessRole.counselor), isTrue);
+    expect(canShowCounselorMessagingInInquiries(AccessRole.admin), isFalse);
+    expect(canShowCounselorMessagingInInquiries(AccessRole.portalStaff), isFalse);
+    expect(canShowCounselorMessagingInInquiries(AccessRole.appUser), isFalse);
   });
 }
