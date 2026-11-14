@@ -32,6 +32,26 @@ void main() {
     expect(find.text('Existing counselor conversation inbox'), findsOneWidget);
   });
 
+  testWidgets('inquiry notification can open Other services directly', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: CounselorInquiryWorkspace(
+            initialSection: CounselorInquirySection.otherServices,
+            messages: Text('Existing counselor conversation inbox'),
+            otherServices: Text('Existing service inquiry queue'),
+          ),
+        ),
+      ),
+    ));
+
+    expect(find.text('Existing service inquiry queue'), findsOneWidget);
+    expect(find.text('Existing counselor conversation inbox'), findsNothing);
+    await tester.tap(find.text('Messages'));
+    await tester.pumpAndSettle();
+    expect(find.text('Existing counselor conversation inbox'), findsOneWidget);
+  });
+
   test('Counselor Messages is inside Inquiries, not a sidebar destination', () {
     final destinations = AdminPortalPage.values.map((value) => value.name);
     expect(destinations, isNot(contains('counselorMessages')));
