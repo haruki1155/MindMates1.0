@@ -22,6 +22,7 @@ test("portal queue projection excludes clinical and personal appointment fields"
   assert.deepEqual(Object.keys(projection).sort(), [
     "appointmentId",
     "assignedCounselor",
+    "collegeId",
     "isArchived",
     "projectedAt",
     "proposalRevision",
@@ -38,8 +39,22 @@ test("portal queue projection excludes clinical and personal appointment fields"
   ]);
   assert.equal(projection.studentDisplayName, "Student Name");
   assert.equal(projection.appointmentId, "appointment-1");
+  assert.equal(projection.collegeId, "");
   assert.equal(projection.scheduleRevision, 7);
   assert.equal(projection.concern, undefined);
   assert.equal(projection.email, undefined);
   assert.equal(projection.userId, undefined);
+});
+
+test("staff queue retains only the verified college key used for filtering", () => {
+  const projected = portalAppointmentQueueProjection("appointment-2", {
+    fullName: "Staff-safe label",
+    userId: "private-student-uid",
+    collegeId: "forged-client-college",
+    concern: "Sensitive notes",
+    scheduledAt: "2026-11-16T09:00:00.000Z",
+  }, "college-verified");
+  assert.equal(projected.collegeId, "college-verified");
+  assert.equal(projected.userId, undefined);
+  assert.equal(projected.concern, undefined);
 });
