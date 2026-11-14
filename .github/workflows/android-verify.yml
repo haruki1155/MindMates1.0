@@ -32,7 +32,11 @@ jobs:
           "$cmake_root/bin/cmake" --version
       - run: flutter pub get
       - run: flutter analyze
-      - run: flutter test --dart-define=APP_ENV=staging
+      # Pinned to a neutral environment: Mood V2 presentation and the five
+      # readers now default to on in staging builds, and the suite-wide run
+      # asserts the default-disabled shape. Staging defaults are covered by
+      # the mood-v2-staging-defaults job in mood-v2-emulator-validation.yml.
+      - run: flutter test --dart-define=APP_ENV=development
       - run: flutter clean
       - run: flutter build apk --debug --flavor staging --dart-define=APP_ENV=staging
       - name: Verify staging APK identity and permissions
