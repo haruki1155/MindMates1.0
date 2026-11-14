@@ -12,7 +12,17 @@ const adminId = `${prefix}-admin`;
 const counselorId = `${prefix}-counselor`;
 const otherCounselorId = `${prefix}-other-counselor`;
 const portalStaffId = `${prefix}-portal-staff`;
-const review = reviewAppointment as unknown as Callable;
+const rawReview = reviewAppointment as unknown as Callable;
+// Applied-schedule assertions include the now-required other-side acceptance.
+const review: Callable = {run: async request => {
+  const result = await rawReview.run(request);
+  if (request.data?.action === "rescheduled") {
+    const id = String(request.data.appointmentId);
+    const data = (await db.doc(`appointments/${id}`).get()).data()!;
+    await (respondToAppointment as unknown as Callable).run({auth: {uid: data.userId}, data: {appointmentId: id, action: "accept_reschedule", requestId: `accept_${id}`, expectedScheduledAt: data.scheduledAt.toMillis(), expectedScheduleRevision: data.scheduleRevision, expectedProposalRevision: data.proposalRevision}});
+  }
+  return result;
+}};
 const respond = respondToAppointment as unknown as Callable;
 const availability = db.collection("pacc_availability").doc("current");
 
@@ -27,8 +37,9 @@ async function futureWeekdaySlot(excluded = new Set<number>()): Promise<number> 
   }
   throw new Error("No future weekday slot found.");
 }
+const presented = new Map<string, {expectedScheduledAt: number; expectedStatus: string; expectedScheduleRevision: number}>();
 function payload(appointmentId: string, proposedAt: number, reason = "Office schedule adjustment") {
-  return {appointmentId, action: "rescheduled", reply: "PACC has updated your appointment schedule.", proposedScheduledAt: proposedAt, rescheduleReason: reason};
+  return {appointmentId, ...presented.get(appointmentId), action: "rescheduled", reply: "PACC has updated your appointment schedule.", proposedScheduledAt: proposedAt, rescheduleReason: reason};
 }
 async function expectCallableFailure(promise: Promise<unknown>, code: string): Promise<void> {
   await assert.rejects(promise, (error: {code?: unknown}) => error?.code === code);
@@ -36,7 +47,9 @@ async function expectCallableFailure(promise: Promise<unknown>, code: string): P
 async function seedAppointment(id: string, options: {assignedStaffId?: string; status?: string; scheduledAt?: number; claimSlot?: boolean} = {}) {
   const scheduledAt = options.scheduledAt ?? await futureWeekdaySlot();
   const appointment = db.collection("appointments").doc(`${prefix}-${id}`);
-  await appointment.set({userId: studentId, status: options.status ?? "confirmed", assignedStaffId: options.assignedStaffId ?? counselorId, scheduledAt: Timestamp.fromMillis(scheduledAt), scheduledTime: "9:00 AM", concern: "Academic pressure"});
+  const status = options.status ?? "confirmed";
+  presented.set(appointment.id, {expectedScheduledAt: scheduledAt, expectedStatus: status, expectedScheduleRevision: 0});
+  await appointment.set({userId: studentId, status, scheduleRevision: 0, assignedStaffId: options.assignedStaffId ?? counselorId, scheduledAt: Timestamp.fromMillis(scheduledAt), scheduledTime: "9:00 AM", concern: "Academic pressure"});
   await db.collection("appointment_user_locks").doc(studentId).set({appointmentId: appointment.id});
   if (options.claimSlot !== false) await db.collection("appointment_slots").doc(`pacc_${scheduledAt}`).set({appointmentId: appointment.id, scheduledAt: Timestamp.fromMillis(scheduledAt)});
   return appointment;
@@ -64,17 +77,18 @@ after(async () => {
   await Promise.all([...slots.docs.filter((item) => appointmentIds.has(String(item.data().appointmentId ?? ""))).map((item) => item.ref.delete()), ...notifications.docs.map((item) => item.ref.delete()), ...audits.docs.filter((item) => appointmentIds.has(String(item.data().targetId ?? ""))).map((item) => item.ref.delete()), db.collection("appointment_user_locks").doc(studentId).delete(), availability.delete(), ...[studentId, adminId, counselorId, otherCounselorId, portalStaffId].map((id) => db.collection("users").doc(id).delete())]);
 });
 
-test("staff re-schedule is atomic, confirmed, audited, and not student-approvable", async () => {
+test("staff proposal is applied atomically only after student acceptance and audited", async () => {
   const oldAt = await futureWeekdaySlot(); const appointment = await seedAppointment("atomic", {scheduledAt: oldAt}); const newAt = await futureWeekdaySlot(new Set([oldAt]));
   await assert.doesNotReject(review.run({auth: {uid: counselorId}, data: payload(appointment.id, newAt)}));
   const [updated, oldSlot, newSlot, lock, history, notices, audit] = await Promise.all([appointment.get(), db.collection("appointment_slots").doc(`pacc_${oldAt}`).get(), db.collection("appointment_slots").doc(`pacc_${newAt}`).get(), db.collection("appointment_user_locks").doc(studentId).get(), appointment.collection("history").get(), db.collection("notifications").where("appointmentId", "==", appointment.id).get(), db.collection("admin_audit_logs").where("targetId", "==", appointment.id).get()]);
-  assert.equal(updated.data()?.status, "confirmed"); assert.equal(updated.data()?.scheduledAt.toMillis(), newAt); assert.equal(updated.data()?.proposedScheduledAt, undefined); assert.deepEqual(updated.data()?.reminders, {});
+  assert.equal(updated.data()?.status, "confirmed"); assert.equal(updated.data()?.scheduledAt.toMillis(), newAt); assert.equal(updated.data()?.proposalStatus, "accepted"); assert.deepEqual(updated.data()?.reminders, {});
   assert.equal(oldSlot.exists, false); assert.equal(newSlot.data()?.appointmentId, appointment.id); assert.equal(lock.data()?.appointmentId, appointment.id);
-  const historyEntry = history.docs.find((item) => item.data().status === "rescheduled")?.data();
+  const historyEntry = history.docs.find((item) => item.data().type === "appointment_schedule_agreed")?.data();
+  assert.equal(history.docs.find(item => item.data().type === "appointment_schedule_proposed")?.data().reason, payload(appointment.id, newAt).rescheduleReason);
   assert.equal(historyEntry?.previousScheduledAt.toMillis(), oldAt); assert.equal(historyEntry?.scheduledAt.toMillis(), newAt);
-  assert.equal(notices.docs[0].data().type, "appointment_rescheduled"); assert.match(notices.docs[0].data().body, /PACC rescheduled/i);
-  assert.equal(audit.docs.some((item) => item.data().action === "APPOINTMENT_RESCHEDULED" && item.data().actorId === counselorId), true);
-  await expectCallableFailure(respond.run({auth: {uid: studentId}, data: {appointmentId: appointment.id, action: "accept_reschedule"}}), "permission-denied");
+  assert.equal(notices.docs.some(n => n.data().type === "appointment" && n.data().agreementEvent === "appointment_schedule_agreed" && n.data().audience === "portal"), true);
+  assert.equal(audit.docs.some((item) => item.data().action === "APPOINTMENT_SCHEDULE_PROPOSED" && item.data().actorId === counselorId), true);
+  await expectCallableFailure(respond.run({auth: {uid: studentId}, data: {appointmentId: appointment.id, action: "accept_reschedule", requestId: "stale_completed_accept", expectedScheduledAt: oldAt, expectedScheduleRevision: 0, expectedProposalRevision: 1}}), "aborted");
 });
 
 test("occupied target is rejected without appointment or slot mutation", async () => {
@@ -106,20 +120,23 @@ test("terminal, unauthorized, and forged staff actions are denied", async () => 
   await assert.doesNotReject(review.run({auth: {uid: otherCounselorId}, data: payload(appointment.id, target)}));
   const updated = (await appointment.get()).data()!;
   assert.equal(updated.assignedStaffId, counselorId);
-  assert.equal(updated.actionBy, otherCounselorId);
+  const actions = await appointment.collection("history").get();
+  assert.equal(actions.docs.some(d => d.data().performedBy === otherCounselorId), true);
 });
 
-test("a legacy proposal is finalized only by staff and its legacy fields are cleared", async () => {
+test("legacy proposal is explicitly counterproposed by staff and accepted by student", async () => {
   const oldAt = await futureWeekdaySlot(); const newAt = await futureWeekdaySlot(new Set([oldAt])); const appointment = await seedAppointment("legacy", {scheduledAt: oldAt, status: "reschedule_proposed"});
   await appointment.update({proposedScheduledAt: Timestamp.fromMillis(newAt), proposedScheduledTime: "9:00 AM", proposedBy: "counselor", proposalStatus: "pending", rescheduleReason: "Legacy"});
   await assert.doesNotReject(review.run({auth: {uid: counselorId}, data: payload(appointment.id, newAt)}));
   const data = (await appointment.get()).data()!; assert.equal(data.status, "confirmed"); assert.equal(data.scheduledAt.toMillis(), newAt);
-  for (const field of ["proposedScheduledAt", "proposedScheduledTime", "proposedBy", "proposalStatus", "rescheduleReason"]) assert.equal(data[field], undefined);
+  assert.equal(data.proposalStatus, "accepted");
 });
 
 test("concurrent re-schedules to one slot allow exactly one claimant", async () => {
   const firstAt = await futureWeekdaySlot(); const secondAt = await futureWeekdaySlot(new Set([firstAt])); const target = await futureWeekdaySlot(new Set([firstAt, secondAt]));
   const first = await seedAppointment("race-first", {scheduledAt: firstAt}); const second = await seedAppointment("race-second", {scheduledAt: secondAt});
+  await first.update({userId: `${studentId}-race`});
+  await db.doc(`appointment_user_locks/${studentId}-race`).set({appointmentId: first.id});
   const outcomes = await Promise.allSettled([review.run({auth: {uid: counselorId}, data: payload(first.id, target)}), review.run({auth: {uid: adminId}, data: payload(second.id, target)})]);
   assert.equal(outcomes.filter((result) => result.status === "fulfilled").length, 1); assert.equal(outcomes.filter((result) => result.status === "rejected").length, 1); assert.equal((await db.collection("appointment_slots").doc(`pacc_${target}`).get()).exists, true);
 });

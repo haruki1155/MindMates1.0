@@ -2942,7 +2942,10 @@ class _AppointmentCard extends StatelessWidget {
   Future<void> _showReviewDialog(BuildContext context) async {
     final currentStatus = item.lifecycleStatus;
     final canReview = canReviewAppointment(item, DateTime.now());
-    var action = currentStatus == AppointmentStatus.confirmed
+    final future = item.scheduledAt.isAfter(DateTime.now());
+    final pendingStudent = item.hasPendingScheduleChange && item.proposedBy == 'student';
+    final agreementRequestId = 'staff_accept_${DateTime.now().microsecondsSinceEpoch}';
+    var action = pendingStudent ? 'accept' : item.hasPendingScheduleChange ? 'rescheduled' : currentStatus == AppointmentStatus.confirmed && future ? 'rescheduled' : currentStatus == AppointmentStatus.confirmed
         ? 'completed'
         : currentStatus == AppointmentStatus.rescheduleProposed
         ? 'rescheduled'
@@ -2994,6 +2997,14 @@ class _AppointmentCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (item.hasPendingScheduleChange) ...[
+                    Text(item.hasVerifiedPendingScheduleChange ? 'Current reserved time' : 'Current recorded time', style: const TextStyle(fontWeight: FontWeight.w700)),
+                    Text('${item.scheduledAt} - ${item.scheduledTime}'),
+                    const SizedBox(height: 8),
+                    Text('Proposed time: ${item.proposedScheduledAt} - ${item.proposedScheduledTime ?? ''}'),
+                    Text(!item.hasVerifiedPendingScheduleChange ? 'Older proposal: verify its current reservation before proposing another time.' : pendingStudent ? 'Student is awaiting your agreement. The current time remains reserved.' : 'Awaiting student agreement. The current time remains reserved.'),
+                    const Divider(height: 28),
+                  ],
                   const _AppointmentSectionHeader(
                     icon: Icons.person_outline,
                     title: 'Client information',
@@ -3074,39 +3085,15 @@ class _AppointmentCard extends StatelessWidget {
                     DropdownButtonFormField<String>(
                       initialValue: action,
                       decoration: const InputDecoration(labelText: 'Action'),
-                      items: currentStatus == AppointmentStatus.confirmed
-                          ? const [
-                              DropdownMenuItem(
-                                value: 'completed',
-                                child: Text('Mark session as completed'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'no_show',
-                                child: Text('Mark as Did Not Attend'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'rescheduled',
-                                child: Text('Re-schedule appointment'),
-                              ),
-                            ]
-                          : currentStatus ==
-                                AppointmentStatus.rescheduleProposed
-                          ? [
-                              const DropdownMenuItem(
-                                value: 'rescheduled',
-                                child: Text('Re-schedule appointment'),
-                              ),
-                            ]
-                          : const [
-                              DropdownMenuItem(
-                                value: 'confirmed',
-                                child: Text('Confirm appointment'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'rescheduled',
-                                child: Text('Re-schedule appointment'),
-                              ),
-                            ],
+                      items: [
+                        if (pendingStudent) const DropdownMenuItem(value: 'accept', child: Text('Accept student proposed time')),
+                        if (!item.hasPendingScheduleChange && currentStatus != AppointmentStatus.confirmed && currentStatus != AppointmentStatus.rescheduleProposed) const DropdownMenuItem(value: 'confirmed', child: Text('Confirm appointment')),
+                        const DropdownMenuItem(value: 'rescheduled', child: Text('Re-schedule appointment')),
+                        if (currentStatus == AppointmentStatus.confirmed && !future) ...[
+                          const DropdownMenuItem(value: 'completed', child: Text('Mark session as completed')),
+                          const DropdownMenuItem(value: 'no_show', child: Text('Mark as Did Not Attend')),
+                        ],
+                      ],
                       onChanged: submitting
                           ? null
                           : (value) => setDialogState(() {
@@ -3350,8 +3337,22 @@ class _AppointmentCard extends StatelessWidget {
                         }
                         setDialogState(() => submitting = true);
                         try {
+                          if (!item.hasScheduleRevision) {
+                            await repository.initializeAppointmentScheduleRevision(appointmentId: item.id, scheduledAt: item.scheduledAt, status: item.lifecycleStatus.value);
+                            if (!context.mounted) return;
+                            Navigator.of(context).pop();
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Appointment prepared. Refresh and review it before confirming.')));
+                            return;
+                          }
+                          if (action == 'accept') {
+                            await repository.changeAppointmentAgreement(item, 'accept', agreementRequestId);
+                          } else {
                           await repository.reviewAppointment(
                             appointmentId: item.id,
+                            expectedScheduledAt: item.scheduledAt.millisecondsSinceEpoch,
+                            expectedScheduleRevision: item.scheduleRevision,
+                            expectedProposalRevision: item.proposalRevision,
+                            expectedStatus: item.lifecycleStatus.value,
                             action: action,
                             reply: action == 'completed'
                                 ? 'Appointment completed.'
@@ -3369,6 +3370,7 @@ class _AppointmentCard extends StatelessWidget {
                                 ? followUpMessage.text.trim()
                                 : null,
                           );
+                          }
                           if (dialogContext.mounted) {
                             Navigator.pop(dialogContext);
                           }
@@ -3416,6 +3418,7 @@ class _AppointmentCard extends StatelessWidget {
   }
 
   static List<String> _appointmentReasons(String action) => switch (action) {
+    'accept' => const ['Accept the student proposed time'],
     'confirmed' => const [
       'Schedule and counselor are available',
       'Appointment approved by PACC',

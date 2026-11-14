@@ -16,6 +16,7 @@ void main() {
   ) async {
     await tester.pumpWidget(_app());
     await tester.pumpAndSettle();
+    await _enterCounselingStage(tester);
     expect(find.text('9:00 AM'), findsOneWidget);
     expect(find.text('12:00 PM'), findsOneWidget);
     expect(find.byKey(const Key('best-time-start')), findsOneWidget);
@@ -25,6 +26,7 @@ void main() {
   testWidgets('shows device 24 hour format in picker fields', (tester) async {
     await tester.pumpWidget(_app(use24Hour: true));
     await tester.pumpAndSettle();
+    await _enterCounselingStage(tester);
     expect(find.text('09:00'), findsOneWidget);
     expect(find.text('9:00 AM'), findsNothing);
   });
@@ -32,6 +34,7 @@ void main() {
   testWidgets('selects a different contact day', (tester) async {
     await tester.pumpWidget(_app());
     await tester.pumpAndSettle();
+    await _enterCounselingStage(tester);
     final weekends = find.byKey(const Key('best-time-days-weekends'));
     await tester.ensureVisible(weekends);
     await tester.pumpAndSettle();
@@ -45,6 +48,7 @@ void main() {
   ) async {
     await tester.pumpWidget(_app());
     await tester.pumpAndSettle();
+    await _enterCounselingStage(tester);
     final start = find.byKey(const Key('best-time-start'));
     await tester.ensureVisible(start);
     await tester.pumpAndSettle();
@@ -78,51 +82,95 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(430, 3200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+
     final repository = _AppointmentRepository(_legacyAppointment());
+
     await tester.pumpWidget(_app(repository: repository));
     await tester.pumpAndSettle();
+
+    // Open the existing completed appointment.
     await tester.tap(find.text('Past').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('View Details'));
+
+    final view = find.text('View appointment');
+    await tester.ensureVisible(view);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Book Appointment'));
+    await tester.tap(view);
     await tester.pumpAndSettle();
+
+    // Rebook from the legacy appointment.
+    await tester.tap(find.text('Book Appointment').last);
+    await tester.pumpAndSettle();
+
+    // Complete Personal Information before Counseling Details.
+    await _enterCounselingStage(tester);
+
+    // Legacy free text must fall back to safe visual defaults.
     expect(find.text('9:00 AM'), findsOneWidget);
     expect(find.text('12:00 PM'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-    final fields = find.byType(TextFormField);
-    for (final entry in <int, String>{
-      0: 'Molar',
-      1: 'Leonardo',
-      3: '20',
-      4: 'Urdaneta',
-      5: '09123456789',
-      6: 'leo@example.com',
-      7: 'facebook.com/leo',
-      8: 'I need counseling',
-    }.entries) {
-      await tester.enterText(fields.at(entry.key), entry.value);
-    }
-    for (final label in ['Male', 'Fourth Year', 'Email', 'No']) {
-      await tester.tap(find.text(label).last);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('intake-concern')),
+      'I need counseling',
+    );
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+
+    for (final label in ['Email', 'No']) {
+      final option = find.widgetWithText(InkWell, label);
+      expect(option, findsOneWidget);
+      await tester.ensureVisible(option);
+      await tester.pumpAndSettle();
+      await tester.tap(option);
       await tester.pumpAndSettle();
     }
-    await tester.tap(find.text('Continue to Date & Time'));
+
+    final continueToSchedule = find.text('Continue to Date & Time');
+    await tester.ensureVisible(continueToSchedule);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('30'));
+    await tester.tap(continueToSchedule);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('10:00 AM'));
+
+    // Select a server-offered date and time.
+    final date = find.text('30');
+    await tester.ensureVisible(date);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue to Confirm'));
+    await tester.tap(date);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm Appointment').last);
+
+    final slot = find.byKey(const Key('time-chip-10:00 AM'));
+    expect(slot, findsOneWidget);
+    await tester.ensureVisible(slot);
     await tester.pumpAndSettle();
-    expect(repository.created?.bestTime, 'Weekend mornings 9 AM - 12 PM');
+    await tester.tap(slot);
+    await tester.pumpAndSettle();
+
+    final review = find.text('Continue to Confirm');
+    await tester.ensureVisible(review);
+    await tester.pumpAndSettle();
+    await tester.tap(review);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Review request'), findsOneWidget);
+
+    final submit = find.text('Send appointment request');
+    await tester.ensureVisible(submit);
+    await tester.pumpAndSettle();
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+
+    // The original legacy contact preference must be preserved.
+    expect(
+      repository.created?.bestTime,
+      'Weekend mornings 9 AM - 12 PM',
+    );
   });
 
   testWidgets('rejects equal and overnight contact windows', (tester) async {
     await tester.pumpWidget(_app());
     await tester.pumpAndSettle();
+    await _enterCounselingStage(tester);
     final field = tester.state<FormFieldState<BestContactTime>>(
       find.byWidgetPredicate((widget) => widget is FormField<BestContactTime>),
     );
@@ -149,12 +197,62 @@ void main() {
   });
 }
 
+
+Future<void> _enterCounselingStage(WidgetTester tester) async {
+  await tester.binding.setSurfaceSize(const Size(430, 3200));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpAndSettle();
+
+  expect(find.byKey(const ValueKey('intake')), findsOneWidget);
+
+  const fields = <String, String>{
+    'intake-first-name': 'Test',
+    'intake-last-name': 'Student',
+    'intake-age': '20',
+    'intake-address': 'Urdaneta City',
+    'intake-contact': '09123456789',
+    'intake-email': 'user@example.com',
+    'intake-facebook': 'test@example.com',
+  };
+
+  for (final entry in fields.entries) {
+    await tester.enterText(
+      find.byKey(ValueKey(entry.key)),
+      entry.value,
+    );
+  }
+
+  FocusManager.instance.primaryFocus?.unfocus();
+  await tester.pumpAndSettle();
+
+  for (final label in ['Male', 'Fourth Year']) {
+    final option = find.widgetWithText(InkWell, label);
+    expect(option, findsOneWidget);
+    await tester.ensureVisible(option);
+    await tester.pumpAndSettle();
+    await tester.tap(option);
+    await tester.pumpAndSettle();
+  }
+
+  final next = find.text('Continue to Counseling Details');
+  await tester.ensureVisible(next);
+  await tester.pumpAndSettle();
+  await tester.tap(next);
+  await tester.pumpAndSettle();
+
+  expect(
+    find.byKey(const ValueKey('counselingDetails')),
+    findsOneWidget,
+  );
+}
+
+
 Widget _app({bool use24Hour = false, _AppointmentRepository? repository}) =>
     MultiProvider(
       providers: [
         ChangeNotifierProvider(
           create: (_) => UserProvider(_UserRepository())
-            ..setUser(const UserModel(id: 'user_1', email: 'user@example.com')),
+            ..setUser(const UserModel(id: 'user_1', email: 'user@example.com', course: 'BS Information Technology')),
         ),
         ChangeNotifierProvider(
           create: (_) =>

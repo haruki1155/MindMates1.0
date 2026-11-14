@@ -9,6 +9,22 @@ import '../../counseling/screens/pacc_counseling_screen.dart';
 import '../../counseling/widgets/appointment_details_sheet.dart';
 import '../widgets/home_dashboard_widgets.dart';
 
+// Feature-local presentation tokens. Booking logic and app-wide theme stay unchanged.
+class _CalendarV2Palette {
+  const _CalendarV2Palette._();
+  static const background = Color(0xFFF7F8F4);
+  static const ink = Color(0xFF1D343C);
+  static const muted = Color(0xFF73878E);
+  static const border = Color(0xFFE5EAE5);
+  static const gold = Color(0xFFF8BF3C);
+
+  static BoxDecoration get panel => BoxDecoration(
+    color: Colors.white,
+    border: Border.all(color: border),
+    borderRadius: BorderRadius.circular(18),
+  );
+}
+
 class HomeAppointmentCalendarScreen extends StatefulWidget {
   const HomeAppointmentCalendarScreen({
     super.key,
@@ -77,15 +93,20 @@ class _HomeAppointmentCalendarScreenState
           ..sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
 
     return Scaffold(
-      backgroundColor: HomePalette.background,
+      backgroundColor: _CalendarV2Palette.background,
       appBar: AppBar(
-        title: const Text('Appointment Calendar'),
-        backgroundColor: HomePalette.sun,
-        foregroundColor: HomePalette.text,
+        toolbarHeight: 100,
+        title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('PACC COUNSELING', style: TextStyle(color: Color(0xFFA17720), fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w800)),
+          SizedBox(height: 6),
+          Text('Appointment Calendar', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _CalendarV2Palette.ink)),
+        ]),
+        backgroundColor: _CalendarV2Palette.background,
+        foregroundColor: _CalendarV2Palette.ink,
         surfaceTintColor: Colors.transparent,
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 18, 16, 36),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
         children: [
           if (userId == null)
             const _CalendarMessage(
@@ -253,8 +274,8 @@ class _MonthCalendar extends StatelessWidget {
     final rows = (cells / 7).ceil();
 
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: HomeDecor.card(borderColor: const Color(0xFFE7D69A)),
+      padding: const EdgeInsets.all(18),
+      decoration: _CalendarV2Palette.panel,
       child: Column(
         children: [
           Row(
@@ -268,7 +289,11 @@ class _MonthCalendar extends StatelessWidget {
                 child: Text(
                   '${months[visibleMonth.month - 1]} ${visibleMonth.year}',
                   textAlign: TextAlign.center,
-                  style: HomeTextStyles.sectionTitle,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: _CalendarV2Palette.ink,
+                  ),
                 ),
               ),
               IconButton(
@@ -278,13 +303,30 @@ class _MonthCalendar extends StatelessWidget {
               ),
             ],
           ),
-          TextButton(onPressed: onToday, child: const Text('Today')),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: onToday,
+              style: TextButton.styleFrom(
+                foregroundColor: _CalendarV2Palette.ink,
+                minimumSize: const Size(64, 48),
+              ),
+              child: const Text('Today'),
+            ),
+          ),
           Row(
             children: [
-              for (final day in ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
+              for (final day in ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'])
                 Expanded(
                   child: Center(
-                    child: Text(day, style: HomeTextStyles.caption),
+                    child: Text(
+                      day,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: _CalendarV2Palette.muted,
+                      ),
+                    ),
                   ),
                 ),
             ],
@@ -295,7 +337,7 @@ class _MonthCalendar extends StatelessWidget {
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 7,
-              mainAxisExtent: rows > 5 ? 49 : 54,
+              mainAxisExtent: 54 * MediaQuery.textScalerOf(context).scale(1),
             ),
             itemCount: rows * 7,
             itemBuilder: (_, index) {
@@ -345,9 +387,8 @@ class _CalendarDay extends StatelessWidget {
         ? null
         : appointmentStatusColor(primaryStatus);
     return Semantics(
-      label: appointments.isEmpty
-          ? '${date.day}'
-          : '${date.day}, ${appointments.length} appointment${appointments.length == 1 ? '' : 's'}',
+      label: '${formatAppointmentDate(date)}${selected ? ', selected' : ''}'
+          '${appointments.isEmpty ? '' : ', ${appointments.length} appointment${appointments.length == 1 ? '' : 's'}'}',
       child: Container(
         key: ValueKey(
           'appointment-calendar-day-${date.year}-${date.month}-${date.day}',
@@ -369,6 +410,8 @@ class _CalendarDay extends StatelessWidget {
           children: [
             Text(
               '${date.day}',
+              maxLines: 1,
+              softWrap: false,
               style: const TextStyle(fontWeight: FontWeight.w800),
             ),
             if (appointments.isNotEmpty) ...[
@@ -458,11 +501,29 @@ class _SelectedDayAgenda extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Highlighted appointment',
-          style: HomeTextStyles.sectionTitle,
+          'Appointments for this day',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: _CalendarV2Palette.ink,
+          ),
         ),
         const SizedBox(height: 4),
-        Text(formatAppointmentDate(date), style: HomeTextStyles.bodyMuted),
+        Text(
+          formatAppointmentDate(date),
+          style: const TextStyle(
+            color: _CalendarV2Palette.muted,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 3),
+        const Text(
+          'Philippine Time (PHT)',
+          style: TextStyle(
+            color: _CalendarV2Palette.muted,
+            fontSize: 12,
+          ),
+        ),
         const SizedBox(height: 12),
         if (appointments.isEmpty)
           _CalendarMessage(
@@ -494,13 +555,12 @@ class _AgendaCard extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
+        key: ValueKey('appointment-agenda-${appointment.id}'),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(18),
         child: Ink(
-          padding: const EdgeInsets.all(15),
-          decoration: HomeDecor.card(
-            borderColor: appointmentStatusColor(status).withValues(alpha: .4),
-          ),
+          padding: const EdgeInsets.all(16),
+          decoration: _CalendarV2Palette.panel,
           child: Row(
             children: [
               Container(
@@ -531,8 +591,8 @@ class _AgendaCard extends StatelessWidget {
                       appointment.status,
                       style: TextStyle(
                         color: appointmentStatusColor(status),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w900,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
                         decoration: status == AppointmentDisplayStatus.cancelled
                             ? TextDecoration.lineThrough
                             : null,
@@ -541,7 +601,10 @@ class _AgendaCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right),
+              const Icon(
+                Icons.chevron_right,
+                color: _CalendarV2Palette.muted,
+              ),
             ],
           ),
         ),
@@ -599,8 +662,8 @@ class _CalendarMessage extends StatelessWidget {
   final VoidCallback? onAction;
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(20),
-    decoration: HomeDecor.card(),
+    padding: const EdgeInsets.all(22),
+    decoration: _CalendarV2Palette.panel,
     child: Column(
       children: [
         Icon(icon, size: 34, color: HomePalette.gold),
@@ -618,7 +681,16 @@ class _CalendarMessage extends StatelessWidget {
         ),
         if (actionLabel != null && onAction != null) ...[
           const SizedBox(height: 12),
-          FilledButton(onPressed: onAction, child: Text(actionLabel!)),
+          FilledButton(
+            onPressed: onAction,
+            style: FilledButton.styleFrom(
+              backgroundColor: _CalendarV2Palette.gold,
+              foregroundColor: _CalendarV2Palette.ink,
+              minimumSize: const Size(180, 48),
+              textStyle: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            child: Text(actionLabel!),
+          ),
         ],
       ],
     ),

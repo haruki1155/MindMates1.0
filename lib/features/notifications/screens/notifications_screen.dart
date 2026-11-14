@@ -6,6 +6,16 @@ import '../../../providers/appointment_provider.dart';
 import '../../../repositories/notification_repository.dart';
 import '../../counseling/widgets/appointment_details_sheet.dart';
 
+// Feature-only colors, aligned with the Appointment V2 surfaces.
+class _NotificationV2Palette {
+  const _NotificationV2Palette._();
+  static const background = Color(0xFFF7F8F4);
+  static const ink = Color(0xFF1D343C);
+  static const muted = Color(0xFF73878E);
+  static const border = Color(0xFFE5EAE5);
+  static const gold = Color(0xFFF8BF3C);
+}
+
 class NotificationsScreen extends StatelessWidget {
   const NotificationsScreen({required this.userId, super.key, this.repository});
 
@@ -16,8 +26,17 @@ class NotificationsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final source = repository ?? NotificationRepository();
     return Scaffold(
+      backgroundColor: _NotificationV2Palette.background,
       appBar: AppBar(
-        title: const Text('Notifications'),
+        toolbarHeight: 100,
+        backgroundColor: _NotificationV2Palette.background,
+        foregroundColor: _NotificationV2Palette.ink,
+        surfaceTintColor: Colors.transparent,
+        title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('PACC COUNSELING', style: TextStyle(color: Color(0xFFA17720), fontSize: 10, letterSpacing: 1.2, fontWeight: FontWeight.w800)),
+          SizedBox(height: 6),
+          Text('Notifications', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _NotificationV2Palette.ink)),
+        ]),
         actions: [
           StreamBuilder<List<AppNotificationModel>>(
             stream: source.watchNotifications(userId),
@@ -28,6 +47,14 @@ class NotificationsScreen extends StatelessWidget {
               if (unread.isEmpty) return const SizedBox.shrink();
               return TextButton(
                 onPressed: () => source.markAllRead(unread),
+                style: TextButton.styleFrom(
+                  foregroundColor: _NotificationV2Palette.ink,
+                  minimumSize: const Size(48, 48),
+                  textStyle: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 child: const Text('Mark all read'),
               );
             },
@@ -38,7 +65,19 @@ class NotificationsScreen extends StatelessWidget {
         stream: source.watchNotifications(userId),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return const Center(child: Text('Unable to load notifications.'));
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'Unable to load notifications.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: _NotificationV2Palette.muted,
+                  ),
+                ),
+              ),
+            );
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -46,15 +85,23 @@ class NotificationsScreen extends StatelessWidget {
           final items = snapshot.data!;
           if (items.isEmpty) return const _NotificationEmptyState();
           return ListView.separated(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
             itemCount: items.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            separatorBuilder: (_, _) => const SizedBox(height: 12),
             itemBuilder: (context, index) {
               final item = items[index];
               return Card(
-                color: item.isRead ? Colors.white : const Color(0xFFFFF8E5),
+                key: ValueKey('notification-${item.id}'),
+                margin: EdgeInsets.zero,
+                elevation: 0,
+                color: item.isRead ? Colors.white : const Color(0xFFFFFAEB),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  side: const BorderSide(color: _NotificationV2Palette.border),
+                ),
                 child: ListTile(
-                  contentPadding: const EdgeInsets.all(14),
+                  minVerticalPadding: 14,
+                  contentPadding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
                   leading: CircleAvatar(
                     backgroundColor: _notificationColor(
                       item,
@@ -72,6 +119,8 @@ class NotificationsScreen extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
+                            color: _NotificationV2Palette.ink,
+                            fontSize: 16,
                             fontWeight: item.isRead
                                 ? FontWeight.w600
                                 : FontWeight.w800,
@@ -84,7 +133,7 @@ class NotificationsScreen extends StatelessWidget {
                           child: Icon(
                             Icons.circle,
                             size: 9,
-                            color: Color(0xFFFFB800),
+                            color: _NotificationV2Palette.gold,
                           ),
                         ),
                     ],
@@ -98,6 +147,9 @@ class NotificationsScreen extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
+                          fontSize: 14,
+                          height: 1.4,
+                          color: _NotificationV2Palette.ink,
                           fontWeight: item.isRead
                               ? FontWeight.w400
                               : FontWeight.w600,
@@ -108,12 +160,15 @@ class NotificationsScreen extends StatelessWidget {
                         '${_relativeTime(item.createdAt)} · ${item.isRead ? 'Read' : 'Unread'}',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey.shade700,
+                          color: _NotificationV2Palette.muted,
                         ),
                       ),
                     ],
                   ),
-                  trailing: const Icon(Icons.chevron_right),
+                  trailing: const Icon(
+                    Icons.chevron_right,
+                    color: _NotificationV2Palette.muted,
+                  ),
                   onTap: () async {
                     if (!item.isRead) await source.markRead(item.id);
                     final appointmentId = item.appointmentId;
@@ -154,16 +209,29 @@ class _NotificationEmptyState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.notifications_none, size: 52, color: Colors.grey),
-          SizedBox(height: 12),
+          Icon(
+            Icons.notifications_none,
+            size: 52,
+            color: _NotificationV2Palette.muted,
+          ),
+          SizedBox(height: 14),
           Text(
             'No notifications yet',
-            style: TextStyle(fontWeight: FontWeight.w800),
+            style: TextStyle(
+              fontSize: 18,
+              color: _NotificationV2Palette.ink,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-          SizedBox(height: 6),
+          SizedBox(height: 8),
           Text(
             'Appointment confirmations, schedule changes,\nand reminders will appear here.',
             textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: _NotificationV2Palette.muted,
+              height: 1.4,
+            ),
           ),
         ],
       ),

@@ -86,7 +86,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(PaccCounselingScreen), findsOneWidget);
-    expect(find.text('My Appointments'), findsOneWidget);
+    expect(find.text('My appointments'), findsOneWidget);
   });
 
   testWidgets('empty Home preview opens PACC booking intake', (tester) async {
@@ -137,7 +137,7 @@ void main() {
 
     await tester.tap(find.text('09:00 AM'));
     await tester.pumpAndSettle();
-    expect(find.text('Appointment Details'), findsOneWidget);
+    expect(find.text('Appointment details'), findsOneWidget);
     expect(find.text('I would like support.'), findsOneWidget);
   });
 
@@ -165,7 +165,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('May 2026'), findsOneWidget);
-      expect(find.text('Highlighted appointment'), findsOneWidget);
+      expect(find.text('Appointments for this day'), findsOneWidget);
       expect(find.text('May 6, 2026'), findsOneWidget);
       expect(find.text('Confirmed'), findsWidgets);
       final day = find.byKey(
@@ -210,6 +210,73 @@ void main() {
     expect(find.text('June 3, 2026'), findsOneWidget);
     expect(find.text('Completed'), findsWidgets);
   });
+
+
+  testWidgets('calendar V2 keeps actual agenda and handles a narrow viewport', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 850));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final appointments = AppointmentProvider(
+      _FakeAppointmentRepository([
+        _appointment('first', DateTime(2026, 4, 15, 9), time: '09:00 AM'),
+      ]),
+    );
+    await appointments.loadAppointments('user_1');
+
+    await tester.pumpWidget(_app(
+      appointments,
+      HomeAppointmentCalendarScreen(
+        initialDate: DateTime(2026, 4, 15),
+        nowProvider: () => now,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Appointments for this day'), findsOneWidget);
+    expect(find.text('Philippine Time (PHT)'), findsOneWidget);
+    expect(find.byKey(const ValueKey('appointment-agenda-first')), findsOneWidget);
+    expect(find.text('09:00 AM'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(find.widgetWithText(TextButton, 'Today')).height, greaterThanOrEqualTo(48));
+    final semantics = tester.ensureSemantics();
+    expect(find.bySemanticsLabel(RegExp('.*April 15, 2026.*')), findsWidgets);
+    semantics.dispose();
+  });
+
+  testWidgets('calendar V2 preserves month controls and appointment details', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final appointments = AppointmentProvider(
+      _FakeAppointmentRepository([
+        _appointment('one', DateTime(2026, 4, 15, 9), time: '09:00 AM'),
+      ]),
+    );
+    await appointments.loadAppointments('user_1');
+
+    await tester.pumpWidget(_app(
+      appointments,
+      HomeAppointmentCalendarScreen(
+        initialDate: DateTime(2026, 4, 15),
+        nowProvider: () => now,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Previous month'));
+    await tester.pumpAndSettle();
+    expect(find.text('March 2026'), findsOneWidget);
+    await tester.tap(find.byTooltip('Next month'));
+    await tester.pumpAndSettle();
+    expect(find.text('April 2026'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('appointment-agenda-one')));
+    await tester.tap(find.byKey(const ValueKey('appointment-agenda-one')));
+    await tester.pumpAndSettle();
+    expect(find.text('Appointment details'), findsOneWidget);
+  });
+
 }
 
 Widget _app(AppointmentProvider appointments, Widget home) {
@@ -226,7 +293,7 @@ Widget _app(AppointmentProvider appointments, Widget home) {
         create: (_) => AssessmentProvider(AssessmentRepository()),
       ),
     ],
-    child: MaterialApp(home: home),
+    child: MaterialApp(builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(disableAnimations: true), child: child!),home: home),
   );
 }
 
