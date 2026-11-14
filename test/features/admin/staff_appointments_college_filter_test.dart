@@ -34,6 +34,7 @@ class _StaffRepo extends AdminPortalRepository {
   Stream<List<College>> watchColleges() => Stream.value(const [
     College(id: 'college-a', name: 'College A', code: 'A', active: true),
     College(id: 'college-b', name: 'College B', code: 'B', active: true),
+    College(id: 'college-c', name: 'College C', code: 'C', active: true),
   ]);
 }
 
@@ -62,6 +63,14 @@ void main() {
     expect(find.text('1 appointment shown'), findsOneWidget);
     expect(find.text('Student Alpha'), findsOneWidget);
     expect(find.text('Student Beta'), findsNothing);
+    expect(repo.queueCalls, 1);
+
+    // Empty colleges must remain filterable, rather than disappearing.
+    await tester.tap(find.text('College A').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('College C').last);
+    await tester.pumpAndSettle();
+    expect(find.text('No appointments match these filters.'), findsOneWidget);
     expect(repo.queueCalls, 1);
   });
 
