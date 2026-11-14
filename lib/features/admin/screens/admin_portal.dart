@@ -2112,7 +2112,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                     onChanged: (_) => setState(() {}),
                     decoration: const InputDecoration(
                       prefixIcon: Icon(Icons.search),
-                      hintText: 'Search student name or ID',
+                      hintText: 'Search student name',
                     ),
                   ),
                 ),
@@ -2835,11 +2835,7 @@ class _AppointmentCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
-              const SizedBox(height: 3),
-              Text(
-                item.userId,
-                style: const TextStyle(color: AdminColors.muted, fontSize: 12),
-              ),
+              const SizedBox(height: 8),
               if (item.userId.trim().isNotEmpty &&
                   repository.currentAccessRole.canAccessClinicalData)
                 FittedBox(
