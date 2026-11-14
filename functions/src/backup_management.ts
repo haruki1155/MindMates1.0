@@ -68,7 +68,7 @@ export function defaultDeps(): BackupDeps {
       },
       async listExportOperations(databaseName) {
         const found: Array<{name: string; outputUriPrefix: string; done: boolean}> = [];
-        for await (const op of client.operationsClient.listOperationsAsync({name: databaseName, filter: ""})) {
+        for await (const op of client.operationsClient.listOperationsAsync({name: databaseName, filter: ""} as unknown as Parameters<typeof client.operationsClient.listOperationsAsync>[0])) {
           const record = op as unknown as {name?: string; done?: boolean; metadata?: {outputUriPrefix?: string}};
           const prefix = String(record.metadata?.outputUriPrefix ?? "");
           if (record.name && prefix) found.push({name: record.name, outputUriPrefix: prefix, done: record.done === true});
