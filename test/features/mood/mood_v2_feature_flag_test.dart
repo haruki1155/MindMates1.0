@@ -42,20 +42,20 @@ void main() {
     }
   });
 
-  test('the protected writer is disabled in every environment', () {
+  test('the protected writer follows the staging build', () {
     if (verifyWriterOnlyPilot) return;
-    expect(MoodV2FeatureFlag.enabled, isFalse);
+    expect(MoodV2FeatureFlag.enabled, AppEnvironmentConfig.isStagingBuild);
   });
 
   test('actionLabel still takes its default from the writer flag', () {
     if (verifyWriterOnlyPilot) return;
     expect(
       MoodV2FeatureFlag.actionLabel(hasCheckedInToday: true),
-      'View today’s mood',
+      MoodV2FeatureFlag.enabled ? 'Log a mood' : 'View today’s mood',
     );
     expect(
       MoodV2FeatureFlag.actionLabel(hasCheckedInToday: false),
-      'Log your mood',
+      MoodV2FeatureFlag.enabled ? 'Log a mood' : 'Log your mood',
     );
     expect(
       MoodV2FeatureFlag.actionLabel(

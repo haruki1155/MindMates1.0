@@ -12,9 +12,9 @@ void main() {
   );
 
   test(
-    'Mood V2 repository is inert until its rollout flag is explicitly enabled',
+    'Mood V2 repository is inert while the writer flag is off',
     () async {
-      if (verifyWriterOnlyPilot) return;
+      if (verifyWriterOnlyPilot || MoodV2FeatureFlag.enabled) return;
       final repository = MoodV2Repository();
 
       expect(MoodV2FeatureFlag.enabled, isFalse);
@@ -29,21 +29,21 @@ void main() {
     },
   );
 
-  test('the writer and the compatibility readers default to disabled', () {
+  test('the compatibility readers default to disabled', () {
     if (verifyWriterOnlyPilot) return;
-    // These stay false in every environment, staging included. The five
-    // student-facing readers and the presentation flag now follow the staging
-    // build; see mood_v2_feature_flag_test.dart.
+    // These stay false in every environment, staging included. The writer,
+    // the five student-facing readers and the presentation flag follow the
+    // staging build; see mood_v2_feature_flag_test.dart.
     expect([
-      MoodV2FeatureFlag.enabled,
       MoodV2ReadCompatibilityFlag.reportsEnabled,
       MoodV2ReadCompatibilityFlag.mindAidEnabled,
     ], everyElement(isFalse));
   });
 
-  test('presentation and the five readers follow the staging build', () {
+  test('writer, presentation and the five readers follow the staging build', () {
     if (verifyWriterOnlyPilot) return;
     expect([
+      MoodV2FeatureFlag.enabled,
       MoodV2FeatureFlag.presentation,
       MoodV2FeatureFlag.providerRead,
       MoodV2FeatureFlag.homeRead,

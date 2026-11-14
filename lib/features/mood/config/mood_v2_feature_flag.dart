@@ -25,14 +25,15 @@ class MoodV2FeatureFlag {
 
   /// Whether the **protected V2 writer** is used for saving.
   ///
-  /// This controls persistence only and has no effect on presentation. It
-  /// stays `false` in every environment, including staging: the server refuses
-  /// `createMoodEntry` unless the project is `mindmate-staging` *and* the uid
-  /// is in the pilot allowlist, so enabling it would break saving for every
-  /// ordinary student. With this off, saving goes through the legacy writer.
+  /// This controls persistence only and has no effect on presentation.
+  ///
+  /// On in staging builds, where the server now accepts `createMoodEntry` from
+  /// any active account; off in development and production. Override with
+  /// `--dart-define=ENABLE_MOOD_V2=false|true`. With this off, saving goes
+  /// through the legacy writer.
   static const enabled = bool.fromEnvironment(
     'ENABLE_MOOD_V2',
-    defaultValue: false,
+    defaultValue: AppEnvironmentConfig.isStagingBuild,
   );
 
   /// Each student-facing reader is separately gated. None of these flags
