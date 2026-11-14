@@ -5,6 +5,7 @@ import '../../../models/pacc_availability_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../theme/admin_theme.dart';
 import '../widgets/staff_schedule_calendar.dart';
+import '../widgets/staff_queue_refresh_button.dart';
 import 'admin_portal.dart';
 
 /// Operational dashboard for PACC Staff. It deliberately does not query
@@ -33,6 +34,11 @@ class StaffOperationsDashboardPage extends StatelessWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: StaffQueueRefreshButton(repository: repository),
+                ),
+                const SizedBox(height: 12),
                 if (snapshot.hasError)
                   const Padding(
                     padding: EdgeInsets.only(bottom: 16),
