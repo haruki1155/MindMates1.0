@@ -48,7 +48,7 @@ void main() {
     await tester.tap(day);
     await tester.pumpAndSettle();
     expect(find.text('9:00 AM · Counseling · Counselor Rivera'), findsNWidgets(2));
-    expect(find.text('Testing schedules: not yet connected'), findsNothing);
+    expect(find.textContaining('Testing schedules not yet connected'), findsOneWidget);
     expect(find.textContaining('Testing dates are currently arranged outside MindMate'), findsOneWidget);
   });
 
