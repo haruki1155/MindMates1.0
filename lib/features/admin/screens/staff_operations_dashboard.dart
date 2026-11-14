@@ -28,23 +28,62 @@ class StaffOperationsDashboardPage extends StatelessWidget {
         child: StreamBuilder<List<AppointmentQueueItem>>(
           stream: repository.watchPortalAppointmentQueue(),
           builder: (context, snapshot) {
-            if (snapshot.hasError) {
-              return _StateCard(
-                title: 'Unable to load staff appointments',
-                message: 'The schedule could not be loaded. Open the appointment table to retry.',
-                action: 'Open appointments',
-                onPressed: () => onNavigate(AdminPortalPage.appointments),
-              );
-            }
-            if (!snapshot.hasData) return const _StaffDashboardSkeleton();
-            return _DashboardContent(
-              appointments: snapshot.data!,
-              availability: repository.watchPaccAvailability(),
-              onNavigate: onNavigate,
+            // Always render the calendar shell. Connectivity or permission
+            // errors must be visible, not mistaken for an empty schedule.
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (snapshot.hasError)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: _ScheduleNotice(
+                      'Live appointments could not be loaded. '
+                      'Calendar counts are unavailable; check access or network.',
+                    ),
+                  )
+                else if (!snapshot.hasData)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: _ScheduleNotice(
+                      'Loading the staff appointment schedule…',
+                    ),
+                  ),
+                _DashboardContent(
+                  appointments: snapshot.hasError
+                      ? const <AppointmentQueueItem>[]
+                      : snapshot.data ?? const <AppointmentQueueItem>[],
+                  availability: repository.watchPaccAvailability(),
+                  onNavigate: onNavigate,
+                ),
+              ],
             );
           },
         ),
       ),
+    ),
+  );
+}
+
+class _ScheduleNotice extends StatelessWidget {
+  const _ScheduleNotice(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: AdminColors.accentFaint,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: AdminColors.border),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.info_outline, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text(message)),
+      ],
     ),
   );
 }
