@@ -43,7 +43,7 @@
 - Modify `lib/features/mood/screens/log_mood_screen.dart` — the split, the classification, the source-neutral confirmation.
 
 **Readers**
-- Modify `lib/features/home/screens/home_screen.dart`, `lib/features/profile/screens/profile_screen.dart`, `lib/features/profile/screens/mental_health_insights_screen.dart` — injection seams where tests need both states; the caption at `mental_health_insights_screen.dart:918`.
+- `lib/features/home/screens/home_screen.dart`, `lib/features/profile/screens/profile_screen.dart`, `lib/features/profile/screens/mental_health_insights_screen.dart` — **unchanged in the end**: the legacy fallbacks already existed, the readers never referenced the writer flag, and the two CI configurations gave both states without injection seams. Task 4 became reader *tests* in `test/providers/mood_provider_test.dart`.
 - Modify `lib/repositories/mood_v2_repository.dart` — defensive guard on `create` only.
 
 **CI**
@@ -194,7 +194,7 @@ the separately authorized pilot/test override mechanism and must keep working.
   - history events belonging to another uid are rejected (`_ownedV2History` behaviour preserved)
   - profile and insights render their V2 presentation with the flags on and legacy-only data
 - [ ] **Step 2: Run to verify they fail**
-- [ ] **Step 3: Implement.** Add flag parameters only where a test needs both states. Repoint the caption at `mental_health_insights_screen.dart:918` from `enabled` to `presentation`. Add a defensive guard so the legacy save path cannot reach `MoodV2Repository.create`'s bare `StateError`. **Leave `MoodV2Repository.fetchHistory` gated on the writer flag** — repointing it to a read flag would return V2-only history and recreate the empty-Journey failure.
+- [ ] **Step 3: Implement.** Add flag parameters only where a test needs both states. **Do not** repoint the caption at `mental_health_insights_screen.dart:918`; see the Correction section in the design doc — it is one-check-in-per-day policy, not a caption, and was left on the writer flag. No new guard is needed for `MoodV2Repository.create`: its `StateError` is already caught by `_saveMoodV2`'s handler and surfaces as the normal error message. **Leave `MoodV2Repository.fetchHistory` gated on the writer flag** — repointing it to a read flag would return V2-only history and recreate the empty-Journey failure.
 - [ ] **Step 4: Run to verify they pass**, plus `flutter test test/features/home test/features/profile test/providers` and `flutter analyze` on the touched paths
 - [ ] **Step 5: Commit** `feat(mood): keep V2 read surfaces working with legacy-only data`
 

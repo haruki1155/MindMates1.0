@@ -1706,6 +1706,74 @@ void main() {
     );
     expect(scrollable.controller?.offset ?? 0, 0);
   });
+
+  // The Journey summary card's closing copy invites another check-in. The
+  // legacy writer accepts one per day, so it must be absent when the
+  // protected writer is off. Only reachable when historyRead is on.
+  if (MoodV2FeatureFlag.historyRead) {
+    const invite = 'You can check in again whenever you need.';
+
+    MoodHistoryWindow seededHistory(DateTime now) => MoodHistoryWindow(
+      coverage: MoodHistoryCoverage.complete,
+      events: [
+        NormalizedMoodEvent(
+          id: 'entry-0',
+          userId: 'user_1',
+          level: 5,
+          dateKey: '2026-07-07',
+          occurredAt: now,
+          source: MoodEventSource.v2,
+          label: 'Great',
+        ),
+      ],
+    );
+
+    testWidgets('writer off: the summary does not invite another check-in', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime(2026, 7, 7, 12);
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: _RecordingMoodProvider(history: seededHistory(now)),
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_1')),
+          moodV2Presentation: true,
+          moodV2WriterEnabled: false,
+          nowProvider: () => now,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // The summary card is on screen...
+      expect(find.text('1 check-ins today'), findsOneWidget);
+      // ...but it does not offer a second entry.
+      expect(find.text(invite), findsNothing);
+    });
+
+    testWidgets('writer on: the summary still invites another check-in', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime(2026, 7, 7, 12);
+      await tester.pumpWidget(
+        _logMoodApp(
+          moodProvider: _RecordingMoodProvider(history: seededHistory(now)),
+          userProvider: UserProvider(_FakeUserRepository())
+            ..setUser(_user(id: 'user_1')),
+          moodV2Presentation: true,
+          moodV2WriterEnabled: true,
+          nowProvider: () => now,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 check-ins today'), findsOneWidget);
+      expect(find.text(invite), findsOneWidget);
+    });
+  }
 }
 
 /// Records any attempt to push a confirmed V2 entry into combined history, so

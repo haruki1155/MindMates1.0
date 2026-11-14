@@ -326,15 +326,6 @@ class _LogMoodScreenState extends State<LogMoodScreen>
             mood: _todayMood!,
             currentStreak: _readProviderOrNull<UserProvider>()?.user?.dayStreak,
           ),
-          if (widget.moodV2WriterEnabled) ...[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              key: const ValueKey('mood-v2-add-entry'),
-              onPressed: _isSaving ? null : _startAdditionalMoodEntry,
-              icon: const Icon(Icons.add_circle_outline_rounded),
-              label: const Text('Log another mood entry'),
-            ),
-          ],
           if (showV2History && !widget.moodV2Presentation) ...[
             const SizedBox(height: 20),
             _buildMoodV2HistoryPanel(moodProvider),

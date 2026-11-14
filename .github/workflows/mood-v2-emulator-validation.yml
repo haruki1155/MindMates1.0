@@ -110,17 +110,16 @@ jobs:
       # In a staging build the protected writer and the two compatibility
       # readers stay disabled, while presentation and the five student-facing
       # readers default to on.
-      - name: Confirm the Mood V2 staging flag contract
-        run: flutter test test/features/mood/mood_v2_feature_flag_test.dart test/features/mood/mood_v2_repository_test.dart --dart-define=APP_ENV=staging
-      - name: Confirm the Mood V2 default-disabled flag contract
-        run: flutter test test/features/mood/mood_v2_feature_flag_test.dart test/features/mood/mood_v2_repository_test.dart --dart-define=APP_ENV=development
+      # The flag contract is asserted by the test/features/mood runs below,
+      # which include mood_v2_feature_flag_test and mood_v2_repository_test in
+      # both environments.
       - name: Run focused Mood V2 UI tests on staging defaults
         run: flutter test test/features/mood --dart-define=APP_ENV=staging
       - name: Run focused Mood V2 UI tests on default-disabled flags
         run: flutter test test/features/mood --dart-define=APP_ENV=development
+      # Covers the reader surfaces (home, profile, providers) on staging
+      # defaults as part of the whole suite.
       - name: Run complete staging regression suite
         run: flutter test --dart-define=APP_ENV=staging
-      - name: Verify the staging-default reader surfaces
-        run: flutter test test/features/home test/features/profile test/providers --dart-define=APP_ENV=staging
       - name: Analyze Flutter source
         run: flutter analyze --no-pub

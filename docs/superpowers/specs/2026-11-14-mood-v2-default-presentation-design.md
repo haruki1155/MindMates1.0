@@ -175,6 +175,23 @@ Consequences, settled:
 - **`MoodV2FeatureFlag.actionLabel` keeps `writerEnabled = enabled`.** The `View today's mood` wording
   when the writer is off is deliberate policy, not a styling leftover, and stays.
 
+### Correction: the insights caption stays on the writer flag
+
+This supersedes the bullet above that says the caption at
+`mental_health_insights_screen.dart:918` "is a caption, not policy, so it is repointed to
+`presentation`". Implementation showed that conclusion was wrong, and it was **not** applied.
+
+That line reads
+`MoodV2FeatureFlag.enabled ? 'Log a mood' : actionLabel.startsWith('View') ? "View today's mood" : 'Log mood'`,
+and `actionLabel` is built at line 103 as `hasCheckedInToday ? "View today's mood" : 'Log mood →'`.
+The `enabled` branch therefore *overrides* the one-check-in-per-day wording with multi-entry
+wording. Repointing it to `presentation` would show "Log a mood" in staging to a student who has
+already checked in today, inviting an action the legacy writer refuses — this document's own
+anti-goal. It is the same policy the section above preserves for `actionLabel`, not styling.
+
+The line is left keyed to `MoodV2FeatureFlag.enabled`. An independent review confirmed this
+reading and that the design contradicted itself here.
+
 ### Test environment (user's decision)
 
 The existing suite stays on today's defaults so no existing test's behaviour shifts underneath it.
