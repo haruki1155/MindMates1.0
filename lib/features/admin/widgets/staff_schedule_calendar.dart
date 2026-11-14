@@ -72,8 +72,11 @@ class _StaffScheduleCalendarState extends State<StaffScheduleCalendar> {
   List<StaffScheduleEntry> get _entries {
     final counseling = widget.counselingAppointments.where((item) {
       if (item.isArchived) return false;
-      return const {'confirmed', 'completed', 'complete'}
-          .contains(item.status.trim().toLowerCase());
+      // Display pending requests separately, never as confirmed bookings.
+      return const {
+        'confirmed', 'completed', 'complete',
+        'requested', 'pending', 'upcoming', 'reschedule_proposed',
+      }.contains(item.status.trim().toLowerCase());
     }).map(StaffScheduleEntry.fromCounseling);
     final entries = <StaffScheduleEntry>[
       ...counseling,
@@ -99,10 +102,16 @@ class _StaffScheduleCalendarState extends State<StaffScheduleCalendar> {
           ? entry.timeLabel.trim()
           : TimeOfDay.fromDateTime(entry.scheduledAt).format(context);
 
-  String _detail(BuildContext context, StaffScheduleEntry entry) =>
-      '${_time(context, entry)} · '
-      '${entry.kind == StaffScheduleKind.counseling ? 'Counseling' : 'Testing'}'
-      ' · ${entry.assignedCounselor}';
+  String _detail(BuildContext context, StaffScheduleEntry entry) {
+    final status = entry.status.trim().toLowerCase();
+    final pending = const {
+      'requested', 'pending', 'upcoming', 'reschedule_proposed',
+    }.contains(status);
+    return '${_time(context, entry)} · '
+        '${entry.kind == StaffScheduleKind.counseling ? 'Counseling' : 'Testing'}'
+        ' · ${entry.assignedCounselor}'
+        '${pending ? ' · Pending (unconfirmed)' : ''}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -141,7 +150,7 @@ class _StaffScheduleCalendarState extends State<StaffScheduleCalendar> {
         Text(
           widget.testingSchedulesConnected
               ? 'Counseling and testing schedules'
-              : 'Counseling schedules · Testing schedules not yet connected',
+              : 'Counseling schedules and pending requests · Testing schedules not yet connected',
           style: const TextStyle(color: AdminColors.muted, fontSize: 12),
         ),
         const SizedBox(height: 14),
@@ -211,7 +220,14 @@ class _StaffScheduleCalendarState extends State<StaffScheduleCalendar> {
     bool compact,
   ) {
     final daily = all.where((item) => _sameDay(item.scheduledAt, date)).toList();
-    final counseling = daily.where((item) => item.kind == StaffScheduleKind.counseling).length;
+    final counseling = daily.where((item) =>
+        item.kind == StaffScheduleKind.counseling &&
+        const {'confirmed', 'completed', 'complete'}
+            .contains(item.status.trim().toLowerCase())).length;
+    final pending = daily.where((item) =>
+        item.kind == StaffScheduleKind.counseling &&
+        const {'requested', 'pending', 'upcoming', 'reschedule_proposed'}
+            .contains(item.status.trim().toLowerCase())).length;
     final testing = daily.where((item) => item.kind == StaffScheduleKind.testing).length;
     final active = _sameDay(date, _selected);
     final inMonth = date.month == _month.month && date.year == _month.year;
@@ -250,6 +266,10 @@ class _StaffScheduleCalendarState extends State<StaffScheduleCalendar> {
                     )),
                     if (counseling > 0)
                       Text(compact ? '$counseling C' : '$counseling counseling',
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: compact ? 10 : 11)),
+                    if (pending > 0)
+                      Text(compact ? '$pending P' : '$pending pending',
                           maxLines: 1, overflow: TextOverflow.ellipsis,
                           style: TextStyle(fontSize: compact ? 10 : 11)),
                     if (widget.testingSchedulesConnected && testing > 0)
