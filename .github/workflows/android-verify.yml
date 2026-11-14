@@ -52,18 +52,64 @@ jobs:
 
   functions:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: functions
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: functions/package-lock.json
-      - run: npm ci
-      - run: npm test
+      # 21 of the 40 suites drive a real Firestore/Auth emulator and assert
+      # on the deployed rules and callables. Without one they fail outright
+      # rather than skipping, so this job ran red and gated nothing. The whole
+      # suite now runs inside the emulator: no file list to keep in sync, and
+      # a new emulator-backed test cannot silently stop running.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install Functions and a local Firebase CLI
+        run: |
+          npm ci --prefix functions
+          npm install --prefix "$RUNNER_TEMP/fn-firebase-tools" --no-save firebase-tools@15.29.0
+      - name: Prepare an isolated, credential-free test environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+          mkdir -p "$RUNNER_TEMP/fn-firebase-home" "$RUNNER_TEMP/fn-empty-gcloud"
+          chmod 700 "$RUNNER_TEMP/fn-firebase-home" "$RUNNER_TEMP/fn-empty-gcloud"
+          {
+            echo "HOME=$RUNNER_TEMP/fn-firebase-home"
+            echo "CLOUDSDK_CONFIG=$RUNNER_TEMP/fn-empty-gcloud"
+            echo "GOOGLE_APPLICATION_CREDENTIALS="
+            echo "FIREBASE_TOKEN="
+            echo "MOOD_V2_STAGING_PILOT_UIDS="
+            echo "SUPER_ADMIN_UID=functions-ci-super-admin"
+          } >> "$GITHUB_ENV"
+      - run: npm run build --prefix functions
+      - name: Provide the synthetic parameter the emulator needs to discover functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Emulator discovery requires every defineString parameter to resolve.
+          # This non-privileged placeholder exists only on the ephemeral runner.
+          echo 'SUPER_ADMIN_UID=functions-ci-super-admin' > functions/.env.local
+          chmod 600 functions/.env.local
+      - name: Prepare the local Firestore emulator binary
+        run: '"$RUNNER_TEMP/fn-firebase-tools/node_modules/.bin/firebase" setup:emulators:firestore'
+      - name: Run the Functions suite against the demo-project emulators
+        env:
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
+          FIREBASE_AUTH_EMULATOR_HOST: 127.0.0.1:9099
+          FUNCTIONS_EMULATOR_HOST: 127.0.0.1
+          FUNCTIONS_EMULATOR_PORT: '5001'
+          GCLOUD_PROJECT: demo-mindmate-mood-v2
+        run: |
+          FIREBASE_BIN="$RUNNER_TEMP/fn-firebase-tools/node_modules/.bin/firebase"
+          "$FIREBASE_BIN" emulators:exec --config firebase.mood-v2.emulators.json --project demo-mindmate-mood-v2 --only auth,firestore,functions "cd functions && npm test"
 
   production-release:
     if: github.event_name == 'workflow_dispatch' && inputs.build_production_release
