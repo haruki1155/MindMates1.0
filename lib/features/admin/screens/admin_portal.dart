@@ -38,6 +38,7 @@ import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
 import '../widgets/pacc_schedule_editor_widgets.dart';
 import '../widgets/clinical_interview_widgets.dart';
+import '../widgets/counselor_inquiry_workspace.dart';
 import '../domain/session_evidence.dart';
 
 const _yellow = AdminColors.accentStrong;
@@ -64,7 +65,6 @@ enum AdminPortalPage {
   notifications,
   availability,
   inquiries,
-  counselorMessages,
   assessments,
   profile,
 }
@@ -83,7 +83,6 @@ extension on AdminPortalPage {
     AdminPortalPage.notifications => 'Notifications',
     AdminPortalPage.availability => 'Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
-    AdminPortalPage.counselorMessages => 'Counselor Messages',
     AdminPortalPage.assessments => 'Assessment',
     AdminPortalPage.profile => 'Profile',
   };
@@ -108,7 +107,6 @@ extension on AdminPortalPage {
     AdminPortalPage.notifications => Icons.notifications_outlined,
     AdminPortalPage.availability => Icons.storefront_outlined,
     AdminPortalPage.inquiries => Icons.chat_bubble_outline_rounded,
-    AdminPortalPage.counselorMessages => Icons.forum_outlined,
     AdminPortalPage.assessments => Icons.assignment_outlined,
     AdminPortalPage.profile => Icons.account_circle_outlined,
   };
@@ -598,7 +596,6 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       controller: _scheduleController,
     ),
     AdminPortalPage.inquiries => _InquiriesPage(repository: _repository),
-    AdminPortalPage.counselorMessages => const CounselorMessagesPage(),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
   };
@@ -641,7 +638,6 @@ class _Nav extends StatelessWidget {
     AdminPortalPage.assessments => accessRole.canAccessClinicalData,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
-    AdminPortalPage.counselorMessages => accessRole == AccessRole.counselor,
     AdminPortalPage.appointments =>
       accessRole.canUsePortal || accessRole == AccessRole.admin,
     AdminPortalPage.availability => canShowScheduleNavigation(accessRole),
@@ -662,7 +658,6 @@ class _Nav extends StatelessWidget {
         AdminPortalPage.availability,
         AdminPortalPage.cases,
         AdminPortalPage.inquiries,
-        AdminPortalPage.counselorMessages,
       ]),
       const _NavSection('Insights', [
         AdminPortalPage.assessments,
@@ -813,9 +808,10 @@ class _Nav extends StatelessWidget {
                                 size: 21,
                               ),
                               trailing:
-                                  item == AdminPortalPage.counselorMessages
-                                  ? const CounselorInboxUnreadBadge()
-                                  : null,
+                                  item == AdminPortalPage.inquiries &&
+                                          accessRole == AccessRole.counselor
+                                      ? const CounselorInboxUnreadBadge()
+                                      : null,
                               title: Text(
                                 item.workspaceLabel,
                                 style: const TextStyle(
@@ -5236,8 +5232,18 @@ class _InquiriesPageState extends State<_InquiriesPage> {
   @override
   Widget build(BuildContext context) => _Page(
     title: 'Inquiries',
-    subtitle: 'Review, acknowledge, and resolve submitted inquiries.',
-    child: StreamBuilder<List<AdminInquiryModel>>(
+    subtitle: widget.repository.currentAccessRole == AccessRole.counselor
+        ? 'Student messages and other PACC service inquiries.'
+        : 'Review, acknowledge, and resolve submitted inquiries.',
+    child: widget.repository.currentAccessRole == AccessRole.counselor
+        ? CounselorInquiryWorkspace(
+            messages: const CounselorMessagesPage(embedded: true),
+            otherServices: _buildServiceInquiries(),
+          )
+        : _buildServiceInquiries(),
+  );
+
+  Widget _buildServiceInquiries() => StreamBuilder<List<AdminInquiryModel>>(
       stream: widget.repository.watchInquiries(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const _AccessPanel();
@@ -5316,8 +5322,7 @@ class _InquiriesPageState extends State<_InquiriesPage> {
           ],
         );
       },
-    ),
-  );
+    );
 }
 
 class _InquiryList extends StatelessWidget {
