@@ -53,7 +53,7 @@ void main() {
     expect(find.text('Prompt follow-up'), findsWidgets);
     expect(find.text('Routine monitoring'), findsWidgets);
     expect(find.text('Engagement'), findsOneWidget);
-    expect(find.text('Secret Chat'), findsOneWidget);
+    expect(find.text('Forum'), findsOneWidget);
     expect(find.text('13'), findsOneWidget);
     expect(find.text('3'), findsWidgets);
   });

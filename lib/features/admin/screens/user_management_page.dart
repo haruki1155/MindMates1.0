@@ -6,9 +6,9 @@ import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../domain/admin_management_models.dart';
 import '../theme/admin_theme.dart';
-import 'profile_management_page.dart';
+import '../widgets/app_user_directory_table.dart';
 
-enum UserManagementCategory { appUsers, staff, admin }
+enum UserManagementCategory { students, employees, staff, admin }
 
 class UserManagementPage extends StatefulWidget {
   const UserManagementPage({
@@ -24,7 +24,7 @@ class UserManagementPage extends StatefulWidget {
 }
 
 class _UserManagementPageState extends State<UserManagementPage> {
-  UserManagementCategory category = UserManagementCategory.appUsers;
+  UserManagementCategory category = UserManagementCategory.students;
   String query = '';
   String staffRoleFilter = 'All roles';
   String staffStatusFilter = 'All account statuses';
@@ -33,13 +33,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
   bool _bulkUpdatingStaff = false;
   String? _bulkActionInProgress;
   final searchController = TextEditingController();
-  late Future<List<PublicAppUserRecord>> publicUsers;
-  int? publicUserCount;
 
   @override
   void initState() {
     super.initState();
-    publicUsers = _loadPublicUsers();
     _syncStaffAuthMetadata();
   }
 
@@ -138,24 +135,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   },
                 ),
                 const SizedBox(height: 24),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _categoryButton(
-                      UserManagementCategory.appUsers,
-                      'App users  ${publicUserCount ?? '…'}',
-                    ),
-                    _categoryButton(
-                      UserManagementCategory.staff,
-                      'Staff / Counselors (${staff.length})',
-                    ),
-                    _categoryButton(
-                      UserManagementCategory.admin,
-                      'Admin  ${admins.length}',
-                    ),
-                  ],
-                ),
+                _categoryNavigation(staff.length, admins.length),
                 const SizedBox(height: 14),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 560),
@@ -165,8 +145,10 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         setState(() => query = value.trim().toLowerCase()),
                     decoration: InputDecoration(
                       prefixIcon: const Icon(Icons.search, size: 20),
-                      hintText: category == UserManagementCategory.appUsers
-                          ? 'Search Student ID or Public User ID'
+                      hintText: category == UserManagementCategory.students
+                          ? 'Search student ID or name'
+                          : category == UserManagementCategory.employees
+                          ? 'Search employee ID or name'
                           : 'Search name, email, or employee ID',
                       suffixIcon: query.isEmpty
                           ? null
@@ -221,7 +203,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                       padding: EdgeInsets.all(
                         MediaQuery.sizeOf(context).width < 600 ? 12 : 20,
                       ),
-                      child: category == UserManagementCategory.appUsers
+                      child:
+                          category == UserManagementCategory.students ||
+                              category == UserManagementCategory.employees
                           ? _appUsersTable(all)
                           : _adminProfiles(admins),
                     ),
@@ -234,16 +218,96 @@ class _UserManagementPageState extends State<UserManagementPage> {
     );
   }
 
-  Widget _categoryButton(UserManagementCategory value, String label) =>
-      ChoiceChip(
-        selected: category == value,
-        label: Text(label),
-        onSelected: (_) => setState(() {
-          category = value;
-          query = '';
-          searchController.clear();
-        }),
-      );
+  // A single connected navigation surface, not a row of unrelated chips.
+  // Wide layouts distribute tabs evenly; narrow layouts scroll horizontally.
+  Widget _categoryNavigation(int staffCount, int adminCount) {
+    final tabs = <(UserManagementCategory, String)>[
+      (UserManagementCategory.students, 'Students'),
+      (UserManagementCategory.employees, 'Employees'),
+      (UserManagementCategory.staff, 'Staff / Counselors ($staffCount)'),
+      (UserManagementCategory.admin, 'Admin $adminCount'),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 720;
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Container(
+            key: const Key('user-category-segmented-nav'),
+            width: wide ? constraints.maxWidth : null,
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: AdminColors.surfaceMuted,
+              border: Border.all(color: AdminColors.border),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              mainAxisSize: wide ? MainAxisSize.max : MainAxisSize.min,
+              children: [
+                for (final tab in tabs)
+                  if (wide)
+                    Expanded(child: _categorySegment(tab.$1, tab.$2))
+                  else
+                    SizedBox(
+                      width: tab.$1 == UserManagementCategory.staff ? 190 : 132,
+                      child: _categorySegment(tab.$1, tab.$2),
+                    ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _categorySegment(UserManagementCategory value, String label) {
+    final selected = category == value;
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: Key('user-tab-${value.name}'),
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => setState(() {
+              category = value;
+              query = '';
+              searchController.clear();
+            }),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 8),
+              decoration: BoxDecoration(
+                color: selected ? AdminColors.accentSoft : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: selected
+                    ? Border.all(color: AdminColors.border)
+                    : Border.all(color: Colors.transparent),
+              ),
+              child: Center(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: AdminColors.ink,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _userFilter({
     required String value,
@@ -262,131 +326,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
     ),
   );
 
-  Widget _appUsersTable(
-    List<UserModel> allProfiles,
-  ) => FutureBuilder<List<PublicAppUserRecord>>(
-    future: publicUsers,
-    builder: (context, snapshot) {
-      if (snapshot.connectionState != ConnectionState.done) {
-        return const Center(child: CircularProgressIndicator());
-      }
-      if (snapshot.hasError) {
-        return Column(
-          children: [
-            const Text('Unable to load anonymous app users.'),
-            FilledButton(
-              onPressed: _refreshPublicUsers,
-              child: const Text('Retry'),
-            ),
-          ],
-        );
-      }
-      final profilesById = {for (final user in allProfiles) user.id: user};
-      final users = (snapshot.data ?? const <PublicAppUserRecord>[]).where((
-        user,
-      ) {
-        final profile = profilesById[user.userId];
-        return query.isEmpty ||
-            user.publicUserId.toLowerCase().contains(query) ||
-            user.department.toLowerCase().contains(query) ||
-            (profile?.displayName.toLowerCase().contains(query) ?? false);
-      }).toList();
-      if (users.isEmpty) return const Text('No app users found.');
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.shield_outlined, size: 18, color: AdminColors.muted),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'App-user records are visible only to the authorized administrator.',
-                  style: TextStyle(color: AdminColors.muted, fontSize: 13),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          LayoutBuilder(
-            builder: (context, box) {
-              if (box.maxWidth < 760) {
-                return Column(
-                  children: users
-                      .map(
-                        (user) => _CompactAppUserRow(
-                          record: user,
-                          profile: profilesById[user.userId],
-                          onView: profilesById[user.userId] == null
-                              ? null
-                              : () => showManagedUserProfile(
-                                  context,
-                                  profilesById[user.userId]!,
-                                ),
-                        ),
-                      )
-                      .toList(),
-                );
-              }
-              return SizedBox(
-                width: double.infinity,
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('Public user ID')),
-                    DataColumn(label: Text('Role')),
-                    DataColumn(label: Text('Department')),
-                    DataColumn(label: Text('Status')),
-                    DataColumn(label: Text('Account created')),
-                    DataColumn(label: Text('Actions')),
-                  ],
-                  rows: users
-                      .map(
-                        (user) => DataRow(
-                          cells: [
-                            DataCell(
-                              Text(
-                                user.publicUserId,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            DataCell(Text(user.populationRole.label)),
-                            DataCell(
-                              Text(
-                                user.department.isEmpty
-                                    ? 'Not provided'
-                                    : user.department,
-                              ),
-                            ),
-                            const DataCell(Text('Active')),
-                            DataCell(Text(_date(user.createdAt))),
-                            DataCell(
-                              OutlinedButton.icon(
-                                onPressed: profilesById[user.userId] == null
-                                    ? null
-                                    : () => showManagedUserProfile(
-                                        context,
-                                        profilesById[user.userId]!,
-                                      ),
-                                icon: const Icon(
-                                  Icons.visibility_outlined,
-                                  size: 17,
-                                ),
-                                label: const Text('View user'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                      .toList(),
-                ),
-              );
-            },
-          ),
-        ],
-      );
-    },
+  Widget _appUsersTable(List<UserModel> profiles) => AppUserDirectoryTable(
+    repository: widget.repository,
+    profiles: profiles,
+    group: category == UserManagementCategory.employees
+        ? AppDirectoryGroup.employees
+        : AppDirectoryGroup.students,
+    query: query,
   );
 
   Widget _staffTable(List<UserModel> values) {
@@ -1396,16 +1342,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
     ),
   ];
 
-  Future<void> _refreshPublicUsers() async {
-    setState(() => publicUsers = _loadPublicUsers());
-  }
-
-  Future<List<PublicAppUserRecord>> _loadPublicUsers() async {
-    final users = await widget.repository.listPublicAppUsers();
-    if (mounted) setState(() => publicUserCount = users.length);
-    return users;
-  }
-
   Future<void> _showOrganizationDirectory() => showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
@@ -1541,104 +1477,6 @@ class _UserManagementPageState extends State<UserManagementPage> {
     name.dispose();
     code.dispose();
   }
-}
-
-class _CompactAppUserRow extends StatelessWidget {
-  const _CompactAppUserRow({
-    required this.record,
-    required this.profile,
-    required this.onView,
-  });
-
-  final PublicAppUserRecord record;
-  final UserModel? profile;
-  final VoidCallback? onView;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(bottom: 8),
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: AdminColors.canvas,
-      borderRadius: BorderRadius.circular(9),
-      border: Border.all(color: AdminColors.border),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Icon(
-              Icons.person_outline,
-              size: 19,
-              color: AdminColors.muted,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                record.publicUserId,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-            _UserBadge(label: record.populationRole.label),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 18,
-          runSpacing: 7,
-          children: [
-            _AppUserFact(
-              label: 'Department',
-              value: record.department.isEmpty
-                  ? 'Not provided'
-                  : record.department,
-            ),
-            _AppUserFact(
-              label: 'Account created',
-              value: _date(record.createdAt),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: onView,
-            icon: const Icon(Icons.visibility_outlined, size: 17),
-            label: const Text('View user'),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _AppUserFact extends StatelessWidget {
-  const _AppUserFact({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) => RichText(
-    text: TextSpan(
-      style: const TextStyle(color: AdminColors.ink, fontSize: 12),
-      children: [
-        TextSpan(
-          text: '$label: ',
-          style: const TextStyle(
-            color: AdminColors.muted,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        TextSpan(
-          text: value,
-          style: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-      ],
-    ),
-  );
 }
 
 class _StaffRecordCard extends StatelessWidget {
@@ -1829,6 +1667,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
     'Appointment rescheduled',
     'Appointment completed',
     'Schedule adjustment requested',
+    'Student information viewed',
   ];
 
   @override
@@ -1871,7 +1710,9 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
       setState(() {
         loading = false;
         loadingMore = false;
-        error = "We couldn't load this activity log.";
+        error = _actionValue() == 'STUDENT_PERSONAL_INFO_VIEWED'
+            ? 'Activity log unavailable: a required database index is not deployed.'
+            : "We couldn't load this activity log.";
       });
     }
   }
@@ -1899,6 +1740,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
     'Appointment rescheduled' => 'APPOINTMENT_RESCHEDULED',
     'Appointment completed' => 'APPOINTMENT_COMPLETED',
     'Schedule adjustment requested' => 'APPOINTMENT_ADJUSTMENT_REQUESTED',
+    'Student information viewed' => 'STUDENT_PERSONAL_INFO_VIEWED',
     _ => '',
   };
 
@@ -1947,6 +1789,13 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
               },
             ),
           ],
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 6),
+          child: Text(
+            'Student information views appear under their own filter.',
+            style: TextStyle(fontSize: 12, color: AdminColors.muted),
+          ),
         ),
         if (events.isEmpty)
           const Expanded(
@@ -2088,6 +1937,7 @@ String _auditActionLabel(String action) => switch (action) {
   'STAFF_ACCOUNT_REACTIVATED' => 'Account reactivated',
   'STAFF_REGISTRATION_APPROVED' => 'Staff registration approved',
   'STAFF_REGISTRATION_REJECTED' => 'Staff registration removed',
+  'STUDENT_PERSONAL_INFO_VIEWED' => 'Student information viewed',
   'accessRoleAssigned' => 'Role changed',
   'staffAccountEnabled' => 'Account reactivated',
   'staffAccountDisabled' => 'Account suspended',

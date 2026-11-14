@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_assets.dart';
+import '../../../routes/route_names.dart';
 import 'client_feedback_form_screen.dart';
+import '../widgets/client_feedback_qr_card.dart';
 import 'guidance_satisfaction_survey_screen.dart';
 import 'pacc_counseling_screen.dart';
 
@@ -64,6 +66,7 @@ class ServiceDetailData {
     this.hasShiftingProcedure = false,
     this.hasSatisfactionSurvey = false,
     this.hasClientFeedbackForm = false,
+    this.hasFeedbackQr = false,
     this.guides = const [],
   });
 
@@ -78,6 +81,7 @@ class ServiceDetailData {
   final bool hasShiftingProcedure;
   final bool hasSatisfactionSurvey;
   final bool hasClientFeedbackForm;
+  final bool hasFeedbackQr;
   final List<ServiceGuideData> guides;
 }
 
@@ -115,6 +119,15 @@ class ServiceDetailScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 18),
                     Text(service.description, style: _DetailText.body),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.support_agent_outlined),
+                      label: const Text('Ask PACC'),
+                      onPressed: () => Navigator.of(context).pushNamed(
+                        RouteNames.counselorChat,
+                        arguments: service.title,
+                      ),
+                    ),
                     if (service.guides.isNotEmpty) ...[
                       const SizedBox(height: 32),
                       _ServiceGuideSection(guides: service.guides),
@@ -169,6 +182,10 @@ class ServiceDetailScreen extends StatelessWidget {
                         buttonLabel: 'Open Client Feedback Form',
                         onTap: () => _openClientFeedbackForm(context),
                       ),
+                    ],
+                    if (service.hasFeedbackQr) ...[
+                      const SizedBox(height: 32),
+                      const ClientFeedbackQrCard(),
                     ],
                   ],
                 ),

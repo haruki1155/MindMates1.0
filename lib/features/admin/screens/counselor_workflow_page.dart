@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../models/appointment_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
 
 enum CounselorWorkflowMode { cases, followUps }
@@ -12,15 +13,19 @@ class CounselorWorkflowPage extends StatelessWidget {
     required this.repository,
     required this.mode,
     required this.onOpenAppointments,
+    this.onModeChanged,
+    this.studentInfoLoader,
   });
 
+  final StudentPersonalInfoLoader? studentInfoLoader;
   final AdminPortalRepository repository;
   final CounselorWorkflowMode mode;
   final VoidCallback onOpenAppointments;
+  final ValueChanged<CounselorWorkflowMode>? onModeChanged;
 
   @override
   Widget build(BuildContext context) => StreamBuilder<List<AppointmentModel>>(
-    stream: repository.watchAppointments(),
+    stream: repository.watchMyAssignedAppointments(),
     builder: (context, snapshot) {
       if (snapshot.hasError) {
         return const Center(
@@ -41,14 +46,9 @@ class CounselorWorkflowPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  mode == CounselorWorkflowMode.cases
-                      ? 'My Cases'
-                      : 'Follow-ups',
-                  style: const TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w900,
-                  ),
+                const Text(
+                  'My Cases',
+                  style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -56,6 +56,28 @@ class CounselorWorkflowPage extends StatelessWidget {
                       ? 'Continue assigned counseling work with privacy-safe student identifiers.'
                       : 'Review actual post-session follow-up offers and bookings.',
                   style: const TextStyle(color: AdminColors.muted),
+                ),
+                const SizedBox(height: 18),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Assigned Cases'),
+                      selected: mode == CounselorWorkflowMode.cases,
+                      onSelected: onModeChanged == null
+                          ? null
+                          : (_) => onModeChanged!(CounselorWorkflowMode.cases),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Follow-ups'),
+                      selected: mode == CounselorWorkflowMode.followUps,
+                      onSelected: onModeChanged == null
+                          ? null
+                          : (_) =>
+                                onModeChanged!(CounselorWorkflowMode.followUps),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 24),
                 _Summary(
@@ -74,6 +96,9 @@ class CounselorWorkflowPage extends StatelessWidget {
                       appointment: appointment,
                       followUp: mode == CounselorWorkflowMode.followUps,
                       onOpenAppointments: onOpenAppointments,
+                      canViewStudentInfo:
+                          repository.currentAccessRole.canAccessClinicalData,
+                      studentInfoLoader: studentInfoLoader,
                     ),
                   ),
               ],
@@ -115,7 +140,7 @@ class _Summary extends StatelessWidget {
     children: [
       Expanded(
         child: _Metric(
-          label: followUps ? 'Needs action' : 'Assigned cases',
+          label: followUps ? 'Follow-up records' : 'Assigned cases',
           value: '${items.length}',
         ),
       ),
@@ -163,14 +188,22 @@ class _WorkCard extends StatelessWidget {
     required this.appointment,
     required this.followUp,
     required this.onOpenAppointments,
+    required this.canViewStudentInfo,
+    this.studentInfoLoader,
   });
   final AppointmentModel appointment;
   final bool followUp;
   final VoidCallback onOpenAppointments;
+  final bool canViewStudentInfo;
+  final StudentPersonalInfoLoader? studentInfoLoader;
   @override
   Widget build(BuildContext context) {
     final id = appointment.userId;
     final suffix = id.length > 4 ? id.substring(id.length - 4) : id;
+    final recordedName = appointment.fullName.trim();
+    final displayName = recordedName.isEmpty
+        ? 'Student ••••$suffix'
+        : recordedName;
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(18),
@@ -184,8 +217,8 @@ class _WorkCard extends StatelessWidget {
           CircleAvatar(
             backgroundColor: AdminColors.accentSoft,
             child: Text(
-              '••••$suffix',
-              style: const TextStyle(fontSize: 10, color: AdminColors.ink),
+              displayName.substring(0, 1).toUpperCase(),
+              style: const TextStyle(fontSize: 14, color: AdminColors.ink),
             ),
           ),
           const SizedBox(width: 14),
@@ -194,7 +227,7 @@ class _WorkCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Student ••••$suffix',
+                  displayName,
                   style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 5),
@@ -217,6 +250,11 @@ class _WorkCard extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          ViewStudentInformationButton(
+            userId: appointment.userId,
+            canView: canViewStudentInfo,
+            loader: studentInfoLoader,
           ),
           TextButton(
             onPressed: onOpenAppointments,

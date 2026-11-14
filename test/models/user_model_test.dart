@@ -175,5 +175,24 @@ void main() {
       expect(user.quickAssessmentCompleted, isTrue);
       expect(user.quickAssessmentCompletedAt, DateTime(2026, 7, 7, 9, 30));
     });
+
+    test('reads roster flags and defaults them to false', () {
+      final bare = UserModel.fromJson({'id': 'u', 'email': 'a@b.c'});
+      expect(bare.personalInfoRequired, isFalse);
+      expect(bare.rosterLinked, isFalse);
+      final flagged = UserModel.fromJson({
+        'id': 'u',
+        'email': 'a@b.c',
+        'personalInfoRequired': true,
+        'rosterLinked': true,
+      });
+      expect(flagged.personalInfoRequired, isTrue);
+      expect(flagged.rosterLinked, isTrue);
+      expect(flagged.toJson()['personalInfoRequired'], isTrue);
+      expect(flagged.toJson()['rosterLinked'], isTrue);
+      final cleared = flagged.copyWith(personalInfoRequired: false);
+      expect(cleared.personalInfoRequired, isFalse);
+      expect(cleared.rosterLinked, isTrue);
+    });
   });
 }

@@ -103,11 +103,11 @@ Future<void> showAppointmentDetailsSheet(
       height: MediaQuery.sizeOf(context).height,
       child: RepaintBoundary(key: const ValueKey('appointment-details-page'), child: Scaffold(
         backgroundColor: AppointmentVisuals.background,
-        body: SafeArea(bottom: false, child: Column(children: [
+        body: SafeArea(bottom: false, child: SingleChildScrollView(child: Column(children: [
           AppointmentPageHeader(title: 'Appointment details', subtitle: 'Everything about your PACC request.', onBack: () => Navigator.pop(context)),
-          Expanded(child: Align(alignment: Alignment.topCenter, child: ConstrainedBox(
+          Align(alignment: Alignment.topCenter, child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 640),
-            child: SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Container(
                 key: const ValueKey('appointment-session-summary'),
                 padding: const EdgeInsets.all(20),
@@ -173,8 +173,8 @@ Future<void> showAppointmentDetailsSheet(
               const SizedBox(height: 16),
               const Text('Appointment details are private to you and authorized PACC staff.', style: AppointmentVisuals.body),
             ])),
-          ))),
-        ])),
+          )),
+        ]))),
         bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
           if (canEdit && current.hasVerifiedPendingScheduleChange && current.proposedBy == 'counselor') Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),

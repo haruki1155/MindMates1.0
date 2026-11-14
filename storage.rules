@@ -24,6 +24,48 @@ service firebase.storage {
       allow delete: if isOwner(userId);
     }
 
+    // Task #10: confidential counselor interview files.
+    function isVerifiedClinician() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('accessRole',
+             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('role', 'appUser')) in ['counselor', 'admin']
+        && (
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('accessRole', 'appUser') == 'admin'
+          || firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', null) == null
+          || (
+            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', '') == 'approved'
+            && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('accountStatus', '') == 'active'
+          )
+        );
+    }
+    function appointmentRecordExists(appointmentId) {
+      return firestore.exists(/databases/(default)/documents/appointments/$(appointmentId));
+    }
+    match /counseling_session_files/{appointmentId}/{uploaderUid}/{fileName} {
+      allow get: if isVerifiedClinician() && appointmentRecordExists(appointmentId);
+      allow list: if false;
+      allow create: if isVerifiedClinician()
+        && request.auth.uid == uploaderUid
+        && appointmentRecordExists(appointmentId)
+        && firestore.get(/databases/(default)/documents/appointments/$(appointmentId)).data.status == 'confirmed'
+        && fileName.matches('^[a-f0-9]{32}[.](jpg|jpeg|png|pdf|doc|docx)$')
+        && request.resource.size > 0
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType in [
+          'image/jpeg', 'image/png', 'application/pdf', 'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        ]
+        && request.resource.metadata.uploadedBy == uploaderUid
+        && request.resource.metadata.appointmentId == appointmentId;
+      allow delete: if isVerifiedClinician()
+        && request.auth.uid == uploaderUid
+        && appointmentRecordExists(appointmentId)
+        && firestore.get(/databases/(default)/documents/appointments/$(appointmentId)).data.status == 'confirmed';
+      allow update: if false;
+    }
+
     match /profile_images/{userId}/{fileName} {
       allow read: if signedIn();
       allow create, update: if isOwner(userId)

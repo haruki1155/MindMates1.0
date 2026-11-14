@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/authentication/auth_flow_routes.dart';
 import 'package:mind_mates/features/splash/screens/splash_screen.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
@@ -64,6 +65,31 @@ void main() {
     expect(userRepository.loadedUid, 'user_1');
   });
 
+  testWidgets('splash sends a student owing information to the form', (
+    tester,
+  ) async {
+    final userRepository = _FakeUserRepository(
+      user: const UserModel(
+        id: 'user_1',
+        email: 'leo@example.com',
+        populationRole: PopulationRole.student,
+        personalInfoRequired: true,
+        profileVersion: 3,
+      ),
+    );
+    await tester.pumpWidget(
+      _SplashHarness(
+        authProvider: AuthProvider(
+          _FakeAuthRepository(currentUserId: 'user_1'),
+        ),
+        userProvider: UserProvider(userRepository),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 1901));
+    await tester.pumpAndSettle();
+    expect(find.text('student info target'), findsOneWidget);
+  });
+
   test('post-auth destination opens onboarding before quick assessment', () {
     expect(
       destinationAfterAuthentication(hasCompletedQuickAssessment: false),
@@ -104,6 +130,10 @@ class _SplashHarness extends StatelessWidget {
           RouteNames.splash: (_) => const SplashScreen(),
           RouteNames.login: (_) => const _RouteMarker('login target'),
           RouteNames.home: (_) => const _RouteMarker('home target'),
+          RouteNames.studentInformation: (_) =>
+              const _RouteMarker('student info target'),
+          RouteNames.profileSetup: (_) =>
+              const _RouteMarker('profile setup target'),
         },
       ),
     );

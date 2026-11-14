@@ -1,5 +1,11 @@
 # UI refresh validation
 
+## PR 42 alignment with main
+
+Merged `origin/main` at `79e80a085b15a86c41ed08384342d4b4bffa7535` into the announcement branch. Resolved admin_portal.dart by retaining main's Schedule visibility and counselor messaging helpers alongside the tested announcement navigation. Resolved home_screen.dart by retaining the announcement entry without restoring main's removed standalone mood CTA. Main's roster, appointments, messaging, streak and Mood V2 changes remain intact.
+
+The Home mood-navigation regression now asserts absence of the obsolete mood CTA specifically, rather than forbidding all HomeWideButton widgets; Announcements is intentionally a wide button. Its navigation test passed. The Teaching assessment-title mismatch reproduced with main's exact Home implementation; left unchanged. Functions build and 10 announcement backend/config tests passed. Scoped analysis found no issues; final focused merge regression results are recorded in the PR update. Original checkout and its dirty files were not synchronized or altered.
+
 Implementation is uncommitted in `.worktrees/announcements`, branch `feat/pacc-announcements`, based on `848a8f2`.
 
 ## PR preparation update

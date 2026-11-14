@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/constants/app_colors.dart';
 import '../../../models/appointment_model.dart';
 
 /// Presentation only; lifecycle values and eligibility remain in the model.
@@ -7,7 +8,38 @@ abstract final class AppointmentVisuals {
   static const background = Color(0xFFF7F8F4);
   static const ink = Color(0xFF1D343C);
   static const muted = Color(0xFF73878E);
-  static const teal = Color(0xFF285D59);
+  static const teal = AppColors.primary;
+  static const iconTint = AppColors.primary;
+  static final iconSurface = Color.alphaBlend(
+    AppColors.primary.withValues(alpha: .1),
+    const Color(0xFFFFFFFF),
+  );
+  static final confirmedSurface = Color.alphaBlend(
+    AppColors.primary.withValues(alpha: .12),
+    const Color(0xFFFFFFFF),
+  );
+
+  static final confirmedInk = Color.alphaBlend(
+    const Color(0xFF000000).withValues(alpha: .15),
+    AppColors.primary,
+  );
+
+  /// (background, foreground) per status; pending/confirmed/cancelled stay distinct.
+  static (Color, Color) statusColors(AppointmentStatus status) => switch (status) {
+    AppointmentStatus.requested || AppointmentStatus.legacyRequested => (
+      const Color(0xFFFFF3D7),
+      const Color(0xFF91600B),
+    ),
+    AppointmentStatus.confirmed || AppointmentStatus.completed => (
+      confirmedSurface,
+      confirmedInk,
+    ),
+    AppointmentStatus.cancelled || AppointmentStatus.declined => (
+      const Color(0xFFFBECE9),
+      const Color(0xFF9B4238),
+    ),
+    _ => (const Color(0xFFEEF1F3), const Color(0xFF526B79)),
+  };
   static const gold = Color(0xFFF8BF3C);
   static const line = Color(0xFFE5EAE5);
   static const title = TextStyle(
@@ -62,21 +94,8 @@ class AppointmentStatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effective = pendingLabel == null ? status : AppointmentStatus.requested;
-    final (background, foreground) = switch (effective) {
-      AppointmentStatus.requested || AppointmentStatus.legacyRequested => (
-        const Color(0xFFFFF3D7),
-        const Color(0xFF91600B),
-      ),
-      AppointmentStatus.confirmed || AppointmentStatus.completed => (
-        const Color(0xFFE7F5EF),
-        const Color(0xFF187557),
-      ),
-      AppointmentStatus.cancelled || AppointmentStatus.declined => (
-        const Color(0xFFFBECE9),
-        const Color(0xFF9B4238),
-      ),
-      _ => (const Color(0xFFEEF1F3), const Color(0xFF526B79)),
-    };
+    final (background, foreground) = AppointmentVisuals.statusColors(effective);
+
     return Semantics(
       key: ValueKey('appointment-status-${status.name}'),
       liveRegion: true,
@@ -193,10 +212,10 @@ class AppointmentDetailRow extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFFF1F6F2),
+            color: AppointmentVisuals.iconSurface,
             borderRadius: BorderRadius.circular(11),
           ),
-          child: Icon(icon, size: 20, color: const Color(0xFF658D81)),
+          child: Icon(icon, size: 20, color: AppointmentVisuals.iconTint),
         ),
         const SizedBox(width: 12),
         Expanded(

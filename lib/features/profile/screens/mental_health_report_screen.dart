@@ -7,6 +7,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../student_assessment/widgets/v4_assessment_response_review.dart';
+import '../../student_assessment/services/assessment_summary_text.dart';
 
 class MentalHealthReportScreen extends StatefulWidget {
   const MentalHealthReportScreen({super.key});
@@ -343,9 +344,10 @@ class _V4FullAssessmentResultCard extends StatelessWidget {
         _v4Text(interpretation['userSummary']) ??
         _v4Text(interpretation['studentSummary']) ??
         'Your saved full assessment result is available.';
-    final overall =
-        _v4Text(interpretation['overallResponseSummary']) ??
-        'Your responses are considered across five well-being areas.';
+    final overall = withoutResponseCompleteness(
+      _v4Text(interpretation['overallResponseSummary']) ??
+          'Your responses are considered across five well-being areas.',
+    );
     final responseReviewAvailable =
         _v4Maps(payload['itemSnapshot']).isNotEmpty &&
         _v4Maps(payload['responses']).isNotEmpty &&
@@ -639,9 +641,6 @@ class _AssessmentExplanationCard extends StatelessWidget {
     parts.add('Past ${value.recallPeriodDays} days');
     if (value.presentedCount > 0) {
       parts.add('${value.answeredCount}/${value.presentedCount} answered');
-    }
-    if (value.responseConfidence.isNotEmpty) {
-      parts.add(value.responseConfidence);
     }
     return parts.join('  •  ');
   }

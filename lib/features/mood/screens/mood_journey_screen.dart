@@ -8,12 +8,17 @@ import '../../../providers/mood_provider.dart';
 import '../../../routes/route_names.dart';
 import '../widgets/mood_v2_history_panel.dart';
 import '../widgets/mood_journey_summary.dart';
+import '../widgets/mood_week_recap_cards.dart';
+import '../domain/mood_week_recap.dart';
 import '../domain/mood_journey_period.dart';
 import '../../home/widgets/home_dashboard_widgets.dart';
 
 class MoodJourneyScreen extends StatefulWidget {
-  const MoodJourneyScreen({super.key, this.nowProvider});
+  const MoodJourneyScreen({super.key, this.nowProvider, this.milestoneDays});
   final DateTime Function()? nowProvider;
+
+  /// Set when opened from the Home milestone "View recap" (item 38).
+  final int? milestoneDays;
 
   @override
   State<MoodJourneyScreen> createState() => _MoodJourneyScreenState();
@@ -130,6 +135,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                     now: _now,
                     period: _period,
                     onPeriodChanged: (value) => setState(() => _period = value),
+                    milestoneDays: widget.milestoneDays,
                   ),
                 MoodV2HistoryPanel(
                   history: safeHistory,
@@ -148,6 +154,21 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                   paginationErrorMessage: mood?.v2PaginationErrorMessage,
                   onLoadMore: () => mood?.loadMoreMoodV2History(uid),
                 ),
+                if (safeHistory != null && _period == MoodJourneyPeriod.week)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: MoodWeekRecapCards(
+                      recap: MoodWeekRecap.from([
+                        for (final event in safeHistory.uniqueEvents)
+                          if (includesMoodJourneyDate(
+                            event.dateKey,
+                            MoodJourneyPeriod.week,
+                            _now,
+                          ))
+                            event,
+                      ]),
+                    ),
+                  ),
                 const SizedBox(height: 16),
                 const Card(
                   color: HomePalette.surface,

@@ -21,6 +21,8 @@ export {createMoodEntry, createMoodEntryDev} from "./mood_entries";
 export {
   provisionAppUserProfile,
   provisionAppUserProfileDev,
+  repairMyStudentCollege,
+  repairMyStudentCollegeDev,
   cancelPendingRegistration,
   cancelPendingRegistrationDev,
   getAssessmentStatus,
@@ -34,9 +36,9 @@ export {
   requestStaffEmailVerification,
   requestStaffEmailVerificationDev,
 } from "./account_recovery";
-import {defineString} from "firebase-functions/params";
+import {configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid as requireAuthenticatedUser} from "./access";
 import {createHash, randomBytes} from "node:crypto";
-import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
+import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, auditLogOwnerField, writeAudit} from "./audit";
 import {
   AppointmentSchedulingValidationError,
   formatAppointmentTime,
@@ -64,6 +66,7 @@ import {
 import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
 import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_intake";
 import {canBookFollowUpFromParent, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
+import {validateSessionEvidence, verifySessionEvidenceObjects} from "./appointment_session_evidence";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -74,6 +77,7 @@ export {
   resolveMindAidEmergencyAlert,
 } from "./mind_aid_emergency";
 export {getReportAnalytics} from "./report_generation";
+export {getAssessmentParticipantDirectory} from "./assessment_participant_directory";
 export {
   importWalkInAppointments,
   listWalkInImports,
@@ -91,7 +95,6 @@ export {
 if (!getApps().length) initializeApp();
 
 const db = getFirestore();
-const superAdminUid = defineString("SUPER_ADMIN_UID");
 const posts = db.collection("secret_chats");
 const stats = db.collection("secret_chat_profile_stats");
 const events = db.collection("_secret_chat_events");
@@ -105,12 +108,6 @@ const portalAppointmentQueue = db.collection("appointment_queue");
 const SECRET_CHAT_ALIAS_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/;
 const SECRET_CHAT_PHOTO_PATTERN = /^secret_chat_profiles\/([^/]+)\/avatar_[0-9]+\.(jpg|png)$/;
 const MAX_SECRET_CHAT_PHOTO_BYTES = 5 * 1024 * 1024;
-
-function requireAuthenticatedUser(request: {auth?: {uid: string}}): string {
-  const userId = request.auth?.uid;
-  if (!userId) throw new HttpsError("unauthenticated", "Sign in is required.");
-  return userId;
-}
 
 export function normalizeSecretChatAlias(value: unknown): string {
   if (typeof value !== "string") {
@@ -285,29 +282,6 @@ function manilaDateKey(date: Date): string {
   }).format(date);
 }
 
-async function requireStaff(uid: string): Promise<FirebaseFirestore.DocumentData> {
-  const user = await db.collection("users").doc(uid).get();
-  const profile = user.data() ?? {};
-  const legacyRole = String(profile.role ?? "").toLowerCase();
-  const accessRole = String(profile.accessRole ??
-    (legacyRole === "admin" || legacyRole === "counselor" ? legacyRole : "appUser"));
-  if (!["portalStaff", "counselor", "admin"].includes(accessRole)) {
-    throw new HttpsError("permission-denied", "Staff access is required.");
-  }
-  // New PACC access requests must pass all three gates.  Older privileged
-  // records remain readable while they are migrated, but no newly registered
-  // staff account can reach protected functions until verification is synced.
-  if (accessRole !== "admin" && profile.staffAccountStatus != null) {
-    const authUser = await getAuth().getUser(uid);
-    if (profile.staffAccountStatus !== "approved" ||
-        profile.accountStatus !== "active" ||
-        !authUser.emailVerified) {
-      throw new HttpsError("permission-denied", "Your PACC portal access is not active.");
-    }
-  }
-  return {...profile, accessRole};
-}
-
 async function requireClinicalAppointmentStaff(
   uid: string,
 ): Promise<FirebaseFirestore.DocumentData> {
@@ -319,26 +293,6 @@ async function requireClinicalAppointmentStaff(
     );
   }
   return staff;
-}
-
-function configuredSuperAdminUid(): string {
-  const value = superAdminUid.value().trim();
-  if (!value) throw new HttpsError("failed-precondition", "SUPER_ADMIN_UID is not configured.");
-  return value;
-}
-
-async function requireSuperAdmin(uid: string): Promise<FirebaseFirestore.DocumentData> {
-  if (uid !== configuredSuperAdminUid()) {
-    throw new HttpsError("permission-denied", "Super-administrator access is required.");
-  }
-  const actor = await requireStaff(uid);
-  if (actor.accessRole !== "admin") {
-    throw new HttpsError("permission-denied", "The configured account is not an administrator.");
-  }
-  await db.collection("system_config").doc("security").set(
-    {superAdminUid: uid, updatedAt: FieldValue.serverTimestamp()}, {merge: true},
-  );
-  return actor;
 }
 
 function normalizedEmployeeId(value: unknown): string {
@@ -984,7 +938,7 @@ export const getAuditLogPage = onCall(async (request) => {
   const afterMillis = typeof request.data?.afterMillis === "number" ? request.data.afterMillis : null;
   const pageSize = Math.min(Math.max(Number(request.data?.pageSize ?? 25), 1), 50);
   let query: FirebaseFirestore.Query = db.collection("admin_audit_logs")
-    .where("targetUserId", "==", targetUserId).orderBy("createdAt", "desc").limit(pageSize);
+    .where(auditLogOwnerField(action), "==", targetUserId).orderBy("createdAt", "desc").limit(pageSize);
   if (category) query = query.where("category", "==", category);
   if (action) query = query.where("action", "==", action);
   if (afterMillis != null) query = query.where("createdAt", ">=", Timestamp.fromMillis(afterMillis));
@@ -1060,7 +1014,13 @@ export const saveOrganizationRecord = onCall(async (request) => {
       throw new HttpsError("failed-precondition", "Choose a department under the selected college.");
     }
   }
-  const duplicate = await db.collection(collection).where("normalizedName", "==", name.toLowerCase()).limit(10).get();
+  // Colleges are global, a department is unique within its college, and a COURSE is unique within its
+  // college too — the roster import resolves a course inside a college, so two same-named courses in one
+  // college could not be told apart, whatever departments they sit under. Codes stay collection-wide
+  // unique because the roster import resolves a college or course by name OR code.
+  let nameQuery = db.collection(collection).where("normalizedName", "==", name.toLowerCase());
+  if (kind !== "college") nameQuery = nameQuery.where("collegeId", "==", collegeId);
+  const duplicate = await nameQuery.limit(10).get();
   const duplicateCode = await db.collection(collection).where("normalizedCode", "==", code.toLowerCase()).limit(10).get();
   if (duplicate.docs.some((doc) => doc.id !== recordId) || duplicateCode.docs.some((doc) => doc.id !== recordId)) {
     throw new HttpsError("already-exists", `A ${kind} with that name already exists.`);
@@ -2088,6 +2048,7 @@ export const reviewAppointment = onCall(async (request) => {
   const reply = boundedText(input.reply, "Reply", 1_000, {required: true});
   let proposal: {millis: number; scheduledTime: string} | null = null;
   let completion: ReturnType<typeof validateCompletionInput> | null = null;
+  let sessionEvidence: ReturnType<typeof validateSessionEvidence> | null = null;
   if (!appointmentId || !["confirmed", "rescheduled", "completed", "no_show"].includes(action)) {
     throw new HttpsError("invalid-argument", "A valid appointment decision is required.");
   }
@@ -2107,6 +2068,10 @@ export const reviewAppointment = onCall(async (request) => {
       offerFollowUp: input.offerFollowUp,
       followUpMessage: input.followUpMessage,
     });
+    sessionEvidence = validateSessionEvidence(input, appointmentId, staffId);
+    await verifySessionEvidenceObjects(sessionEvidence, appointmentId, staffId);
+  } else if (["interviewQuestions", "requirementsChecked", "materialsUsed", "attachments"].some((field) => input[field] != null)) {
+    throw new HttpsError("invalid-argument", "Private clinical documentation is permitted only when completing a session.");
   }
 
   const appointment = db.collection("appointments").doc(appointmentId);
@@ -2209,6 +2174,7 @@ export const reviewAppointment = onCall(async (request) => {
       transaction.set(clinicalNote, {
         appointmentId,
         summary: completion.summary,
+        attachments: sessionEvidence!.attachments,
         authorId: staffId,
         authorNameSnapshot: staffName,
         authorRoleSnapshot: staff.accessRole,
@@ -2557,3 +2523,15 @@ export const expireStaleAppointmentRequests = onSchedule(
     }));
   },
 );
+
+export {
+  backfillStudentInfoRequirement, importStudentRoster, issueStudentActivationCodes, listLegacyStudentsNotInRoster,
+  listStudentRoster, listStudentRosterImports, previewStudentRosterImport, resetStudentActivationLock,
+  revokeStudentActivation, setStudentRosterStatus, updateStudentRosterRecord,
+} from "./student_roster";
+export {importAcademicCatalog, previewAcademicCatalogImport} from "./academic_import";
+export {activateStudentAccount, activateStudentAccountDev} from "./student_activation";
+export {
+  getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
+  reviewStudentCorrection, saveStudentPersonalInfo,
+} from "./student_personal_info";

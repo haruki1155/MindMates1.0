@@ -1,12 +1,17 @@
+// ignore_for_file: prefer_initializing_formals
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:typed_data';
 
 import '../database/firestore_collections.dart';
+import '../models/academic_import_models.dart';
 import '../models/admin_inquiry_model.dart';
 import '../models/admin_activity_analytics_model.dart';
 import '../models/admin_mind_aid_analytics_model.dart';
 import '../models/appointment_model.dart';
+import '../features/admin/domain/session_evidence.dart';
 import '../models/appointment_queue_item.dart';
 import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
@@ -171,17 +176,59 @@ class PortalAccessEvaluation {
   bool get isGranted => state == PortalAccessState.granted;
 }
 
+/// Invokes a callable by name and returns its response data. Injectable so
+/// tests can fake the catalogue import callables.
+typedef AdminCallableInvoker =
+    Future<Object?> Function(String name, Map<String, Object?> data);
+
 class AdminPortalRepository {
   AdminPortalRepository({
     FirestoreService? firestoreService,
     PaccAvailabilityRepository? paccAvailabilityRepository,
-  }) : _firestoreService = firestoreService ?? FirestoreService(),
+    AdminCallableInvoker? callableInvoker,
+  }) : _callableInvoker = callableInvoker,
+       _firestoreService = firestoreService ?? FirestoreService(),
        _paccAvailabilityRepository =
            paccAvailabilityRepository ??
            PaccAvailabilityRepository(firestoreService: firestoreService);
 
   final FirestoreService _firestoreService;
   final PaccAvailabilityRepository _paccAvailabilityRepository;
+  final AdminCallableInvoker? _callableInvoker;
+
+  Future<Object?> _callCallable(String name, Map<String, Object?> data) {
+    final invoker = _callableInvoker;
+    if (invoker != null) return invoker(name, data);
+    return FirebaseFunctions.instanceFor(
+      region: 'us-central1',
+    ).routedCallable(name).call<Object?>(data).then((result) => result.data);
+  }
+
+  /// Dry-runs a catalogue file. [rows] are passed through untouched: an
+  /// unmapped role must be absent, a mapped blank cell must be `''`.
+  Future<CatalogPreview> previewCatalogImport({
+    required String fileName,
+    required String sheetName,
+    required List<Map<String, String>> rows,
+  }) async => CatalogPreview.fromJson(
+    await _callCallable('previewAcademicCatalogImport', {
+      'fileName': fileName,
+      'sheetName': sheetName,
+      'rows': rows,
+    }),
+  );
+
+  Future<CatalogImportResult> importCatalog({
+    required String fileName,
+    required String sheetName,
+    required List<Map<String, String>> rows,
+  }) async => CatalogImportResult.fromJson(
+    await _callCallable('importAcademicCatalog', {
+      'fileName': fileName,
+      'sheetName': sheetName,
+      'rows': rows,
+    }),
+  );
 
   Future<List<AppointmentSlot>> getAvailableAppointmentSlots(DateTime date) =>
       AppointmentRepository().getAvailableSlots(date);
@@ -577,10 +624,15 @@ class AdminPortalRepository {
           : <AdminAuditEvent>[];
       return (events: events, hasMore: result.data['hasMore'] == true);
     } catch (_) {
+      // Never report "no views" when the access-log query itself failed (for
+      // example a missing index); the client-side fallback cannot filter it.
+      if (action == 'STUDENT_PERSONAL_INFO_VIEWED') rethrow;
       // The caller is already an authorized portal administrator. Fall back to
       // the protected Firestore read while a callable/index is propagating.
       final items = await _firestoreService.getDocuments(
         FirestoreCollections.adminAuditLogs,
+        // View-filter queries rethrew above, so this fallback only ever serves
+        // target-scoped ones.
         whereEquals: {'targetUserId': targetUserId},
         orderBy: 'createdAt',
         limit: pageSize,
@@ -1090,6 +1142,76 @@ class AdminPortalRepository {
     });
   }
 
+  Future<SessionEvidenceRecord?> getClinicalSessionEvidence(
+    String appointmentId,
+  ) async {
+    final snapshot = await _firestoreService.firestore
+        .collection('appointments')
+        .doc(appointmentId)
+        .collection('clinical_notes')
+        .doc('session')
+        .get();
+    final data = snapshot.data();
+    return data == null ? null : SessionEvidenceRecord.fromJson(data);
+  }
+
+  /// No public Storage download token is produced. The authenticated SDK
+  /// checks Storage rules for every file read.
+  Future<Uint8List> getClinicalEvidenceBytes(String path) async {
+    if (!path.startsWith('counseling_session_files/')) {
+      throw const FormatException('Not a clinical attachment path.');
+    }
+    final data = await FirebaseStorage.instance
+        .ref(path)
+        .getData(maxSessionEvidenceFileBytes);
+    if (data == null) throw StateError('Attachment unavailable.');
+    return data;
+  }
+
+  /// Uploads are immutable and bound to the currently authenticated clinician.
+  /// They are referenced in clinical_notes only after server verification.
+  Future<List<SessionEvidenceAttachment>> uploadClinicalEvidenceFiles({
+    required String appointmentId,
+    required List<PendingSessionEvidenceFile> files,
+  }) async {
+    if (files.length > maxSessionEvidenceFiles) {
+      throw const FormatException('Choose no more than five files.');
+    }
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) throw StateError('Sign in again to upload attachments.');
+    final attachments = <SessionEvidenceAttachment>[];
+    for (final file in files) {
+      final mime = sessionEvidenceMimeType(file.name);
+      if (!validSessionEvidenceFileName(file.name) ||
+          mime == null ||
+          mime != file.contentType ||
+          file.size == 0 ||
+          file.size > maxSessionEvidenceFileBytes) {
+        throw const FormatException('Unsupported file or file size.');
+      }
+      final path = buildSessionEvidencePath(
+        appointmentId, uid, file.name,
+      );
+      await FirebaseStorage.instance.ref(path).putData(
+        file.bytes,
+        SettableMetadata(
+          contentType: file.contentType,
+          customMetadata: {
+            'uploadedBy': uid,
+            'appointmentId': appointmentId,
+          },
+        ),
+      );
+      attachments.add(SessionEvidenceAttachment(
+        path: path,
+        name: file.name,
+        contentType: file.contentType,
+        size: file.size,
+      ));
+    }
+    return attachments;
+  }
+
   Future<void> reviewAppointment({
     required String appointmentId,
     required String action,
@@ -1102,6 +1224,7 @@ class AdminPortalRepository {
     String? proposedScheduledTime,
     String? rescheduleReason,
     String? sessionSummary,
+    List<SessionEvidenceAttachment> attachments = const [],
     bool offerFollowUp = false,
     String? followUpMessage,
   }) async {
@@ -1123,7 +1246,10 @@ class AdminPortalRepository {
       data['proposedScheduledTime'] = proposedScheduledTime;
     }
     if (rescheduleReason != null) data['rescheduleReason'] = rescheduleReason;
-    if (sessionSummary != null) data['sessionSummary'] = sessionSummary;
+    if (sessionSummary != null) {
+      data['sessionSummary'] = sessionSummary;
+      data['attachments'] = attachments.map((file) => file.toJson()).toList();
+    }
     if (offerFollowUp) data['offerFollowUp'] = true;
     if (followUpMessage != null) data['followUpMessage'] = followUpMessage;
     await FirebaseFunctions.instance

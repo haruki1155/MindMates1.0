@@ -3,17 +3,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../database/firestore_collections.dart';
 import '../features/mind_aid/ai_engine/mind_aid_chat_engine.dart';
 import '../features/mind_aid/ai_engine/mind_aid_engine.dart';
-import '../features/mind_aid/ai_engine/mind_aid_safety_classifier.dart';
-import '../features/mind_aid/ai_engine/score_engine.dart';
 import '../features/mind_aid/data/mind_aid_dataset_loader.dart';
 import '../features/mind_aid/domain/mind_aid_chat_models.dart';
 import '../features/mind_aid/domain/mind_aid_context.dart';
 import '../features/mind_aid/domain/mind_aid_engine_result.dart';
 import '../features/mind_aid/domain/mind_aid_integration_models.dart';
 import '../features/mind_aid/domain/mind_aid_session_memory.dart';
-import '../features/mind_aid/domain/mind_aid_dialogue_state.dart';
-import '../features/mind_aid/domain/mind_aid_dataset_models.dart';
 import '../features/mind_aid/domain/mind_aid_safety.dart';
+import '../features/mind_aid/domain/mind_aid_dialogue_state.dart';
 import '../models/mind_aid_message_model.dart';
 import '../models/mind_aid_suggestion_model.dart';
 import '../services/firebase/firestore_service.dart';
@@ -184,107 +181,7 @@ class MindAidRepository {
     final conversationId = preferences?.conversationId.trim().isNotEmpty == true
         ? preferences!.conversationId
         : userId;
-    final analysis = _engine.process(text, dataset, context: context);
-    final safety = const MindAidSafetyClassifier().classify(
-      normalizedInput: ScoreEngine.normalize(text),
-      matches: const [],
-    );
-    final isHighRisk =
-        safety.level.blocksCloud ||
-        analysis.requiresEscalation ||
-        analysis.severity == MindAidSeverity.high ||
-        analysis.severity == MindAidSeverity.crisis;
-
-    if (!isHighRisk &&
-        userId != 'guest' &&
-        preferences?.cloudConsent == true &&
-        await _cloudService.isCloudEnabled()) {
-      try {
-        final cloud = await _cloudService.send(
-          requestId: effectiveRequestId,
-          conversationId: conversationId,
-          text: text,
-          launchContext: launchContext,
-          conversationMode: context.conversationMode,
-          explicitListening: context.explicitListening,
-          sessionInstanceId: sessionInstanceId,
-          recentTurns: preferences?.cloudConsent == true &&
-                  preferences?.personalizationEnabled == true
-              ? liveTurns.map((turn) => turn.toMap()).toList(growable: false)
-              : const [],
-        );
-        final safety = MindAidSafetyLevel.values.firstWhere(
-          (item) => item.name == cloud.safetyLevel,
-          orElse: () => MindAidSafetyLevel.safeSupport,
-        );
-        final response = MindAidChatResponse(
-          text: cloud.text,
-          intentMatches: const [],
-          severity: cloud.requiresEscalation
-              ? MindAidSeverity.high
-              : MindAidSeverity.low,
-          suggestions: cloud.suggestions
-              .asMap()
-              .entries
-              .map(
-                (entry) => MindAidSuggestionModel(
-                  id: 'cx_${entry.key}_${entry.value.hashCode.abs()}',
-                  label: entry.value,
-                ),
-              )
-              .toList(growable: false),
-          followUpQuestions: const [],
-          recommendations: const [],
-          requiresEscalation: cloud.requiresEscalation,
-          conversationState: const MindAidConversationState(),
-          status: cloud.requiresEscalation ? 'urgent' : 'sent',
-          safetyLevel: safety,
-          intentOverride: cloud.intent,
-          source: cloud.source,
-          confidence: cloud.confidence,
-          fallbackReason: cloud.fallbackReason,
-          model: cloud.model,
-          actions: cloud.actions,
-        );
-        final message = MindAidMessageModel(
-          id: cloud.messageId,
-          conversationId: conversationId,
-          sender: 'assistant',
-          text: cloud.text,
-          createdAt: DateTime.now(),
-          status: response.status,
-          safetyLevel: cloud.safetyLevel,
-          primaryIntent: cloud.intent,
-          requiresEscalation: cloud.requiresEscalation,
-          source: cloud.source,
-          confidence: cloud.confidence,
-          fallbackReason: cloud.fallbackReason,
-          model: cloud.model,
-          actions: cloud.actions,
-        );
-        return MindAidSendResult(
-          message: message,
-          suggestions: response.suggestions,
-          chatResponse: response,
-          userMessageSaved: true,
-        );
-      } catch (_) {
-        // The local engine below is the reliable fallback for rollout, network,
-        // quota, permission, and Dialogflow response failures.
-      }
-    }
-
-    final userMessageSaved = await _trySaveMessage(
-      userId: userId,
-      message: MindAidMessageModel(
-        id: '${effectiveRequestId}_user',
-        conversationId: conversationId,
-        sender: 'user',
-        text: text,
-        createdAt: DateTime.now(),
-        status: 'sent',
-      ),
-    );
+    final userCreatedAt = DateTime.now();
 
     final result = await _chatEngine.respond(
       MindAidChatRequest(
@@ -305,28 +202,117 @@ class MindAidRepository {
       dataset,
     );
 
+    // Cloud response is allowed only with explicit consent
+    // and only for messages that pass the local safety gate.
+    var effectiveResult = result;
+    MindAidCloudResponse? cloudResponse;
+    var cloudAttempted = false;
+    if (preferences?.cloudConsent == true &&
+        userId != 'guest' &&
+        !result.requiresEscalation &&
+        !result.safetyLevel.blocksCloud) {
+      cloudAttempted = true;
+      try {
+        final cloud = await _cloudService.send(
+          requestId: effectiveRequestId,
+          conversationId: conversationId,
+          text: text,
+          launchContext: launchContext,
+          conversationMode: context.conversationMode,
+          explicitListening: context.explicitListening,
+          sessionInstanceId: sessionInstanceId,
+          recentTurns: liveTurns
+              .map(
+                (turn) => <String, String>{
+                  'role': turn.role,
+                  'text': turn.text,
+                },
+              )
+              .toList(growable: false),
+        );
+
+        cloudResponse = cloud;
+        final serverSafety = MindAidSafetyLevel.values.firstWhere(
+          (level) => level.name == cloud.safetyLevel,
+          orElse: () => MindAidSafetyLevel.crisisOrImmediateRisk,
+        );
+        final safety = serverSafety.index >= result.safetyLevel.index
+            ? serverSafety
+            : result.safetyLevel;
+        effectiveResult = MindAidChatResponse(
+          text: cloud.text,
+          intentMatches: result.intentMatches,
+          severity: result.severity,
+          suggestions: result.suggestions,
+          followUpQuestions: cloud.suggestions,
+          recommendations: result.recommendations,
+          requiresEscalation:
+              cloud.requiresEscalation || result.requiresEscalation,
+          conversationState: result.conversationState,
+          status: cloud.requiresEscalation || safety.blocksCloud
+              ? 'urgent'
+              : 'sent',
+          safetyLevel: safety,
+          intentOverride: cloud.intent,
+          source: cloud.source,
+          confidence: cloud.confidence,
+          fallbackReason: cloud.fallbackReason,
+          model: cloud.model,
+          actions: cloud.actions,
+          effectiveConversationMode: cloud.effectiveConversationMode,
+        );
+      } catch (_) {
+        // Keep the existing local MindAid response as fallback.
+      }
+    }
+
     final message = MindAidMessageModel(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id:
+          cloudResponse?.messageId ??
+          '${userId}_${effectiveRequestId}_assistant',
       conversationId: conversationId,
       sender: 'assistant',
-      text: result.text,
+      text: effectiveResult.text,
       createdAt: DateTime.now(),
-      status: result.status,
-      safetyLevel: result.safetyLevel.name,
-      primaryIntent: result.primaryIntent,
-      requiresEscalation: result.requiresEscalation,
-      source: 'local',
-      fallbackReason: preferences?.cloudConsent == true
-          ? 'cloud_unavailable'
-          : '',
+      status: effectiveResult.status,
+      safetyLevel: effectiveResult.safetyLevel.name,
+      primaryIntent: effectiveResult.primaryIntent,
+      requiresEscalation: effectiveResult.requiresEscalation,
+      source: effectiveResult.source,
+      confidence: effectiveResult.confidence,
+      fallbackReason:
+          cloudResponse?.fallbackReason ??
+          (cloudAttempted ? 'cloud_unavailable' : ''),
+      model: effectiveResult.model,
+      actions: effectiveResult.actions,
+      effectiveConversationMode: cloudResponse?.effectiveConversationMode,
     );
 
-    await _trySaveMessage(userId: userId, message: message);
+    // A successful callable has atomically persisted both documents. Only
+    // local-only/failed calls write here, after the cloud attempt has settled.
+    // Reuse server IDs so a lost callable response cannot create duplicates or
+    // overwrite a server-owned document (updates are denied by security rules).
+    final userMessageSaved =
+        cloudResponse != null ||
+        await _trySaveMessage(
+          userId: userId,
+          message: MindAidMessageModel(
+            id: '${userId}_${effectiveRequestId}_user',
+            conversationId: conversationId,
+            sender: 'user',
+            text: text,
+            createdAt: userCreatedAt,
+            status: 'sent',
+          ),
+        );
+    if (cloudResponse == null) {
+      await _trySaveMessage(userId: userId, message: message);
+    }
 
     return MindAidSendResult(
       message: message,
       suggestions: result.suggestions,
-      chatResponse: result,
+      chatResponse: effectiveResult,
       userMessageSaved: userMessageSaved,
     );
   }
@@ -458,15 +444,12 @@ class MindAidRepository {
     required String userId,
     required MindAidMessageModel message,
   }) {
-    return _firestoreService.setDocument(
-      FirestoreCollections.mindAidMessages,
-      message.id,
-      {
-        'userId': userId,
-        ...message.toMap(),
-        'createdAt': FieldValue.serverTimestamp(),
-      },
-    );
+    return _firestoreService
+        .setDocument(FirestoreCollections.mindAidMessages, message.id, {
+          'userId': userId,
+          ...message.toMap(),
+          'createdAt': FieldValue.serverTimestamp(),
+        });
   }
 
   Future<bool> _trySaveMessage({

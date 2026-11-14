@@ -12,8 +12,10 @@ import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../home/screens/home_appointment_calendar_screen.dart';
 import '../widgets/appointment_details_sheet.dart';
 import '../widgets/appointment_list_view.dart';
+import '../../../core/constants/app_colors.dart';
 import '../widgets/appointment_presentation.dart';
 import '../../notifications/screens/notifications_screen.dart';
+import '../domain/best_contact_time.dart';
 
 class PaccCounselingScreen extends StatefulWidget {
   const PaccCounselingScreen({
@@ -93,7 +95,8 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   final _emailController = TextEditingController();
   final _facebookController = TextEditingController();
   final _concernController = TextEditingController();
-  final _bestTimeController = TextEditingController();
+  BestContactTime _bestTime = BestContactTime.defaults;
+  String? _legacyBestTime;
 
   late _PaccAppointmentTab _tab;
   _PaccAppointmentStep _step = _PaccAppointmentStep.intake;
@@ -146,7 +149,8 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _emailController.text = user.email;
       _facebookController.clear();
       _concernController.text = widget.initialConcern?.trim() ?? '';
-      _bestTimeController.clear();
+      _bestTime = BestContactTime.defaults;
+      _legacyBestTime = null;
       _sex = null;
       _course = user.course?.trim().isEmpty ?? true ? null : user.course;
       _yearLevel = null;
@@ -184,7 +188,6 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
     _emailController.dispose();
     _facebookController.dispose();
     _concernController.dispose();
-    _bestTimeController.dispose();
     super.dispose();
   }
 
@@ -392,7 +395,11 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         emailController: _emailController,
         facebookController: _facebookController,
         concernController: _concernController,
-        bestTimeController: _bestTimeController,
+        bestTime: _bestTime,
+        onBestTimeChanged: (value) => setState(() {
+          _bestTime = value;
+          _legacyBestTime = null;
+        }),
         sex: _sex,
         course: _course,
         yearLevel: _yearLevel,
@@ -428,7 +435,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         preferredContactMethod: _preferredContactMethod,
         therapyBefore: _therapyBefore,
         concern: _concernController.text.trim(),
-        bestTime: _bestTimeController.text.trim(),
+        bestTime: _legacyBestTime ?? formatBestContactTime(_bestTime),
         isSaving: appointmentProvider?.isSaving ?? false,
         onBack: () => setState(() => _step = _PaccAppointmentStep.calendar),
         onEditPersonal: () => _editReviewSection(_PaccAppointmentStep.intake),
@@ -520,6 +527,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
           ? priorAppointment?.id
           : null;
       _bookingRequestId = _newBookingRequestId();
+      _legacyBestTime = null;
       if (priorAppointment != null) {
         _ageController.text = priorAppointment.age?.toString() ?? '';
         _addressController.text = priorAppointment.address ?? '';
@@ -527,7 +535,12 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         _emailController.text = priorAppointment.email;
         _facebookController.text = priorAppointment.facebook ?? '';
         _concernController.text = priorAppointment.concern;
-        _bestTimeController.text = priorAppointment.bestTime ?? '';
+        final previousBestTime = priorAppointment.bestTime ?? '';
+        final parsedBestTime = parseBestContactTime(previousBestTime);
+        _bestTime = parsedBestTime ?? BestContactTime.defaults;
+        if (previousBestTime.isNotEmpty && parsedBestTime == null) {
+          _legacyBestTime = previousBestTime;
+        }
         _sex = priorAppointment.sex;
         _course = priorAppointment.course;
         _yearLevel = priorAppointment.yearLevel;
@@ -603,7 +616,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       _preferredContactMethod != null &&
       _therapyBefore != null &&
       _concernController.text.trim().isNotEmpty &&
-      _bestTimeController.text.trim().isNotEmpty;
+      _bestTime.isValidRange;
 
   void _validateIntakeForm() {
     final personal = _step == _PaccAppointmentStep.intake;
@@ -690,7 +703,7 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
       preferredContactMethod: _preferredContactMethod!,
       therapyBefore: _therapyBefore,
       concern: _concernController.text.trim(),
-      bestTime: _bestTimeController.text.trim(),
+      bestTime: _legacyBestTime ?? formatBestContactTime(_bestTime),
       scheduledAt: _scheduledAt(_selectedDate!, _selectedTime!),
       scheduledTime: _selectedTime!,
       location: 'PACC Office, 2nd Floor, Main Building',
@@ -1348,74 +1361,41 @@ class _TimeSelectionView extends StatelessWidget {
       children: [
         Row(
           children: [
-            if (showBack) IconButton(
-              tooltip: 'Back to calendar',
-              onPressed: onBack,
-              icon: const Icon(Icons.chevron_left, color: Colors.black),
+            if (showBack)
+              IconButton(
+                tooltip: 'Back to calendar',
+                onPressed: onBack,
+                icon: const Icon(Icons.chevron_left),
+              ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Choose Time', style: _PaccText.title),
+                  Text(
+                    selectedDate == null
+                        ? 'Choose a date'
+                        : _formatWeekdayMonthDay(selectedDate!),
+                    style: _PaccText.subtitle,
+                  ),
+                ],
+              ),
             ),
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Choose Time', style: _PaccText.title),
-                Text(
-                  selectedDate == null
-                      ? 'Choose a date'
-                      : _formatWeekdayMonthDay(selectedDate!),
-                  style: _PaccText.subtitle,
-                ),
-              ],
-            )),
           ],
         ),
-        const Text('Philippine Time (PHT)', style: _PaccText.body),
+        const Text(
+          'Philippine Time (PHT)',
+          style: _PaccText.body,
+        ),
         const SizedBox(height: 22),
         if (isSaving)
-          const LinearProgressIndicator(semanticsLabel: 'Loading appointment times')
-        else if (availableTimes.isNotEmpty) ...[
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              key: const ValueKey('appointment-time-picker'),
-              icon: const Icon(Icons.schedule),
-              style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
-              label: Text(selectedTime ?? 'Choose appointment time'),
-              onPressed: () async {
-                final picked = await showTimePicker(
-                  context: context,
-                  helpText: 'Appointment time (PHT)',
-                  initialTime: _parseClock(selectedTime ?? availableTimes.first),
-                );
-                if (picked == null || !context.mounted) return;
-                final matchingTimes = availableTimes.where((label) => _tryParseClock(label) == picked);
-                if (matchingTimes.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: const Text('That time is unavailable. Choose a whole-hour start within the displayed available ranges.'),
-                  ));
-                  return;
-                }
-                onTimeSelected(matchingTimes.first);
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: const Color(0xFFF1F6F2), borderRadius: BorderRadius.circular(14)),
-            child: Column(children: [
-              const Text('Available appointment times', textAlign: TextAlign.center, style: AppointmentVisuals.section),
-              const SizedBox(height: 10),
-              for (final range in _availableTimeRanges(availableTimes)) Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Text(range, textAlign: TextAlign.center, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppointmentVisuals.teal)),
-              ),
-              const SizedBox(height: 8),
-              const Text('PHT - Whole-hour starts only', textAlign: TextAlign.center, style: AppointmentVisuals.body),
-            ]),
-          ),
-        ] else ...[
+          const LinearProgressIndicator(
+            semanticsLabel: 'Loading appointment times',
+          )
+        else if (availableTimes.isEmpty) ...[
           Text(
-            noSlotMessage ?? 'No appointment times are available for this date. Please choose another date.',
+            noSlotMessage ??
+                'No appointment times are available for this date. Please choose another date.',
             style: _PaccText.body,
           ),
           TextButton.icon(
@@ -1423,12 +1403,72 @@ class _TimeSelectionView extends StatelessWidget {
             icon: const Icon(Icons.refresh),
             label: const Text('Retry appointment times'),
           ),
-        ],
+        ] else
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final time in availableTimes)
+                _TimeChip(
+                  time: time,
+                  selected: selectedTime == time,
+                  onTap: () => onTimeSelected(time),
+                ),
+            ],
+          ),
         const SizedBox(height: 34),
         const _ReminderCard(),
         const SizedBox(height: 34),
-
       ],
+    );
+  }
+}
+
+class _TimeChip extends StatelessWidget {
+  const _TimeChip({
+    required this.time,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String time;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      key: Key('time-chip-$time'),
+      color: selected ? const Color(0xFFFFF1C7) : Colors.white,
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: selected
+              ? _PaccColors.sunButton
+              : const Color(0xFFE5C24D),
+          width: selected ? 1.5 : 1,
+        ),
+      ),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 44),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 8,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (selected) ...[
+                const Icon(Icons.check, size: 16),
+                const SizedBox(width: 6),
+              ],
+              Text(time, style: _PaccText.cardTitle),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1469,7 +1509,8 @@ class _IntakeFormView extends StatelessWidget {
     required this.emailController,
     required this.facebookController,
     required this.concernController,
-    required this.bestTimeController,
+    required this.bestTime,
+    required this.onBestTimeChanged,
     required this.sex,
     required this.course,
     required this.yearLevel,
@@ -1496,7 +1537,8 @@ class _IntakeFormView extends StatelessWidget {
   final TextEditingController emailController;
   final TextEditingController facebookController;
   final TextEditingController concernController;
-  final TextEditingController bestTimeController;
+  final BestContactTime bestTime;
+  final ValueChanged<BestContactTime> onBestTimeChanged;
   final String? sex;
   final String? course;
   final String? yearLevel;
@@ -1682,26 +1724,9 @@ class _IntakeFormView extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 const _FieldLabel('Best Time to Contact You*'),
-                TextFormField(
-                  key: const ValueKey('intake-best-time'),
-                  controller: bestTimeController,
-                  readOnly: true,
-                  style: _PaccText.input.copyWith(fontSize: 14),
-                  decoration: _PaccDecor.input('Choose a contact time').copyWith(
-                    suffixIcon: const Icon(Icons.schedule),
-                    helperText: 'Philippine Time (PHT)',
-                  ),
-                  validator: _required,
-                  onTap: () async {
-                    final selected = await showTimePicker(
-                      context: context,
-                      helpText: 'Best time to contact you (PHT)',
-                      initialTime: _parseClock(bestTimeController.text),
-                    );
-                    if (selected != null && context.mounted) {
-                      bestTimeController.text = _clockLabel(selected);
-                    }
-                  },
+                _BestTimeField(
+                  value: bestTime,
+                  onChanged: onBestTimeChanged,
                 ),
               ],
             ),
@@ -1722,6 +1747,112 @@ class _IntakeFormView extends StatelessWidget {
     if (required != null) return required;
     return value!.contains('@') ? null : 'Enter a valid email';
   }
+}
+
+class _BestTimeField extends FormField<BestContactTime> {
+  _BestTimeField({
+    required BestContactTime value,
+    required ValueChanged<BestContactTime> onChanged,
+  }) : super(
+         initialValue: value,
+         validator: (value) => value?.isValidRange == true
+             ? null
+             : 'End time must be after the start time.',
+         builder: (field) {
+           final current = field.value ?? BestContactTime.defaults;
+
+           void update(BestContactTime next) {
+             field.didChange(next);
+             onChanged(next);
+           }
+
+           Future<void> pickTime(BuildContext context, bool isStart) async {
+             final before = field.value ?? BestContactTime.defaults;
+             final selected = await showTimePicker(
+               context: context,
+               initialTime: isStart ? before.start : before.end,
+             );
+             if (selected == null || !field.mounted) return;
+             final latest = field.value ?? BestContactTime.defaults;
+             update(
+               BestContactTime(
+                 days: latest.days,
+                 start: isStart ? selected : latest.start,
+                 end: isStart ? latest.end : selected,
+               ),
+             );
+           }
+
+           return Column(
+             crossAxisAlignment: CrossAxisAlignment.start,
+             children: [
+               Wrap(
+                 spacing: 8,
+                 runSpacing: 8,
+                 children: [
+                   for (final days in BestContactTimeDays.values)
+                     ChoiceChip(
+                       key: Key('best-time-days-${days.name}'),
+                       label: Text(days.label),
+                       selected: current.days == days,
+                       onSelected: (_) => update(
+                         BestContactTime(
+                           days: days,
+                           start: current.start,
+                           end: current.end,
+                         ),
+                       ),
+                     ),
+                 ],
+               ),
+               const SizedBox(height: 12),
+               Row(
+                 children: [
+                   for (final isStart in [true, false]) ...[
+                     if (!isStart) const SizedBox(width: 8),
+                     Expanded(
+                       child: OutlinedButton.icon(
+                         key: Key(
+                           isStart ? 'best-time-start' : 'best-time-end',
+                         ),
+                         onPressed: () => pickTime(field.context, isStart),
+                         icon: const Icon(Icons.schedule, size: 18),
+                         label: Column(
+                           mainAxisSize: MainAxisSize.min,
+                           crossAxisAlignment: CrossAxisAlignment.start,
+                           children: [
+                             Text(isStart ? 'From' : 'To'),
+                             Text(
+                               MaterialLocalizations.of(
+                                 field.context,
+                               ).formatTimeOfDay(
+                                 isStart ? current.start : current.end,
+                                 alwaysUse24HourFormat: MediaQuery.of(
+                                   field.context,
+                                 ).alwaysUse24HourFormat,
+                               ),
+                             ),
+                           ],
+                         ),
+                       ),
+                     ),
+                   ],
+                 ],
+               ),
+               if (field.hasError)
+                 Padding(
+                   padding: const EdgeInsets.only(top: 8),
+                   child: Text(
+                     field.errorText!,
+                     style: TextStyle(
+                       color: Theme.of(field.context).colorScheme.error,
+                     ),
+                   ),
+                 ),
+             ],
+           );
+         },
+       );
 }
 
 class _FormSection extends StatelessWidget {
@@ -1988,10 +2119,15 @@ class _ConfirmationView extends StatelessWidget {
             Container(
               width: 104,
               height: 104,
-              decoration: const BoxDecoration(
-                color: Color(0xFFE0F3E9),
+              decoration: BoxDecoration(
+                // Primary-derived tint, matching AppointmentVisuals'
+                // confirmedSurface. The check icon on it stays at 4.2:1.
+                color: Color.alphaBlend(
+                  AppColors.primary.withValues(alpha: .12),
+                  const Color(0xFFFFFFFF),
+                ),
                 shape: BoxShape.circle,
-                boxShadow: [
+                boxShadow: const [
                   BoxShadow(
                     color: Color(0x08000000),
                     blurRadius: 6,
@@ -1999,7 +2135,7 @@ class _ConfirmationView extends StatelessWidget {
                   ),
                 ],
               ),
-              child: const Icon(Icons.check, size: 48, color: Color(0xFF187557)),
+              child: const Icon(Icons.check, size: 48, color: AppColors.primary),
             ),
             const SizedBox(height: 22),
             const Text(
@@ -2584,31 +2720,4 @@ String _weekdayName(int weekday) {
     'Sunday',
   ];
   return weekdays[weekday - 1];
-}
-
-TimeOfDay _parseClock(String value) =>
-    _tryParseClock(value) ?? const TimeOfDay(hour: 9, minute: 0);
-
-TimeOfDay? _tryParseClock(String value) {
-  final match = RegExp(r'^(\d{1,2}):([0-5]\d)\s*(AM|PM)$', caseSensitive: false).firstMatch(value.trim());
-  if (match == null || int.parse(match[1]!) < 1 || int.parse(match[1]!) > 12) return null;
-  return TimeOfDay(hour: int.parse(match[1]!) % 12 + (match[3]!.toUpperCase() == 'PM' ? 12 : 0), minute: int.parse(match[2]!));
-}
-
-String _clockLabel(TimeOfDay time) => '${time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod}:${time.minute.toString().padLeft(2, '0')} ${time.period == DayPeriod.am ? 'AM' : 'PM'}';
-
-List<String> _availableTimeRanges(List<String> labels) {
-  final minutes = labels.map(_tryParseClock).whereType<TimeOfDay>().map((t) => t.hour * 60 + t.minute).toSet().toList()..sort();
-  if (minutes.isEmpty) return const [];
-  String clock(int value) => _clockLabel(TimeOfDay(hour: value ~/ 60, minute: value % 60));
-  final ranges = <String>[];
-  var start = minutes.first;
-  var end = start;
-  void append() => ranges.add(start == end ? clock(start) : '${clock(start)} - ${clock(end)}');
-  for (final minute in minutes.skip(1)) {
-    if (minute == end + 60) { end = minute; }
-    else { append(); start = end = minute; }
-  }
-  append();
-  return ranges;
 }

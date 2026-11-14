@@ -8,6 +8,7 @@ import '../services/firebase/firestore_service.dart';
 import '../features/mood/domain/mood_v2_analytics.dart';
 import '../features/mood/domain/mood_v2_compatibility.dart';
 import 'mood_combined_history_repository.dart';
+import 'user_repository.dart';
 
 abstract class ReportRepositoryDataSource {
   Future<Map<String, dynamic>?> getUserDocument(String userId);
@@ -381,7 +382,11 @@ class ReportRepository {
     final latestAssessmentStatus = _assessmentStatus(latestAssessment);
     final latestAssessmentSource = _assessmentSource(latestAssessment);
     final mentalStatusSignal = _mentalStatusSignal(latestAssessment);
-    final currentStreak = _intOrZero(userDoc?['dayStreak']);
+    final currentStreak = StreakCalculator.effectiveStreak(
+      storedStreak: _intOrZero(userDoc?['dayStreak']),
+      lastActivityDateKey: userDoc?['lastActivityDateKey']?.toString(),
+      now: generatedAt,
+    );
     final totalEngagementCount =
         activeDateKeys.length +
         weeklyAssessments.length +

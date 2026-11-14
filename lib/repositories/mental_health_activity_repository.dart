@@ -5,6 +5,7 @@ import '../core/utils/firestore_mapper.dart';
 import '../database/firestore_collections.dart';
 import '../models/mental_health_activity_summary.dart';
 import '../services/firebase/firestore_service.dart';
+import 'user_repository.dart';
 
 abstract class MentalHealthActivityDataSource {
   Future<Map<String, dynamic>?> getUserDocument(String userId);
@@ -201,7 +202,11 @@ class MentalHealthActivityRepository {
       secretChatInteractions: counts['secretChatInteraction'] ?? 0,
       assessmentCount:
           (counts['quickAssessment'] ?? 0) + (counts['fullAssessment'] ?? 0),
-      currentStreak: intFromFirestore(userDoc?['dayStreak']),
+      currentStreak: StreakCalculator.effectiveStreak(
+        storedStreak: intFromFirestore(userDoc?['dayStreak']),
+        lastActivityDateKey: userDoc?['lastActivityDateKey']?.toString(),
+        now: targetDate,
+      ),
       recentActivities: recentActivities
           .map(_activityItemFromJson)
           .take(8)

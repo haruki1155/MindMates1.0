@@ -71,10 +71,9 @@ class _SplashScreenState extends State<SplashScreen>
           }
           return;
         }
-        if (userProvider.user!.profileVersion >= 3 &&
-            (!userProvider.user!.isProfileComplete ||
-                !userProvider.user!.profileSetupCompleted)) {
-          routeName = RouteNames.profileSetup;
+        final gateRoute = gateRouteForUser(userProvider.user!);
+        if (gateRoute != null) {
+          routeName = gateRoute;
           if (mounted) {
             Navigator.of(context).pushReplacementNamed(routeName);
           }

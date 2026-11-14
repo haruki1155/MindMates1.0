@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../domain/mood_v2_analytics.dart';
 import '../domain/mood_journey_period.dart';
 import '../../home/widgets/home_dashboard_widgets.dart';
+import '../../home/widgets/streak_flame.dart';
 
 class MoodJourneySummary extends StatefulWidget {
   const MoodJourneySummary({
@@ -11,11 +12,15 @@ class MoodJourneySummary extends StatefulWidget {
     required this.now,
     this.period,
     this.onPeriodChanged,
+    this.milestoneDays,
   });
   final MoodHistoryWindow history;
   final DateTime now;
   final MoodJourneyPeriod? period;
   final ValueChanged<MoodJourneyPeriod>? onPeriodChanged;
+
+  /// Set when opened from the Home milestone "View recap" (item 38).
+  final int? milestoneDays;
 
   @override
   State<MoodJourneySummary> createState() => _MoodJourneySummaryState();
@@ -57,6 +62,10 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (widget.milestoneDays case final days?) ...[
+          _MilestoneBanner(days: days),
+          const SizedBox(height: 12),
+        ],
         Container(
           key: const Key('mood-streak-card'),
           padding: const EdgeInsets.all(16),
@@ -74,11 +83,7 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
           ),
           child: Row(
             children: [
-              const Icon(
-                Icons.local_fire_department_rounded,
-                color: HomePalette.orange,
-                size: 30,
-              ),
+              StreakFlame(days: streak.currentDays, size: 44),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -277,6 +282,36 @@ class _MoodJourneySummaryState extends State<MoodJourneySummary> {
           ),
         const SizedBox(height: 16),
       ],
+    );
+  }
+}
+
+class _MilestoneBanner extends StatelessWidget {
+  const _MilestoneBanner({required this.days});
+
+  final int days;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [HomePalette.softGold, HomePalette.sun],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: const Color(0x269A7000)),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        "🔥 $days-day streak · Here's your week in moods",
+        style: const TextStyle(
+          color: HomePalette.text,
+          fontSize: 15,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 }

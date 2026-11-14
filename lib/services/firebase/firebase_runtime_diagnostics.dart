@@ -13,6 +13,8 @@ class FirebaseRuntimeDiagnostics {
     Object? error,
     String? errorCode,
     String? correlationId,
+    String? errorType,
+    String? errorPlugin,
   }) {
     if (!kDebugMode) return;
 
@@ -25,6 +27,9 @@ class FirebaseRuntimeDiagnostics {
       'appCheckProvider': _appCheckProvider,
       'firebaseErrorCode': errorCode ?? firebaseErrorCode(error) ?? '',
       'correlationId': correlationId ?? correlationIdFrom(error) ?? '',
+      // Opt-in, non-personal failure descriptors (never message content).
+      'errorType': ?errorType,
+      'errorPlugin': ?errorPlugin,
     };
     debugPrint('FirebaseRuntime $metadata');
   }
@@ -34,6 +39,9 @@ class FirebaseRuntimeDiagnostics {
     required Object error,
   }) {
     log(event: 'startup_${stage}_failed', error: error);
+    if (kDebugMode) {
+      debugPrint('MindMate startup failure [$stage]: $error');
+    }
   }
 
   static String? firebaseErrorCode(Object? error) {
@@ -77,10 +85,15 @@ class FirebaseRuntimeDiagnostics {
   }
 
   static String _firebaseAppId() {
+    // Do not query Firebase.app() before initialization on Web.
+    // firebase_core_web can throw a JS interop TypeError here.
+    if (Firebase.apps.isEmpty) {
+      return 'not-initialized';
+    }
     try {
       return Firebase.app().options.appId;
-    } on FirebaseException {
-      return AndroidFirebaseIdentity.firebaseAppId;
+    } catch (_) {
+      return 'unavailable';
     }
   }
 }

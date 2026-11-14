@@ -9,12 +9,42 @@ import 'package:mind_mates/repositories/assessment_repository.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  testWidgets('v3 result explains the selected answer before the legend', (
+    tester,
+  ) async {
+    await _pumpResult(tester, _resultProvider([0, 2, 2, 1, 2]));
+    expect(find.text('What to do next'), findsOneWidget);
+    expect(find.text("What's going well"), findsOneWidget);
+    expect(find.text('Worth a closer look'), findsOneWidget);
+    expect(find.text('You answered: Sometimes'), findsWidgets);
+    expect(
+      find.textContaining('Why it matters: Feeling that tasks'),
+      findsOneWidget,
+    );
+    expect(find.text('What the colors mean'), findsOneWidget);
+    expect(find.text('Your strengths'), findsNothing);
+    final card = find.byKey(const Key('quick-next-step-card'));
+    expect(card, findsOneWidget);
+    expect(
+      find.descendant(of: card, matching: find.text('Get a fuller picture')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: card, matching: find.text('Take Full Assessment')),
+      findsOneWidget,
+    );
+    final cardBottom = tester.getBottomLeft(card).dy;
+    expect(
+      cardBottom,
+      lessThan(tester.getTopLeft(find.text("What's going well")).dy),
+    );
+  });
   testWidgets(
     'low shows supportive guidance without full assessment or PACC actions',
     (tester) async {
       await _pumpResult(tester, _resultProvider([0, 0, 0, 0, 0]));
 
-      expect(find.text('Continue with your day'), findsOneWidget);
+      expect(find.text('Keep up your healthy habits'), findsOneWidget);
       expect(find.text('Take Full Assessment'), findsNothing);
       expect(find.text('Book a PACC appointment'), findsNothing);
       expect(
@@ -29,7 +59,7 @@ void main() {
     (tester) async {
       await _pumpResult(tester, _resultProvider([1, 2, 1, 1, 2]));
 
-      expect(find.text('A fuller check-in may help'), findsOneWidget);
+      expect(find.text('Get a fuller picture'), findsOneWidget);
       expect(find.text('Take Full Assessment'), findsOneWidget);
       expect(find.text('Book a PACC appointment'), findsNothing);
       expect(
@@ -44,7 +74,7 @@ void main() {
     (tester) async {
       await _pumpResult(tester, _resultProvider([3, 3, 3, 2, 3]));
 
-      expect(find.text('Consider additional support'), findsOneWidget);
+      expect(find.text('Consider extra support'), findsOneWidget);
       expect(find.text('Take Full Assessment'), findsOneWidget);
       expect(find.text('Book a PACC appointment'), findsOneWidget);
       expect(
@@ -60,14 +90,14 @@ void main() {
       final provider = _resultProvider([4, 4, 4, 3, 4]);
       await _pumpResult(tester, provider);
 
-      expect(find.text('Support is available'), findsOneWidget);
+      expect(find.text('Support is here for you'), findsOneWidget);
       expect(
         find.text('Would you like to talk with a PACC counselor?'),
         findsOneWidget,
       );
       await tester.tap(find.text('No, Continue'));
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('Support is available'), findsOneWidget);
+      expect(find.text('Support is here for you'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
       await _pumpResult(tester, provider);
@@ -75,7 +105,7 @@ void main() {
         find.text('Would you like to talk with a PACC counselor?'),
         findsNothing,
       );
-      expect(find.text('Support is available'), findsOneWidget);
+      expect(find.text('Support is here for you'), findsOneWidget);
 
       provider.resetQuestions();
       _completeWithOptions(provider, [4, 4, 4, 3, 4]);
@@ -99,7 +129,7 @@ void main() {
 
       await tester.binding.handlePopRoute();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('Support is available'), findsOneWidget);
+      expect(find.text('Support is here for you'), findsOneWidget);
     },
   );
 }

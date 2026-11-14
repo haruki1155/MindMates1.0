@@ -4,6 +4,7 @@ import 'package:mind_mates/core/theme/app_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
+import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
 import 'package:mind_mates/features/mood/screens/log_mood_screen.dart';
 import 'package:mind_mates/features/mood/screens/mood_journey_screen.dart';
 import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
@@ -54,8 +55,11 @@ void moodVisualAcceptance({Future<void> Function(String name)? screenshot}) {
         child: MaterialApp(
           theme: AppTheme.light,
           routes: {
-            RouteNames.logMood: (_) =>
-                LogMoodScreen(moodV2Enabled: true, moodV2Writer: writer),
+            RouteNames.logMood: (_) => LogMoodScreen(
+              moodV2Presentation: true,
+              moodV2WriterEnabled: true,
+              moodV2Writer: writer,
+            ),
             RouteNames.mentalHealthInsights: (_) =>
                 const Scaffold(body: Text('Existing inSIGHT destination')),
           },
@@ -65,9 +69,11 @@ void moodVisualAcceptance({Future<void> Function(String name)? screenshot}) {
     );
     await tester.pumpAndSettle();
     expect(find.text('Mood check-ins'), findsNothing);
-    final log = find
-        .text(MoodV2FeatureFlag.enabled ? 'Log a mood' : 'Log your mood')
-        .first;
+    // Item 40: Home logs moods from the Day streak card's "Log mood".
+    final log = find.descendant(
+      of: find.byType(HomeStreakCard),
+      matching: find.text('Log mood'),
+    );
     expect(log, findsOneWidget);
     if (screenshot != null) await screenshot('01-home');
     await tester.ensureVisible(log);

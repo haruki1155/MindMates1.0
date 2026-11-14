@@ -7,6 +7,7 @@ class FirebaseCallableRouter {
 
   static const _stagingAliases = <String>{
     'provisionAppUserProfile',
+    'repairMyStudentCollege',
     'cancelPendingRegistration',
     'resolveSchoolIdAuthEmail',
     'requestAdminPasswordReset',
@@ -16,6 +17,10 @@ class FirebaseCallableRouter {
     'submitFullAssessment',
     'previewAssessmentDomain',
     'sendMindAidMessage',
+    'activateStudentAccount',
+    // Staging installs no App Check provider, so the protected
+    // `createMoodEntry` (enforceAppCheck: true) always refuses there.
+    'createMoodEntry',
   };
 
   static String name(String protectedName) {

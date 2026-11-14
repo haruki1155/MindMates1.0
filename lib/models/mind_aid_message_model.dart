@@ -17,6 +17,7 @@ class MindAidMessageModel {
   final String? model;
   final List<MindAidAction> actions;
   final bool hasPaaccDisplay;
+  final String? effectiveConversationMode;
 
   MindAidMessageModel({
     required this.id,
@@ -34,6 +35,7 @@ class MindAidMessageModel {
     this.model,
     this.actions = const [],
     this.hasPaaccDisplay = false,
+    this.effectiveConversationMode,
   });
 
   factory MindAidMessageModel.fromMap(Map<String, dynamic> map) {
@@ -53,6 +55,7 @@ class MindAidMessageModel {
       model: map['model']?.toString(),
       actions: _actionsFrom(map['actions']),
       hasPaaccDisplay: map['hasPaaccDisplay'] == true,
+      effectiveConversationMode: map['effectiveConversationMode']?.toString(),
     );
   }
 
@@ -71,6 +74,8 @@ class MindAidMessageModel {
       'confidence': confidence,
       'fallbackReason': fallbackReason,
       if (model != null) 'model': model,
+      if (effectiveConversationMode != null)
+        'effectiveConversationMode': effectiveConversationMode,
       'actions': actions
           .map(
             (action) => {
