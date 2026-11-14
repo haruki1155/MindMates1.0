@@ -170,6 +170,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Firestore managed-export job records. Written only by Cloud Functions;
+    // readable only by the configured super-administrator. They hold status,
+    // timestamps, counts and sanitised error codes, never document contents.
+    match /backup_jobs/{jobId} {
+      allow read: if isSystemAdmin();
+      allow write: if false;
+    }
+
     match /user_public_ids/{userId} {
       allow read, write: if false;
     }
