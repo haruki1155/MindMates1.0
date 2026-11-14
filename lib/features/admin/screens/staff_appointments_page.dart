@@ -123,6 +123,12 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                     'Check Staff access, Firestore rules, or network connectivity.',
                   ),
                   const SizedBox(height: 16),
+                ] else if (records.isEmpty) ...[
+                  const _Message(
+                    'No staff-safe schedule records are available. '
+                    'If Admin shows appointments, choose Refresh schedules.',
+                  ),
+                  const SizedBox(height: 16),
                 ],
                 Wrap(
                   spacing: 8,
