@@ -87,10 +87,12 @@ class _DashboardContent extends StatelessWidget {
         stream: availability,
         builder: (context, state) {
           if (state.data == null) return const SizedBox.shrink();
-          return PaccStaffScheduleMetric(
-            width: 340,
-            availability: state.data!,
-            now: DateTime.now(),
+          return LayoutBuilder(
+            builder: (context, constraints) => PaccStaffScheduleMetric(
+              width: constraints.maxWidth < 340 ? constraints.maxWidth : 340,
+              availability: state.data!,
+              now: DateTime.now(),
+            ),
           );
         },
       ),
