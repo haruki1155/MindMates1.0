@@ -34,6 +34,8 @@ export type BackupDeps = {
   exporter: {
     exportDocuments(request: {name: string; outputUriPrefix: string}): Promise<[{name?: string | null}]>;
     checkExportDocumentsProgress(name: string): Promise<OperationState>;
+    /** Export operations known to the database, used to reconcile a job whose start was interrupted. */
+    listExportOperations(databaseName: string): Promise<Array<{name: string; outputUriPrefix: string; done: boolean}>>;
   };
   objectExists(bucket: string, path: string): Promise<boolean>;
   env: Record<string, string | undefined>;
@@ -44,6 +46,9 @@ export type BackupDeps = {
 
 const SYSTEM_ACTOR: BackupActor = {uid: "system", name: "Scheduled backup", role: "system"};
 const JOBS = "backup_jobs";
+// A job created without an operation name may still be mid-start (the export
+// call is in flight). Only after this long do we treat the start as orphaned.
+export const ORPHAN_GRACE_MS = 10 * 60 * 1_000;
 
 let adminClient: InstanceType<typeof firestoreAdmin.FirestoreAdminClient> | null = null;
 
@@ -60,6 +65,15 @@ export function defaultDeps(): BackupDeps {
       async checkExportDocumentsProgress(name) {
         const operation = await client.checkExportDocumentsProgress(name);
         return operation as unknown as OperationState;
+      },
+      async listExportOperations(databaseName) {
+        const found: Array<{name: string; outputUriPrefix: string; done: boolean}> = [];
+        for await (const op of client.operationsClient.listOperationsAsync({name: databaseName, filter: ""})) {
+          const record = op as unknown as {name?: string; done?: boolean; metadata?: {outputUriPrefix?: string}};
+          const prefix = String(record.metadata?.outputUriPrefix ?? "");
+          if (record.name && prefix) found.push({name: record.name, outputUriPrefix: prefix, done: record.done === true});
+        }
+        return found;
       },
     },
     async objectExists(bucket, path) {
@@ -161,9 +175,12 @@ export async function startBackup(deps: BackupDeps, actor: BackupActor, trigger:
       name: `projects/${deps.projectId}/databases/(default)`,
       outputUriPrefix,
     });
+    if (typeof operation.name !== "string" || !operation.name.trim()) {
+      throw Object.assign(new Error("The export API returned no operation name."), {code: "export-operation-missing"});
+    }
     await deps.db.runTransaction(async (tx) => {
       tx.update(ref, {
-        operationName: operation.name ?? null,
+        operationName: operation.name,
         startedAt: Timestamp.fromDate(deps.now()),
         revision: FieldValue.increment(1),
         updatedAt: FieldValue.serverTimestamp(),
@@ -193,7 +210,9 @@ export async function refreshBackup(deps: BackupDeps, actor: BackupActor, jobId:
   const data = snapshot.data() ?? {};
   const status = String(data.status) as BackupJobStatus;
   if (status !== "running") return {jobId, status};
-  if (typeof data.operationName !== "string" || !data.operationName) return {jobId, status};
+  if (typeof data.operationName !== "string" || !data.operationName) {
+    return reconcileOrphanedStart(deps, actor, jobId, data);
+  }
 
   // An operation that can no longer be read (expired, deleted, permission
   // lost) must not leave the job running forever and block every later
@@ -237,6 +256,48 @@ export async function refreshBackup(deps: BackupDeps, actor: BackupActor, jobId:
     const error = {code: "export-metadata-missing", message: "The export finished but its metadata file was not found in the backup bucket."};
     tx.update(ref, {...base, status: "failed", verification: stored, error, completedAt: Timestamp.fromDate(now)});
     audit(tx, deps.db, actor, "BACKUP_FAILED", jobId, {stage: "verification", error});
+    return {jobId, status: "failed" as const};
+  });
+}
+
+/**
+ * A job that is `running` without an operation name had its start interrupted
+ * between creating the record and storing the export API's answer. Never guess:
+ * ask the database for export operations targeting this job's prefix. If one
+ * exists, adopt it (the paid export is already running, do not start another).
+ * If none exists after the grace period, the start never happened: fail the
+ * job so later backups are unblocked. Inside the grace period, leave it alone.
+ */
+async function reconcileOrphanedStart(
+  deps: BackupDeps,
+  actor: BackupActor,
+  jobId: string,
+  data: FirebaseFirestore.DocumentData,
+): Promise<{jobId: string; status: BackupJobStatus}> {
+  const ref = deps.db.collection(JOBS).doc(jobId);
+  const now = deps.now();
+  const prefix = String(data.outputUriPrefix ?? "");
+  const revision = Number(data.revision ?? 0);
+  const live = (await deps.exporter.listExportOperations(`projects/${deps.projectId}/databases/(default)`))
+    .find((op) => op.outputUriPrefix === prefix);
+  if (live) {
+    await deps.db.runTransaction(async (tx) => {
+      const current = (await tx.get(ref)).data() ?? {};
+      if (current.status !== "running" || Number(current.revision ?? 0) !== revision || current.operationName) return;
+      tx.update(ref, {operationName: live.name, startedAt: Timestamp.fromDate(now), revision: revision + 1, updatedAt: FieldValue.serverTimestamp()});
+    });
+    return {jobId, status: "running"};
+  }
+  const requestedAt = data.requestedAt instanceof Timestamp ? data.requestedAt.toMillis() : 0;
+  if (now.getTime() - requestedAt < ORPHAN_GRACE_MS) return {jobId, status: "running"};
+  const error = {code: "export-start-orphaned", message: "The backup record was created but no export operation was started for it."};
+  return deps.db.runTransaction(async (tx) => {
+    const current = (await tx.get(ref)).data() ?? {};
+    if (current.status !== "running" || Number(current.revision ?? 0) !== revision || current.operationName) {
+      return {jobId, status: String(current.status) as BackupJobStatus};
+    }
+    tx.update(ref, {status: "failed", error, completedAt: Timestamp.fromDate(now), revision: revision + 1, updatedAt: FieldValue.serverTimestamp()});
+    audit(tx, deps.db, actor, "BACKUP_FAILED", jobId, {stage: "orphaned-start", error});
     return {jobId, status: "failed" as const};
   });
 }

@@ -24,7 +24,7 @@ const counselorUid = `${prefix}-counselor`;
 const actor = {uid: adminUid, name: "Test Admin", role: "admin"};
 const db = getFirestore();
 
-type Fake = BackupDeps & {exportCalls: Array<{name: string; outputUriPrefix: string}>; operation: OperationState; exists: boolean; failExport?: Error};
+type Fake = BackupDeps & {exportCalls: Array<{name: string; outputUriPrefix: string}>; operation: OperationState; exists: boolean; failExport?: Error; liveOperations: Array<{name: string; outputUriPrefix: string; done: boolean}>; exportResponseName?: string | null};
 
 function fakeDeps(env: Record<string, string | undefined> = {BACKUP_BUCKET: "test-bucket"}): Fake {
   let counter = 0;
@@ -33,6 +33,8 @@ function fakeDeps(env: Record<string, string | undefined> = {BACKUP_BUCKET: "tes
     exportCalls: [],
     operation: {done: false},
     exists: true,
+    liveOperations: [],
+    exportResponseName: "op-1",
     env,
     projectId: "demo-mindmate-pr2",
     now: () => new Date("2026-11-15T02:30:00Z"),
@@ -41,10 +43,13 @@ function fakeDeps(env: Record<string, string | undefined> = {BACKUP_BUCKET: "tes
       async exportDocuments(request) {
         if (fake.failExport) throw fake.failExport;
         fake.exportCalls.push(request);
-        return [{name: "op-1"}];
+        return [{name: fake.exportResponseName}];
       },
       async checkExportDocumentsProgress() {
         return fake.operation;
+      },
+      async listExportOperations() {
+        return fake.liveOperations;
       },
     },
     objectExists: async () => fake.exists,
@@ -185,6 +190,69 @@ test("refreshBackup marks a job failed when its operation can no longer be read"
   // A later request is no longer blocked by the stuck job.
   const next = await startBackup(deps, actor, "manual");
   assert.equal(next.status, "running");
+});
+
+async function orphanJob(deps: Fake, ageMinutes: number): Promise<string> {
+  const jobId = deps.newJobId();
+  const requestedAt = Timestamp.fromMillis(deps.now().getTime() - ageMinutes * 60_000);
+  await db.doc(`backup_jobs/${jobId}`).set({
+    jobId, status: "running", trigger: "manual", requestedBy: adminUid, requestedAt,
+    startedAt: null, completedAt: null, operationName: null,
+    outputUriPrefix: `gs://test-bucket/firestore-exports/20261115-023000-${jobId}`,
+    coverage: {firestore: "included", auth: "excluded", storage: "excluded"}, progress: null,
+    verification: {status: "pending", metadataPath: `firestore-exports/20261115-023000-${jobId}/20261115-023000-${jobId}.overall_export_metadata`, checkedAt: null},
+    error: null, retentionDays: 30, expiresAt: requestedAt, revision: 1,
+  });
+  return jobId;
+}
+
+test("an orphaned start with no live export operation is failed after the grace period and unblocks later backups", {skip: !emulated}, async () => {
+  await clearJobs();
+  const deps = fakeDeps();
+  const jobId = await orphanJob(deps, 30);
+  assert.equal((await refreshBackup(deps, actor, jobId)).status, "failed");
+  const job = (await db.doc(`backup_jobs/${jobId}`).get()).data()!;
+  assert.equal(job.error.code, "export-start-orphaned");
+  assert.ok(job.completedAt instanceof Timestamp);
+  assert.ok((await auditRows("BACKUP_FAILED")) >= 1);
+  assert.equal(deps.exportCalls.length, 0);
+  assert.equal((await startBackup(deps, actor, "manual")).status, "running");
+  assert.equal(deps.exportCalls.length, 1);
+});
+
+test("an orphaned start whose export is actually running adopts the operation instead of starting another", {skip: !emulated}, async () => {
+  await clearJobs();
+  const deps = fakeDeps();
+  const jobId = await orphanJob(deps, 30);
+  deps.liveOperations = [{name: "op-live", outputUriPrefix: `gs://test-bucket/firestore-exports/20261115-023000-${jobId}`, done: false}];
+  assert.equal((await refreshBackup(deps, actor, jobId)).status, "running");
+  const job = (await db.doc(`backup_jobs/${jobId}`).get()).data()!;
+  assert.equal(job.operationName, "op-live");
+  assert.equal(deps.exportCalls.length, 0);
+  await denied(startBackup(deps, actor, "manual"), "failed-precondition");
+  // Once adopted, normal completion applies.
+  deps.operation = {done: true};
+  assert.equal((await refreshBackup(deps, actor, jobId)).status, "completed");
+});
+
+test("a very recent nameless job is left alone because its start may still be in flight", {skip: !emulated}, async () => {
+  await clearJobs();
+  const deps = fakeDeps();
+  const jobId = await orphanJob(deps, 1);
+  assert.equal((await refreshBackup(deps, actor, jobId)).status, "running");
+  const job = (await db.doc(`backup_jobs/${jobId}`).get()).data()!;
+  assert.equal(job.operationName, null);
+  assert.equal(job.revision, 1);
+});
+
+test("an export response without an operation name fails the job instead of leaving it nameless and running", {skip: !emulated}, async () => {
+  await clearJobs();
+  const deps = fakeDeps();
+  deps.exportResponseName = null;
+  await denied(startBackup(deps, actor, "manual"), "internal");
+  const jobs = await db.collection("backup_jobs").where("requestedBy", "==", adminUid).get();
+  assert.equal(jobs.docs[0].data().status, "failed");
+  assert.equal(jobs.docs[0].data().error.code, "export-operation-missing");
 });
 
 test("the scheduler does nothing unless BACKUP_SCHEDULE_ENABLED is true", {skip: !emulated}, async () => {
