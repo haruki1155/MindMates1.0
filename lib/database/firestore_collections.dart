@@ -2,6 +2,7 @@ class FirestoreCollections {
   const FirestoreCollections._();
 
   static const users = 'users';
+  static const announcements = 'announcements';
   static const roleCorrectionRequests = 'role_correction_requests';
   static const roleAuditLogs = 'role_audit_logs';
   static const adminAuditLogs = 'admin_audit_logs';
