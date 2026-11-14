@@ -29,7 +29,7 @@ class _Repository extends AdminPortalRepository {
 }
 
 void main() {
-  testWidgets('completed-session decision includes private interview documentation fields', (tester) async {
+  testWidgets('completed-session decision preserves summary and file upload only', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1440, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final record = _appointment(
@@ -45,10 +45,11 @@ void main() {
     await tester.tap(find.text('Review'));
     await tester.pumpAndSettle();
     expect(find.text('Session summary (internal)'), findsOneWidget);
-    expect(find.byKey(const Key('clinical-interview-questions')), findsOneWidget);
-    expect(find.byKey(const Key('clinical-requirements-checked')), findsOneWidget);
-    expect(find.byKey(const Key('clinical-materials-used')), findsOneWidget);
+    expect(find.text('Session attachments'), findsOneWidget);
     expect(find.text('Add images / documents'), findsOneWidget);
+    expect(find.byKey(const Key('clinical-interview-questions')), findsNothing);
+    expect(find.byKey(const Key('clinical-requirements-checked')), findsNothing);
+    expect(find.byKey(const Key('clinical-materials-used')), findsNothing);
   });
 
   testWidgets('PACC reopens its requested-time proposal with a valid counter action', (tester) async {
