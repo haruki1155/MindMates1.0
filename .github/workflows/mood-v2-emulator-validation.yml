@@ -107,9 +107,9 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      # In a staging build the protected writer and the two compatibility
-      # readers stay disabled, while presentation and the five student-facing
-      # readers default to on.
+      # In a staging build the protected writer now defaults to on, together
+      # with presentation and the five student-facing readers. Only the two
+      # compatibility readers stay disabled.
       # The flag contract is asserted by the test/features/mood runs below,
       # which include mood_v2_feature_flag_test and mood_v2_repository_test in
       # both environments.
