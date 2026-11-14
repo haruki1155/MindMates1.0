@@ -1,3 +1,4 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/appointment_model.dart';
@@ -37,25 +38,41 @@ class _CounselorPage extends StatelessWidget {
           stream: repository.watchAppointments(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              return const _Message(
+              final issue = snapshot.error;
+              final code = issue is FirebaseException ? issue.code : 'unknown';
+              return _Message(
                 title: 'Unable to load your counseling workspace',
-                body: 'Please try again or contact an administrator.',
+                body: 'Cannot read clinical appointments ($code). '
+                    'Check Counselor authorization, project environment and '
+                    'Firestore query permissions. Do not use Admin access as a workaround.',
               );
             }
             if (!snapshot.hasData) return const _Skeleton();
             return StreamBuilder<List<AppointmentModel>>(
               stream: repository.watchMyAssignedAppointments(),
               builder: (context, myCasesSnapshot) {
-                if (myCasesSnapshot.hasError) {
-                  return const _Message(
-                    title: 'Unable to load your assigned caseload',
-                    body: 'Please try again or contact an administrator.',
-                  );
-                }
-                return _Content(
-                  appointments: snapshot.data!,
-                  myAppointments: myCasesSnapshot.data ?? const [],
-                  onNavigate: onNavigate,
+                // A failed assigned-caseload query must not hide the
+                // organization-wide appointments that already loaded.
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (myCasesSnapshot.hasError)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 16),
+                        child: _Message(
+                          title: 'Assigned caseload unavailable',
+                          body: 'Your full PACC appointment overview is still '
+                              'available. Check assigned-case access or query indexes.',
+                        ),
+                      ),
+                    _Content(
+                      appointments: snapshot.data!,
+                      myAppointments: myCasesSnapshot.hasError
+                          ? const <AppointmentModel>[]
+                          : myCasesSnapshot.data ?? const <AppointmentModel>[],
+                      onNavigate: onNavigate,
+                    ),
+                  ],
                 );
               },
             );

@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'dart:async';
 import 'dart:typed_data';
 
 import '../database/firestore_collections.dart';
@@ -237,6 +238,7 @@ class AdminPortalRepository {
   bool _isSuperAdmin = false;
   bool get isSuperAdmin => _isSuperAdmin;
   bool _mustChangePassword = false;
+  bool _staffQueueRefreshAttempted = false;
   bool get mustChangePassword => _mustChangePassword;
 
   AccessRole _profileAccessRole(Map<String, dynamic>? profile) {
@@ -760,30 +762,59 @@ class AdminPortalRepository {
         );
   }
 
+  /// Explicitly backfill the staff-safe queue from canonical appointments.
+  /// This is a privileged Cloud Function; callers never receive clinical data.
+  /// On staging it requires the Function to be deployed and Staff approval.
+  Future<int> refreshPortalAppointmentQueue() async {
+    if (currentAccessRole != AccessRole.portalStaff) {
+      throw StateError('PACC Staff access is required.');
+    }
+    final result = await FirebaseFunctions.instance
+        .routedCallable('refreshPortalAppointmentQueue')
+        .call<Map<String, dynamic>>();
+    return (result.data['refreshed'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Read the existing staff-safe appointment projection directly.
+  ///
+  /// Do not gate the whole screen on `refreshPortalAppointmentQueue`: a
+  /// callable can be unavailable in staging, rate-limited, or fail App Check,
+  /// even when the user is authorized to read existing queue documents.
+  /// Projection refresh is a separate privileged operation, not a read
+  /// prerequisite. Firestore rules still enforce portalStaff-only access.
   Stream<List<AppointmentQueueItem>> watchPortalAppointmentQueue() {
     if (currentAccessRole != AccessRole.portalStaff) {
       return Stream.value(const <AppointmentQueueItem>[]);
     }
-    return Stream.fromFuture(
-      FirebaseFunctions.instance
-          .routedCallable('refreshPortalAppointmentQueue')
-          .call(),
-    ).asyncExpand(
-      (_) => _firestoreService
-          .watchDocuments(FirestoreCollections.appointmentQueue)
-          .map(
-            (items) =>
-                items
-                    .map(
-                      (item) => AppointmentQueueItem.fromJson(
-                        item,
-                        id: item['id']?.toString(),
-                      ),
-                    )
-                    .toList()
-                  ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
-          ),
-    );
+    // Best-effort catch-up for records created before the queue projection
+    // trigger was deployed. Never block reads on this Cloud Function.
+    // One attempt per repository instance avoids repeat requests on rebuild.
+    if (!_staffQueueRefreshAttempted) {
+      _staffQueueRefreshAttempted = true;
+      unawaited(
+        FirebaseFunctions.instance
+            .routedCallable('refreshPortalAppointmentQueue')
+            .call()
+            .then<void>((_) {})
+            .catchError((Object error, StackTrace stackTrace) {
+              // The Firestore queue listener remains authoritative and live.
+              // App Check / callable failures must not blank the Staff UI.
+            }),
+      );
+    }
+    return _firestoreService
+        .watchDocuments(FirestoreCollections.appointmentQueue)
+        .map(
+          (items) => items
+              .map(
+                (item) => AppointmentQueueItem.fromJson(
+                  item,
+                  id: item['id']?.toString(),
+                ),
+              )
+              .toList()
+            ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
+        );
   }
 
   Stream<List<AppNotificationModel>> watchPortalNotifications() =>

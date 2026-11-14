@@ -11,6 +11,7 @@ class AppointmentQueueItem {
     required this.status,
     required this.isArchived,
     this.assignedCounselor,
+    this.collegeId = '',
   });
 
   final String id;
@@ -20,6 +21,9 @@ class AppointmentQueueItem {
   final String status;
   final bool isArchived;
   final String? assignedCounselor;
+  /// Staff-safe academic filter; populated from the student's verified profile.
+  /// Empty means that a validated college could not be resolved.
+  final String collegeId;
 
   factory AppointmentQueueItem.fromJson(
     Map<String, dynamic> json, {
@@ -32,6 +36,7 @@ class AppointmentQueueItem {
     status: json['status']?.toString().trim() ?? 'requested',
     isArchived: json['isArchived'] == true,
     assignedCounselor: _optionalString(json['assignedCounselor']),
+    collegeId: _optionalString(json['collegeId']) ?? '',
   );
 
   static String? _optionalString(Object? value) {

@@ -8,7 +8,7 @@ import {
   initializeTestEnvironment,
   RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import {doc, getDoc, setDoc} from "firebase/firestore";
+import {collection, doc, getDoc, getDocs, setDoc} from "firebase/firestore";
 
 const projectId = "mind-mates-appointment-privacy-rules-test";
 let environment: RulesTestEnvironment;
@@ -77,6 +77,19 @@ test("portal staff can read only the minimal appointment queue", async () => {
   await assertFails(getDoc(doc(portalStaff, "appointments/appointment-1")));
   await assertFails(getDoc(doc(portalStaff, "appointments/appointment-1/history/terminal")));
   await assertSucceeds(getDoc(doc(portalStaff, "appointment_queue/appointment-1")));
+});
+
+test("portal staff may list only safe appointment projections, counselors may list canonical appointments", async () => {
+  const portalStaff = environment.authenticatedContext("portal-staff").firestore();
+  const counselor = environment.authenticatedContext("counselor").firestore();
+  const admin = environment.authenticatedContext("admin").firestore();
+  const student = environment.authenticatedContext("student").firestore();
+
+  await assertSucceeds(getDocs(collection(portalStaff, "appointment_queue")));
+  await assertFails(getDocs(collection(portalStaff, "appointments")));
+  await assertSucceeds(getDocs(collection(counselor, "appointments")));
+  await assertSucceeds(getDocs(collection(admin, "appointments")));
+  await assertFails(getDocs(collection(student, "appointments")));
 });
 
 test("clinical notes are visible to all clinical staff", async () => {

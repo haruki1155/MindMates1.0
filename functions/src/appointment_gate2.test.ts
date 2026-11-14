@@ -7,7 +7,8 @@ test("queue delayed and duplicate events project authoritative confirmation", as
   assert.ok(process.env.FIRESTORE_EMULATOR_HOST);
   const db = getFirestore();
   const ref = db.doc("appointments/gate2-queue");
-  await ref.set({userId: "gate2-student", fullName: "Student", status: "requested", scheduleRevision: 1, scheduledAt: Timestamp.fromMillis(2000000000000)});
+  await db.doc("users/gate2-queue-student").set({accessRole: "appUser", collegeId: "college-verified"});
+  await ref.set({userId: "gate2-queue-student", fullName: "Student", collegeId: "untrusted-client-value", status: "requested", scheduleRevision: 1, scheduledAt: Timestamp.fromMillis(2000000000000)});
   const old = await ref.get();
   await ref.update({status: "confirmed", scheduleRevision: 2});
   const trigger = functions.syncPortalAppointmentQueue as unknown as {run: (event: unknown) => Promise<void>};
@@ -15,6 +16,8 @@ test("queue delayed and duplicate events project authoritative confirmation", as
   const queue = (await db.doc(`appointment_queue/${ref.id}`).get()).data()!;
   assert.equal(queue.status, "confirmed");
   assert.equal(queue.scheduleRevision, 2);
+  assert.equal(queue.collegeId, "college-verified");
+  assert.equal(queue.userId, undefined);
   assert.equal(queue.concern, undefined);
   await ref.update({status: "requested", scheduleRevision: 3});
   const olderPending = await ref.get();
@@ -27,6 +30,8 @@ test("queue delayed and duplicate events project authoritative confirmation", as
   const refreshed = (await db.doc(`appointment_queue/${ref.id}`).get()).data()!;
   assert.equal(refreshed.status, "confirmed");
   assert.equal(refreshed.scheduleRevision, 3);
+  assert.equal(refreshed.collegeId, "college-verified");
+  assert.equal(refreshed.userId, undefined);
   assert.equal(refreshed.scheduledAt.toMillis(), 2000000000000);
 });
 
