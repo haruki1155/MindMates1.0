@@ -1,3 +1,4 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/appointment_model.dart';
@@ -37,9 +38,13 @@ class _CounselorPage extends StatelessWidget {
           stream: repository.watchAppointments(),
           builder: (context, snapshot) {
             if (snapshot.hasError) {
-              return const _Message(
+              final issue = snapshot.error;
+              final code = issue is FirebaseException ? issue.code : 'unknown';
+              return _Message(
                 title: 'Unable to load your counseling workspace',
-                body: 'Please try again or contact an administrator.',
+                body: 'Cannot read clinical appointments ($code). '
+                    'Check Counselor authorization, project environment and '
+                    'Firestore query permissions. Do not use Admin access as a workaround.',
               );
             }
             if (!snapshot.hasData) return const _Skeleton();
