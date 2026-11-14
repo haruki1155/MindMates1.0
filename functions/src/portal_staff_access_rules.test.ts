@@ -8,7 +8,7 @@ import {
   initializeTestEnvironment,
   RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import {collection, doc, getDoc, getDocs, setDoc} from "firebase/firestore";
+import {collection, doc, getDoc, getDocs, setDoc, updateDoc} from "firebase/firestore";
 
 // Role matrix for PACC portal data visibility. Every portal account state that
 // the staff lifecycle can produce is represented, so a client that resolves a
@@ -50,6 +50,16 @@ beforeEach(async () => {
         summary: "Sensitive clinical note",
       }),
       setDoc(doc(firestore, "mind_aid_emergency_alerts/alert-1"), {userId: "student"}),
+      // Legacy records: no staffAccountStatus. Absent or active accountStatus
+      // keeps access; an explicit suspended/disabled status must not.
+      setDoc(doc(firestore, "users/counselor-legacy"), {accessRole: "counselor"}),
+      setDoc(doc(firestore, "users/counselor-legacy-active"), {accessRole: "counselor", accountStatus: "active"}),
+      setDoc(doc(firestore, "users/counselor-legacy-suspended"), {accessRole: "counselor", accountStatus: "suspended"}),
+      setDoc(doc(firestore, "users/staff-legacy-disabled"), {accessRole: "portalStaff", accountStatus: "disabled"}),
+      setDoc(doc(firestore, "users/admin-suspended"), {accessRole: "admin", accountStatus: "suspended"}),
+      setDoc(doc(firestore, "system_config/security"), {superAdminUid: "admin"}),
+      setDoc(doc(firestore, "mind_aid_config/current"), {enabled: true}),
+      setDoc(doc(firestore, "admin_audit_logs/audit-1"), {action: "TEST"}),
       setDoc(doc(firestore, "users/staff-approved"), {
         accessRole: "portalStaff", approvedRole: "portalStaff",
         staffAccountStatus: "approved", accountStatus: "active",
@@ -166,4 +176,56 @@ test("students only read their own inquiry", async () => {
   await assertSucceeds(getDoc(doc(student, "inquiries/inquiry-1")));
   await assertFails(getDocs(collection(student, "inquiries")));
   await assertFails(getDocs(collection(student, "appointment_queue")));
+});
+
+test("explicit suspended or disabled status denies legacy records; absent or active status keeps access", async () => {
+  const legacy = environment.authenticatedContext("counselor-legacy", verified).firestore();
+  const legacyActive = environment.authenticatedContext("counselor-legacy-active", verified).firestore();
+  await assertSucceeds(getDoc(doc(legacy, "appointments/appointment-1")));
+  await assertSucceeds(getDoc(doc(legacyActive, "appointments/appointment-1/clinical_notes/session")));
+  await assertSucceeds(getDocs(collection(legacyActive, "inquiries")));
+
+  const suspended = environment.authenticatedContext("counselor-legacy-suspended", verified).firestore();
+  await assertFails(getDoc(doc(suspended, "appointments/appointment-1")));
+  await assertFails(getDoc(doc(suspended, "appointments/appointment-1/clinical_notes/session")));
+  await assertFails(getDocs(collection(suspended, "mind_aid_emergency_alerts")));
+  await assertFails(getDocs(collection(suspended, "inquiries")));
+
+  const disabledStaff = environment.authenticatedContext("staff-legacy-disabled", verified).firestore();
+  await assertFails(getDocs(collection(disabledStaff, "appointment_queue")));
+  await assertFails(getDocs(collection(disabledStaff, "inquiries")));
+});
+
+test("administrator rule gates require the verified, active lifecycle", async () => {
+  const admin = environment.authenticatedContext("admin", verified).firestore();
+  await assertSucceeds(getDoc(doc(admin, "users/student")));
+  await assertSucceeds(getDoc(doc(admin, "admin_audit_logs/audit-1")));
+  await assertSucceeds(getDoc(doc(admin, "mind_aid_config/current")));
+
+  const adminUnverified = environment.authenticatedContext("admin", unverified).firestore();
+  await assertFails(getDoc(doc(adminUnverified, "users/student")));
+  await assertFails(getDoc(doc(adminUnverified, "admin_audit_logs/audit-1")));
+  await assertFails(getDoc(doc(adminUnverified, "mind_aid_config/current")));
+
+  const adminSuspended = environment.authenticatedContext("admin-suspended", verified).firestore();
+  await assertFails(getDoc(doc(adminSuspended, "appointments/appointment-1")));
+  await assertFails(getDoc(doc(adminSuspended, "mind_aid_config/current")));
+  await environment.withSecurityRulesDisabled(async (context) =>
+    setDoc(doc(context.firestore(), "system_config/security"), {superAdminUid: "admin-suspended"}));
+  await assertFails(getDoc(doc(adminSuspended, "users/student")));
+  await assertFails(getDoc(doc(adminSuspended, "admin_audit_logs/audit-1")));
+});
+
+test("portal accounts may only change an inquiry's status, never its content or assignment", async () => {
+  const counselor = environment.authenticatedContext("counselor", verified).firestore();
+  await assertSucceeds(updateDoc(doc(counselor, "inquiries/inquiry-1"), {status: "in_progress", updatedAt: new Date()}));
+  await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {assignedStaffId: "counselor"}));
+  await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {message: "rewritten"}));
+  await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {status: "deleted"}));
+  await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {userId: "counselor", status: "resolved"}));
+
+  const suspended = environment.authenticatedContext("counselor-legacy-suspended", verified).firestore();
+  await assertFails(updateDoc(doc(suspended, "inquiries/inquiry-1"), {status: "resolved", updatedAt: new Date()}));
+  const student = environment.authenticatedContext("student", verified).firestore();
+  await assertFails(updateDoc(doc(student, "inquiries/inquiry-1"), {status: "resolved", updatedAt: new Date()}));
 });

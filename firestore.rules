@@ -22,23 +22,28 @@ service cloud.firestore {
           : get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
+    function portalProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Portal access = portal role + verified email + account lifecycle.
+    // Mirrors functions/src/access.ts::requireStaff.
+    //  - `accountStatus`: absent means a pre-lifecycle (legacy) record and is
+    //    treated as active; any explicit non-active value (suspended,
+    //    disabled, pending) denies, including for administrators.
+    //  - `staffAccountStatus`: absent means legacy; otherwise it must be
+    //    'approved'. Administrators are not applicant requests.
+    // Fields are read with get() so a missing key is "legacy", not an
+    // evaluation error that silently denies the whole request.
     function hasPortalAccess() {
       return currentAccessRole() in ['portalStaff', 'counselor', 'admin']
         && isVerifiedEmail()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && portalProfile().get('accountStatus', 'active') == 'active'
         && (
-          // The guarded super-admin record predates the staff-request
-          // lifecycle. It is Auth-verified and is not an applicant request.
           currentAccessRole() == 'admin'
-          ||
-          // Pre-lifecycle staff records have no status fields at all. Read
-          // them with get() so a missing key means "legacy", not an
-          // evaluation error that silently denies the whole request.
-          !exists(/databases/$(database)/documents/users/$(request.auth.uid))
-          || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', null) == null
-          || (
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', null) == 'approved'
-            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountStatus', null) == 'active'
-          )
+          || portalProfile().get('staffAccountStatus', null) == null
+          || portalProfile().get('staffAccountStatus', null) == 'approved'
         );
     }
 
@@ -57,14 +62,15 @@ service cloud.firestore {
     // Clinical staff may review care data, but only administrator accounts
     // may change portal configuration and curated content.
     function isPortalAdmin() {
-      return currentAccessRole() == 'admin';
+      return currentAccessRole() == 'admin' && hasPortalAccess();
     }
 
     function isSystemAdmin() {
       return signedIn()
         && exists(/databases/$(database)/documents/system_config/security)
         && request.auth.uid == get(/databases/$(database)/documents/system_config/security).data.superAdminUid
-        && currentAccessRole() == 'admin';
+        && currentAccessRole() == 'admin'
+        && hasPortalAccess();
     }
 
     function validSelfProfileUpdate() {
@@ -795,8 +801,12 @@ service cloud.firestore {
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt == request.time;
       allow read: if isOwner(resource.data.userId) || hasPortalAccess();
+      // Portal accounts may only move the workflow status from the client.
+      // Content, ownership and assignment changes belong to audited server
+      // operations (acknowledgeInquiry today, routing/escalation later).
       allow update: if hasPortalAccess()
-        && request.resource.data.userId == resource.data.userId;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && request.resource.data.status in ['pending', 'in_progress', 'resolved'];
       allow delete: if false;
     }
 
