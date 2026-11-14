@@ -84,6 +84,36 @@ void main() {
     expect(find.textContaining('Testing dates are currently arranged outside MindMate'), findsNothing);
   });
 
+  testWidgets('calendar includes requested appointments as pending, not confirmed', (tester) async {
+    tester.view.physicalSize = const Size(1280, 1500);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(MaterialApp(home: Scaffold(
+      body: SingleChildScrollView(child: StaffScheduleCalendar(
+        counselingAppointments: [
+          _counseling(id: 'pending-1', status: 'requested'),
+          _counseling(id: 'confirmed-1', status: 'confirmed'),
+          _counseling(id: 'cancelled-1', status: 'cancelled'),
+        ],
+        initialMonth: DateTime(2026, 11, 1),
+      )),
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('1 counseling'), findsOneWidget);
+    expect(find.text('1 pending'), findsOneWidget);
+    final day = find.byKey(const Key('staff-day-2026-11-16'));
+    final tooltip = tester.widget<Tooltip>(find.ancestor(
+      of: day,
+      matching: find.byType(Tooltip),
+    ));
+    expect(tooltip.message, contains('Pending (unconfirmed)'));
+    await tester.ensureVisible(day);
+    await tester.tap(day);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Pending (unconfirmed)'), findsOneWidget);
+  });
+
   testWidgets('calendar changes months and scrolls on a short viewport without overflow', (tester) async {
     // StaffOperationsDashboardPage hosts the reusable calendar inside
     // SingleChildScrollView. Match that production layout on the default
