@@ -29,6 +29,7 @@ import 'academic_structure_page.dart';
 import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
 import '../../announcements/screens/manage_announcements_page.dart';
+import 'backup_data_page.dart';
 import 'staff_operations_dashboard.dart';
 import 'staff_appointments_page.dart';
 import 'counselor_operations_dashboard.dart';
@@ -68,6 +69,7 @@ enum AdminPortalPage {
   availability,
   inquiries,
   assessments,
+  backupData,
   profile,
 }
 
@@ -87,6 +89,7 @@ extension on AdminPortalPage {
     AdminPortalPage.availability => 'Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
     AdminPortalPage.assessments => 'Assessment',
+    AdminPortalPage.backupData => 'Back-up Data',
     AdminPortalPage.profile => 'Profile',
   };
 
@@ -112,6 +115,7 @@ extension on AdminPortalPage {
     AdminPortalPage.availability => Icons.storefront_outlined,
     AdminPortalPage.inquiries => Icons.chat_bubble_outline_rounded,
     AdminPortalPage.assessments => Icons.assignment_outlined,
+    AdminPortalPage.backupData => Icons.backup_outlined,
     AdminPortalPage.profile => Icons.account_circle_outlined,
   };
 }
@@ -621,6 +625,9 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       initialSection: _initialInquirySection,
     ),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
+    AdminPortalPage.backupData => _repository.isSuperAdmin
+        ? BackupDataPage(repository: _repository)
+        : const Center(child: Text('Super-administrator access is required.')),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
   };
 }
@@ -667,6 +674,7 @@ class PortalWorkspaceNavigation extends StatelessWidget {
     // duplicating the destination in the workspace navigation.
     AdminPortalPage.notifications => false,
     AdminPortalPage.assessments => accessRole.canAccessClinicalData,
+    AdminPortalPage.backupData => isSuperAdmin,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
     AdminPortalPage.appointments =>
@@ -695,7 +703,10 @@ class PortalWorkspaceNavigation extends StatelessWidget {
         AdminPortalPage.assessments,
         AdminPortalPage.reports,
       ]),
-      const _NavSection('System', [AdminPortalPage.profile]),
+      const _NavSection('System', [
+        AdminPortalPage.backupData,
+        AdminPortalPage.profile,
+      ]),
     ];
     return Material(
       color: AdminColors.surface,
