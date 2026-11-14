@@ -30,10 +30,10 @@ class StaffOperationsDashboardPage extends StatelessWidget {
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return _StateCard(
-                title: "Unable to load today's appointments",
-                message: 'Please try again.',
-                action: 'Retry',
-                onPressed: () {},
+                title: 'Unable to load staff appointments',
+                message: 'The schedule could not be loaded. Open the appointment table to retry.',
+                action: 'Open appointments',
+                onPressed: () => onNavigate(AdminPortalPage.appointments),
               );
             }
             if (!snapshot.hasData) return const _StaffDashboardSkeleton();
