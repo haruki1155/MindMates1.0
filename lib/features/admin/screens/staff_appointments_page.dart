@@ -115,13 +115,13 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Wrap(
+                LayoutBuilder(builder: (context, constraints) => Wrap(
                   spacing: 16,
                   runSpacing: 12,
                   crossAxisAlignment: WrapCrossAlignment.end,
                   children: [
                     SizedBox(
-                      width: 320,
+                      width: constraints.maxWidth < 320 ? constraints.maxWidth : 320,
                       child: TextField(
                         controller: _search,
                         onChanged: (_) => setState(() {}),
@@ -133,7 +133,7 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                       ),
                     ),
                     SizedBox(
-                      width: 320,
+                      width: constraints.maxWidth < 320 ? constraints.maxWidth : 320,
                       child: DropdownButtonFormField<String>(
                         key: ValueKey('college-$selectedCollege'),
                         initialValue: selectedCollege,
@@ -167,7 +167,7 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                       ),
                     ),
                   ],
-                ),
+                )),
                 const SizedBox(height: 12),
                 Text(
                   '${visible.length} ${visible.length == 1 ? 'appointment' : 'appointments'} shown',
