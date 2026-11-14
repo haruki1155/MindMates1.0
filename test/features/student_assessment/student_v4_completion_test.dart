@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/counseling/screens/pacc_counseling_screen.dart';
 import 'package:mind_mates/features/student_assessment/screens/student_assessment_complete_screen.dart';
 import 'package:mind_mates/features/student_assessment/widgets/assessment_domain_illustration.dart';
 import 'package:mind_mates/features/student_assessment/models/student_assessment_models.dart';
@@ -226,7 +227,8 @@ void main() {
       await tester.tap(find.text('Continue to PACC'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Appointment Details'), findsOneWidget);
+      expect(find.byType(PaccCounselingScreen), findsOneWidget);
+      expect(find.byKey(const ValueKey('intake')), findsOneWidget);
       expect(appointments.createCalls, 0);
       await tester.binding.handlePopRoute();
       await tester.pump(const Duration(milliseconds: 300));
