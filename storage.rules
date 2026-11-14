@@ -24,8 +24,7 @@ service firebase.storage {
       allow delete: if isOwner(userId);
     }
 
-    // Task #10: authenticated, approved clinicians only. This path never
-    // exposes download tokens or permits listing the clinical file namespace.
+    // Task #10: confidential counselor interview files.
     function isVerifiedClinician() {
       return signedIn()
         && request.auth.token.email_verified == true
@@ -41,32 +40,17 @@ service firebase.storage {
           )
         );
     }
-
     function appointmentRecordExists(appointmentId) {
       return firestore.exists(/databases/(default)/documents/appointments/$(appointmentId));
     }
-
     match /counseling_session_files/{appointmentId}/{uploaderUid}/{fileName} {
-      // These files contain counseling interview information. Students and
-      // generic portal staff can never read them.
       allow get: if isVerifiedClinician() && appointmentRecordExists(appointmentId);
       allow list: if false;
-      // Upload is allowed only while a scheduled session is confirmed.
       allow create: if isVerifiedClinician()
         && request.auth.uid == uploaderUid
         && appointmentRecordExists(appointmentId)
         && firestore.get(/databases/(default)/documents/appointments/$(appointmentId)).data.status == 'confirmed'
-        && fileName.matches('^[a-f0-9]{32}[.](jpg|jpeg|png|pdf|doc|docx)
-      allow read: if signedIn();
-      allow create, update: if isOwner(userId)
-        && fileName.matches('^avatar[.](jpg|png)$')
-        && request.resource.size <= 5 * 1024 * 1024
-        && request.resource.contentType.matches('^image/(jpeg|png)$');
-      allow delete: if isOwner(userId);
-    }
-  }
-}
-)
+        && fileName.matches('^[a-f0-9]{32}[.](jpg|jpeg|png|pdf|doc|docx)$')
         && request.resource.size > 0
         && request.resource.size <= 5 * 1024 * 1024
         && request.resource.contentType in [
@@ -75,8 +59,6 @@ service firebase.storage {
         ]
         && request.resource.metadata.uploadedBy == uploaderUid
         && request.resource.metadata.appointmentId == appointmentId;
-      // May remove a draft upload before the appointment is finalized;
-      // after completion, saved evidence cannot be edited or deleted by clients.
       allow delete: if isVerifiedClinician()
         && request.auth.uid == uploaderUid
         && appointmentRecordExists(appointmentId)
