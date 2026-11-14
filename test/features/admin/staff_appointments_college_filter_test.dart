@@ -60,7 +60,7 @@ void main() {
 
     expect(find.textContaining('Live appointments could not be loaded'),
         findsOneWidget);
-    expect(find.text('Filter by college'), findsOneWidget);
+    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
     expect(find.byType(DataTable), findsOneWidget);
     expect(find.text('Appointment data is unavailable, not an empty schedule.'),
         findsOneWidget);
