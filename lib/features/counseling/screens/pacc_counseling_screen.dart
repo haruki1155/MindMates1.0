@@ -12,6 +12,7 @@ import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../home/screens/home_appointment_calendar_screen.dart';
 import '../widgets/appointment_details_sheet.dart';
 import '../widgets/appointment_list_view.dart';
+import '../../../core/constants/app_colors.dart';
 import '../widgets/appointment_presentation.dart';
 import '../../notifications/screens/notifications_screen.dart';
 import '../domain/best_contact_time.dart';
@@ -2129,7 +2130,7 @@ class _ConfirmationView extends StatelessWidget {
                   ),
                 ],
               ),
-              child: const Icon(Icons.check, size: 48, color: Color(0xFF187557)),
+              child: const Icon(Icons.check, size: 48, color: AppColors.primary),
             ),
             const SizedBox(height: 22),
             const Text(
