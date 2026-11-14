@@ -211,8 +211,8 @@ export async function createMoodEntryForUser(
   allowStudentRollout = false,
 ): Promise<Record<string, unknown>> {
   const profile = await requireEligibleAppUser(uid);
-  // This capability is selected by server code, never request data. The Dev
-  // handler deliberately uses the default pilot-only path.
+  // This capability is selected by server code, never request data. Both
+  // handlers pass it as true; it only takes effect on mindmate-staging.
   if (gate.projectId === "mindmate-staging" && gate.pilotUserIds.has(uid)) {
     requireMoodV2StagingPilot(uid, gate);
   } else {
@@ -266,7 +266,10 @@ export async function createMoodEntryHandler(request: CallableRequest): Promise<
 
 export async function createMoodEntryDevHandler(request: CallableRequest): Promise<Record<string, unknown>> {
   const uid = requireUid(request);
-  return createMoodEntryForUser(uid, parseMoodEntryInput(request.data));
+  // Staging clients are routed here because they install no App Check
+  // provider. They must accept the same student rollout as the protected
+  // handler, otherwise a non-pilot account can never save a mood entry.
+  return createMoodEntryForUser(uid, parseMoodEntryInput(request.data), Timestamp.now(), moodV2RolloutGate(), true);
 }
 
 export const createMoodEntry = onCall({enforceAppCheck: true}, createMoodEntryHandler);

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../../services/firebase/firebase_runtime_diagnostics.dart';
 import '../repositories/counselor_chat_repository.dart';
 
 class OutgoingInquiry {
@@ -107,6 +108,14 @@ class CounselorSendController extends ChangeNotifier {
         /* Keep the acknowledged ID safe to reconcile. */
       }
     } catch (e) {
+      // Diagnostics only: runtime type and Firebase code/plugin. Never the
+      // message text, user identifiers or the exception message.
+      FirebaseRuntimeDiagnostics.log(
+        event: 'counselor_send_failed',
+        errorType: e.runtimeType.toString(),
+        errorCode: e is FirebaseException ? e.code : null,
+        errorPlugin: e is FirebaseException ? e.plugin : null,
+      );
       error = !saved
           ? 'Unable to save this message on your device. Keep this screen open and retry.'
           : switch (e) {

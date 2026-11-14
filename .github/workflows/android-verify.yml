@@ -33,6 +33,13 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test --dart-define=APP_ENV=staging
+      # Mood V2 presentation and the five readers default to on in staging
+      # builds. This second, focused run proves the default-disabled shape
+      # still holds, so neither configuration can hide a regression in the
+      # other. It is scoped to the mood suites because other suites in this
+      # repo do not currently pass under APP_ENV=development.
+      - name: Verify Mood V2 default-disabled flags
+        run: flutter test test/features/mood --dart-define=APP_ENV=development
       - run: flutter clean
       - run: flutter build apk --debug --flavor staging --dart-define=APP_ENV=staging
       - name: Verify staging APK identity and permissions

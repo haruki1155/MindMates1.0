@@ -26,6 +26,7 @@ void main() {
     WidgetTester tester,
     HomeStreakData streak, {
     double width = 390,
+    bool writer = false,
   }) async {
     final taps = <String>[];
     await tester.binding.setSurfaceSize(Size(width, 900));
@@ -42,6 +43,7 @@ void main() {
                   data: streak,
                   onTap: () => taps.add('card'),
                   onViewRecap: () => taps.add('recap'),
+                  allowsAdditionalEntries: writer,
                 ),
               ),
             ),
@@ -125,4 +127,34 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  group('log button with multiple entries per day', () {
+    for (final writer in [true, false]) {
+      for (final state in HomeStreakState.values) {
+        final checkedIn =
+            state == HomeStreakState.doneToday ||
+            state == HomeStreakState.milestone;
+        const label = 'Log mood';
+        final visible = writer || !checkedIn;
+        testWidgets('writer ${writer ? 'on' : 'off'} + ${state.name}: '
+            '${visible ? 'shows "$label"' : 'hides the pill'}', (tester) async {
+          await pump(
+            tester,
+            data(state, state == HomeStreakState.notStarted ? 0 : 3),
+            writer: writer,
+          );
+          expect(find.text(label), visible ? findsOneWidget : findsNothing);
+          if (visible) {
+            expect(
+              find.ancestor(
+                of: find.text(label),
+                matching: find.byType(FilledButton),
+              ),
+              findsOneWidget,
+            );
+          }
+        });
+      }
+    }
+  });
 }
