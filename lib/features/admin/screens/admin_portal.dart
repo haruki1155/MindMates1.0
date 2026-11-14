@@ -601,6 +601,11 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   };
 }
 
+/// Schedule editing/navigation is reserved for counselors and administrators.
+/// This controls portal navigation only; backend authorization remains unchanged.
+bool canShowScheduleNavigation(AccessRole accessRole) =>
+    accessRole == AccessRole.counselor || accessRole == AccessRole.admin;
+
 class _Nav extends StatelessWidget {
   const _Nav({
     required this.page,
@@ -636,6 +641,7 @@ class _Nav extends StatelessWidget {
     AdminPortalPage.counselorMessages => accessRole == AccessRole.counselor,
     AdminPortalPage.appointments =>
       accessRole.canUsePortal || accessRole == AccessRole.admin,
+    AdminPortalPage.availability => canShowScheduleNavigation(accessRole),
     _ => accessRole.canUsePortal || accessRole == AccessRole.admin,
   };
   @override
