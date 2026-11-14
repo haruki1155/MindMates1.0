@@ -409,6 +409,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   late final AdminPortalRepository _repository =
       widget.repository ?? AdminPortalRepository();
   AdminPortalPage _page = AdminPortalPage.dashboard;
+  CounselorInquirySection _initialInquirySection = CounselorInquirySection.messages;
   final _rosterLeaveGuard = StudentRosterLeaveGuard();
   bool _navCollapsed = false;
   late final Stream<List<AppNotificationModel>> _notifications;
@@ -508,7 +509,10 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
     },
   );
 
-  Future<void> _setPage(AdminPortalPage page) async {
+  Future<void> _setPage(
+    AdminPortalPage page, {
+    CounselorInquirySection inquirySection = CounselorInquirySection.messages,
+  }) async {
     if (_page == AdminPortalPage.availability &&
         page != AdminPortalPage.availability &&
         !await _scheduleController.confirmLeave(context)) {
@@ -524,7 +528,14 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       return;
     }
     Navigator.of(context).maybePop();
-    if (mounted) setState(() => _page = page);
+    if (mounted) {
+      setState(() {
+        _page = page;
+        if (page == AdminPortalPage.inquiries) {
+          _initialInquirySection = inquirySection;
+        }
+      });
+    }
   }
 
   Widget _buildPage() => switch (_page) {
@@ -589,13 +600,19 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
     AdminPortalPage.notifications => AdminNotificationsPage(
       repository: _repository,
       onOpenAppointments: () => _setPage(AdminPortalPage.appointments),
-      onOpenInquiries: () => _setPage(AdminPortalPage.inquiries),
+      onOpenInquiries: () => _setPage(
+        AdminPortalPage.inquiries,
+        inquirySection: CounselorInquirySection.otherServices,
+      ),
     ),
     AdminPortalPage.availability => _AvailabilityPage(
       repository: _repository,
       controller: _scheduleController,
     ),
-    AdminPortalPage.inquiries => _InquiriesPage(repository: _repository),
+    AdminPortalPage.inquiries => _InquiriesPage(
+      repository: _repository,
+      initialSection: _initialInquirySection,
+    ),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
   };
@@ -5213,8 +5230,12 @@ class _FilterField extends StatelessWidget {
 }
 
 class _InquiriesPage extends StatefulWidget {
-  const _InquiriesPage({required this.repository});
+  const _InquiriesPage({
+    required this.repository,
+    this.initialSection = CounselorInquirySection.messages,
+  });
   final AdminPortalRepository repository;
+  final CounselorInquirySection initialSection;
   @override
   State<_InquiriesPage> createState() => _InquiriesPageState();
 }
@@ -5248,6 +5269,7 @@ class _InquiriesPageState extends State<_InquiriesPage> {
         ? CounselorInquiryWorkspace(
             messages: const CounselorMessagesPage(embedded: true),
             otherServices: _buildServiceInquiries(),
+            initialSection: widget.initialSection,
           )
         : _buildServiceInquiries(),
   );
