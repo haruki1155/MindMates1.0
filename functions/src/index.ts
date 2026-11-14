@@ -1657,9 +1657,13 @@ function createAppointmentEvent(transaction: FirebaseFirestore.Transaction, appo
 export function portalAppointmentQueueProjection(
   appointmentId: string,
   appointment: FirebaseFirestore.DocumentData,
+  collegeId = "",
 ): FirebaseFirestore.DocumentData {
   return {
     appointmentId,
+    // Derived from the student's verified user profile, never from arbitrary
+    // client appointment fields. No student UID or care details are exposed.
+    collegeId,
     studentDisplayName: String(appointment.fullName ?? "").trim(),
     scheduledAt: appointment.scheduledAt ?? Timestamp.now(),
     scheduledTime: String(appointment.scheduledTime ?? "").trim(),
@@ -1682,7 +1686,17 @@ async function projectCurrentAppointment(id: string): Promise<void> {
     const appointment = await tx.get(db.doc(`appointments/${id}`));
     const notifications = await tx.get(db.collection("notifications").where("appointmentId", "==", id));
     const data = appointment.data();
-    if (data) tx.set(portalAppointmentQueue.doc(id), portalAppointmentQueueProjection(id, data));
+    // Refresh the staff-safe college key from the authoritative user profile.
+    // All reads precede writes in this transaction. Unknown colleges remain
+    // unassigned, rather than being guessed from a course or department name.
+    const userId = typeof data?.userId === "string" ? data.userId.trim() : "";
+    const profile = data && /^[A-Za-z0-9_-]{1,128}$/.test(userId)
+      ? await tx.get(db.collection("users").doc(userId))
+      : null;
+    const userCollege = profile?.data()?.collegeId;
+    const collegeId = typeof userCollege === "string" &&
+      /^[A-Za-z0-9_-]{1,128}$/.test(userCollege.trim()) ? userCollege.trim() : "";
+    if (data) tx.set(portalAppointmentQueue.doc(id), portalAppointmentQueueProjection(id, data, collegeId));
     else tx.delete(portalAppointmentQueue.doc(id));
     for (const notification of notifications.docs) {
       const note = notification.data();
