@@ -102,9 +102,9 @@ class ClinicalInterviewEditor extends StatelessWidget {
           leading: Icon(files[index].contentType.startsWith('image/')
               ? Icons.image_outlined : Icons.description_outlined),
           title: Text(files[index].name),
-          subtitle: Text((files[index].size / 1024).toStringAsFixed(0) + ' KB'),
+          subtitle: Text('${(files[index].size / 1024).toStringAsFixed(0)} KB'),
           trailing: IconButton(
-            tooltip: 'Remove ' + files[index].name,
+            tooltip: 'Remove ${files[index].name}',
             icon: const Icon(Icons.close),
             onPressed: busy ? null : () => onRemoveFile(index),
           ),
@@ -161,8 +161,13 @@ class _ClinicalInterviewRecordViewerState
       const SizedBox(height: 16),
       if (_future == null)
         OutlinedButton.icon(
-          onPressed: () => setState(() => _future =
-              widget.repository.getClinicalSessionEvidence(widget.appointmentId)),
+          onPressed: () {
+            final request = widget.repository
+                .getClinicalSessionEvidence(widget.appointmentId);
+            setState(() {
+              _future = request;
+            });
+          },
           icon: const Icon(Icons.assignment_turned_in_outlined),
           label: const Text('View session documentation'),
         )
@@ -172,8 +177,13 @@ class _ClinicalInterviewRecordViewerState
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return TextButton.icon(
-                onPressed: () => setState(() => _future = widget.repository
-                    .getClinicalSessionEvidence(widget.appointmentId)),
+                onPressed: () {
+                  final request = widget.repository
+                      .getClinicalSessionEvidence(widget.appointmentId);
+                  setState(() {
+                    _future = request;
+                  });
+                },
                 icon: const Icon(Icons.refresh),
                 label: const Text('Unable to load session documentation. Retry'),
               );
@@ -206,9 +216,9 @@ class _ClinicalInterviewRecordViewerState
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.attach_file_outlined),
                       title: Text(file.name),
-                      subtitle: Text((file.size / 1024).toStringAsFixed(0) + ' KB'),
+                      subtitle: Text('${(file.size / 1024).toStringAsFixed(0)} KB'),
                       trailing: IconButton(
-                        tooltip: 'Download ' + file.name,
+                        tooltip: 'Download ${file.name}',
                         onPressed: _downloading ? null : () => _download(file),
                         icon: const Icon(Icons.download_outlined),
                       ),
