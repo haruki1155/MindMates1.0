@@ -44,6 +44,8 @@ class UserModel {
     this.lastSignInAt,
     this.lastActiveAt,
     this.activeDateKeys = const [],
+    this.assignedCollegeIds = const [],
+    this.collegeAssignmentRevision = 0,
     this.avatarAssetName,
     this.profilePhotoUrl,
     this.profilePhotoPath,
@@ -96,6 +98,12 @@ class UserModel {
   final DateTime? lastSignInAt;
   final DateTime? lastActiveAt;
   final List<String> activeDateKeys;
+
+  /// Colleges this PACC staff member or counselor serves. Written only by
+  /// the `setStaffCollegeAssignments` callable; distinct from [collegeId],
+  /// which is the person's own home college. Never serialized by [toJson].
+  final List<String> assignedCollegeIds;
+  final int collegeAssignmentRevision;
   final String? avatarAssetName;
   final String? profilePhotoUrl;
   final String? profilePhotoPath;
@@ -213,6 +221,8 @@ class UserModel {
     DateTime? lastSignInAt,
     DateTime? lastActiveAt,
     List<String>? activeDateKeys,
+    List<String>? assignedCollegeIds,
+    int? collegeAssignmentRevision,
     String? avatarAssetName,
     String? profilePhotoUrl,
     String? profilePhotoPath,
@@ -263,6 +273,9 @@ class UserModel {
       lastSignInAt: lastSignInAt ?? this.lastSignInAt,
       lastActiveAt: lastActiveAt ?? this.lastActiveAt,
       activeDateKeys: activeDateKeys ?? this.activeDateKeys,
+      assignedCollegeIds: assignedCollegeIds ?? this.assignedCollegeIds,
+      collegeAssignmentRevision:
+          collegeAssignmentRevision ?? this.collegeAssignmentRevision,
       avatarAssetName: avatarAssetName ?? this.avatarAssetName,
       profilePhotoUrl: profilePhotoUrl ?? this.profilePhotoUrl,
       profilePhotoPath: profilePhotoPath ?? this.profilePhotoPath,
@@ -348,6 +361,8 @@ class UserModel {
       lastSignInAt: _dateOrNull(json['lastSignInAt']),
       lastActiveAt: _dateOrNull(json['lastActiveAt']),
       activeDateKeys: _stringList(json['activeDateKeys']),
+      assignedCollegeIds: _collegeIds(json['assignedCollegeIds']),
+      collegeAssignmentRevision: _intOrZero(json['collegeAssignmentRevision']),
       avatarAssetName: _stringOrNull(json['avatarAssetName']),
       profilePhotoUrl: _stringOrNull(json['profilePhotoUrl']),
       profilePhotoPath: _stringOrNull(json['profilePhotoPath']),
@@ -464,6 +479,18 @@ class UserModel {
   }
 
   static bool _present(String? value) => value?.trim().isNotEmpty == true;
+
+  static List<String> _collegeIds(Object? value) {
+    if (value is! List) return const [];
+    final ids = value
+        .whereType<String>()
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    return List.unmodifiable(ids);
+  }
 
   static List<String> _stringList(Object? value) {
     if (value is! List) return const [];

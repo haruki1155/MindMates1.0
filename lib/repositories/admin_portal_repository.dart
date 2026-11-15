@@ -1414,6 +1414,25 @@ class AdminPortalRepository {
     return (result.data['colleges'] as num?)?.toInt() ?? 0;
   }
 
+  /// Replaces the colleges a staff member or counselor serves. Authorization,
+  /// validation and the revision check happen server-side; returns the new
+  /// revision.
+  Future<int> setStaffCollegeAssignments({
+    required String userId,
+    required List<String> collegeIds,
+    required int expectedRevision,
+    required String reason,
+  }) async {
+    final result = await _callCallable('setStaffCollegeAssignments', {
+      'userId': userId,
+      'collegeIds': collegeIds,
+      'expectedRevision': expectedRevision,
+      'reason': reason,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
   Future<void> updateStaffOrganization({
     required String userId,
     required String departmentId,
