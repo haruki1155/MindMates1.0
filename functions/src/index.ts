@@ -1,5 +1,7 @@
 import {handleAppointmentAgreement} from "./appointment_agreement";
 export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callable";
+export {listAppointmentApprovals} from "./appointment_approval_service";
+import {approvalHistoryFields, approvalMetadata, authorizeAppointmentApproval} from "./appointment_approval_service";
 export {setStaffCollegeAssignments} from "./college_assignments_callable";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
@@ -2021,6 +2023,9 @@ export const initializeAppointmentScheduleRevision = onCall(async (request) => {
   const id = String(input.appointmentId ?? "").trim();
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !Number.isSafeInteger(input.expectedScheduledAt) || typeof input.expectedStatus !== "string") throw new HttpsError("invalid-argument", "Refresh the appointment before initialization.");
   const ref = db.collection("appointments").doc(id);
+  const target = await ref.get();
+  if (!target.exists) throw new HttpsError("failed-precondition", "The appointment is unavailable or changed. Refresh it.");
+  await authorizeAppointmentApproval(staffId, target.data()!, input.exceptionReason);
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const data = snap.data();
@@ -2035,26 +2040,35 @@ export const initializeAppointmentScheduleRevision = onCall(async (request) => {
   return {ok: true, refreshRequired: true};
 });
 
+const authorizeAgreementStaff = (uid: string, appointment: FirebaseFirestore.DocumentData, input: Record<string, unknown>) =>
+  authorizeAppointmentApproval(uid, appointment, input.exceptionReason);
+
 export const changeAppointmentAgreement = onCall(async (request) => handleAppointmentAgreement(
-  requireAuthenticatedUser(request), (request.data ?? {}) as Record<string, unknown>, requireClinicalAppointmentStaff,
+  requireAuthenticatedUser(request), (request.data ?? {}) as Record<string, unknown>, authorizeAgreementStaff,
 ));
 
 export const rescheduleStudentAppointment = onCall(async (request) => handleAppointmentAgreement(
-  requireAuthenticatedUser(request), {...(request.data ?? {}), action: "propose"}, requireClinicalAppointmentStaff,
+  requireAuthenticatedUser(request), {...(request.data ?? {}), action: "propose"}, authorizeAgreementStaff,
 ));
 
 export const respondToAppointment = onCall(async (request) => handleAppointmentAgreement(
-  requireAuthenticatedUser(request), {...(request.data ?? {}), action: request.data?.action === "accept_reschedule" ? "accept" : request.data?.action}, requireClinicalAppointmentStaff,
+  requireAuthenticatedUser(request), {...(request.data ?? {}), action: request.data?.action === "accept_reschedule" ? "accept" : request.data?.action}, authorizeAgreementStaff,
 ));
 
 export const reviewAppointment = onCall(async (request) => {
   const staffId = request.auth?.uid;
   if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
-  const staff = await requireClinicalAppointmentStaff(staffId);
+  await requireClinicalAppointmentStaff(staffId);
+  const reviewedId = String((request.data as Record<string, unknown> | undefined)?.appointmentId ?? "").trim();
+  const reviewed = /^[A-Za-z0-9_-]{1,128}$/.test(reviewedId) ? await db.collection("appointments").doc(reviewedId).get() : null;
+  if (!reviewed?.exists) throw new HttpsError("not-found", "Appointment not found.");
+  // College-scoped approval: only a counselor serving the student's verified
+  // college, or the super-admin for exceptions / reasoned overrides.
+  const staff = await authorizeAppointmentApproval(staffId, reviewed.data()!, (request.data as Record<string, unknown>).exceptionReason);
   if (request.data?.action === "rescheduled") {
     const input = request.data as Record<string, unknown>;
     const schedule = staffProposalTimestamp(input);
-    return handleAppointmentAgreement(staffId, {...input, action: "propose", scheduledAt: schedule.millis, requestId: input.requestId ?? `staff_${createHash("sha256").update(JSON.stringify([staffId, input.appointmentId, input.expectedScheduledAt, input.expectedScheduleRevision, input.expectedProposalRevision ?? 0, schedule.millis])).digest("hex")}`}, requireClinicalAppointmentStaff);
+    return handleAppointmentAgreement(staffId, {...input, action: "propose", scheduledAt: schedule.millis, requestId: input.requestId ?? `staff_${createHash("sha256").update(JSON.stringify([staffId, input.appointmentId, input.expectedScheduledAt, input.expectedScheduleRevision, input.expectedProposalRevision ?? 0, schedule.millis])).digest("hex")}`}, authorizeAgreementStaff);
   }
 
   const input = request.data as Record<string, unknown>;
@@ -2212,6 +2226,7 @@ export const reviewAppointment = onCall(async (request) => {
       } : {}),
       staffId,
       staffName,
+      ...approvalHistoryFields(staff.approvalAuthority),
       createdAt: FieldValue.serverTimestamp(),
     });
     const title = action === "rescheduled" ? "Appointment rescheduled" : action === "confirmed" ? "PACC Appointment Confirmed" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked as Did Not Attend" : "Appointment update";
@@ -2245,6 +2260,7 @@ export const reviewAppointment = onCall(async (request) => {
             time: proposal!.scheduledTime,
           } : {}),
         },
+        ...approvalMetadata(staff.approvalAuthority),
       },
     });
   });

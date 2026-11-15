@@ -7,6 +7,9 @@ import {ensureVerifiedAuthUser} from "./test_support_auth";
 type Input = Record<string, unknown>;
 const db = getFirestore();
 const staff = "agreement-clinician";
+// College-scoped approval (PR 6): this suite's student has no verified college,
+// so its staff actor exercises the super-admin triage path.
+process.env.SUPER_ADMIN_UID = staff;
 const student = "agreement-student";
 function call(uid: string, data: Input): Promise<unknown> {
   const callable = (functions as unknown as Record<string, {run: (r: unknown) => Promise<unknown>}>).changeAppointmentAgreement;

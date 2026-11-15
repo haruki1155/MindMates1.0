@@ -125,6 +125,7 @@ test("integrated reschedule, notification retries, queue, confirmation, and revi
   const id = "gate2-integrated";
   const uid = "gate2-integrated-student";
   const staff = "gate2-integrated-staff";
+  process.env.SUPER_ADMIN_UID = staff; // triage path: student has no verified college
   const ref = db.doc(`appointments/${id}`);
   await db.doc(`users/${staff}`).set({accessRole: "admin"});
   await ensureVerifiedAuthUser(staff);

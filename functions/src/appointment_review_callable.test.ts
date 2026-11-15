@@ -8,6 +8,10 @@ import {ensureVerifiedAuthUser} from "./test_support_auth";
 type Callable = {run: (request: {auth?: {uid: string}; data?: Record<string, unknown>}) => Promise<unknown>};
 const db = getFirestore();
 const prefix = `appointment-review-${Date.now()}`;
+// College-scoped approval (PR 6): the student belongs to `college`; only
+// counselorId serves it, otherCounselorId serves a different college.
+const college = `${prefix}-college`;
+const otherCollege = `${prefix}-other-college`;
 const studentId = `${prefix}-student`;
 const adminId = `${prefix}-admin`;
 const counselorId = `${prefix}-counselor`;
@@ -60,10 +64,13 @@ async function setOpenSchedule(): Promise<void> {
 }
 
 before(async () => {
+  process.env.SUPER_ADMIN_UID = adminId;
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("FIRESTORE_EMULATOR_HOST is required for appointment callable tests.");
   await Promise.all([
-    db.collection("users").doc(studentId).set({accessRole: "appUser"}), db.collection("users").doc(adminId).set({accessRole: "admin", name: "Test Admin"}),
-    db.collection("users").doc(counselorId).set({accessRole: "counselor", name: "Assigned Counselor"}), db.collection("users").doc(otherCounselorId).set({accessRole: "counselor", name: "Other Counselor"}),
+    db.collection("users").doc(studentId).set({accessRole: "appUser", verificationStatus: "verified", collegeId: college}), db.collection("users").doc(adminId).set({accessRole: "admin", name: "Test Admin"}),
+    db.collection("colleges").doc(college).set({name: "Review College", code: "RC", active: true}),
+    db.collection("colleges").doc(otherCollege).set({name: "Other College", code: "OC", active: true}),
+    db.collection("users").doc(counselorId).set({accessRole: "counselor", name: "Assigned Counselor", assignedCollegeIds: [college]}), db.collection("users").doc(otherCounselorId).set({accessRole: "counselor", name: "Other Counselor", assignedCollegeIds: [otherCollege]}),
     db.collection("users").doc(portalStaffId).set({accessRole: "portalStaff", name: "Portal Staff"}), setOpenSchedule(),
     ...[adminId, counselorId, otherCounselorId, portalStaffId].map((id) => ensureVerifiedAuthUser(id)),
   ]);
@@ -119,11 +126,11 @@ test("terminal, unauthorized, and forged staff actions are denied", async () => 
   await expectCallableFailure(review.run({auth: {uid: counselorId}, data: payload(terminal.id, await futureWeekdaySlot(new Set([slot])))}), "failed-precondition");
   const appointment = await seedAppointment("authority"); const target = await futureWeekdaySlot();
   await expectCallableFailure(review.run({auth: {uid: studentId}, data: payload(appointment.id, target)}), "permission-denied"); await expectCallableFailure(review.run({auth: {uid: portalStaffId}, data: payload(appointment.id, target)}), "permission-denied");
-  await assert.doesNotReject(review.run({auth: {uid: otherCounselorId}, data: payload(appointment.id, target)}));
+  await expectCallableFailure(review.run({auth: {uid: otherCounselorId}, data: payload(appointment.id, target)}), "permission-denied");
   const updated = (await appointment.get()).data()!;
   assert.equal(updated.assignedStaffId, counselorId);
   const actions = await appointment.collection("history").get();
-  assert.equal(actions.docs.some(d => d.data().performedBy === otherCounselorId), true);
+  assert.equal(actions.docs.some(d => d.data().performedBy === otherCounselorId), false);
 });
 
 test("legacy proposal is explicitly counterproposed by staff and accepted by student", async () => {
@@ -139,6 +146,6 @@ test("concurrent re-schedules to one slot allow exactly one claimant", async () 
   const first = await seedAppointment("race-first", {scheduledAt: firstAt}); const second = await seedAppointment("race-second", {scheduledAt: secondAt});
   await first.update({userId: `${studentId}-race`});
   await db.doc(`appointment_user_locks/${studentId}-race`).set({appointmentId: first.id});
-  const outcomes = await Promise.allSettled([review.run({auth: {uid: counselorId}, data: payload(first.id, target)}), review.run({auth: {uid: adminId}, data: payload(second.id, target)})]);
+  const outcomes = await Promise.allSettled([review.run({auth: {uid: counselorId}, data: payload(first.id, target)}), review.run({auth: {uid: adminId}, data: {...payload(second.id, target), exceptionReason: "Covering for the assigned counselor"}})]);
   assert.equal(outcomes.filter((result) => result.status === "fulfilled").length, 1); assert.equal(outcomes.filter((result) => result.status === "rejected").length, 1); assert.equal((await db.collection("appointment_slots").doc(`pacc_${target}`).get()).exists, true);
 });

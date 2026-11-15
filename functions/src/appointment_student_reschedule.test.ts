@@ -32,6 +32,7 @@ test("student proposals retain the slot and agreement safely replays", async () 
   const request = {auth: {uid}, data: {appointmentId: id, expectedScheduledAt: oldAt, expectedScheduleRevision: 0, scheduledAt: newAt, requestId: "request_123456"}};
   const baseline = (functions as Record<string, unknown>).initializeAppointmentScheduleRevision as {run: (r: unknown) => Promise<unknown>};
   const staff = "schedule-test-staff";
+  process.env.SUPER_ADMIN_UID = staff; // triage path: student has no verified college
   await db.collection("users").doc(staff).set({accessRole: "admin", name: "Staff"});
   await ensureVerifiedAuthUser(staff);
   assert.ok(baseline, "legacy revision requires explicit initialization");
@@ -103,6 +104,7 @@ test("legacy initialization races fail closed and never reset a revision", async
   const id = "legacy-race-appointment";
   const uid = "legacy-race-student";
   const staff = "legacy-race-staff";
+  process.env.SUPER_ADMIN_UID = staff; // triage path: student has no verified college
   const day = new Date(Date.now() + 35 * 86400000);
   while ([0, 6].includes(day.getUTCDay())) day.setUTCDate(day.getUTCDate() + 1);
   const at = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 1);
