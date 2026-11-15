@@ -99,6 +99,11 @@ class InquiryRoutingPanel extends StatelessWidget {
     final canEscalate =
         _isAssignee &&
         !inquiry.isEscalated &&
+        !inquiry.isTakenOver &&
+        inquiry.status != InquiryStatus.resolved;
+    final canTakeOver =
+        repository.isSuperAdmin &&
+        !inquiry.isTakenOver &&
         inquiry.status != InquiryStatus.resolved;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -120,6 +125,11 @@ class InquiryRoutingPanel extends StatelessWidget {
           _row('Responsible', _name(inquiry.ownerId!)),
         if (inquiry.isEscalated)
           _row('Escalation', 'Requested — ${inquiry.escalationReason ?? ''}'),
+        if (inquiry.isTakenOver)
+          _row(
+            'Taken over',
+            '${inquiry.takeoverByName} — ${inquiry.takeoverReason ?? ''}',
+          ),
         const SizedBox(height: 10),
         Wrap(
           spacing: 10,
@@ -130,6 +140,12 @@ class InquiryRoutingPanel extends StatelessWidget {
                 onPressed: () => _escalate(context),
                 icon: const Icon(Icons.flag_outlined),
                 label: const Text('Escalate to administrator'),
+              ),
+            if (canTakeOver)
+              OutlinedButton.icon(
+                onPressed: () => _takeOver(context),
+                icon: const Icon(Icons.admin_panel_settings_outlined),
+                label: const Text('Take over'),
               ),
             if (repository.isSuperAdmin)
               OutlinedButton.icon(
@@ -166,6 +182,22 @@ class InquiryRoutingPanel extends StatelessWidget {
         actionLabel: 'Escalate',
         onSubmit: (reason) =>
             repository.escalateInquiry(inquiry.id, reason: reason),
+      ),
+    );
+    if (done == true) onChanged?.call();
+  }
+
+  Future<void> _takeOver(BuildContext context) async {
+    final done = await showDialog<bool>(
+      context: context,
+      builder: (_) => _ReasonDialog(
+        title: 'Take over inquiry',
+        actionLabel: 'Take over',
+        onSubmit: (reason) => repository.takeOverInquiry(
+          inquiry.id,
+          expectedRevision: inquiry.routingRevision,
+          reason: reason,
+        ),
       ),
     );
     if (done == true) onChanged?.call();

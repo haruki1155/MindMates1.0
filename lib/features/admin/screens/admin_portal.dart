@@ -37,6 +37,7 @@ import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/inquiry_oversight.dart';
 import '../widgets/inquiry_routing_panel.dart';
 import '../widgets/pacc_schedule_editor_widgets.dart';
 import '../widgets/clinical_interview_widgets.dart';
@@ -5308,6 +5309,12 @@ class _InquiriesPageState extends State<_InquiriesPage> {
           children: [
             InquiryBackfillButton(repository: widget.repository),
             const SizedBox(height: 10),
+            InquiryOverduePanel(
+              repository: widget.repository,
+              inquiries: all,
+              onOpen: _openInquiry,
+            ),
+            const SizedBox(height: 10),
             _CompactSummaryStrip(
               values: {
                 'Total': all.length,
@@ -5720,6 +5727,8 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
             ),
           ],
           const Divider(height: 34),
+          InquiryReplyThread(inquiry: item, repository: widget.repository),
+          const Divider(height: 34),
           InquiryRoutingPanel(
             inquiry: item,
             repository: widget.repository,
@@ -5789,7 +5798,11 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     if (_updatingStatus || next == widget.item!.status) return;
     setState(() => _updatingStatus = true);
     try {
-      await widget.repository.updateInquiryStatus(widget.item!.id, next);
+      await widget.repository.updateInquiryStatus(
+        widget.item!.id,
+        next,
+        expectedRevision: widget.item!.routingRevision,
+      );
       widget.onUpdated();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
