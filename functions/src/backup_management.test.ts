@@ -24,25 +24,42 @@ const counselorUid = `${prefix}-counselor`;
 const actor = {uid: adminUid, name: "Test Admin", role: "admin"};
 const db = getFirestore();
 
-type Fake = BackupDeps & {exportCalls: Array<{name: string; outputUriPrefix: string}>; operation: OperationState; exists: boolean; failExport?: Error; liveOperations: Array<{name: string; outputUriPrefix: string; done: boolean; failed: boolean; state: string}>; exportResponseName?: string | null; listingError?: Error};
+type Fake = BackupDeps & {exportCalls: Array<{name: string; outputUriPrefix: string}>; operation: OperationState; exists: boolean; failExport?: Error; liveOperations: Array<{name: string; outputUriPrefix: string; done: boolean; failed: boolean; state: string}>; exportResponseName?: string | null; listingError?: Error; exportAttempts: number; failTransactions: number; failExportAfterAccept?: Error};
 
 function fakeDeps(env: Record<string, string | undefined> = {BACKUP_BUCKET: "test-bucket"}): Fake {
   let counter = 0;
+  const proxy = new Proxy(db, {
+    get(target, prop) {
+      if (prop === "runTransaction" && fake.failTransactions > 0) {
+        return async () => {
+          fake.failTransactions--;
+          throw Object.assign(new Error("10 ABORTED: transaction contention"), {code: 10});
+        };
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
   const fake: Fake = {
-    db,
+    db: proxy,
     exportCalls: [],
     operation: {done: false},
     exists: true,
     liveOperations: [],
     exportResponseName: "op-1",
+    exportAttempts: 0,
+    failTransactions: 0,
     env,
     projectId: "demo-mindmate-pr2",
     now: () => new Date("2026-11-15T02:30:00Z"),
     newJobId: () => `${prefix}-job-${++counter}`,
     exporter: {
       async exportDocuments(request) {
+        fake.exportAttempts++;
         if (fake.failExport) throw fake.failExport;
         fake.exportCalls.push(request);
+        // The upstream API accepted the export but the reply is lost.
+        if (fake.failExportAfterAccept) throw fake.failExportAfterAccept;
         return [{name: fake.exportResponseName}];
       },
       async checkExportDocumentsProgress() {
@@ -178,19 +195,107 @@ test("refreshBackup marks a finished export failed when its metadata object is m
   assert.ok((await auditRows("BACKUP_FAILED")) >= 1);
 });
 
-test("refreshBackup marks a job failed when its operation can no longer be read", {skip: !emulated}, async () => {
+async function expectBlocked(deps: Fake): Promise<void> {
+  const attempts = deps.exportAttempts;
+  await denied(startBackup(deps, actor, "manual"), "failed-precondition");
+  const scheduled = fakeDeps({BACKUP_BUCKET: "test-bucket", BACKUP_SCHEDULE_ENABLED: "true"});
+  scheduled.exporter.checkExportDocumentsProgress = deps.exporter.checkExportDocumentsProgress;
+  scheduled.listingError = deps.listingError;
+  scheduled.liveOperations = deps.liveOperations;
+  assert.deepEqual(await runScheduledBackup(scheduled), {started: false, reason: "job-running"});
+  assert.equal(deps.exportAttempts, attempts, "no second export attempt during uncertainty");
+  assert.equal(scheduled.exportAttempts, 0, "the scheduler must not export during uncertainty");
+}
+
+test("a transient status lookup error keeps the job running and blocked, then completes once lookup recovers", {skip: !emulated}, async () => {
   await clearJobs();
   const deps = fakeDeps();
   const {jobId} = await startBackup(deps, actor, "manual");
-  deps.exporter.checkExportDocumentsProgress = async () => { throw Object.assign(new Error("Operation not found"), {code: 5}); };
+  const failedBefore = await auditRows("BACKUP_FAILED");
+  const lookup = deps.exporter.checkExportDocumentsProgress;
+  for (const code of [14, 4, 7, 5]) {
+    deps.exporter.checkExportDocumentsProgress = async () => { throw Object.assign(new Error(`lookup failed ${code}`), {code}); };
+    assert.equal((await refreshBackup(deps, actor, jobId)).status, "running", `code ${code}`);
+    const job = (await db.doc(`backup_jobs/${jobId}`).get()).data()!;
+    assert.equal(job.status, "running");
+    assert.equal(job.operationName, "op-1");
+    assert.equal(job.reconciliation.status, "uncertain");
+    assert.equal(job.reconciliation.reason, "status-lookup-failed");
+    assert.equal(job.reconciliation.lastErrorCode, `export-${code}`);
+    assert.equal(job.completedAt, null);
+  }
+  assert.equal(await auditRows("BACKUP_FAILED"), failedBefore, "an uncertain lookup is not an audited failure");
+  await expectBlocked(deps);
+  deps.exporter.checkExportDocumentsProgress = lookup;
+  deps.operation = {done: true};
+  deps.exists = true;
+  assert.equal((await refreshBackup(deps, actor, jobId)).status, "completed");
+  assert.equal(deps.exportAttempts, 1);
+});
+
+test("a definitive export failure reported by the operation is still terminal", {skip: !emulated}, async () => {
+  await clearJobs();
+  const deps = fakeDeps();
+  const {jobId} = await startBackup(deps, actor, "manual");
+  deps.operation = {done: true, error: {code: 7, message: "The caller does not have permission"}};
   assert.equal((await refreshBackup(deps, actor, jobId)).status, "failed");
-  const job = (await db.doc(`backup_jobs/${jobId}`).get()).data()!;
-  assert.equal(job.error.code, "export-5");
-  assert.ok(job.completedAt instanceof Timestamp);
-  assert.ok((await auditRows("BACKUP_FAILED")) >= 1);
-  // A later request is no longer blocked by the stuck job.
-  const next = await startBackup(deps, actor, "manual");
-  assert.equal(next.status, "running");
+  assert.equal((await db.doc(`backup_jobs/${jobId}`).get()).data()!.error.code, "export-7");
+  assert.equal((await startBackup(deps, actor, "manual")).status, "running");
+});
+
+test("an ambiguous export-start error keeps the job running and uncertain, and blocks duplicates", {skip: !emulated}, async () => {
+  await clearJobs();
+  const deps = fakeDeps();
+  deps.failExportAfterAccept = Object.assign(new Error("14 UNAVAILABLE: connection reset"), {code: 14});
+  await denied(startBackup(deps, actor, "manual"), "unavailable");
+  const jobs = await db.collection("backup_jobs").where("requestedBy", "==", adminUid).get();
+  assert.equal(jobs.size, 1);
+  const job = jobs.docs[0].data();
+  assert.equal(job.status, "running");
+  assert.equal(job.operationName, null);
+  assert.equal(job.reconciliation.status, "uncertain");
+  assert.equal(job.reconciliation.reason, "export-start-ambiguous");
+  assert.equal(job.reconciliation.lastErrorCode, "export-14");
+  assert.equal(deps.exportAttempts, 1);
+  deps.failExportAfterAccept = undefined;
+  await expectBlocked(deps);
+  // Reconciliation later finds the accepted operation by prefix and adopts it.
+  deps.liveOperations = [{name: "op-recovered", outputUriPrefix: job.outputUriPrefix, done: false, failed: false, state: "PROCESSING"}];
+  assert.equal((await refreshBackup(deps, actor, jobs.docs[0].id)).status, "running");
+  assert.equal((await db.doc(`backup_jobs/${jobs.docs[0].id}`).get()).data()!.operationName, "op-recovered");
+  assert.equal(deps.exportAttempts, 1);
+});
+
+test("a successful export followed by a failed operation-name save never marks the job failed", {skip: !emulated}, async () => {
+  for (const failures of [1, 2]) {
+    await clearJobs();
+    const deps = fakeDeps();
+    const failedBefore = await auditRows("BACKUP_FAILED");
+    const exporter = deps.exporter.exportDocuments;
+    deps.exporter.exportDocuments = async (request) => {
+      const result = await exporter(request);
+      deps.failTransactions = failures; // persistence fails only after upstream acceptance
+      return result;
+    };
+    const result = await startBackup(deps, actor, "manual");
+    assert.equal(result.status, "running", `failures ${failures}`);
+    const job = (await db.doc(`backup_jobs/${result.jobId}`).get()).data()!;
+    assert.equal(job.status, "running");
+    assert.equal(job.operationName, null);
+    assert.equal(await auditRows("BACKUP_FAILED"), failedBefore);
+    if (failures === 1) {
+      assert.equal(job.reconciliation.status, "uncertain");
+      assert.equal(job.reconciliation.reason, "operation-name-not-persisted");
+    }
+    assert.equal(deps.exportAttempts, 1);
+    deps.exporter.exportDocuments = exporter;
+    await expectBlocked(deps);
+    // The accepted operation is found by prefix and adopted, never re-exported.
+    deps.liveOperations = [{name: "op-1", outputUriPrefix: job.outputUriPrefix, done: false, failed: false, state: "PROCESSING"}];
+    assert.equal((await refreshBackup(deps, actor, result.jobId)).status, "running");
+    assert.equal((await db.doc(`backup_jobs/${result.jobId}`).get()).data()!.operationName, "op-1");
+    assert.equal(deps.exportAttempts, 1);
+  }
 });
 
 async function orphanJob(deps: Fake, ageMinutes: number): Promise<string> {

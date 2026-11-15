@@ -104,7 +104,10 @@ Production scales linearly with document count (≈ $0.60 per export per 1M docu
 - `admin_audit_logs`: `BACKUP_REQUESTED`, `BACKUP_COMPLETED`, `BACKUP_FAILED`, `BACKUP_SKIPPED` (category `SYSTEM`, targetType `backup_job`).
 - `export-7` (PERMISSION_DENIED): the service agent lacks `roles/storage.admin` on the bucket, or the Functions SA lacks `datastore.importExportAdmin`.
 - `export-metadata-missing`: the export reported done but the metadata object is absent — check the bucket and operation in Cloud Console; treat the job as failed.
-- `failed-precondition` "already running": refresh the running job; if the operation is gone, mark it failed via a refresh (the operation lookup fails ⇒ `failed`).
+- `failed-precondition` "already running": a job is `running`, possibly with `reconciliation.status: uncertain`. This is deliberate: an export whose outcome is unknown keeps new exports blocked so no duplicate paid export can start.
+  - `export-start-ambiguous`, `export-response-without-name`, `operation-name-not-persisted`: the export may have been accepted. *Refresh status* looks up export operations (running and completed) by the job's exact output prefix and adopts a match; only when both listings answer and none matches, after 10 minutes, is the job failed as `export-start-orphaned`.
+  - `status-lookup-failed` / `operation-listing-unavailable`: the status could not be read. Nothing is decided; refresh again later. A definitive result read from the operation itself is the only thing that completes or fails the job.
+  - If a job stays uncertain because the API keeps refusing lookups, an operator inspects the operation in Cloud Console (`gcloud firestore operations list --database='(default)'`, filter by the output prefix) and resolves it under a separate authorization. Never clear it on a timer.
 
 ## 9. Restore drill (requires authorization; never production)
 

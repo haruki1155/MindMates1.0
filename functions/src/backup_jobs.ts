@@ -146,6 +146,20 @@ export function verificationFor(metadataPath: string, exists: boolean, now: Date
   return {status: exists ? "verified" : "missing", metadataPath, checkedAt: now};
 }
 
+// gRPC codes that prove the export request was refused and nothing started:
+// INVALID_ARGUMENT, NOT_FOUND, ALREADY_EXISTS, PERMISSION_DENIED,
+// RESOURCE_EXHAUSTED, FAILED_PRECONDITION, OUT_OF_RANGE, UNIMPLEMENTED,
+// UNAUTHENTICATED. Everything else (CANCELLED, UNKNOWN, DEADLINE_EXCEEDED,
+// ABORTED, INTERNAL, UNAVAILABLE, DATA_LOSS, or no code at all, e.g. a dropped
+// socket) leaves open whether the export was accepted.
+const DEFINITIVE_REJECTION_CODES = new Set([3, 5, 6, 7, 8, 9, 11, 12, 16]);
+
+/** True only when an export-start error proves no export was started. */
+export function isDefinitiveExportRejection(error: unknown): boolean {
+  const code = error && typeof error === "object" ? (error as {code?: unknown}).code : undefined;
+  return typeof code === "number" && DEFINITIVE_REJECTION_CODES.has(code);
+}
+
 /** Error shape safe to store and show: a short code and a bounded message, nothing else. */
 export function sanitizeError(error: unknown): NonNullable<BackupError> {
   let code = "unknown";

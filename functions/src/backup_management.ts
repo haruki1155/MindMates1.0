@@ -23,6 +23,7 @@ import {
   BackupJobStatus,
   BackupTrigger,
   exportPrefixFor,
+  isDefinitiveExportRejection,
   OperationState,
   resolveBackupConfig,
   sanitizeError,
@@ -182,35 +183,22 @@ export async function startBackup(deps: BackupDeps, actor: BackupActor, trigger:
     audit(tx, deps.db, actor, "BACKUP_REQUESTED", jobId, {trigger, outputUriPrefix, retentionDays: config.retentionDays});
   });
 
+  // Step 1: ask Firestore to start the export. Only a definitive rejection is
+  // terminal; any other error leaves open whether the paid export started.
+  let operation: {name?: string | null};
   try {
-    const [operation] = await deps.exporter.exportDocuments({
+    [operation] = await deps.exporter.exportDocuments({
       name: `projects/${deps.projectId}/databases/(default)`,
       outputUriPrefix,
     });
-    if (typeof operation.name !== "string" || !operation.name.trim()) {
-      // The backend may well have accepted the export. Do not fail the job
-      // (that would allow a duplicate paid export); leave it running and let
-      // reconciliation find the operation by its output prefix.
-      await deps.db.runTransaction(async (tx) => {
-        tx.update(ref, {
-          reconciliation: {status: "uncertain", reason: "export-response-without-name", checkedAt: Timestamp.fromDate(deps.now())},
-          revision: FieldValue.increment(1),
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-      });
-      return {jobId, status: "running"};
-    }
-    await deps.db.runTransaction(async (tx) => {
-      tx.update(ref, {
-        operationName: operation.name,
-        startedAt: Timestamp.fromDate(deps.now()),
-        revision: FieldValue.increment(1),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    });
-    return {jobId, status: "running"};
   } catch (error) {
     const safe = sanitizeError(error);
+    if (!isDefinitiveExportRejection(error)) {
+      // Keep the job running (new starts stay blocked) until reconciliation
+      // finds the operation by prefix or proves none exists.
+      await markUncertain(deps, ref, "export-start-ambiguous", safe.code);
+      throw new HttpsError("unavailable", `The export request outcome is unknown (${safe.code}). The job stays open until it is reconciled.`);
+    }
     await deps.db.runTransaction(async (tx) => {
       tx.update(ref, {
         status: "failed",
@@ -219,9 +207,56 @@ export async function startBackup(deps: BackupDeps, actor: BackupActor, trigger:
         revision: FieldValue.increment(1),
         updatedAt: FieldValue.serverTimestamp(),
       });
-      audit(tx, deps.db, actor, "BACKUP_FAILED", jobId, {stage: "export-request", error: safe});
+      audit(tx, deps.db, actor, "BACKUP_FAILED", jobId, {stage: "export-request-rejected", error: safe});
     });
     throw new HttpsError("internal", `The export request was rejected (${safe.code}).`);
+  }
+
+  // Step 2: the export was accepted. From here on nothing may mark the job
+  // failed: a persistence error only means we could not record the name.
+  if (typeof operation.name !== "string" || !operation.name.trim()) {
+    await markUncertain(deps, ref, "export-response-without-name", null);
+    return {jobId, status: "running"};
+  }
+  const operationName = operation.name;
+  try {
+    await deps.db.runTransaction(async (tx) => {
+      tx.update(ref, {
+        operationName,
+        startedAt: Timestamp.fromDate(deps.now()),
+        revision: FieldValue.increment(1),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    await markUncertain(deps, ref, "operation-name-not-persisted", sanitizeError(error).code);
+  }
+  return {jobId, status: "running"};
+}
+
+/**
+ * Record that a running job's export outcome is not yet known. Best effort:
+ * if even this write fails, the job is still `running` with no operation name,
+ * which reconciliation already treats as needing a lookup by prefix.
+ */
+async function markUncertain(
+  deps: BackupDeps,
+  ref: FirebaseFirestore.DocumentReference,
+  reason: string,
+  lastErrorCode: string | null,
+): Promise<void> {
+  try {
+    await deps.db.runTransaction(async (tx) => {
+      const current = (await tx.get(ref)).data() ?? {};
+      if (current.status !== "running") return;
+      tx.update(ref, {
+        reconciliation: {status: "uncertain", reason, lastErrorCode, checkedAt: Timestamp.fromDate(deps.now())},
+        revision: FieldValue.increment(1),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    console.warn("Backup job uncertainty could not be recorded; the job remains running.", sanitizeError(error).code);
   }
 }
 
@@ -236,14 +271,16 @@ export async function refreshBackup(deps: BackupDeps, actor: BackupActor, jobId:
     return reconcileOrphanedStart(deps, actor, jobId, data);
   }
 
-  // An operation that can no longer be read (expired, deleted, permission
-  // lost) must not leave the job running forever and block every later
-  // backup: it is recorded as a failure with the sanitised reason.
+  // A failed status lookup says nothing about the export itself (it may still
+  // be running), so it never ends the job. Only the operation's own result,
+  // read successfully, can mark it completed or failed. The job stays running,
+  // keeping new exports blocked, until a later refresh reads the real state.
   let next: ReturnType<typeof applyOperationState>;
   try {
     next = applyOperationState(await deps.exporter.checkExportDocumentsProgress(data.operationName));
   } catch (error) {
-    next = {status: "failed", error: sanitizeError(error)};
+    await markUncertain(deps, ref, "status-lookup-failed", sanitizeError(error).code);
+    return {jobId, status: "running"};
   }
   const now = deps.now();
   const revision = Number(data.revision ?? 0);

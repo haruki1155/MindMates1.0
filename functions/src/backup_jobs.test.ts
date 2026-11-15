@@ -8,6 +8,7 @@ import {
   BackupJobRecord,
   exportPrefixFor,
   resolveBackupConfig,
+  isDefinitiveExportRejection,
   sanitizeError,
   StartBlockedError,
   summarizeJobs,
@@ -79,6 +80,14 @@ test("sanitizeError strips stacks and truncates", () => {
   assert.deepEqual(sanitizeError(Object.assign(new Error("bad bucket"), {code: "not-found"})), {code: "not-found", message: "bad bucket"});
   assert.deepEqual(sanitizeError("boom"), {code: "unknown", message: "boom"});
   assert.deepEqual(sanitizeError(undefined), {code: "unknown", message: "Unknown error"});
+});
+
+test("only definitive gRPC rejections count as a failed export start; anything else is uncertain", () => {
+  for (const code of [3, 5, 6, 7, 8, 9, 11, 12, 16]) assert.equal(isDefinitiveExportRejection({code}), true, `code ${code}`);
+  for (const code of [1, 2, 4, 10, 13, 14, 15]) assert.equal(isDefinitiveExportRejection({code}), false, `code ${code}`);
+  assert.equal(isDefinitiveExportRejection(new Error("socket hang up")), false);
+  assert.equal(isDefinitiveExportRejection(undefined), false);
+  assert.equal(isDefinitiveExportRejection({code: "permission-denied"}), false);
 });
 
 test("summarizeJobs reports last verified completion and running count", () => {
