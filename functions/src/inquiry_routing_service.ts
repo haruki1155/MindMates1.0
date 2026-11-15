@@ -19,7 +19,7 @@ import {
 // a transaction with an audit record; notifications carry no inquiry content
 // and use deterministic IDs so retries never duplicate them.
 
-type Actor = {uid: string; name: string; role: string};
+export type Actor = {uid: string; name: string; role: string};
 const SYSTEM: Actor = {uid: "system", name: "Inquiry routing", role: "system"};
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const STATUSES = new Set(["pending", "in_progress", "resolved"]);
@@ -48,7 +48,7 @@ async function authStates(uids: string[]): Promise<Map<string, AuthState>> {
   return states;
 }
 
-function notification(recipient: string, inquiryId: string, title: string, body: string): Record<string, unknown> {
+export function notification(recipient: string, inquiryId: string, title: string, body: string): Record<string, unknown> {
   return {
     userId: recipient, type: "inquiry", audience: "portal", title, body, inquiryId,
     createdAt: FieldValue.serverTimestamp(), readAt: null, resolvedAt: null,
@@ -57,7 +57,7 @@ function notification(recipient: string, inquiryId: string, title: string, body:
 }
 
 /** Create once; an existing document (retry) counts as delivered. */
-async function createOnce(id: string, payload: Record<string, unknown>): Promise<void> {
+export async function createOnce(id: string, payload: Record<string, unknown>): Promise<void> {
   try {
     await db().collection("notifications").doc(id).create(payload);
   } catch (error: unknown) {
@@ -167,32 +167,64 @@ export async function routeInquiry(inquiryId: string, actor: Actor = SYSTEM): Pr
 }
 
 /** Assignee (staff/counselor) or the configured super-administrator. */
-async function inquiryActor(request: {auth?: {uid: string} | null}): Promise<{actor: Actor; isSuperAdmin: boolean; role: string}> {
+export async function inquiryActor(request: {auth?: {uid: string} | null}): Promise<{actor: Actor; isSuperAdmin: boolean; role: string}> {
   const uid = requireUid(request);
   const profile = await requireStaff(uid);
   const role = String(profile.accessRole);
   return {actor: {uid, name: actorName(profile), role}, isSuperAdmin: role === "admin" && uid === superAdminUid(), role};
 }
 
-function canHandle(who: {actor: Actor; isSuperAdmin: boolean; role: string}, inquiry: FirebaseFirestore.DocumentData): boolean {
+export function canHandle(who: {actor: Actor; isSuperAdmin: boolean; role: string}, inquiry: FirebaseFirestore.DocumentData): boolean {
   if (who.isSuperAdmin) return true;
+  // After a super-admin takeover the assignees keep read access but can no
+  // longer act until the inquiry is reassigned.
+  if (inquiry.takeover) return false;
   return (who.role === "portalStaff" || who.role === "counselor") &&
     Array.isArray(inquiry.assigneeIds) && inquiry.assigneeIds.includes(who.actor.uid);
 }
 
-function inquiryIdFrom(data: unknown): string {
+export function inquiryIdFrom(data: unknown): string {
   const id = typeof (data as {inquiryId?: unknown})?.inquiryId === "string" ? (data as {inquiryId: string}).inquiryId.trim() : "";
   if (!ID.test(id)) throw new HttpsError("invalid-argument", "Inquiry ID is required.");
   return id;
 }
 
-function reasonFrom(data: unknown): string {
+export function reasonFrom(data: unknown): string {
   const text = typeof (data as {reason?: unknown})?.reason === "string" ? (data as {reason: string}).reason.trim() : "";
   if (text.length < 3 || text.length > 500) throw new HttpsError("invalid-argument", "Reason must be 3-500 characters.");
   return text;
 }
 
-const DENIED = "Only the staff assigned to this inquiry or the super-administrator can do this.";
+export const STALE_REVISION = "This inquiry was updated by someone else. Reload and try again.";
+
+/**
+ * Optimistic-concurrency policy for inquiry workflow actions. Every mutation
+ * (acknowledge, status, escalate, reply, takeover, reassign) advances
+ * `routingRevision`.
+ * - A supplied `expectedRevision` is always enforced.
+ * - Acknowledge, status and escalate also accept an omitted revision, because
+ *   PR #4 web clients do not send one; such calls are served and audited as
+ *   `revisionChecked: false`. Setting INQUIRY_REQUIRE_EXPECTED_REVISION=true
+ *   (after every client sends revisions) makes the revision mandatory.
+ * - Reply and takeover always require it.
+ */
+export function checkExpectedRevision(expected: unknown, revision: number): {revisionChecked: boolean} {
+  if (expected === undefined || expected === null) {
+    if ((process.env.INQUIRY_REQUIRE_EXPECTED_REVISION ?? "").trim().toLowerCase() === "true") {
+      throw new HttpsError("invalid-argument", "expectedRevision is required.");
+    }
+    return {revisionChecked: false};
+  }
+  if (!Number.isInteger(expected)) throw new HttpsError("invalid-argument", "expectedRevision must be an integer.");
+  if (expected !== revision) throw new HttpsError("failed-precondition", STALE_REVISION);
+  return {revisionChecked: true};
+}
+
+export function revisionOf(data: FirebaseFirestore.DocumentData): number {
+  return Number.isInteger(data.routingRevision) ? Number(data.routingRevision) : 0;
+}
+
+export const DENIED = "Only the staff assigned to this inquiry or the super-administrator can do this.";
 
 export const acknowledgeInquiry = onCall(async (request) => {
   const who = await inquiryActor(request);
@@ -203,6 +235,8 @@ export const acknowledgeInquiry = onCall(async (request) => {
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
     if (!canHandle(who, data)) throw new HttpsError("permission-denied", DENIED);
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     if (data.acknowledgedAt) throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Inquiry has no sender.");
@@ -211,6 +245,7 @@ export const acknowledgeInquiry = onCall(async (request) => {
       acknowledgedAt: FieldValue.serverTimestamp(),
       acknowledgedBy: who.actor.uid,
       ownerId: data.ownerId ?? who.actor.uid,
+      routingRevision: revision + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
     tx.create(db().collection("notifications").doc(), {
@@ -221,7 +256,8 @@ export const acknowledgeInquiry = onCall(async (request) => {
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ACKNOWLEDGED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {before: String(data.status ?? "pending"), after: "in_progress", ownerId: data.ownerId ?? who.actor.uid},
+      metadata: {before: String(data.status ?? "pending"), after: "in_progress", ownerId: data.ownerId ?? who.actor.uid,
+        revision: revision + 1, revisionChecked},
     });
   });
   return {ok: true};
@@ -238,10 +274,13 @@ export const setInquiryStatus = onCall(async (request) => {
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
     if (!canHandle(who, data)) throw new HttpsError("permission-denied", DENIED);
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     const before = String(data.status ?? "pending");
-    if (before === status) return {ok: true, changed: false};
+    if (before === status) return {ok: true, changed: false, revision};
     tx.update(ref, {
       status,
+      routingRevision: revision + 1,
       updatedAt: FieldValue.serverTimestamp(),
       resolvedAt: status === "resolved" ? FieldValue.serverTimestamp() : null,
       resolvedBy: status === "resolved" ? who.actor.uid : null,
@@ -250,9 +289,9 @@ export const setInquiryStatus = onCall(async (request) => {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: status === "resolved" ? "INQUIRY_RESOLVED" : "INQUIRY_STATUS_CHANGED",
       category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {before, after: status},
+      metadata: {before, after: status, revision: revision + 1, revisionChecked},
     });
-    return {ok: true, changed: true};
+    return {ok: true, changed: true, revision: revision + 1};
   });
 });
 
@@ -270,17 +309,20 @@ export const escalateInquiry = onCall(async (request) => {
     // Escalation is an assignee's request for administrator review.
     if (who.isSuperAdmin || !canHandle(who, data)) throw new HttpsError("permission-denied", "Only staff assigned to this inquiry can escalate it.");
     if (data.status === "resolved") throw new HttpsError("failed-precondition", "Resolved inquiries cannot be escalated.");
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     if (data.escalation?.status === "requested") throw new HttpsError("failed-precondition", "This inquiry is already escalated.");
     tx.update(ref, {
       escalation: {status: "requested", reason, requestedBy: who.actor.uid, requestedAt: FieldValue.serverTimestamp()},
+      routingRevision: revision + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ESCALATED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {reason, recipient: admin},
+      metadata: {reason, recipient: admin, revision: revision + 1, revisionChecked},
     });
-    return Number(data.routingRevision ?? 0);
+    return revision;
   });
   await createOnce(escalationNotificationId(inquiryId, revision),
     notification(admin, inquiryId, "Inquiry escalated", "An assigned inquiry was escalated for administrator review."));
@@ -327,6 +369,7 @@ export const reassignInquiry = onCall(async (request) => {
       routingRevision: plan.revision,
       routedAt: FieldValue.serverTimestamp(),
       escalation,
+      takeover: null,
       updatedAt: FieldValue.serverTimestamp(),
     });
     writeAudit(tx, db(), {

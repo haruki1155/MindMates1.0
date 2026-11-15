@@ -122,7 +122,11 @@ service cloud.firestore {
       allow write: if false;
     }
     match /system_config/{documentId} {
-      allow read: if signedIn() && documentId == 'security';
+      // inquiry_sla holds the super-admin's response target (hours); it is set
+      // only by the setInquirySla callable.
+      allow read: if signedIn()
+        && (documentId == 'security'
+          || (documentId == 'inquiry_sla' && hasPortalAccess()));
       allow write: if false;
     }
 
@@ -809,14 +813,25 @@ service cloud.firestore {
       // triage inquiries have no assignees, so only the owner and the
       // super-administrator see them. Staff list queries must filter on
       // `assigneeIds array-contains <uid>`.
-      allow read: if isOwner(resource.data.userId)
-        || isSystemAdmin()
-        || (currentAccessRole() in ['portalStaff', 'counselor']
-          && hasPortalAccess()
-          && request.auth.uid in resource.data.get('assigneeIds', []));
+      allow read: if canReadInquiry(resource.data);
       // Acknowledge, status, escalation and reassignment are audited
       // callables (functions/src/inquiry_routing_service.ts).
       allow update, delete: if false;
+
+      // Authored replies follow their inquiry's visibility and are written
+      // only by the replyToInquiry callable.
+      match /replies/{replyId} {
+        allow read: if canReadInquiry(get(/databases/$(database)/documents/inquiries/$(inquiryId)).data);
+        allow write: if false;
+      }
+    }
+
+    function canReadInquiry(inquiry) {
+      return isOwner(inquiry.userId)
+        || isSystemAdmin()
+        || (currentAccessRole() in ['portalStaff', 'counselor']
+          && hasPortalAccess()
+          && request.auth.uid in inquiry.get('assigneeIds', []));
     }
 
     match /appointment_slots/{slotId} {

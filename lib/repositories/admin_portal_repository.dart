@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
+import 'dart:math';
 
 import '../database/firestore_collections.dart';
 import '../models/academic_import_models.dart';
@@ -22,6 +23,7 @@ import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
 import '../features/admin/domain/admin_management_models.dart';
 import '../features/admin/domain/inquiry_scope.dart';
+import '../features/admin/domain/inquiry_sla.dart';
 import '../features/admin/domain/report_generation_models.dart';
 import '../services/firebase/firebase_callable_router.dart';
 import '../services/firebase/firestore_service.dart';
@@ -180,6 +182,16 @@ class PortalAccessEvaluation {
 
 /// Invokes a callable by name and returns its response data. Injectable so
 /// tests can fake the catalogue import callables.
+/// Idempotency key for a reply: a retried call with the same key returns the
+/// reply it already created instead of posting a second one.
+String newInquiryRequestId() {
+  const alphabet =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  final random = Random.secure();
+  return List.generate(24, (_) => alphabet[random.nextInt(alphabet.length)])
+      .join();
+}
+
 typedef AdminCallableInvoker =
     Future<Object?> Function(String name, Map<String, Object?> data);
 
@@ -1476,18 +1488,95 @@ class AdminPortalRepository {
   }
 
   /// Status changes are audited server-side; clients cannot write inquiries.
-  Future<void> updateInquiryStatus(String id, InquiryStatus status) =>
-      _callCallable('setInquiryStatus', {
+  /// Pass [expectedRevision] to reject the change if someone acted first.
+  Future<void> updateInquiryStatus(
+    String id,
+    InquiryStatus status, {
+    int? expectedRevision,
+  }) => _callCallable('setInquiryStatus', {
+    'inquiryId': id,
+    'status': status.storedValue,
+    'expectedRevision': ?expectedRevision,
+  });
+
+  /// Assignee or super-administrator posts an authored reply; returns the
+  /// new revision. [requestId] makes retries return the original reply.
+  Future<int> replyToInquiry(
+    String id, {
+    required String message,
+    required int expectedRevision,
+    required String requestId,
+  }) async {
+    final result = await _callCallable('replyToInquiry', {
+      'inquiryId': id,
+      'message': message,
+      'expectedRevision': expectedRevision,
+      'requestId': requestId,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Super-administrator takes over an unresolved inquiry.
+  Future<int> takeOverInquiry(
+    String id, {
+    required int expectedRevision,
+    required String reason,
+  }) async {
+    final result = await _callCallable('takeOverInquiry', {
+      'inquiryId': id,
+      'expectedRevision': expectedRevision,
+      'reason': reason,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Super-administrator chooses the response target (24, 48 or 72 hours).
+  Future<void> setInquirySla(int hours) =>
+      _callCallable('setInquirySla', {'hours': hours});
+
+  /// The configured response target; unset until the super-admin chooses one.
+  Stream<InquirySla> watchInquirySla() => _firestoreService
+      .watchDocument('system_config', 'inquiry_sla')
+      .map(InquirySla.fromJson);
+
+  /// Reply timeline, oldest first. Rules limit it to the inquiry's readers.
+  Stream<List<InquiryReply>> watchInquiryReplies(String inquiryId) =>
+      _firestoreService
+          .watchDocuments(
+            '${FirestoreCollections.inquiries}/$inquiryId/replies',
+            orderBy: 'createdAt',
+            descending: false,
+          )
+          .map(
+            (items) => items
+                .map(
+                  (item) => InquiryReply.fromJson(
+                    item,
+                    id: item['id']?.toString() ?? '',
+                  ),
+                )
+                .toList(),
+          );
+
+  /// Pass [expectedRevision] so the server rejects a stale view.
+  Future<void> acknowledgeInquiry(String id, {int? expectedRevision}) =>
+      _callCallable('acknowledgeInquiry', {
         'inquiryId': id,
-        'status': status.storedValue,
+        'expectedRevision': ?expectedRevision,
       });
 
-  Future<void> acknowledgeInquiry(String id) =>
-      _callCallable('acknowledgeInquiry', {'inquiryId': id});
-
   /// Assignee asks the super-administrator to review the inquiry.
-  Future<void> escalateInquiry(String id, {required String reason}) =>
-      _callCallable('escalateInquiry', {'inquiryId': id, 'reason': reason});
+  Future<void> escalateInquiry(
+    String id, {
+    required String reason,
+    int? expectedRevision,
+  }) => _callCallable('escalateInquiry', {
+    'inquiryId': id,
+    'reason': reason,
+    'expectedRevision': ?expectedRevision,
+  });
 
   /// Super-administrator replaces the assignees; returns the new revision.
   Future<int> reassignInquiry(
