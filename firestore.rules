@@ -96,6 +96,9 @@ service cloud.firestore {
     match /users/{userId} {
       // New profiles must be created by the Admin SDK callable so Student ID
       // reservation and profile creation remain one atomic transaction.
+      // College assignments (assignedCollegeIds, collegeAssignment*) are
+      // written only by the setStaffCollegeAssignments callable; they are
+      // deliberately absent from validSelfProfileUpdate's allow-list.
       allow create: if false;
       allow read: if isOwner(userId) || isSystemAdmin();
       allow update: if (isOwner(userId) && validSelfProfileUpdate());
