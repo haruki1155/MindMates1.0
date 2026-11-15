@@ -37,6 +37,7 @@ import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/appointment_approvals_panel.dart';
 import '../widgets/pacc_schedule_editor_widgets.dart';
 import '../widgets/clinical_interview_widgets.dart';
 import '../widgets/counselor_inquiry_workspace.dart';
@@ -2069,6 +2070,20 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            AppointmentApprovalsPanel(
+              repository: widget.repository,
+              appointments: records,
+              onOpen: (appointment) => _AppointmentCard(
+                item: appointment,
+                repository: widget.repository,
+                selected: false,
+                archiving: false,
+                onSelected: null,
+                onArchive: null,
+                now: DateTime.now(),
+              )._showReviewDialog(context),
+            ),
+            const SizedBox(height: 14),
             SegmentedButton<bool>(
               segments: const [
                 ButtonSegment(
@@ -2998,6 +3013,13 @@ class _AppointmentCard extends StatelessWidget {
     final selectedClinicalFiles = <PendingSessionEvidenceFile>[];
     List<SessionEvidenceAttachment>? uploadedClinicalFiles;
     final followUpMessage = TextEditingController();
+    // Required by the server when the super-admin acts on an appointment that
+    // a college counselor is assigned to (college-scoped approval).
+    final exceptionReason = TextEditingController();
+    String? exceptionReasonValue() {
+      final text = exceptionReason.text.trim();
+      return repository.isSuperAdmin && text.isNotEmpty ? text : null;
+    }
     var offerFollowUp = false;
     DateTime? proposedDate;
     List<AppointmentSlot> proposedSlots = const [];
@@ -3169,6 +3191,20 @@ class _AppointmentCard extends StatelessWidget {
                           ? null
                           : (value) => setDialogState(() => reason = value!),
                     ),
+                    if (repository.isSuperAdmin) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: exceptionReason,
+                        enabled: !submitting,
+                        maxLength: 500,
+                        decoration: const InputDecoration(
+                          labelText: 'Administrator exception reason',
+                          helperText:
+                              'Required when a counselor is assigned to this '
+                              "student's college.",
+                        ),
+                      ),
+                    ],
                     if (action == 'rescheduled') ...[
                       const SizedBox(height: 12),
                       TextField(
@@ -3454,14 +3490,14 @@ class _AppointmentCard extends StatelessWidget {
                         setDialogState(() => submitting = true);
                         try {
                           if (!item.hasScheduleRevision) {
-                            await repository.initializeAppointmentScheduleRevision(appointmentId: item.id, scheduledAt: item.scheduledAt, status: item.lifecycleStatus.value);
+                            await repository.initializeAppointmentScheduleRevision(appointmentId: item.id, scheduledAt: item.scheduledAt, status: item.lifecycleStatus.value, exceptionReason: exceptionReasonValue());
                             if (!context.mounted) return;
                             Navigator.of(context).pop();
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Appointment prepared. Refresh and review it before confirming.')));
                             return;
                           }
                           if (action == 'accept') {
-                            await repository.changeAppointmentAgreement(item, 'accept', agreementRequestId);
+                            await repository.changeAppointmentAgreement(item, 'accept', agreementRequestId, exceptionReason: exceptionReasonValue());
                           } else {
                           // Upload evidence only after the legacy schedule guard.
                           // Reuse the uploaded manifest if a callable retry is needed.
@@ -3497,6 +3533,7 @@ class _AppointmentCard extends StatelessWidget {
                                 action == 'completed' && offerFollowUp
                                 ? followUpMessage.text.trim()
                                 : null,
+                            exceptionReason: exceptionReasonValue(),
                           );
                           }
                           if (dialogContext.mounted) {

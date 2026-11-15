@@ -12,7 +12,7 @@ class _Repository extends AdminPortalRepository {
   String? agreementAction;
   int? agreementRevision;
   @override
-  Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId) async { agreementAction = action; agreementRevision = appointment.proposalRevision; }
+  Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId, {String? exceptionReason}) async { agreementAction = action; agreementRevision = appointment.proposalRevision; }
 
   @override
   Stream<List<AppointmentModel>> watchAppointments() => Stream.value(records);
