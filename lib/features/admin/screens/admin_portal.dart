@@ -37,6 +37,7 @@ import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/inquiry_routing_panel.dart';
 import '../widgets/pacc_schedule_editor_widgets.dart';
 import '../widgets/clinical_interview_widgets.dart';
 import '../widgets/counselor_inquiry_workspace.dart';
@@ -668,7 +669,9 @@ class PortalWorkspaceNavigation extends StatelessWidget {
     AdminPortalPage.notifications => false,
     AdminPortalPage.assessments => accessRole.canAccessClinicalData,
     AdminPortalPage.inquiries =>
-      accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
+      accessRole == AccessRole.counselor ||
+          accessRole == AccessRole.portalStaff ||
+          accessRole == AccessRole.admin,
     AdminPortalPage.appointments =>
       accessRole.canUsePortal || accessRole == AccessRole.admin,
     AdminPortalPage.availability => canShowScheduleNavigation(accessRole),
@@ -5303,6 +5306,8 @@ class _InquiriesPageState extends State<_InquiriesPage> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            InquiryBackfillButton(repository: widget.repository),
+            const SizedBox(height: 10),
             _CompactSummaryStrip(
               values: {
                 'Total': all.length,
@@ -5504,6 +5509,7 @@ class _InquiryQueueRow extends StatelessWidget {
                           label: item.category,
                           color: AdminColors.surfaceMuted,
                         ),
+                        InquiryRoutingBadge(inquiry: item),
                       ],
                     ),
                   ],
@@ -5713,6 +5719,12 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
               ],
             ),
           ],
+          const Divider(height: 34),
+          InquiryRoutingPanel(
+            inquiry: item,
+            repository: widget.repository,
+            onChanged: widget.onUpdated,
+          ),
           const Divider(height: 34),
           const _InquirySectionHeading(
             icon: Icons.task_alt_outlined,

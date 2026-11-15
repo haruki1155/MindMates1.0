@@ -397,6 +397,7 @@ class AdminPortalRepository {
   }
 
   User? get currentAuthUser => FirebaseAuth.instance.currentUser;
+  String? get currentUserId => currentAuthUser?.uid;
   Stream<User?> get authStateChanges =>
       FirebaseAuth.instance.authStateChanges();
 
@@ -1139,7 +1140,7 @@ class AdminPortalRepository {
   /// inquiries routed to them (`assigneeIds array-contains uid`), and any
   /// other portal account gets an error rather than an empty inbox.
   Stream<List<AdminInquiryModel>> watchInquiries() {
-    final uid = currentAuthUser?.uid;
+    final uid = currentUserId;
     final role = currentAccessRole;
     final assignee = role == AccessRole.portalStaff || role == AccessRole.counselor;
     if (!isSuperAdmin && (!assignee || uid == null)) {

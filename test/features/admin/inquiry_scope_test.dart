@@ -4,19 +4,22 @@ import 'package:mind_mates/models/admin_inquiry_model.dart';
 import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/repositories/admin_portal_repository.dart';
 
-AdminInquiryModel _inquiry(String id, {List<String>? assignees, Map<String, dynamic> extra = const {}}) =>
-    AdminInquiryModel.fromJson({
-      'id': id,
-      'userId': 'student-$id',
-      'subject': 'Subject $id',
-      'message': 'Message $id',
-      'category': 'General',
-      'email': 'student-$id@example.edu',
-      'status': 'pending',
-      'createdAt': '2026-11-14T08:00:00.000',
-      'assigneeIds': ?assignees,
-      ...extra,
-    });
+AdminInquiryModel _inquiry(
+  String id, {
+  List<String>? assignees,
+  Map<String, dynamic> extra = const {},
+}) => AdminInquiryModel.fromJson({
+  'id': id,
+  'userId': 'student-$id',
+  'subject': 'Subject $id',
+  'message': 'Message $id',
+  'category': 'General',
+  'email': 'student-$id@example.edu',
+  'status': 'pending',
+  'createdAt': '2026-11-14T08:00:00.000',
+  'assigneeIds': ?assignees,
+  ...extra,
+});
 
 void main() {
   test('parses routing, assignment and escalation fields', () {
@@ -50,7 +53,13 @@ void main() {
     expect(legacy.assigneeIds, isEmpty);
     expect(legacy.routingRevision, 0);
     expect(legacy.isEscalated, isFalse);
-    final triage = _inquiry('t', extra: {'routingStatus': 'needs_triage', 'routingReason': 'missing_college'});
+    final triage = _inquiry(
+      't',
+      extra: {
+        'routingStatus': 'needs_triage',
+        'routingReason': 'missing_college',
+      },
+    );
     expect(triage.routingStatus, InquiryRoutingStatus.needsTriage);
     expect(triage.routingReason, 'missing_college');
   });
@@ -64,17 +73,49 @@ void main() {
     ];
     for (final role in [AccessRole.counselor, AccessRole.portalStaff]) {
       expect(
-        scopeInquiriesForRole(items, role: role, uid: role == AccessRole.counselor ? 'c1' : 's1', isSuperAdmin: false).map((i) => i.id),
+        scopeInquiriesForRole(
+          items,
+          role: role,
+          uid: role == AccessRole.counselor ? 'c1' : 's1',
+          isSuperAdmin: false,
+        ).map((i) => i.id),
         ['mine'],
       );
     }
-    expect(scopeInquiriesForRole(items, role: AccessRole.counselor, uid: null, isSuperAdmin: false), isEmpty);
+    expect(
+      scopeInquiriesForRole(
+        items,
+        role: AccessRole.counselor,
+        uid: null,
+        isSuperAdmin: false,
+      ),
+      isEmpty,
+    );
   });
 
   test('only the super-administrator sees every inquiry', () {
-    final items = [_inquiry('a', assignees: ['c2']), _inquiry('legacy')];
-    expect(scopeInquiriesForRole(items, role: AccessRole.admin, uid: 'admin', isSuperAdmin: true).length, 2);
-    expect(scopeInquiriesForRole(items, role: AccessRole.admin, uid: 'other-admin', isSuperAdmin: false), isEmpty);
+    final items = [
+      _inquiry('a', assignees: ['c2']),
+      _inquiry('legacy'),
+    ];
+    expect(
+      scopeInquiriesForRole(
+        items,
+        role: AccessRole.admin,
+        uid: 'admin',
+        isSuperAdmin: true,
+      ).length,
+      2,
+    );
+    expect(
+      scopeInquiriesForRole(
+        items,
+        role: AccessRole.admin,
+        uid: 'other-admin',
+        isSuperAdmin: false,
+      ),
+      isEmpty,
+    );
   });
 
   test('repository inquiry actions call the audited callables', () async {
@@ -82,13 +123,27 @@ void main() {
     final repository = AdminPortalRepository(
       callableInvoker: (name, data) async {
         calls.add((name, data));
-        return {'ok': true, 'revision': 4, 'routed': 2, 'needsTriage': 1, 'remaining': 0};
+        return {
+          'ok': true,
+          'revision': 4,
+          'routed': 2,
+          'needsTriage': 1,
+          'remaining': 0,
+        };
       },
     );
     await repository.updateInquiryStatus('i1', InquiryStatus.resolved);
     await repository.acknowledgeInquiry('i1');
     await repository.escalateInquiry('i1', reason: 'Needs supervisor');
-    expect(await repository.reassignInquiry('i1', assigneeIds: const ['c2'], expectedRevision: 3, reason: 'Coverage'), 4);
+    expect(
+      await repository.reassignInquiry(
+        'i1',
+        assigneeIds: const ['c2'],
+        expectedRevision: 3,
+        reason: 'Coverage',
+      ),
+      4,
+    );
     final backfill = await repository.routeExistingInquiries();
     expect(backfill.routed, 2);
     expect(backfill.needsTriage, 1);
@@ -101,7 +156,12 @@ void main() {
     ]);
     expect(calls[0].$2, {'inquiryId': 'i1', 'status': 'resolved'});
     expect(calls[2].$2, {'inquiryId': 'i1', 'reason': 'Needs supervisor'});
-    expect(calls[3].$2, {'inquiryId': 'i1', 'assigneeIds': ['c2'], 'expectedRevision': 3, 'reason': 'Coverage'});
+    expect(calls[3].$2, {
+      'inquiryId': 'i1',
+      'assigneeIds': ['c2'],
+      'expectedRevision': 3,
+      'reason': 'Coverage',
+    });
     expect(calls[4].$2, {'limit': 100});
   });
 }
