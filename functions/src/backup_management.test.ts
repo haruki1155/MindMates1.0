@@ -24,7 +24,7 @@ const counselorUid = `${prefix}-counselor`;
 const actor = {uid: adminUid, name: "Test Admin", role: "admin"};
 const db = getFirestore();
 
-type Fake = BackupDeps & {exportCalls: Array<{name: string; outputUriPrefix: string}>; operation: OperationState; exists: boolean; failExport?: Error; liveOperations: Array<{name: string; outputUriPrefix: string; done: boolean}>; exportResponseName?: string | null};
+type Fake = BackupDeps & {exportCalls: Array<{name: string; outputUriPrefix: string}>; operation: OperationState; exists: boolean; failExport?: Error; liveOperations: Array<{name: string; outputUriPrefix: string; done: boolean; failed: boolean; state: string}>; exportResponseName?: string | null; listingError?: Error};
 
 function fakeDeps(env: Record<string, string | undefined> = {BACKUP_BUCKET: "test-bucket"}): Fake {
   let counter = 0;
@@ -49,6 +49,7 @@ function fakeDeps(env: Record<string, string | undefined> = {BACKUP_BUCKET: "tes
         return fake.operation;
       },
       async listExportOperations() {
+        if (fake.listingError) throw fake.listingError;
         return fake.liveOperations;
       },
     },
@@ -224,7 +225,7 @@ test("an orphaned start whose export is actually running adopts the operation in
   await clearJobs();
   const deps = fakeDeps();
   const jobId = await orphanJob(deps, 30);
-  deps.liveOperations = [{name: "op-live", outputUriPrefix: `gs://test-bucket/firestore-exports/20261115-023000-${jobId}`, done: false}];
+  deps.liveOperations = [{name: "op-live", outputUriPrefix: `gs://test-bucket/firestore-exports/20261115-023000-${jobId}`, done: false, failed: false, state: "PROCESSING"}];
   assert.equal((await refreshBackup(deps, actor, jobId)).status, "running");
   const job = (await db.doc(`backup_jobs/${jobId}`).get()).data()!;
   assert.equal(job.operationName, "op-live");
@@ -245,15 +246,54 @@ test("a very recent nameless job is left alone because its start may still be in
   assert.equal(job.revision, 1);
 });
 
-test("an export response without an operation name fails the job instead of leaving it nameless and running", {skip: !emulated}, async () => {
+test("an orphaned start whose export already completed is adopted and verified, never re-exported", {skip: !emulated}, async () => {
+  await clearJobs();
+  const deps = fakeDeps();
+  const jobId = await orphanJob(deps, 30);
+  deps.liveOperations = [{name: "op-done", outputUriPrefix: `gs://test-bucket/firestore-exports/20261115-023000-${jobId}`, done: true, failed: false, state: "SUCCESSFUL"}];
+  deps.operation = {done: true};
+  deps.exists = true;
+  assert.equal((await refreshBackup(deps, actor, jobId)).status, "completed");
+  const job = (await db.doc(`backup_jobs/${jobId}`).get()).data()!;
+  assert.equal(job.operationName, "op-done");
+  assert.equal(job.verification.status, "verified");
+  assert.equal(deps.exportCalls.length, 0);
+});
+
+test("an unavailable operation listing leaves an orphaned job running and blocks new exports", {skip: !emulated}, async () => {
+  await clearJobs();
+  const deps = fakeDeps({BACKUP_BUCKET: "test-bucket", BACKUP_SCHEDULE_ENABLED: "true"});
+  const jobId = await orphanJob(deps, 30);
+  deps.listingError = new Error("listing PERMISSION_DENIED");
+  assert.equal((await refreshBackup(deps, actor, jobId)).status, "running");
+  const job = (await db.doc(`backup_jobs/${jobId}`).get()).data()!;
+  assert.equal(job.status, "running");
+  assert.equal(job.operationName, null);
+  assert.equal(job.reconciliation.status, "uncertain");
+  await denied(startBackup(deps, actor, "manual"), "failed-precondition");
+  assert.equal(deps.exportCalls.length, 0);
+  assert.deepEqual(await runScheduledBackup(deps), {started: false, reason: "job-running"});
+  assert.equal(deps.exportCalls.length, 0);
+  assert.equal((await db.doc(`backup_jobs/${jobId}`).get()).data()!.status, "running");
+});
+
+test("an export response without an operation name keeps the job running for reconciliation instead of guessing", {skip: !emulated}, async () => {
   await clearJobs();
   const deps = fakeDeps();
   deps.exportResponseName = null;
-  await denied(startBackup(deps, actor, "manual"), "internal");
-  const jobs = await db.collection("backup_jobs").where("requestedBy", "==", adminUid).get();
-  assert.equal(jobs.docs[0].data().status, "failed");
-  assert.equal(jobs.docs[0].data().error.code, "export-operation-missing");
+  const result = await startBackup(deps, actor, "manual");
+  assert.equal(result.status, "running");
+  const job = (await db.doc(`backup_jobs/${jobId(result)}`).get()).data()!;
+  assert.equal(job.status, "running");
+  assert.equal(job.operationName, null);
+  assert.equal(job.reconciliation.status, "uncertain");
+  assert.equal(job.reconciliation.reason, "export-response-without-name");
+  // No duplicate export can be started while the outcome is unknown.
+  await denied(startBackup(deps, actor, "manual"), "failed-precondition");
+  assert.equal(deps.exportCalls.length, 1);
 });
+
+function jobId(result: {jobId: string}): string { return result.jobId; }
 
 test("the scheduler does nothing unless BACKUP_SCHEDULE_ENABLED is true", {skip: !emulated}, async () => {
   await clearJobs();

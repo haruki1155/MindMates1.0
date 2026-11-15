@@ -6,6 +6,13 @@ import {HttpsError, onCall} from "firebase-functions/v2/https";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 
 import {requireSuperAdmin, requireUid} from "./access";
+import {
+  ExportOperationSummary,
+  findOperationForPrefix,
+  listExportOperations as listExportOperationsFrom,
+  OperationListingUnavailableError,
+  RawOperation,
+} from "./backup_operations";
 import {actorName, AUDIT_CATEGORIES, writeAudit} from "./audit";
 import {
   applyOperationState,
@@ -34,8 +41,12 @@ export type BackupDeps = {
   exporter: {
     exportDocuments(request: {name: string; outputUriPrefix: string}): Promise<[{name?: string | null}]>;
     checkExportDocumentsProgress(name: string): Promise<OperationState>;
-    /** Export operations known to the database, used to reconcile a job whose start was interrupted. */
-    listExportOperations(databaseName: string): Promise<Array<{name: string; outputUriPrefix: string; done: boolean}>>;
+    /**
+     * Export operations known to the database (running, failed and completed),
+     * used to reconcile a job whose start was interrupted. Must throw
+     * OperationListingUnavailableError when the answer is incomplete.
+     */
+    listExportOperations(databaseName: string): Promise<ExportOperationSummary[]>;
   };
   objectExists(bucket: string, path: string): Promise<boolean>;
   env: Record<string, string | undefined>;
@@ -67,13 +78,14 @@ export function defaultDeps(): BackupDeps {
         return operation as unknown as OperationState;
       },
       async listExportOperations(databaseName) {
-        const found: Array<{name: string; outputUriPrefix: string; done: boolean}> = [];
-        for await (const op of client.operationsClient.listOperationsAsync({name: databaseName, filter: ""} as unknown as Parameters<typeof client.operationsClient.listOperationsAsync>[0])) {
-          const record = op as unknown as {name?: string; done?: boolean; metadata?: {outputUriPrefix?: string}};
-          const prefix = String(record.metadata?.outputUriPrefix ?? "");
-          if (record.name && prefix) found.push({name: record.name, outputUriPrefix: prefix, done: record.done === true});
-        }
-        return found;
+        // The admin client's own long-running descriptor decodes the Any-wrapped
+        // ExportDocumentsMetadata; no separate protobuf dependency is needed.
+        const decoder = client.descriptors?.longrunning?.exportDocuments?.metadataDecoder as ((bytes: Uint8Array) => unknown) | undefined;
+        if (typeof decoder !== "function") throw new OperationListingUnavailableError("Export metadata decoder is unavailable.");
+        const page = (filter: string): AsyncIterable<RawOperation> => client.operationsClient.listOperationsAsync(
+          {name: databaseName, filter} as unknown as Parameters<typeof client.operationsClient.listOperationsAsync>[0],
+        ) as AsyncIterable<RawOperation>;
+        return listExportOperationsFrom(page, decoder);
       },
     },
     async objectExists(bucket, path) {
@@ -176,7 +188,17 @@ export async function startBackup(deps: BackupDeps, actor: BackupActor, trigger:
       outputUriPrefix,
     });
     if (typeof operation.name !== "string" || !operation.name.trim()) {
-      throw Object.assign(new Error("The export API returned no operation name."), {code: "export-operation-missing"});
+      // The backend may well have accepted the export. Do not fail the job
+      // (that would allow a duplicate paid export); leave it running and let
+      // reconciliation find the operation by its output prefix.
+      await deps.db.runTransaction(async (tx) => {
+        tx.update(ref, {
+          reconciliation: {status: "uncertain", reason: "export-response-without-name", checkedAt: Timestamp.fromDate(deps.now())},
+          revision: FieldValue.increment(1),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      });
+      return {jobId, status: "running"};
     }
     await deps.db.runTransaction(async (tx) => {
       tx.update(ref, {
@@ -278,25 +300,60 @@ async function reconcileOrphanedStart(
   const now = deps.now();
   const prefix = String(data.outputUriPrefix ?? "");
   const revision = Number(data.revision ?? 0);
-  const live = (await deps.exporter.listExportOperations(`projects/${deps.projectId}/databases/(default)`))
-    .find((op) => op.outputUriPrefix === prefix);
-  if (live) {
+  const guard = (current: FirebaseFirestore.DocumentData) =>
+    current.status === "running" && Number(current.revision ?? 0) === revision && !current.operationName;
+
+  let operations: ExportOperationSummary[];
+  try {
+    operations = await deps.exporter.listExportOperations(`projects/${deps.projectId}/databases/(default)`);
+  } catch (error) {
+    // Unknown whether an export is running: keep the job running (which keeps
+    // new exports blocked) and record why, so an operator can see it.
+    const reason = error instanceof OperationListingUnavailableError ? "operation-listing-unavailable" : "operation-listing-error";
     await deps.db.runTransaction(async (tx) => {
       const current = (await tx.get(ref)).data() ?? {};
-      if (current.status !== "running" || Number(current.revision ?? 0) !== revision || current.operationName) return;
-      tx.update(ref, {operationName: live.name, startedAt: Timestamp.fromDate(now), revision: revision + 1, updatedAt: FieldValue.serverTimestamp()});
+      if (!guard(current)) return;
+      tx.update(ref, {
+        reconciliation: {status: "uncertain", reason, checkedAt: Timestamp.fromDate(now), detail: sanitizeError(error).message},
+        revision: revision + 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
     });
     return {jobId, status: "running"};
   }
+
+  const live = findOperationForPrefix(operations, prefix);
+  if (live) {
+    // Running or already finished: adopt the operation, then let the normal
+    // refresh path verify and record its outcome. Never start another export.
+    const adopted = await deps.db.runTransaction(async (tx) => {
+      const current = (await tx.get(ref)).data() ?? {};
+      if (!guard(current)) return false;
+      tx.update(ref, {
+        operationName: live.name,
+        startedAt: Timestamp.fromDate(now),
+        reconciliation: {status: "adopted", reason: live.done ? "operation-already-finished" : "operation-running", checkedAt: Timestamp.fromDate(now)},
+        revision: revision + 1,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+    return adopted ? refreshBackup(deps, actor, jobId) : {jobId, status: "running"};
+  }
+
   const requestedAt = data.requestedAt instanceof Timestamp ? data.requestedAt.toMillis() : 0;
   if (now.getTime() - requestedAt < ORPHAN_GRACE_MS) return {jobId, status: "running"};
-  const error = {code: "export-start-orphaned", message: "The backup record was created but no export operation was started for it."};
+  // Both listings answered and neither knows this prefix: the export was never
+  // accepted. Failing the job unblocks later backups without duplicating one.
+  const error = {code: "export-start-orphaned", message: "The backup record was created but no export operation exists for it."};
   return deps.db.runTransaction(async (tx) => {
     const current = (await tx.get(ref)).data() ?? {};
-    if (current.status !== "running" || Number(current.revision ?? 0) !== revision || current.operationName) {
-      return {jobId, status: String(current.status) as BackupJobStatus};
-    }
-    tx.update(ref, {status: "failed", error, completedAt: Timestamp.fromDate(now), revision: revision + 1, updatedAt: FieldValue.serverTimestamp()});
+    if (!guard(current)) return {jobId, status: String(current.status) as BackupJobStatus};
+    tx.update(ref, {
+      status: "failed", error, completedAt: Timestamp.fromDate(now),
+      reconciliation: {status: "orphaned", reason: "no-operation-for-prefix", checkedAt: Timestamp.fromDate(now)},
+      revision: revision + 1, updatedAt: FieldValue.serverTimestamp(),
+    });
     audit(tx, deps.db, actor, "BACKUP_FAILED", jobId, {stage: "orphaned-start", error});
     return {jobId, status: "failed" as const};
   });
