@@ -59,6 +59,34 @@ class InquiryRoutingBackfillResult {
   final String? nextCursor;
 }
 
+/// One authored reply on an inquiry (inquiries/{id}/replies/{requestId}).
+class InquiryReply {
+  const InquiryReply({
+    required this.id,
+    required this.message,
+    required this.authorName,
+    required this.authorRole,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String message;
+  final String authorName;
+  final String authorRole;
+  final DateTime? createdAt;
+
+  bool get isAdministrator => authorRole == 'admin';
+
+  factory InquiryReply.fromJson(Map<String, dynamic> json, {required String id}) =>
+      InquiryReply(
+        id: id,
+        message: json['message']?.toString() ?? '',
+        authorName: json['authorName']?.toString() ?? 'PACC staff',
+        authorRole: json['authorRole']?.toString() ?? '',
+        createdAt: dateTimeFromFirestore(json['createdAt']),
+      );
+}
+
 class AdminInquiryModel {
   const AdminInquiryModel({
     required this.id,
