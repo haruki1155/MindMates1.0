@@ -1,25 +1,23 @@
 import '../../../models/admin_inquiry_model.dart';
 import '../../../models/profile_roles.dart';
 
-/// Which inquiries a signed-in portal user should see.
+/// Defensive client-side mirror of the Firestore inquiry rules.
 ///
-/// No server component assigns `assignedStaffId` on inquiries yet, so a
-/// counselor must see the shared unassigned pool plus anything explicitly
-/// assigned to them. Hiding the unassigned pool behind an equality filter on
-/// a never-written field made every counselor inbox look empty while the
-/// administrator view showed the same records. Firestore rules already permit
-/// approved portal accounts to read inquiries; this only narrows the UI.
+/// Inquiries are routed server-side to the staff and counselors assigned to
+/// the student's college (`assigneeIds`). Only those assignees and the
+/// configured super-administrator may see an inquiry; the rules enforce this,
+/// and the repository already queries with `assigneeIds array-contains uid`.
+/// This filter only guarantees the UI never shows anything else.
 List<AdminInquiryModel> scopeInquiriesForRole(
   List<AdminInquiryModel> items, {
   required AccessRole role,
   required String? uid,
+  required bool isSuperAdmin,
 }) {
-  if (role != AccessRole.counselor) return items;
-  return items
-      .where(
-        (item) =>
-            item.assignedStaffId == null ||
-            (uid != null && item.assignedStaffId == uid),
-      )
-      .toList();
+  if (isSuperAdmin) return items;
+  if (uid == null ||
+      (role != AccessRole.counselor && role != AccessRole.portalStaff)) {
+    return const [];
+  }
+  return items.where((item) => item.assigneeIds.contains(uid)).toList();
 }
