@@ -1,10 +1,12 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
+import '../../../models/case_remarks_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../models/student_case_history_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/case_remarks_editor.dart';
 
 /// Loads one page of a student's case history; `cursor` is null for the first.
 typedef StudentCaseHistoryLoader =
@@ -41,6 +43,14 @@ class StudentCaseHistoryButton extends StatelessWidget {
             studentId: studentId,
             cursor: cursor,
           ),
+          canEditRemarks: repository.currentAccessRole == AccessRole.counselor,
+          remarksLoader: repository.fetchCaseRemarks,
+          remarksSaver: (appointmentId, text, expectedRevision) =>
+              repository.saveCaseRemarks(
+                appointmentId: appointmentId,
+                text: text,
+                expectedRevision: expectedRevision,
+              ),
         ),
       ),
     ),
@@ -57,11 +67,22 @@ class StudentCaseHistoryPage extends StatefulWidget {
     required this.studentId,
     required this.studentName,
     required this.loader,
+    this.canEditRemarks = false,
+    this.remarksLoader,
+    this.remarksSaver,
   });
 
   final String studentId;
   final String studentName;
   final StudentCaseHistoryLoader loader;
+  final bool canEditRemarks;
+  final Future<CaseRemarks> Function(String appointmentId)? remarksLoader;
+  final Future<CaseRemarks> Function(
+    String appointmentId,
+    String text,
+    int expectedRevision,
+  )?
+  remarksSaver;
 
   @override
   State<StudentCaseHistoryPage> createState() => _StudentCaseHistoryPageState();
@@ -227,7 +248,17 @@ class _StudentCaseHistoryPageState extends State<StudentCaseHistoryPage> {
             ),
           );
         }
-        children.add(_CaseCard(entry: item));
+        children.add(
+          _CaseCard(
+            entry: item,
+            canEditRemarks:
+                widget.canEditRemarks &&
+                widget.remarksLoader != null &&
+                widget.remarksSaver != null,
+            remarksLoader: widget.remarksLoader,
+            remarksSaver: widget.remarksSaver,
+          ),
+        );
       }
     }
     if (_truncated) {
@@ -306,12 +337,33 @@ String _dateText(DateTime value) {
       '${local.day.toString().padLeft(2, '0')}';
 }
 
-class _CaseCard extends StatelessWidget {
-  const _CaseCard({required this.entry});
+class _CaseCard extends StatefulWidget {
+  const _CaseCard({
+    required this.entry,
+    required this.canEditRemarks,
+    this.remarksLoader,
+    this.remarksSaver,
+  });
   final StudentCaseHistoryEntry entry;
+  final bool canEditRemarks;
+  final Future<CaseRemarks> Function(String appointmentId)? remarksLoader;
+  final Future<CaseRemarks> Function(
+    String appointmentId,
+    String text,
+    int expectedRevision,
+  )?
+  remarksSaver;
+
+  @override
+  State<_CaseCard> createState() => _CaseCardState();
+}
+
+class _CaseCardState extends State<_CaseCard> {
+  bool _showRemarks = false;
 
   @override
   Widget build(BuildContext context) {
+    final entry = widget.entry;
     final scheduled = entry.scheduledAt;
     final when = scheduled != null
         ? '${_dateText(scheduled)}'
@@ -361,6 +413,30 @@ class _CaseCard extends StatelessWidget {
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
+          ],
+          if (widget.canEditRemarks) ...[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () => setState(() => _showRemarks = !_showRemarks),
+              icon: Icon(
+                _showRemarks ? Icons.expand_less : Icons.notes_outlined,
+                size: 18,
+              ),
+              label: Text(
+                _showRemarks
+                    ? 'Hide Transcript / Remarks'
+                    : 'Transcript / Remarks',
+              ),
+            ),
+            if (_showRemarks) ...[
+              const SizedBox(height: 8),
+              CaseRemarksEditor(
+                key: ValueKey('remarks-${entry.id}'),
+                load: () => widget.remarksLoader!(entry.id),
+                save: (text, expectedRevision) =>
+                    widget.remarksSaver!(entry.id, text, expectedRevision),
+              ),
+            ],
           ],
         ],
       ),

@@ -2,6 +2,7 @@ import {handleAppointmentAgreement} from "./appointment_agreement";
 export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callable";
 export {setStaffCollegeAssignments} from "./college_assignments_callable";
 export {getStudentCaseHistory} from "./student_case_history_callable";
+export {getCaseRemarks, saveCaseRemarks} from "./case_remarks_callable";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
