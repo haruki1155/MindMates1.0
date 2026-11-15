@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import * as functions from "./index";
+import {ensureVerifiedAuthUser} from "./test_support_auth";
 
 test("queue delayed and duplicate events project authoritative confirmation", async () => {
   assert.ok(process.env.FIRESTORE_EMULATOR_HOST);
@@ -24,6 +25,7 @@ test("queue delayed and duplicate events project authoritative confirmation", as
   await ref.update({status: "confirmed"}); // confirmation keeps the revision
   await trigger.run({params: {appointmentId: ref.id}, data: {after: olderPending}});
   await db.doc("users/gate2-refresh-staff").set({accessRole: "portalStaff"});
+  await ensureVerifiedAuthUser("gate2-refresh-staff");
   await db.doc(`appointment_queue/${ref.id}`).delete();
   const refresh = functions.refreshPortalAppointmentQueue as unknown as {run: (request: unknown) => Promise<unknown>};
   await refresh.run({auth: {uid: "gate2-refresh-staff"}});
@@ -39,6 +41,7 @@ test("reschedule notifications reject delayed pending events after confirmation"
   const db = getFirestore();
   const ref = db.doc("appointments/gate2-notification");
   await db.doc("users/gate2-staff").set({accessRole: "portalStaff"});
+  await ensureVerifiedAuthUser("gate2-staff");
   await ref.set({userId: "gate2-student", status: "confirmed", scheduleRevision: 0, scheduledAt: Timestamp.fromMillis(2000000000000), concern: "PRIVATE"});
   const before = await ref.get();
   await ref.update({status: "requested", scheduleRevision: 1, studentScheduleRequestId: "gate2_request_1"});
@@ -124,6 +127,7 @@ test("integrated reschedule, notification retries, queue, confirmation, and revi
   const staff = "gate2-integrated-staff";
   const ref = db.doc(`appointments/${id}`);
   await db.doc(`users/${staff}`).set({accessRole: "admin"});
+  await ensureVerifiedAuthUser(staff);
   await db.doc("pacc_availability/current").set({openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, blackoutDates: []});
   await ref.set({userId: uid, fullName: "Private name", concern: "PRIVATE CONCERN", status: "confirmed", scheduleRevision: 0, scheduledAt: Timestamp.fromMillis(a), scheduledTime: "11:00 AM"});
   await db.doc(`appointment_slots/pacc_${a}`).set({appointmentId: id});

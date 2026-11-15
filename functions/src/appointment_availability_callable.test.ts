@@ -3,6 +3,7 @@ import {after, before, beforeEach, test} from "node:test";
 import {getFirestore} from "firebase-admin/firestore";
 
 import {getAvailableAppointmentSlots, savePaccAvailability} from "./index";
+import {ensureVerifiedAuthUser} from "./test_support_auth";
 
 type Callable = {run: (request: {auth?: {uid: string}; data?: Record<string, unknown>}) => Promise<unknown>};
 const db = getFirestore();
@@ -30,6 +31,8 @@ before(async () => {
     db.collection("users").doc(counselorId).set({accessRole: "counselor", name: "Availability Test Counselor"}),
     db.collection("users").doc(staffId).set({accessRole: "staff", name: "Availability Test Staff"}),
     db.collection("users").doc(studentId).set({accessRole: "student", name: "Availability Test Student"}),
+    ensureVerifiedAuthUser(adminId),
+    ensureVerifiedAuthUser(counselorId),
   ]);
 });
 beforeEach(async () => {

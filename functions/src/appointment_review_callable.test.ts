@@ -3,6 +3,7 @@ import {after, before, test} from "node:test";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {respondToAppointment, reviewAppointment} from "./index";
+import {ensureVerifiedAuthUser} from "./test_support_auth";
 
 type Callable = {run: (request: {auth?: {uid: string}; data?: Record<string, unknown>}) => Promise<unknown>};
 const db = getFirestore();
@@ -64,6 +65,7 @@ before(async () => {
     db.collection("users").doc(studentId).set({accessRole: "appUser"}), db.collection("users").doc(adminId).set({accessRole: "admin", name: "Test Admin"}),
     db.collection("users").doc(counselorId).set({accessRole: "counselor", name: "Assigned Counselor"}), db.collection("users").doc(otherCounselorId).set({accessRole: "counselor", name: "Other Counselor"}),
     db.collection("users").doc(portalStaffId).set({accessRole: "portalStaff", name: "Portal Staff"}), setOpenSchedule(),
+    ...[adminId, counselorId, otherCounselorId, portalStaffId].map((id) => ensureVerifiedAuthUser(id)),
   ]);
 });
 after(async () => {
