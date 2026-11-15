@@ -74,6 +74,13 @@ const history = async (id: string) => (await db.collection(`appointments/${id}/h
 const audits = async (id: string, action: string) =>
   (await db.collection("admin_audit_logs").where("targetId", "==", id).where("action", "==", action).get()).docs.map((d) => d.data());
 
+/** History is student-readable: only the approval mode may appear there. */
+function assertNoInternalApprovalDetail(entry: Record<string, unknown>): void {
+  for (const field of ["approvalCollegeId", "approvalScopeReason", "approvalExceptionReason"]) {
+    assert.equal(entry[field], undefined, `${field} must stay in the admin-only audit log`);
+  }
+}
+
 let previous: string | undefined;
 before(async () => {
   if (!emulated) return;
@@ -101,7 +108,7 @@ test("the counselor assigned to the student's college confirms; history, audit a
   assert.equal(data.status, "confirmed");
   const entries = await history(id);
   assert.equal(entries.length, 1);
-  assert.deepEqual([entries[0].status, entries[0].staffId, entries[0].approvalMode, entries[0].approvalCollegeId], ["confirmed", uid("cA"), "college", cite]);
+  assert.deepEqual([entries[0].status, entries[0].staffId, entries[0].approvalMode], ["confirmed", uid("cA"), "college"]);
   const [row] = await audits(id, "APPOINTMENT_CONFIRMED");
   assert.deepEqual([row.metadata.approval.mode, row.metadata.approval.collegeId], ["college", cite]);
   const toStudent = (await db.collection("notifications").where("appointmentId", "==", id).where("userId", "==", uid("student-cite")).get()).docs.map((d) => d.data());
@@ -128,7 +135,8 @@ test("missing, unverified, unknown or unstaffed colleges go to super-admin triag
     await rejects(call(reviewAppointment, "cA", confirm(id, at)), "permission-denied");
     await call(reviewAppointment, "admin", confirm(id, at));
     const [entry] = await history(id);
-    assert.deepEqual([entry.approvalMode, entry.approvalScopeReason], ["admin_triage", reason], student);
+    assert.equal(entry.approvalMode, "admin_triage", student);
+    assertNoInternalApprovalDetail(entry);
     const [row] = await audits(id, "APPOINTMENT_CONFIRMED");
     assert.deepEqual([row.metadata.approval.mode, row.metadata.approval.scopeReason], ["admin_triage", reason]);
   }
@@ -141,7 +149,9 @@ test("the super-admin overrides a college-scoped appointment only with a written
   assert.equal((await appointment(id)).status, "requested");
   await call(reviewAppointment, "admin", confirm(id, at, {exceptionReason: "Counselor on approved leave"}));
   const [entry] = await history(id);
-  assert.deepEqual([entry.approvalMode, entry.approvalExceptionReason], ["admin_override", "Counselor on approved leave"]);
+  assert.equal(entry.approvalMode, "admin_override");
+  assertNoInternalApprovalDetail(entry);
+  assert.ok(!JSON.stringify(entry).includes("approved leave"), "the student-readable history must not carry the override reason");
   const [row] = await audits(id, "APPOINTMENT_CONFIRMED");
   assert.deepEqual([row.metadata.approval.mode, row.metadata.approval.exceptionReason], ["admin_override", "Counselor on approved leave"]);
 });
@@ -164,6 +174,7 @@ test("the two-way agreement still works for the assigned counselor and refuses o
   assert.equal((await db.doc(`appointment_slots/pacc_${at}`).get()).exists, false, "the old slot is released");
   const proposed = (await history(id)).find((h) => h.type === "APPOINTMENT_SCHEDULE_PROPOSED" || h.proposedBy === "counselor");
   assert.equal(proposed?.approvalMode, "college");
+  assertNoInternalApprovalDetail(proposed!);
 });
 
 test("a student's counterproposal can be accepted only by the assigned counselor", {skip: !emulated}, async () => {
@@ -224,4 +235,13 @@ test("My College's Approvals lists only the counselor's colleges; the super-admi
   assert.ok(!forAdmin.items.some((i: {appointmentId: string}) => i.appointmentId === mine.id), "college-scoped items belong to counselors");
   assert.ok(!JSON.stringify([forA, forB, forAdmin]).includes("Private concern"), "no clinical text in the list");
   for (const actor of ["ops", "otherAdmin", "sus"]) await rejects(call(listAppointmentApprovals, actor, {}), "permission-denied");
+});
+
+test("internal approval detail is only in the admin-only audit log, never in student-readable history", {skip: !emulated}, async () => {
+  const {id, at} = await seed("cba");
+  await call(reviewAppointment, "admin", confirm(id, at));
+  const [entry] = await history(id);
+  assertNoInternalApprovalDetail(entry);
+  const [row] = await audits(id, "APPOINTMENT_CONFIRMED");
+  assert.deepEqual([row.metadata.approval.mode, row.metadata.approval.scopeReason, row.metadata.approval.collegeId], ["admin_triage", "no_eligible_counselor", cba]);
 });

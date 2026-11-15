@@ -98,15 +98,15 @@ export function approvalMetadata(authority: ApprovalAuthority | undefined): Reco
   return authority ? {approval: {...authority}} : {};
 }
 
-/** History fields for an approval decision. */
+/**
+ * History fields for an approval decision. appointments/{id}/history is
+ * readable by the student (firestore.rules), so it records only which path
+ * approved the action. The college, the scope reason and any super-admin
+ * exception reason stay in admin_audit_logs (approvalMetadata), which only
+ * the super-administrator can read.
+ */
 export function approvalHistoryFields(authority: ApprovalAuthority | undefined): Record<string, unknown> {
-  if (!authority) return {};
-  return {
-    approvalMode: authority.mode,
-    approvalCollegeId: authority.collegeId,
-    ...(authority.scopeReason ? {approvalScopeReason: authority.scopeReason} : {}),
-    ...(authority.exceptionReason ? {approvalExceptionReason: authority.exceptionReason} : {}),
-  };
+  return authority ? {approvalMode: authority.mode} : {};
 }
 
 const ACTIVE_RAW_STATUSES = ["requested", "pending", "confirmed", "upcoming", "reschedule_proposed", "reschedule_required"];

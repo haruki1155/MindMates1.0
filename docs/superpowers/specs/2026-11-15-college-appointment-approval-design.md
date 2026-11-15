@@ -59,3 +59,15 @@ Pure scope/decision tests; emulator tests for every row of the table, two-way ag
 2. Override allowed with a mandatory reason rather than forbidden.
 3. Reads unchanged (org-wide for counselors) pending PACC policy.
 4. Approval list computed server-side on demand (refresh), not live.
+
+## Deployment checklist (precondition; added after independent review)
+Without assignment data every appointment becomes an exception, every counselor is refused, and the whole clinical queue falls to one super-administrator. Before deploying these Functions:
+1. PR #3's `setStaffCollegeAssignments` is deployed and **every active counselor has `assignedCollegeIds`** covering the colleges they serve.
+2. Every counselor profile has `accessRole: "counselor"` (records with only the legacy `role` field are not eligible approvers) and is approved, active and email-verified.
+3. `SUPER_ADMIN_UID` is set for the target project and that account is verified and active; otherwise exceptions cannot be handled by anyone.
+4. Other `admin` accounts are told they can no longer approve; exceptions and overrides belong to the configured super-administrator.
+5. After deploying, the super-administrator opens **Approval exceptions** and checks how many appointments are `no_eligible_counselor`; a large number means assignments are incomplete.
+6. Rollback: redeploy the previous versions of the six callables by name; no data migration is involved.
+
+## Privacy note (added after independent review)
+`appointments/{id}/history` is readable by the student, so history records only `approvalMode`. The college, the scope reason and any super-admin exception reason are written only to `admin_audit_logs`.
