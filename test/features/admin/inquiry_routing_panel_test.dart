@@ -102,16 +102,27 @@ class _Repo extends AdminPortalRepository {
     return expectedRevision + 1;
   }
 
+  final backfillCursors = <String?>[];
   @override
   Future<InquiryRoutingBackfillResult> routeExistingInquiries({
     int limit = 100,
+    String? cursor,
   }) async {
     backfills++;
-    return const InquiryRoutingBackfillResult(
-      routed: 3,
-      needsTriage: 1,
-      remaining: 0,
-    );
+    backfillCursors.add(cursor);
+    return backfills == 1
+        ? const InquiryRoutingBackfillResult(
+            routed: 3,
+            needsTriage: 1,
+            done: false,
+            nextCursor: 'inq-500',
+          )
+        : const InquiryRoutingBackfillResult(
+            routed: 2,
+            needsTriage: 0,
+            done: true,
+            nextCursor: null,
+          );
   }
 }
 
@@ -300,6 +311,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(repo.backfills, 1);
     expect(find.textContaining('3 routed'), findsOneWidget);
+    expect(find.textContaining('More inquiries remain'), findsOneWidget);
+    await tester.tap(find.text('Continue routing'));
+    await tester.pumpAndSettle();
+    expect(repo.backfillCursors, [null, 'inq-500']);
+    expect(
+      find.textContaining('All existing inquiries have been checked'),
+      findsOneWidget,
+    );
+    expect(find.text('Route existing inquiries'), findsOneWidget);
     await _pump(tester, InquiryBackfillButton(repository: _Repo()));
     expect(find.text('Route existing inquiries'), findsNothing);
   });

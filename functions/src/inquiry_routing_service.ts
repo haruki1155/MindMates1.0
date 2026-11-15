@@ -1,5 +1,5 @@
 import {getAuth} from "firebase-admin/auth";
-import {FieldValue, getFirestore} from "firebase-admin/firestore";
+import {FieldPath, FieldValue, getFirestore} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid} from "./access";
@@ -64,6 +64,37 @@ async function createOnce(id: string, payload: Record<string, unknown>): Promise
     const code = typeof error === "object" && error !== null && "code" in error ? String((error as {code?: unknown}).code) : "";
     if (code !== "6" && code !== "already-exists") throw error;
   }
+}
+
+/**
+ * Make sure a recipient has an active notification with this ID. Creates it
+ * when missing; when it exists but was archived (for example the recipient
+ * was removed from an inquiry and later re-added), reactivates it as unread.
+ * An already active notification is left untouched, so retries never
+ * duplicate or reset it.
+ */
+export async function ensureActiveNotification(id: string, payload: Record<string, unknown>): Promise<void> {
+  const ref = db().collection("notifications").doc(id);
+  await db().runTransaction(async (tx) => {
+    const current = await tx.get(ref);
+    if (!current.exists) {
+      tx.create(ref, {
+        createdAt: FieldValue.serverTimestamp(), readAt: null, resolvedAt: null,
+        archiveEligibleAt: null, archivedAt: null, expiresAt: null, ...payload,
+      });
+      return;
+    }
+    if (current.data()?.archivedAt == null) return;
+    tx.update(ref, {
+      ...payload,
+      createdAt: FieldValue.serverTimestamp(),
+      readAt: null,
+      resolvedAt: null,
+      archiveEligibleAt: null,
+      archivedAt: null,
+      expiresAt: null,
+    });
+  });
 }
 
 async function notifyRouting(inquiryId: string, data: FirebaseFirestore.DocumentData): Promise<void> {
@@ -314,27 +345,63 @@ export const reassignInquiry = onCall(async (request) => {
     if (existing.exists && !existing.data()?.archivedAt) await note.update({archivedAt: now, resolvedAt: now, archiveEligibleAt: null});
   }));
   if (outcome.status !== "resolved") {
-    await Promise.all(outcome.plan.added.map((added) => createOnce(assigneeNotificationId(inquiryId, added),
-      notification(added, inquiryId, "Inquiry assigned to you", "An inquiry was assigned to you for review."))));
+    // A re-added assignee may still hold an archived notification under the
+    // same deterministic ID; reactivate it instead of treating it as sent.
+    await Promise.all(outcome.plan.added.map((added) => ensureActiveNotification(assigneeNotificationId(inquiryId, added), {
+      userId: added, type: "inquiry", audience: "portal", inquiryId,
+      title: "Inquiry assigned to you", body: "An inquiry was assigned to you for review.",
+    })));
   }
   return {ok: true, revision: outcome.plan.revision};
 });
+
+export type BackfillOptions = {limit?: number; cursor?: string | null; pageSize?: number; maxPages?: number};
+export type BackfillResult = {routed: number; needsTriage: number; scanned: number; nextCursor: string | null; done: boolean};
+
+/**
+ * Route inquiries that predate college routing, in document-ID order.
+ * Bounded per call (at most `maxPages * pageSize` documents read and `limit`
+ * inquiries routed) and resumable: pass the returned `nextCursor` until
+ * `done`. Routed inquiries are skipped server-side page by page, so records
+ * beyond any number of already-routed ones are still reached.
+ */
+export async function routeExistingInquiriesBatch(actor: Actor, options: BackfillOptions = {}): Promise<BackfillResult> {
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 100);
+  const pageSize = Math.min(Math.max(Math.trunc(options.pageSize ?? 500), 1), 500);
+  const maxPages = Math.min(Math.max(Math.trunc(options.maxPages ?? 10), 1), 20);
+  let cursor = options.cursor ?? null;
+  let routed = 0;
+  let needsTriage = 0;
+  let scanned = 0;
+  for (let page = 0; page < maxPages; page++) {
+    let query = db().collection("inquiries").orderBy(FieldPath.documentId()).limit(pageSize);
+    if (cursor) query = query.startAfter(cursor);
+    const snapshot = await query.get();
+    if (snapshot.empty) return {routed, needsTriage, scanned, nextCursor: null, done: true};
+    for (const inquiry of snapshot.docs) {
+      scanned += 1;
+      cursor = inquiry.id;
+      if (inquiry.data().routingStatus != null) continue;
+      const result = await routeInquiry(inquiry.id, actor);
+      if (!result.alreadyRouted) {
+        routed += 1;
+        if (result.routingStatus === "needs_triage") needsTriage += 1;
+      }
+      if (routed >= limit) return {routed, needsTriage, scanned, nextCursor: cursor, done: false};
+    }
+    if (snapshot.size < pageSize) return {routed, needsTriage, scanned, nextCursor: null, done: true};
+  }
+  return {routed, needsTriage, scanned, nextCursor: cursor, done: false};
+}
 
 export const routeExistingInquiries = onCall(async (request) => {
   const uid = requireUid(request);
   const admin = await requireSuperAdmin(uid);
   const actor: Actor = {uid, name: actorName(admin), role: String(admin.accessRole)};
-  const rawLimit = Number((request.data as {limit?: unknown})?.limit ?? 50);
-  const limit = Number.isInteger(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
-  const candidates = await db().collection("inquiries").limit(1000).get();
-  const pending = candidates.docs.filter((d) => d.data().routingStatus == null).slice(0, limit);
-  let routed = 0;
-  let needsTriage = 0;
-  for (const inquiry of pending) {
-    const result = await routeInquiry(inquiry.id, actor);
-    if (result.alreadyRouted) continue;
-    routed += 1;
-    if (result.routingStatus === "needs_triage") needsTriage += 1;
-  }
-  return {ok: true, routed, needsTriage, remaining: candidates.docs.filter((d) => d.data().routingStatus == null).length - pending.length};
+  const data = (request.data ?? {}) as {limit?: unknown; cursor?: unknown};
+  const rawLimit = Number(data.limit ?? 50);
+  const cursor = data.cursor == null || data.cursor === "" ? null : String(data.cursor);
+  if (cursor !== null && !ID.test(cursor)) throw new HttpsError("invalid-argument", "Invalid continuation cursor.");
+  const result = await routeExistingInquiriesBatch(actor, {limit: Number.isInteger(rawLimit) ? rawLimit : 50, cursor});
+  return {ok: true, ...result};
 });

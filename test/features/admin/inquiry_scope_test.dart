@@ -128,7 +128,8 @@ void main() {
           'revision': 4,
           'routed': 2,
           'needsTriage': 1,
-          'remaining': 0,
+          'done': false,
+          'nextCursor': 'inq-500',
         };
       },
     );
@@ -147,11 +148,15 @@ void main() {
     final backfill = await repository.routeExistingInquiries();
     expect(backfill.routed, 2);
     expect(backfill.needsTriage, 1);
+    expect(backfill.done, isFalse);
+    expect(backfill.nextCursor, 'inq-500');
+    await repository.routeExistingInquiries(cursor: 'inq-500');
     expect(calls.map((c) => c.$1), [
       'setInquiryStatus',
       'acknowledgeInquiry',
       'escalateInquiry',
       'reassignInquiry',
+      'routeExistingInquiries',
       'routeExistingInquiries',
     ]);
     expect(calls[0].$2, {'inquiryId': 'i1', 'status': 'resolved'});
@@ -163,5 +168,6 @@ void main() {
       'reason': 'Coverage',
     });
     expect(calls[4].$2, {'limit': 100});
+    expect(calls[5].$2, {'limit': 100, 'cursor': 'inq-500'});
   });
 }

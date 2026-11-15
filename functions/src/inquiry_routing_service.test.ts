@@ -9,7 +9,9 @@ import {
   acknowledgeInquiry,
   escalateInquiry,
   reassignInquiry,
+  ensureActiveNotification,
   routeExistingInquiries,
+  routeExistingInquiriesBatch,
   routeInquiry,
   setInquiryStatus,
 } from "./inquiry_routing_service";
@@ -253,4 +255,98 @@ test("legacy inquiries are routed by the super-admin backfill; resolved ones are
   const again = await call(routeExistingInquiries, "admin", {limit: 100});
   assert.equal((await audit(open, "INQUIRY_ROUTED")).length, 1);
   assert.equal(again.routed, 0);
+});
+
+test("reassigning A -> B -> A reactivates A's original notification without duplicating it", {skip: !emulated}, async () => {
+  const id = await newInquiry("cite");
+  await routeInquiry(id);
+  const noteId = `portal_inquiry_${id}_${uid("c1")}`;
+  await db.doc(`notifications/${noteId}`).update({readAt: new Date()});
+  await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 1, reason: "Move to CAS"});
+  assert.ok((await db.doc(`notifications/${noteId}`).get()).data()!.archivedAt, "removed assignee's notification is archived");
+
+  await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], expectedRevision: 2, reason: "Back to CITE"});
+  const note = (await db.doc(`notifications/${noteId}`).get()).data()!;
+  assert.equal(note.archivedAt, null, "re-added assignee's notification is active again");
+  assert.equal(note.resolvedAt, null);
+  assert.equal(note.readAt, null, "and unread, so the badge shows it");
+  assert.equal(note.expiresAt, null);
+  assert.equal(note.userId, uid("c1"));
+  assert.ok(!JSON.stringify(note).includes("Sensitive"));
+  const forC1 = (await notificationsFor(id)).filter((n) => n.userId === uid("c1"));
+  assert.equal(forC1.length, 1, "one notification document per assignee, never a duplicate");
+  // B lost the inquiry, so B's notification is archived.
+  assert.ok((await db.doc(`notifications/portal_inquiry_${id}_${uid("c2")}`).get()).data()!.archivedAt);
+});
+
+test("ensureActiveNotification is idempotent across retries", {skip: !emulated}, async () => {
+  const id = `${p}-notify-retry`;
+  const payload = {userId: uid("c1"), type: "inquiry", audience: "portal", title: "T", body: "B", inquiryId: id};
+  await ensureActiveNotification(id, payload);
+  await db.doc(`notifications/${id}`).update({archivedAt: new Date(), resolvedAt: new Date(), readAt: new Date()});
+  await ensureActiveNotification(id, payload);
+  const reactivated = (await db.doc(`notifications/${id}`).get()).data()!;
+  assert.equal(reactivated.archivedAt, null);
+  await db.doc(`notifications/${id}`).update({readAt: new Date()});
+  await ensureActiveNotification(id, payload);
+  assert.ok((await db.doc(`notifications/${id}`).get()).data()!.readAt, "an active notification is left untouched on retry");
+  assert.equal((await db.collection("notifications").where("inquiryId", "==", id).get()).size, 1);
+});
+
+async function seedInquiries(prefix: string, count: number, routedBelow: number): Promise<string[]> {
+  const ids = Array.from({length: count}, (_, i) => `${prefix}-${String(i).padStart(4, "0")}`);
+  for (let start = 0; start < ids.length; start += 400) {
+    const batch = db.batch();
+    for (const [offset, id] of ids.slice(start, start + 400).entries()) {
+      const routed = start + offset < routedBelow;
+      batch.set(db.doc(`inquiries/${id}`), {
+        userId: uid("student-cite"), subject: "S", message: "M", category: "Service Form", email: "s@x",
+        status: "resolved", createdAt: new Date(),
+        ...(routed ? {routingStatus: "routed", assigneeIds: [], routingRevision: 1} : {}),
+      });
+    }
+    await batch.commit();
+  }
+  return ids;
+}
+
+test("backfill pages past already-routed inquiries and resumes from a cursor", {skip: !emulated}, async () => {
+  const ids = await seedInquiries(`${p}-page`, 6, 4);
+  const admin = {uid: uid("admin"), name: "Super Admin", role: "admin"};
+  // One page of two documents per call: the first pages hold only routed
+  // inquiries, so the old in-memory filter would report nothing to do.
+  let cursor: string | null = `${p}-page`;
+  let routed = 0;
+  let calls = 0;
+  for (;;) {
+    const result: {routed: number; nextCursor: string | null; done: boolean; scanned: number} =
+      await routeExistingInquiriesBatch(admin, {limit: 100, cursor, pageSize: 2, maxPages: 1});
+    calls += 1;
+    routed += result.routed;
+    assert.ok(result.scanned <= 2, "work per call is bounded");
+    if (result.done) {
+      assert.equal(result.nextCursor, null);
+      break;
+    }
+    assert.ok(result.nextCursor, "an unfinished pass returns a cursor");
+    cursor = result.nextCursor;
+    assert.ok(calls < 50, "pagination must terminate");
+  }
+  assert.ok(calls >= 3, "routing reached past the first, fully routed page");
+  assert.ok(routed >= 2);
+  for (const id of ids.slice(4)) assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingStatus, "routed");
+});
+
+test("the callable routes unrouted inquiries that sit behind more than 1,000 routed ones", {skip: !emulated}, async () => {
+  const ids = await seedInquiries(`${p}-bulk`, 1005, 1000);
+  let response = await call(routeExistingInquiries, "admin", {limit: 100});
+  let guard = 0;
+  while (!response.done && guard++ < 20) {
+    response = await call(routeExistingInquiries, "admin", {limit: 100, cursor: response.nextCursor});
+  }
+  assert.equal(response.done, true);
+  for (const id of ids.slice(1000)) {
+    assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingStatus, "routed", id);
+  }
+  await rejects(call(routeExistingInquiries, "admin", {limit: 100, cursor: "bad/cursor"}), "invalid-argument");
 });

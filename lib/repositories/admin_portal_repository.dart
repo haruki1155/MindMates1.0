@@ -1506,19 +1506,25 @@ class AdminPortalRepository {
     return (data['revision'] as num?)?.toInt() ?? expectedRevision;
   }
 
-  /// Super-administrator routes inquiries created before college routing.
+  /// Super-administrator routes inquiries created before college routing,
+  /// one bounded batch per call. Resume with the returned cursor until done.
   Future<InquiryRoutingBackfillResult> routeExistingInquiries({
     int limit = 100,
+    String? cursor,
   }) async {
     final result = await _callCallable('routeExistingInquiries', {
       'limit': limit,
+      'cursor': ?cursor,
     });
     final data = result is Map ? result : const {};
     int count(String key) => (data[key] as num?)?.toInt() ?? 0;
+    final next = data['nextCursor']?.toString();
     return InquiryRoutingBackfillResult(
       routed: count('routed'),
       needsTriage: count('needsTriage'),
-      remaining: count('remaining'),
+      // Absent or malformed responses are never treated as finished.
+      done: data['done'] == true,
+      nextCursor: next == null || next.isEmpty ? null : next,
     );
   }
 

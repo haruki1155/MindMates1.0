@@ -44,16 +44,19 @@ enum InquiryRoutingStatus {
   };
 }
 
-/// Result of the super-administrator backfill for unrouted inquiries.
+/// One bounded batch of the super-administrator backfill for unrouted
+/// inquiries. When [done] is false, pass [nextCursor] to continue.
 class InquiryRoutingBackfillResult {
   const InquiryRoutingBackfillResult({
     required this.routed,
     required this.needsTriage,
-    required this.remaining,
+    required this.done,
+    required this.nextCursor,
   });
   final int routed;
   final int needsTriage;
-  final int remaining;
+  final bool done;
+  final String? nextCursor;
 }
 
 class AdminInquiryModel {

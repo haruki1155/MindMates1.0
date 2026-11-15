@@ -406,18 +406,30 @@ class _InquiryBackfillButtonState extends State<InquiryBackfillButton> {
   bool _busy = false;
   String? _message;
 
+  /// Where the previous batch stopped; null starts a fresh pass.
+  String? _cursor;
+
   Future<void> _run() async {
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      final result = await widget.repository.routeExistingInquiries();
+      final result = await widget.repository.routeExistingInquiries(
+        cursor: _cursor,
+      );
       if (mounted) {
-        setState(
-          () => _message =
-              '${result.routed} routed, ${result.needsTriage} need triage, ${result.remaining} remaining.',
-        );
+        setState(() {
+          final summary =
+              '${result.routed} routed, ${result.needsTriage} need triage.';
+          if (result.done) {
+            _cursor = null;
+            _message = '$summary All existing inquiries have been checked.';
+          } else {
+            _cursor = result.nextCursor;
+            _message = '$summary More inquiries remain.';
+          }
+        });
       }
     } catch (error) {
       if (mounted) {
@@ -441,7 +453,9 @@ class _InquiryBackfillButtonState extends State<InquiryBackfillButton> {
         OutlinedButton.icon(
           onPressed: _busy ? null : _run,
           icon: const Icon(Icons.alt_route),
-          label: const Text('Route existing inquiries'),
+          label: Text(
+            _cursor == null ? 'Route existing inquiries' : 'Continue routing',
+          ),
         ),
         if (_message != null) Text(_message!),
       ],
