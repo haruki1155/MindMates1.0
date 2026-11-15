@@ -310,8 +310,9 @@ test("the enabled scheduler skips while a job runs and otherwise starts a system
   await clearJobs();
   const deps = fakeDeps({BACKUP_BUCKET: "test-bucket", BACKUP_SCHEDULE_ENABLED: "true"});
   await startBackup(deps, actor, "manual");
+  const skippedBefore = await auditRows("BACKUP_SKIPPED");
   assert.deepEqual(await runScheduledBackup(deps), {started: false, reason: "job-running"});
-  assert.equal(await auditRows("BACKUP_SKIPPED"), 1);
+  assert.equal(await auditRows("BACKUP_SKIPPED"), skippedBefore + 1);
   await clearJobs();
   assert.deepEqual(await runScheduledBackup(deps), {started: true});
   const jobs = await db.collection("backup_jobs").where("requestedBy", "==", "system").get();
