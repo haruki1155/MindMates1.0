@@ -84,9 +84,22 @@ class _StudentCaseHistoryPageState extends State<StudentCaseHistoryPage> {
     _loadFirst();
   }
 
-  bool _isDenied(Object error) =>
-      error is FirebaseFunctionsException &&
-      (error.code == 'permission-denied' || error.code == 'not-found');
+  static const _notAuthorized =
+      "You are not authorized to view this student's case history.";
+
+  /// A message for errors that retrying cannot fix, or null.
+  String? _finalMessage(Object error) {
+    if (error is! FirebaseFunctionsException) return null;
+    return switch (error.code) {
+      'permission-denied' => _notAuthorized,
+      'not-found' => 'This student account was not found.',
+      'failed-precondition' => 'This account is not a student account.',
+      'invalid-argument' => 'This case history link is not valid.',
+      _ => null,
+    };
+  }
+
+  String _deniedMessage = _notAuthorized;
 
   Future<void> _loadFirst() async {
     if (_state != _LoadState.loading) {
@@ -106,9 +119,11 @@ class _StudentCaseHistoryPageState extends State<StudentCaseHistoryPage> {
       });
     } catch (error) {
       if (!mounted) return;
-      setState(
-        () => _state = _isDenied(error) ? _LoadState.denied : _LoadState.failed,
-      );
+      final message = _finalMessage(error);
+      setState(() {
+        _deniedMessage = message ?? _notAuthorized;
+        _state = message != null ? _LoadState.denied : _LoadState.failed;
+      });
     }
   }
 
@@ -133,9 +148,7 @@ class _StudentCaseHistoryPageState extends State<StudentCaseHistoryPage> {
       if (!mounted) return;
       setState(() {
         _loadingMore = false;
-        _moreError = _isDenied(error)
-            ? "You are not authorized to view this student's case history."
-            : 'We could not load more cases.';
+        _moreError = _finalMessage(error) ?? 'We could not load more cases.';
       });
     }
   }
@@ -155,9 +168,9 @@ class _StudentCaseHistoryPageState extends State<StudentCaseHistoryPage> {
           _LoadState.loading => const Center(
             child: CircularProgressIndicator(),
           ),
-          _LoadState.denied => const _Message(
-            title: 'Not authorized',
-            body: "You are not authorized to view this student's case history.",
+          _LoadState.denied => _Message(
+            title: 'Case history unavailable',
+            body: _deniedMessage,
           ),
           _LoadState.failed => _Message(
             title: 'Case history unavailable',
@@ -222,8 +235,8 @@ class _StudentCaseHistoryPageState extends State<StudentCaseHistoryPage> {
         const Padding(
           padding: EdgeInsets.only(top: 8),
           child: Text(
-            'Only the most recent records are shown. Contact the PACC '
-            'administrator for the complete record.',
+            'Some records may not be shown because this history is very '
+            'long. Contact the PACC administrator for the complete record.',
             style: TextStyle(color: AdminColors.muted, fontSize: 12),
           ),
         ),
@@ -274,7 +287,7 @@ String _groupLabel(StudentCaseHistoryEntry entry) {
   return date == null ? 'Date not recorded' : '${date.year}';
 }
 
-String statusLabel(String status) => switch (status) {
+String _statusLabel(String status) => switch (status) {
   'requested' => 'Requested',
   'confirmed' => 'Confirmed',
   'reschedule_proposed' => 'Reschedule proposed',
@@ -329,7 +342,7 @@ class _CaseCard extends StatelessWidget {
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              _Chip(label: statusLabel(entry.status)),
+              _Chip(label: _statusLabel(entry.status)),
               if (entry.archived) const _Chip(label: 'Archived', muted: true),
               Text(when, style: const TextStyle(fontWeight: FontWeight.w700)),
             ],

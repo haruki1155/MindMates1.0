@@ -227,6 +227,7 @@ class _WorkCard extends StatelessWidget {
           ),
           const SizedBox(width: 14),
           Expanded(
+            flex: 3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -257,6 +258,7 @@ class _WorkCard extends StatelessWidget {
           ),
           // Wraps under narrow widths instead of overflowing the row.
           Flexible(
+            flex: 2,
             child: Wrap(
               alignment: WrapAlignment.end,
               crossAxisAlignment: WrapCrossAlignment.center,

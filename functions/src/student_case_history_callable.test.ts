@@ -5,7 +5,7 @@ import {Timestamp, getFirestore} from "firebase-admin/firestore";
 import {HttpsError} from "firebase-functions/v2/https";
 
 import "./index";
-import {getStudentCaseHistory} from "./student_case_history_callable";
+import {getStudentCaseHistory, readStudentAppointments} from "./student_case_history_callable";
 
 // Auth + Firestore emulators. Exercises the real callable and the shared
 // staff gate (functions/src/access.ts), so every actor is a real verified
@@ -111,7 +111,7 @@ test("entries never carry contact details or clinical notes", {skip: !emulated},
   }
 });
 
-test("pagination returns every case exactly once and only the first page is audited", {skip: !emulated}, async () => {
+test("pagination returns every case exactly once and every page is audited", {skip: !emulated}, async () => {
   const before = (await audits("ana-twin")).length;
   const first = await run("cite-counselor", {studentId: uid("ana-twin"), pageSize: 1});
   assert.equal(first.nextCursor, null);
@@ -130,9 +130,10 @@ test("pagination returns every case exactly once and only the first page is audi
   assert.deepEqual(seen, anaOrder.map(id));
   assert.equal(pages, 2);
   const rows = await audits("ana");
-  assert.equal(rows.length, auditsBefore + 1, "later pages are not audited again");
-  const row = rows.find((r) => r.actorId === uid("cite-counselor"))!;
+  assert.equal(rows.length, auditsBefore + 2, "each page read is audited");
+  const row = rows.find((r) => r.actorId === uid("cite-counselor") && r.metadata.page === "first")!;
   assert.deepEqual([row.targetType, row.metadata.basis, row.category], ["student", "college", "SECURITY"]);
+  assert.ok(rows.some((r) => r.metadata.page === "next" && r.metadata.returned === 1));
   await rejects(run("cite-counselor", {studentId: uid("ana"), cursor: "garbage"}), "invalid-argument");
 });
 
@@ -164,4 +165,22 @@ test("unknown students and staff targets look the same to a counselor; bad input
   await rejects(run("cite-counselor", {studentId: uid("cas-counselor")}), "permission-denied");
   await rejects(run("cite-counselor", {studentId: "../users"}), "invalid-argument");
   await rejects(run("cite-counselor", {}), "invalid-argument");
+});
+
+test("a forged cursor cannot read the history without an audit record", {skip: !emulated}, async () => {
+  const before = (await audits("ana")).length;
+  const forged = await run("cite-counselor", {studentId: uid("ana"), cursor: "9999999999999999|0", pageSize: 50});
+  assert.deepEqual(forged.items.map((item) => item.id), anaOrder.map(id));
+  const rows = await audits("ana");
+  assert.equal(rows.length, before + 1);
+  assert.ok(rows.some((r) => r.metadata.page === "next" && r.metadata.returned === anaOrder.length));
+});
+
+test("reading a long history keeps going past one batch and reports truncation at the cap", {skip: !emulated}, async () => {
+  const all = await readStudentAppointments(db, uid("ana"), 2, 10);
+  assert.deepEqual(all.records.map((r: {id: string}) => r.id).sort(), anaOrder.map(id).sort());
+  assert.equal(all.truncated, false);
+  const capped = await readStudentAppointments(db, uid("ana"), 2, 3);
+  assert.equal(capped.records.length, 3);
+  assert.equal(capped.truncated, true);
 });

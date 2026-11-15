@@ -20,7 +20,7 @@ export type CaseHistoryBasis = "super_admin" | "college" | "assigned";
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 50;
 /** Upper bound on one student's appointments read per call. */
-export const MAX_HISTORY_RECORDS = 500;
+export const MAX_HISTORY_RECORDS = 2000;
 
 const STAFF_ROLES = new Set(["portalStaff", "counselor", "admin"]);
 const NOT_AUTHORIZED = "You are not authorized to view this student's case history.";

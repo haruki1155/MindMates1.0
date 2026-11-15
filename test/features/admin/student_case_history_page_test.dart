@@ -171,6 +171,57 @@ void main() {
     expect(find.text('Retry'), findsNothing);
   });
 
+  for (final (code, message) in [
+    ('not-found', 'This student account was not found.'),
+    ('failed-precondition', 'This account is not a student account.'),
+    ('invalid-argument', 'This case history link is not valid.'),
+  ]) {
+    testWidgets('$code shows a final message without retry', (tester) async {
+      await _pump(
+        tester,
+        ({cursor}) async =>
+            throw FirebaseFunctionsException(code: code, message: 'x'),
+      );
+      expect(find.text(message), findsOneWidget);
+      expect(find.text('Retry'), findsNothing);
+    });
+  }
+
+  testWidgets('a load-more failure keeps loaded cases and explains', (
+    tester,
+  ) async {
+    await _pump(tester, ({cursor}) async {
+      if (cursor != null) throw StateError('offline');
+      return _page([_entry('a2', at: '2026-03-02T01:00:00.000Z')], next: 'c1');
+    });
+    await tester.tap(find.text('Load more'));
+    await tester.pumpAndSettle();
+    expect(find.text('We could not load more cases.'), findsOneWidget);
+    expect(find.text('Completed'), findsOneWidget);
+    expect(find.text('Load more'), findsOneWidget);
+  });
+
+  testWidgets('a truncated history says some records may be missing', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      ({cursor}) async => StudentCaseHistoryResult(
+        studentId: 's1',
+        displayName: 'Ana Cruz',
+        collegeId: 'cite',
+        items: [_entry('a1', at: '2026-03-02T01:00:00.000Z')],
+        nextCursor: null,
+        truncated: true,
+      ),
+    );
+    expect(
+      find.textContaining('Some records may not be shown'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('most recent'), findsNothing);
+  });
+
   testWidgets('back navigation returns to the previous screen', (tester) async {
     await _pump(tester, ({cursor}) async => _page(const []));
     await tester.tap(find.byType(BackButton));
