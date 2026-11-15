@@ -33,6 +33,7 @@ import 'staff_operations_dashboard.dart';
 import 'staff_appointments_page.dart';
 import 'counselor_operations_dashboard.dart';
 import 'counselor_workflow_page.dart';
+import 'student_case_history_page.dart';
 import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
@@ -2878,9 +2879,21 @@ class _AppointmentCard extends StatelessWidget {
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: ViewStudentInformationButton(
-                    userId: item.userId,
-                    canView: repository.currentAccessRole.canAccessClinicalData,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ViewStudentInformationButton(
+                        userId: item.userId,
+                        canView:
+                            repository.currentAccessRole.canAccessClinicalData,
+                      ),
+                      if (canOpenStudentCaseHistory(repository))
+                        StudentCaseHistoryButton(
+                          repository: repository,
+                          studentId: item.userId,
+                          studentName: item.fullName,
+                        ),
+                    ],
                   ),
                 ),
             ],

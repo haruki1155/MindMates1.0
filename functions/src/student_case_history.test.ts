@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 import {Timestamp} from "firebase-admin/firestore";
 
+import {auditLogOwnerField} from "./audit";
 import {
   CaseHistoryError,
   caseHistoryEntry,
@@ -119,4 +120,10 @@ test("entries carry case details only: no contact details or clinical notes", ()
   });
   assert.equal(caseHistoryEntry("x", {counselorName: "Legacy", actionByName: "Other"}).counselorName, "Legacy");
   assert.equal(caseHistoryEntry("x", {}).hasSchedule, false);
+});
+
+test("history views are listed under the staff member who viewed them, like student-info views", () => {
+  assert.equal(auditLogOwnerField("COUNSELING_HISTORY_VIEWED"), "actorId");
+  assert.equal(auditLogOwnerField("STUDENT_PERSONAL_INFO_VIEWED"), "actorId");
+  assert.equal(auditLogOwnerField("STAFF_ROLE_CHANGED"), "targetUserId");
 });
