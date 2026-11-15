@@ -85,6 +85,13 @@ class AdminInquiryModel {
     this.ownerId,
     this.escalationStatus,
     this.escalationReason,
+    this.firstResponseAt,
+    this.lastResponseAt,
+    this.lastResponseByName,
+    this.lastResponseRole,
+    this.responseCount = 0,
+    this.takeoverByName,
+    this.takeoverReason,
   });
 
   final String id;
@@ -117,6 +124,18 @@ class AdminInquiryModel {
   final String? escalationStatus;
   final String? escalationReason;
 
+  /// First and latest authored reply (not the acknowledgement receipt).
+  final DateTime? firstResponseAt;
+  final DateTime? lastResponseAt;
+  final String? lastResponseByName;
+  final String? lastResponseRole;
+  final int responseCount;
+
+  /// Set when the super-administrator has taken over the inquiry.
+  final String? takeoverByName;
+  final String? takeoverReason;
+
+  bool get isTakenOver => takeoverByName != null;
   bool get isManuallyRouted => routingMode == 'manual';
   bool get isEscalated => escalationStatus == 'requested';
 
@@ -172,6 +191,20 @@ class AdminInquiryModel {
           : null,
       escalationReason: json['escalation'] is Map
           ? _optional((json['escalation'] as Map)['reason'])
+          : null,
+      firstResponseAt: dateTimeFromFirestore(json['firstResponseAt']),
+      lastResponseAt: dateTimeFromFirestore(json['lastResponseAt']),
+      lastResponseByName: _optional(json['lastResponseByName']),
+      lastResponseRole: _optional(json['lastResponseRole']),
+      responseCount: json['responseCount'] is num
+          ? (json['responseCount'] as num).toInt()
+          : 0,
+      takeoverByName: json['takeover'] is Map
+          ? (_optional((json['takeover'] as Map)['byName']) ??
+                _optional((json['takeover'] as Map)['by']))
+          : null,
+      takeoverReason: json['takeover'] is Map
+          ? _optional((json['takeover'] as Map)['reason'])
           : null,
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
       status: InquiryStatus.fromValue(json['status']),
