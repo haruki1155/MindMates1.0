@@ -180,8 +180,11 @@ class InquiryRoutingPanel extends StatelessWidget {
       builder: (_) => _ReasonDialog(
         title: 'Escalate to administrator',
         actionLabel: 'Escalate',
-        onSubmit: (reason) =>
-            repository.escalateInquiry(inquiry.id, reason: reason),
+        onSubmit: (reason) => repository.escalateInquiry(
+          inquiry.id,
+          reason: reason,
+          expectedRevision: inquiry.routingRevision,
+        ),
       ),
     );
     if (done == true) onChanged?.call();

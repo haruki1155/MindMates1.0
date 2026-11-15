@@ -3,14 +3,16 @@ import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {requireSuperAdmin, requireUid} from "./access";
 import {actorName, AUDIT_CATEGORIES, writeAudit} from "./audit";
-import {Actor, canHandle, createOnce, DENIED, inquiryActor, inquiryIdFrom, notification, reasonFrom} from "./inquiry_routing_service";
+import {Actor, canHandle, createOnce, DENIED, inquiryActor, inquiryIdFrom, notification, reasonFrom, revisionOf, STALE_REVISION} from "./inquiry_routing_service";
 import {InquirySlaError, parseSlaHours, replyMessage, requestIdFrom} from "./inquiry_sla";
 
 // Authored replies, super-admin takeover and the response target. Every
 // mutation is a transaction with an audit record and a revision check.
 
 const db = () => getFirestore();
-const STALE = "This inquiry was updated by someone else. Reload and try again.";
+// Reply and takeover are new in PR 5, so no legacy client omits the revision:
+// it is always required here.
+const STALE = STALE_REVISION;
 
 function validated<T>(fn: () => T): T {
   try {
@@ -21,9 +23,7 @@ function validated<T>(fn: () => T): T {
   }
 }
 
-function currentRevision(data: FirebaseFirestore.DocumentData): number {
-  return Number.isInteger(data.routingRevision) ? Number(data.routingRevision) : 0;
-}
+const currentRevision = revisionOf;
 
 /** Super-administrator chooses the response target (24/48/72 h). */
 export const setInquirySla = onCall(async (request) => {

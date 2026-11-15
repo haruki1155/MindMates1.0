@@ -5777,7 +5777,10 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     if (_acknowledging) return;
     setState(() => _acknowledging = true);
     try {
-      await widget.repository.acknowledgeInquiry(widget.item!.id);
+      await widget.repository.acknowledgeInquiry(
+        widget.item!.id,
+        expectedRevision: widget.item!.routingRevision,
+      );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Receipt notification sent.')),

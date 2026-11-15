@@ -5,7 +5,7 @@ import {getFirestore} from "firebase-admin/firestore";
 import {HttpsError} from "firebase-functions/v2/https";
 
 import "./index";
-import {reassignInquiry, routeInquiry, setInquiryStatus} from "./inquiry_routing_service";
+import {acknowledgeInquiry, escalateInquiry, reassignInquiry, routeInquiry, setInquiryStatus} from "./inquiry_routing_service";
 import {replyToInquiry, setInquirySla, takeOverInquiry} from "./inquiry_sla_service";
 
 // Auth + Firestore emulators: real callables, real routing.
@@ -173,4 +173,85 @@ test("reassignment after takeover hands the inquiry back to the new assignees", 
   assert.equal(data.takeover, null);
   const reply = await call(replyToInquiry, "c2", {inquiryId: id, message: "Taking this from here.", expectedRevision: data.routingRevision, requestId: requestId("handback")});
   assert.equal(reply.duplicate, false);
+});
+
+// ---- Revision consistency (PR #51 review) ---------------------------------
+
+async function withStrictRevisions<T>(fn: () => Promise<T>): Promise<T> {
+  const previousFlag = process.env.INQUIRY_REQUIRE_EXPECTED_REVISION;
+  process.env.INQUIRY_REQUIRE_EXPECTED_REVISION = "true";
+  try {
+    return await fn();
+  } finally {
+    if (previousFlag == null) delete process.env.INQUIRY_REQUIRE_EXPECTED_REVISION;
+    else process.env.INQUIRY_REQUIRE_EXPECTED_REVISION = previousFlag;
+  }
+}
+
+test("acknowledgement advances the revision, so views fetched before it are rejected", {skip: !emulated}, async () => {
+  const id = await routedInquiry();
+  const fetched = (await inquiry(id)).routingRevision;
+  assert.equal(fetched, 1);
+  await call(acknowledgeInquiry, "c1", {inquiryId: id, expectedRevision: fetched});
+  assert.equal((await inquiry(id)).routingRevision, 2);
+  // The administrator and the other assignee still hold revision 1.
+  await rejects(call(takeOverInquiry, "admin", {inquiryId: id, expectedRevision: fetched, reason: "Past the response target"}), "failed-precondition");
+  await rejects(call(replyToInquiry, "s1", {inquiryId: id, message: "Hello", expectedRevision: fetched, requestId: requestId("ack-stale")}), "failed-precondition");
+  assert.equal((await inquiry(id)).takeover ?? null, null);
+  assert.equal((await db.collection(`inquiries/${id}/replies`).get()).size, 0);
+  const reply = await call(replyToInquiry, "s1", {inquiryId: id, message: "Hello", expectedRevision: 2, requestId: requestId("ack-fresh")});
+  assert.equal(reply.revision, 3);
+});
+
+test("a stale acknowledgement changes nothing: no status change, receipt or audit", {skip: !emulated}, async () => {
+  const id = await routedInquiry();
+  await call(replyToInquiry, "c1", {inquiryId: id, message: "Answer first", expectedRevision: 1, requestId: requestId("before-ack")});
+  const receiptsBefore = (await notes(id)).filter((x) => x.userId === uid("student") && x.title === "Form received").length;
+  await rejects(call(acknowledgeInquiry, "s1", {inquiryId: id, expectedRevision: 1}), "failed-precondition");
+  const data = await inquiry(id);
+  assert.equal(data.acknowledgedAt ?? null, null);
+  assert.equal(data.routingRevision, 2);
+  assert.equal((await notes(id)).filter((x) => x.userId === uid("student") && x.title === "Form received").length, receiptsBefore);
+  assert.equal((await audit(id, "INQUIRY_ACKNOWLEDGED")).length, 0);
+});
+
+test("escalation advances the revision too", {skip: !emulated}, async () => {
+  const id = await routedInquiry();
+  await call(escalateInquiry, "c1", {inquiryId: id, reason: "Needs supervisor review"});
+  assert.equal((await inquiry(id)).routingRevision, 2);
+  await rejects(call(takeOverInquiry, "admin", {inquiryId: id, expectedRevision: 1, reason: "Past the response target"}), "failed-precondition");
+  await rejects(call(replyToInquiry, "s1", {inquiryId: id, message: "Hi", expectedRevision: 1, requestId: requestId("esc-stale")}), "failed-precondition");
+});
+
+test("legacy PR #4 clients that omit the revision are still served, and the audit says it was unchecked", {skip: !emulated}, async () => {
+  const id = await routedInquiry();
+  await call(acknowledgeInquiry, "c1", {inquiryId: id});
+  await call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved"});
+  const data = await inquiry(id);
+  assert.deepEqual([data.status, data.routingRevision], ["resolved", 3]);
+  const [ack] = await audit(id, "INQUIRY_ACKNOWLEDGED");
+  const [resolved] = await audit(id, "INQUIRY_RESOLVED");
+  assert.equal(ack.metadata.revisionChecked, false);
+  assert.equal(resolved.metadata.revisionChecked, false);
+  assert.deepEqual([ack.metadata.revision, resolved.metadata.revision], [2, 3]);
+});
+
+test("a supplied revision is always enforced and recorded as checked", {skip: !emulated}, async () => {
+  const id = await routedInquiry();
+  await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "in_progress", expectedRevision: 7}), "failed-precondition");
+  await call(setInquiryStatus, "c1", {inquiryId: id, status: "in_progress", expectedRevision: 1});
+  const [changed] = await audit(id, "INQUIRY_STATUS_CHANGED");
+  assert.equal(changed.metadata.revisionChecked, true);
+  await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: "2"}), "invalid-argument");
+});
+
+test("once strict revisions are switched on, omitted revisions are refused", {skip: !emulated}, async () => {
+  const id = await routedInquiry();
+  await withStrictRevisions(async () => {
+    await rejects(call(acknowledgeInquiry, "c1", {inquiryId: id}), "invalid-argument");
+    await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved"}), "invalid-argument");
+    await call(acknowledgeInquiry, "c1", {inquiryId: id, expectedRevision: 1});
+    await call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 2});
+  });
+  assert.equal((await inquiry(id)).status, "resolved");
 });

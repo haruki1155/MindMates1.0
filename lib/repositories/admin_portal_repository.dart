@@ -1560,12 +1560,23 @@ class AdminPortalRepository {
                 .toList(),
           );
 
-  Future<void> acknowledgeInquiry(String id) =>
-      _callCallable('acknowledgeInquiry', {'inquiryId': id});
+  /// Pass [expectedRevision] so the server rejects a stale view.
+  Future<void> acknowledgeInquiry(String id, {int? expectedRevision}) =>
+      _callCallable('acknowledgeInquiry', {
+        'inquiryId': id,
+        'expectedRevision': ?expectedRevision,
+      });
 
   /// Assignee asks the super-administrator to review the inquiry.
-  Future<void> escalateInquiry(String id, {required String reason}) =>
-      _callCallable('escalateInquiry', {'inquiryId': id, 'reason': reason});
+  Future<void> escalateInquiry(
+    String id, {
+    required String reason,
+    int? expectedRevision,
+  }) => _callCallable('escalateInquiry', {
+    'inquiryId': id,
+    'reason': reason,
+    'expectedRevision': ?expectedRevision,
+  });
 
   /// Super-administrator replaces the assignees; returns the new revision.
   Future<int> reassignInquiry(

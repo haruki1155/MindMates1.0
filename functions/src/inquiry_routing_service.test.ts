@@ -201,14 +201,14 @@ test("the super-administrator reassigns with revision checks; removed assignees 
   await routeInquiry(id);
   await call(escalateInquiry, "c1", {inquiryId: id, reason: "Needs another college"});
   await rejects(call(reassignInquiry, "c1", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 1, reason: "Coverage change"}), "permission-denied");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("sus")], expectedRevision: 1, reason: "Coverage change"}), "failed-precondition");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("unv")], expectedRevision: 1, reason: "Coverage change"}), "failed-precondition");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 0, reason: "Coverage change"}), "failed-precondition");
-  const result = await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 1, reason: "Coverage change"});
-  assert.equal(result.revision, 2);
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("sus")], expectedRevision: 2, reason: "Coverage change"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("unv")], expectedRevision: 2, reason: "Coverage change"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 1, reason: "Coverage change"}), "failed-precondition");
+  const result = await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 2, reason: "Coverage change"});
+  assert.equal(result.revision, 3, "escalation advanced the revision before reassignment");
   const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
   assert.deepEqual([inquiry.assigneeIds, inquiry.routingMode, inquiry.routingRevision, inquiry.escalation.status, inquiry.escalation.handledBy],
-    [[uid("c2")], "manual", 2, "handled", uid("admin")]);
+    [[uid("c2")], "manual", 3, "handled", uid("admin")]);
   const [row] = await audit(id, "INQUIRY_REASSIGNED");
   assert.deepEqual([row.metadata.added, row.metadata.removed, row.metadata.outOfCollege, row.metadata.reason],
     [[uid("c2")], [uid("c1"), uid("s1")].sort(), [uid("c2")], "Coverage change"]);

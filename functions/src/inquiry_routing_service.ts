@@ -195,6 +195,35 @@ export function reasonFrom(data: unknown): string {
   return text;
 }
 
+export const STALE_REVISION = "This inquiry was updated by someone else. Reload and try again.";
+
+/**
+ * Optimistic-concurrency policy for inquiry workflow actions. Every mutation
+ * (acknowledge, status, escalate, reply, takeover, reassign) advances
+ * `routingRevision`.
+ * - A supplied `expectedRevision` is always enforced.
+ * - Acknowledge, status and escalate also accept an omitted revision, because
+ *   PR #4 web clients do not send one; such calls are served and audited as
+ *   `revisionChecked: false`. Setting INQUIRY_REQUIRE_EXPECTED_REVISION=true
+ *   (after every client sends revisions) makes the revision mandatory.
+ * - Reply and takeover always require it.
+ */
+export function checkExpectedRevision(expected: unknown, revision: number): {revisionChecked: boolean} {
+  if (expected === undefined || expected === null) {
+    if ((process.env.INQUIRY_REQUIRE_EXPECTED_REVISION ?? "").trim().toLowerCase() === "true") {
+      throw new HttpsError("invalid-argument", "expectedRevision is required.");
+    }
+    return {revisionChecked: false};
+  }
+  if (!Number.isInteger(expected)) throw new HttpsError("invalid-argument", "expectedRevision must be an integer.");
+  if (expected !== revision) throw new HttpsError("failed-precondition", STALE_REVISION);
+  return {revisionChecked: true};
+}
+
+export function revisionOf(data: FirebaseFirestore.DocumentData): number {
+  return Number.isInteger(data.routingRevision) ? Number(data.routingRevision) : 0;
+}
+
 export const DENIED = "Only the staff assigned to this inquiry or the super-administrator can do this.";
 
 export const acknowledgeInquiry = onCall(async (request) => {
@@ -206,6 +235,8 @@ export const acknowledgeInquiry = onCall(async (request) => {
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
     if (!canHandle(who, data)) throw new HttpsError("permission-denied", DENIED);
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     if (data.acknowledgedAt) throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Inquiry has no sender.");
@@ -214,6 +245,7 @@ export const acknowledgeInquiry = onCall(async (request) => {
       acknowledgedAt: FieldValue.serverTimestamp(),
       acknowledgedBy: who.actor.uid,
       ownerId: data.ownerId ?? who.actor.uid,
+      routingRevision: revision + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
     tx.create(db().collection("notifications").doc(), {
@@ -224,7 +256,8 @@ export const acknowledgeInquiry = onCall(async (request) => {
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ACKNOWLEDGED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {before: String(data.status ?? "pending"), after: "in_progress", ownerId: data.ownerId ?? who.actor.uid},
+      metadata: {before: String(data.status ?? "pending"), after: "in_progress", ownerId: data.ownerId ?? who.actor.uid,
+        revision: revision + 1, revisionChecked},
     });
   });
   return {ok: true};
@@ -241,11 +274,8 @@ export const setInquiryStatus = onCall(async (request) => {
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
     if (!canHandle(who, data)) throw new HttpsError("permission-denied", DENIED);
-    const revision = Number.isInteger(data.routingRevision) ? Number(data.routingRevision) : 0;
-    const expected = (request.data as {expectedRevision?: unknown})?.expectedRevision;
-    if (expected !== undefined && expected !== revision) {
-      throw new HttpsError("failed-precondition", "This inquiry was updated by someone else. Reload and try again.");
-    }
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     const before = String(data.status ?? "pending");
     if (before === status) return {ok: true, changed: false, revision};
     tx.update(ref, {
@@ -259,7 +289,7 @@ export const setInquiryStatus = onCall(async (request) => {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: status === "resolved" ? "INQUIRY_RESOLVED" : "INQUIRY_STATUS_CHANGED",
       category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {before, after: status, revision: revision + 1},
+      metadata: {before, after: status, revision: revision + 1, revisionChecked},
     });
     return {ok: true, changed: true, revision: revision + 1};
   });
@@ -279,17 +309,20 @@ export const escalateInquiry = onCall(async (request) => {
     // Escalation is an assignee's request for administrator review.
     if (who.isSuperAdmin || !canHandle(who, data)) throw new HttpsError("permission-denied", "Only staff assigned to this inquiry can escalate it.");
     if (data.status === "resolved") throw new HttpsError("failed-precondition", "Resolved inquiries cannot be escalated.");
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     if (data.escalation?.status === "requested") throw new HttpsError("failed-precondition", "This inquiry is already escalated.");
     tx.update(ref, {
       escalation: {status: "requested", reason, requestedBy: who.actor.uid, requestedAt: FieldValue.serverTimestamp()},
+      routingRevision: revision + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ESCALATED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {reason, recipient: admin},
+      metadata: {reason, recipient: admin, revision: revision + 1, revisionChecked},
     });
-    return Number(data.routingRevision ?? 0);
+    return revision;
   });
   await createOnce(escalationNotificationId(inquiryId, revision),
     notification(admin, inquiryId, "Inquiry escalated", "An assigned inquiry was escalated for administrator review."));

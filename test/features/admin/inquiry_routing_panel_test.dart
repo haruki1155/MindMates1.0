@@ -80,9 +80,13 @@ class _Repo extends AdminPortalRepository {
     ),
   ]);
   @override
-  Future<void> escalateInquiry(String id, {required String reason}) async {
+  Future<void> escalateInquiry(
+    String id, {
+    required String reason,
+    int? expectedRevision,
+  }) async {
     if (error != null) throw error!;
-    escalations.add('$id:$reason');
+    escalations.add('$id:$reason:$expectedRevision');
   }
 
   @override
@@ -197,7 +201,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, 'Escalate'));
       await tester.pumpAndSettle();
-      expect(repo.escalations, ['inq-1:Needs supervisor review']);
+      expect(repo.escalations, ['inq-1:Needs supervisor review:2']);
     },
   );
 

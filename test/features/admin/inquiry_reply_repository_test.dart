@@ -72,12 +72,20 @@ void main() {
         expectedRevision: 5,
       );
       await repository.updateInquiryStatus('i1', InquiryStatus.inProgress);
+      await repository.acknowledgeInquiry('i1', expectedRevision: 6);
+      await repository.escalateInquiry(
+        'i1',
+        reason: 'Needs review',
+        expectedRevision: 7,
+      );
       expect(calls.map((c) => c.$1), [
         'replyToInquiry',
         'takeOverInquiry',
         'setInquirySla',
         'setInquiryStatus',
         'setInquiryStatus',
+        'acknowledgeInquiry',
+        'escalateInquiry',
       ]);
       expect(calls[0].$2, {
         'inquiryId': 'i1',
@@ -97,6 +105,12 @@ void main() {
         'expectedRevision': 5,
       });
       expect(calls[4].$2, {'inquiryId': 'i1', 'status': 'in_progress'});
+      expect(calls[5].$2, {'inquiryId': 'i1', 'expectedRevision': 6});
+      expect(calls[6].$2, {
+        'inquiryId': 'i1',
+        'reason': 'Needs review',
+        'expectedRevision': 7,
+      });
     },
   );
 }
