@@ -6,6 +6,7 @@ import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../domain/admin_management_models.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/college_assignment_dialog.dart';
 import '../widgets/app_user_directory_table.dart';
 
 enum UserManagementCategory { students, employees, staff, admin }
@@ -596,6 +597,13 @@ class _UserManagementPageState extends State<UserManagementPage> {
               value: 'enable',
               child: Text('Reactivate account'),
             ),
+          if (widget.repository.isSuperAdmin &&
+              (user.accessRole == AccessRole.portalStaff ||
+                  user.accessRole == AccessRole.counselor))
+            const PopupMenuItem(
+              value: 'colleges',
+              child: Text('College assignments'),
+            ),
           const PopupMenuItem(value: 'history', child: Text('Activity Log')),
         ],
       ),
@@ -612,6 +620,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
         await _setEnabled(user, false);
       case 'enable':
         await _setEnabled(user, true);
+      case 'colleges':
+        await showCollegeAssignmentDialog(
+          context,
+          repository: widget.repository,
+          user: user,
+        );
       case 'history':
         await _openManageDrawer(user, historyOnly: true);
     }
@@ -930,6 +944,12 @@ class _UserManagementPageState extends State<UserManagementPage> {
             _detail('Position', user.position),
             _detail('Department', user.department ?? user.departmentId),
             _detail('College', user.collegeId),
+            _detail(
+              'Assigned colleges',
+              user.assignedCollegeIds.isEmpty
+                  ? 'Unassigned'
+                  : user.assignedCollegeIds.join(', '),
+            ),
             _detail('Course', user.courseId),
             _detail('Account status', user.staffAccountStatus?.label),
             _detail('Portal role', user.accessRole.storedValue),
