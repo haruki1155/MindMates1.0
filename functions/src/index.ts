@@ -1,5 +1,7 @@
 import {handleAppointmentAgreement} from "./appointment_agreement";
 export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callable";
+export {acknowledgeInquiry, escalateInquiry, reassignInquiry, routeExistingInquiries, setInquiryStatus} from "./inquiry_routing_service";
+import {routeInquiry} from "./inquiry_routing_service";
 export {setStaffCollegeAssignments} from "./college_assignments_callable";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
@@ -1501,9 +1503,14 @@ export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
   },
 );
 
+// New inquiries are routed to the staff assigned to the student's verified
+// college (or to super-admin triage) instead of notifying every portal
+// account. The export name is kept so the deployed trigger is replaced in place.
 export const notifyPortalOfInquiry = onDocumentCreated(
   {document: "inquiries/{inquiryId}", retry: true},
-  async (event) => notifyClinicalStaff("inquiry", event.params.inquiryId),
+  async (event) => {
+    await routeInquiry(event.params.inquiryId);
+  },
 );
 
 export const scheduleReadNotificationArchive = onDocumentUpdated(
@@ -2406,42 +2413,6 @@ export const sendAppointmentNotification = onDocumentCreated(
     await Promise.all(invalid.map((token) => db.collection("user_devices").doc(userId).collection("tokens").doc(token).delete()));
   },
 );
-
-export const acknowledgeInquiry = onCall(async (request) => {
-  const staffId = request.auth?.uid;
-  if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
-  const staff = await requireStaff(staffId);
-  const inquiryId = String(request.data?.inquiryId ?? "").trim();
-  if (!inquiryId) throw new HttpsError("invalid-argument", "Inquiry ID is required.");
-  const inquiry = db.collection("inquiries").doc(inquiryId);
-  await db.runTransaction(async (transaction) => {
-    const current = await transaction.get(inquiry);
-    if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
-    const data = current.data()!;
-    if (data.acknowledgedAt) {
-      throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
-    }
-    const userId = String(data.userId ?? "");
-    if (!userId) throw new HttpsError("failed-precondition", "Inquiry has no sender.");
-    transaction.update(inquiry, {
-      status: "in_progress",
-      acknowledgedAt: FieldValue.serverTimestamp(),
-      acknowledgedBy: staffId,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    transaction.create(db.collection("notifications").doc(), {
-      userId,
-      inquiryId,
-      type: "inquiry",
-      title: "Form received",
-      body: `PACC received your ${String(data.subject ?? "form")}. Our staff will review it.`,
-      staffName: String(staff.name ?? staff.email ?? "PACC staff"),
-      createdAt: FieldValue.serverTimestamp(),
-      readAt: null,
-    });
-  });
-  return {ok: true};
-});
 
 const REMINDER_WINDOWS: Array<{key: "twentyFourHour" | "oneHour"; minutes: number}> = [
   {key: "twentyFourHour", minutes: 24 * 60},
