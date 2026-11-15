@@ -2,6 +2,7 @@ import {handleAppointmentAgreement} from "./appointment_agreement";
 export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callable";
 export {acknowledgeInquiry, escalateInquiry, reassignInquiry, routeExistingInquiries, setInquiryStatus} from "./inquiry_routing_service";
 import {routeInquiry} from "./inquiry_routing_service";
+export {replyToInquiry, setInquirySla, takeOverInquiry} from "./inquiry_sla_service";
 export {setStaffCollegeAssignments} from "./college_assignments_callable";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
