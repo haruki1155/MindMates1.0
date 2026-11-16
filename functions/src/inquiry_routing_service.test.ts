@@ -162,6 +162,42 @@ test("only assignees or the super-administrator acknowledge; acknowledgement cla
   assert.equal((await db.doc(`inquiries/${triage}`).get()).data()!.ownerId, uid("admin"));
 });
 
+test("resolved inquiries cannot be reopened by acknowledgement, including under concurrent updates", {skip: !emulated}, async () => {
+  const resolvedId = await newInquiry("cite");
+  await routeInquiry(resolvedId);
+  await call(setInquiryStatus, "c1", {inquiryId: resolvedId, status: "resolved"});
+  await rejects(call(acknowledgeInquiry, "s1", {inquiryId: resolvedId}), "failed-precondition");
+  const resolvedDoc = (await db.doc(`inquiries/${resolvedId}`).get()).data()!;
+  assert.equal(resolvedDoc.status, "resolved");
+  assert.equal(resolvedDoc.acknowledgedAt ?? null, null);
+  assert.equal((await audit(resolvedId, "INQUIRY_ACKNOWLEDGED")).length, 0);
+  const resolvedStudentNotes = await db.collection("notifications")
+    .where("inquiryId", "==", resolvedId)
+    .where("userId", "==", uid("student-cite"))
+    .get();
+  assert.equal(resolvedStudentNotes.size, 0);
+
+  // Concurrent resolve vs acknowledge race never reopens status to in_progress.
+  const raceId = await newInquiry("cite");
+  await routeInquiry(raceId);
+  const outcomes = await Promise.allSettled([
+    call(setInquiryStatus, "c1", {inquiryId: raceId, status: "resolved"}),
+    call(acknowledgeInquiry, "s1", {inquiryId: raceId}),
+  ]);
+  assert.equal(outcomes[0].status, "fulfilled");
+  const raceDoc = (await db.doc(`inquiries/${raceId}`).get()).data()!;
+  assert.equal(raceDoc.status, "resolved");
+  if (outcomes[1].status === "rejected") {
+    assert.ok(outcomes[1].reason instanceof HttpsError && outcomes[1].reason.code === "failed-precondition");
+    assert.equal((await audit(raceId, "INQUIRY_ACKNOWLEDGED")).length, 0);
+    const raceNotes = await db.collection("notifications")
+      .where("inquiryId", "==", raceId)
+      .where("userId", "==", uid("student-cite"))
+      .get();
+    assert.equal(raceNotes.size, 0);
+  }
+});
+
 test("status changes are server-side, assignee-scoped and audited", {skip: !emulated}, async () => {
   const id = await newInquiry("cite");
   await routeInquiry(id);

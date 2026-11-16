@@ -203,6 +203,9 @@ export const acknowledgeInquiry = onCall(async (request) => {
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
     if (!canHandle(who, data)) throw new HttpsError("permission-denied", DENIED);
+    if (String(data.status ?? "pending").toLowerCase() === "resolved") {
+      throw new HttpsError("failed-precondition", "Resolved inquiries cannot be acknowledged.");
+    }
     if (data.acknowledgedAt) throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Inquiry has no sender.");

@@ -5365,7 +5365,7 @@ class _InquiriesPageState extends State<_InquiriesPage> {
   void _openInquiry(AdminInquiryModel inquiry) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _InquiryDetailScreen(
+        builder: (_) => InquiryDetailScreen(
           inquiry: inquiry,
           repository: widget.repository,
         ),
@@ -5634,30 +5634,43 @@ class _InquiryQueueRow extends StatelessWidget {
   );
 }
 
-class _InquiryDetailScreen extends StatelessWidget {
-  const _InquiryDetailScreen({required this.inquiry, required this.repository});
+class InquiryDetailScreen extends StatelessWidget {
+  const InquiryDetailScreen({
+    super.key,
+    required this.inquiry,
+    required this.repository,
+  });
 
   final AdminInquiryModel inquiry;
   final AdminPortalRepository repository;
+
+  bool get _hasInitialAccess {
+    if (repository.isSuperAdmin) return true;
+    final role = repository.currentAccessRole;
+    final uid = repository.currentUserId;
+    return (role == AccessRole.portalStaff || role == AccessRole.counselor) &&
+        uid != null &&
+        inquiry.assigneeIds.contains(uid);
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AdminColors.canvas,
     appBar: AppBar(
       toolbarHeight: 68,
-      title: Column(
+      title: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Inquiry details',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: 2),
+          SizedBox(height: 2),
           Text(
             'Review the submitted message, form responses, and case status.',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               color: AdminColors.muted,
               fontSize: 11,
               fontWeight: FontWeight.w500,
@@ -5669,12 +5682,46 @@ class _InquiryDetailScreen extends StatelessWidget {
     body: StreamBuilder<List<AdminInquiryModel>>(
       stream: repository.watchInquiries(),
       builder: (context, snapshot) {
-        var current = inquiry;
-        for (final item in snapshot.data ?? const <AdminInquiryModel>[]) {
-          if (item.id == inquiry.id) {
-            current = item;
-            break;
+        Widget? body;
+        if (snapshot.hasError) {
+          body = const _InquiryAccessRevokedPanel(
+            title: 'Unable to access this inquiry',
+            message:
+                'You do not have permission to view this inquiry or your session access changed.',
+          );
+        } else if (snapshot.hasData) {
+          AdminInquiryModel? current;
+          for (final item in snapshot.data!) {
+            if (item.id == inquiry.id) {
+              current = item;
+              break;
+            }
           }
+          if (current == null) {
+            body = const _InquiryAccessRevokedPanel(
+              title: 'Inquiry no longer assigned to you',
+              message:
+                  'This inquiry was reassigned or removed from your queue. Details and case actions are hidden.',
+            );
+          } else {
+            body = _InquiryDetails(
+              item: current,
+              repository: repository,
+              onUpdated: () {},
+            );
+          }
+        } else if (!_hasInitialAccess) {
+          body = const _InquiryAccessRevokedPanel(
+            title: 'Inquiry access restricted',
+            message:
+                'Only assigned PACC staff and the super-administrator may view this inquiry.',
+          );
+        } else {
+          body = _InquiryDetails(
+            item: inquiry,
+            repository: repository,
+            onUpdated: () {},
+          );
         }
         return SingleChildScrollView(
           padding: EdgeInsets.all(
@@ -5683,15 +5730,59 @@ class _InquiryDetailScreen extends StatelessWidget {
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1080),
-              child: _InquiryDetails(
-                item: current,
-                repository: repository,
-                onUpdated: () {},
-              ),
+              child: body,
             ),
           ),
         );
       },
+    ),
+  );
+}
+
+class _InquiryAccessRevokedPanel extends StatelessWidget {
+  const _InquiryAccessRevokedPanel({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(24),
+    decoration: _box,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.lock_outline, color: AdminColors.muted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          message,
+          style: const TextStyle(color: AdminColors.muted, height: 1.45),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => Navigator.maybePop(context),
+          icon: const Icon(Icons.arrow_back),
+          label: const Text('Back to inquiries'),
+        ),
+      ],
     ),
   );
 }
@@ -5843,7 +5934,10 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
             runSpacing: 10,
             children: [
               OutlinedButton.icon(
-                onPressed: item.isAcknowledged || _acknowledging
+                onPressed:
+                    item.isAcknowledged ||
+                        item.status == InquiryStatus.resolved ||
+                        _acknowledging
                     ? null
                     : () => _acknowledge(context),
                 icon: Icon(
@@ -5854,6 +5948,8 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                 label: Text(
                   item.isAcknowledged
                       ? 'Receipt acknowledged'
+                      : item.status == InquiryStatus.resolved
+                      ? 'Resolved'
                       : _acknowledging
                       ? 'Acknowledging…'
                       : 'Acknowledge receipt',
@@ -5884,7 +5980,9 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     } catch (error) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to acknowledge inquiry: $error')),
+          SnackBar(
+            content: Text(_inquiryActionError(error, 'acknowledge inquiry')),
+          ),
         );
       }
     } finally {
@@ -5908,13 +6006,16 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     } catch (error) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to update inquiry: $error')),
+          SnackBar(content: Text(_inquiryActionError(error, 'update inquiry'))),
         );
       }
     } finally {
       if (mounted) setState(() => _updatingStatus = false);
     }
   }
+
+  String _inquiryActionError(Object error, String action) =>
+      FirebaseErrorMessage.describe(error, fallback: 'Unable to $action.');
 
   Future<void> _previewPdf() async {
     if (_previewingPdf || _downloadingPdf) return;

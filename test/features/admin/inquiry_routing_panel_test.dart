@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,14 +51,36 @@ class _Repo extends AdminPortalRepository {
     this.role = AccessRole.counselor,
     this.uid = 'c1',
     this.error,
+    this.inquiriesStream,
+    this.actionError,
   });
   final bool superAdmin;
   final AccessRole role;
   final String uid;
   final Object? error;
+  final Stream<List<AdminInquiryModel>>? inquiriesStream;
+  final Object? actionError;
   final escalations = <String>[];
   final reassignments = <Map<String, Object?>>[];
+  final acknowledgedIds = <String>[];
+  final statusUpdates = <Map<String, Object?>>[];
   int backfills = 0;
+
+  @override
+  Stream<List<AdminInquiryModel>> watchInquiries() =>
+      inquiriesStream ?? Stream.value([_inquiry()]);
+
+  @override
+  Future<void> acknowledgeInquiry(String id) async {
+    if (actionError != null) throw actionError!;
+    acknowledgedIds.add(id);
+  }
+
+  @override
+  Future<void> updateInquiryStatus(String id, InquiryStatus status) async {
+    if (actionError != null) throw actionError!;
+    statusUpdates.add({'id': id, 'status': status.name});
+  }
 
   @override
   bool get isSuperAdmin => superAdmin;
@@ -344,4 +368,185 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Inquiries'), findsOneWidget);
   });
+
+  testWidgets(
+    'InquiryDetailScreen hides details and actions when inquiry is reassigned away',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final controller = StreamController<List<AdminInquiryModel>>();
+      addTearDown(controller.close);
+      final initial = _inquiry(extra: {'message': 'Student inquiry body'});
+      final repo = _Repo(uid: 'c1', inquiriesStream: controller.stream);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: initial, repository: repo),
+        ),
+      );
+      controller.add([initial]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Feedback'), findsOneWidget);
+      expect(find.text('Student inquiry body'), findsOneWidget);
+      expect(find.text('Acknowledge receipt'), findsOneWidget);
+      expect(find.byTooltip('Change inquiry status'), findsOneWidget);
+      expect(find.text('Escalate to administrator'), findsOneWidget);
+
+      controller.add(const []);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Inquiry no longer assigned to you'), findsOneWidget);
+      expect(find.text('Back to inquiries'), findsOneWidget);
+      expect(find.text('Feedback'), findsNothing);
+      expect(find.text('Student inquiry body'), findsNothing);
+      expect(find.text('Acknowledge receipt'), findsNothing);
+      expect(find.byTooltip('Change inquiry status'), findsNothing);
+      expect(find.text('Escalate to administrator'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'InquiryDetailScreen hides details when stream emits permission error',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final controller = StreamController<List<AdminInquiryModel>>();
+      addTearDown(controller.close);
+      final initial = _inquiry();
+      final repo = _Repo(uid: 'c1', inquiriesStream: controller.stream);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: initial, repository: repo),
+        ),
+      );
+      controller.addError(
+        FirebaseFunctionsException(
+          code: 'permission-denied',
+          message: 'Missing inquiry permission.',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Unable to access this inquiry'), findsOneWidget);
+      expect(find.text('Back to inquiries'), findsOneWidget);
+      expect(find.text('Feedback'), findsNothing);
+      expect(find.text('Message'), findsNothing);
+      expect(find.text('Acknowledge receipt'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'InquiryDetailScreen blocks pre-stream details for unassigned non-admin',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final controller = StreamController<List<AdminInquiryModel>>();
+      addTearDown(controller.close);
+      final repo = _Repo(
+        superAdmin: false,
+        uid: 'other-counselor',
+        inquiriesStream: controller.stream,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: _inquiry(), repository: repo),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Inquiry access restricted'), findsOneWidget);
+      expect(find.text('Back to inquiries'), findsOneWidget);
+      expect(find.text('Feedback'), findsNothing);
+      expect(find.text('Acknowledge receipt'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'InquiryDetailScreen disables acknowledgement for resolved inquiries and surfaces callable errors',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final resolved = _inquiry(extra: {'status': 'resolved'});
+      final repo = _Repo(
+        superAdmin: true,
+        inquiriesStream: Stream.value([resolved]),
+        actionError: FirebaseFunctionsException(
+          code: 'failed-precondition',
+          message: 'Resolved inquiries cannot be acknowledged.',
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: resolved, repository: repo),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final resolvedButton = find.ancestor(
+        of: find.text('Resolved'),
+        matching: find.byWidgetPredicate((w) => w is OutlinedButton),
+      );
+      expect(resolvedButton, findsOneWidget);
+      expect(tester.widget<OutlinedButton>(resolvedButton).onPressed, isNull);
+      expect(find.text('Acknowledge receipt'), findsNothing);
+
+      await tester.tap(find.byTooltip('Change inquiry status'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(InquiryStatus.inProgress.label));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Resolved inquiries cannot be acknowledged.'),
+        findsOneWidget,
+      );
+      expect(repo.statusUpdates, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'InquiryDetailScreen keeps super-admin full view and receipt acknowledgement',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final pending = _inquiry();
+      final repo = _Repo(
+        superAdmin: true,
+        uid: 'admin',
+        role: AccessRole.admin,
+        inquiriesStream: Stream.value([pending]),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: pending, repository: repo),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Feedback'), findsOneWidget);
+      await tester.tap(find.text('Acknowledge receipt'));
+      await tester.pumpAndSettle();
+
+      expect(repo.acknowledgedIds, ['inq-1']);
+    },
+  );
 }
