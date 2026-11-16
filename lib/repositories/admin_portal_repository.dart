@@ -1037,8 +1037,8 @@ class AdminPortalRepository {
   Future<CounselingPopulationConfig> fetchCounselingPopulation(
     String schoolYear,
   ) async {
-    if (!currentAccessRole.canAccessClinicalData) {
-      throw StateError('Counselor or administrator access is required.');
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
     }
     final result = await FirebaseFunctions.instance
         .httpsCallable('getCounselingPopulation')
@@ -1050,8 +1050,8 @@ class AdminPortalRepository {
     required String schoolYear,
     required Map<String, int> populations,
   }) async {
-    if (!currentAccessRole.canAccessClinicalData) {
-      throw StateError('Counselor or administrator access is required.');
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
     }
     final result = await FirebaseFunctions.instance
         .httpsCallable('saveCounselingPopulation')
@@ -1062,26 +1062,48 @@ class AdminPortalRepository {
     return CounselingPopulationConfig.fromJson(result.data);
   }
 
+  Future<List<AcademicYearRecord>> fetchAcademicYears() async {
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
+    }
+    final data = await _callCallable('getAcademicYears', const {});
+    return _academicYears(
+      data is Map ? Map<String, dynamic>.from(data) : const {},
+    );
+  }
+
   Future<List<AcademicYearRecord>> createAcademicYear({
     required String schoolYear,
+    String? startDate,
+    String? endDate,
     String? copyFrom,
     bool copyPopulation = false,
   }) async {
-    final result = await FirebaseFunctions.instance
-        .httpsCallable('createAcademicYear')
-        .call<Map<String, dynamic>>({
-          'schoolYear': schoolYear,
-          'copyFrom': ?copyFrom,
-          'copyPopulation': copyPopulation,
-        });
-    return _academicYears(result.data);
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
+    }
+    final data = await _callCallable('createAcademicYear', {
+      'schoolYear': schoolYear,
+      'startDate': ?startDate,
+      'endDate': ?endDate,
+      'copyFrom': ?copyFrom,
+      'copyPopulation': copyPopulation,
+    });
+    return _academicYears(
+      data is Map ? Map<String, dynamic>.from(data) : const {},
+    );
   }
 
   Future<List<AcademicYearRecord>> closeAcademicYear(String schoolYear) async {
-    final result = await FirebaseFunctions.instance
-        .httpsCallable('closeAcademicYear')
-        .call<Map<String, dynamic>>({'schoolYear': schoolYear});
-    return _academicYears(result.data);
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
+    }
+    final data = await _callCallable('closeAcademicYear', {
+      'schoolYear': schoolYear,
+    });
+    return _academicYears(
+      data is Map ? Map<String, dynamic>.from(data) : const {},
+    );
   }
 
   static List<AcademicYearRecord> _academicYears(Map<String, dynamic> data) =>

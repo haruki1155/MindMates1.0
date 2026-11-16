@@ -53,10 +53,9 @@ class ImportedWalkInFile {
         id: json['id']?.toString() ?? '',
         fileName: json['fileName']?.toString() ?? 'Imported walk-in entries',
         rowCount: (json['rowCount'] as num?)?.toInt() ?? 0,
-        importedAt:
-            DateTime.fromMillisecondsSinceEpoch(
-              (json['importedAtMillis'] as num?)?.toInt() ?? 0,
-            ).toLocal(),
+        importedAt: DateTime.fromMillisecondsSinceEpoch(
+          (json['importedAtMillis'] as num?)?.toInt() ?? 0,
+        ).toLocal(),
         archived: json['archived'] == true,
       );
 }
@@ -350,6 +349,8 @@ class CounselingPopulationConfig {
   }
 }
 
+enum AcademicYearPeriodState { current, upcoming, closed }
+
 class AcademicYearRecord {
   const AcademicYearRecord({
     required this.schoolYear,
@@ -361,6 +362,22 @@ class AcademicYearRecord {
   final String startDate;
   final String endDate;
   final String status;
+
+  bool get isClosed => status == 'closed';
+
+  AcademicYearPeriodState periodState({DateTime? now}) {
+    if (isClosed) return AcademicYearPeriodState.closed;
+    final reference = (now ?? DateTime.now()).toLocal();
+    final todayKey =
+        '${reference.year.toString().padLeft(4, '0')}-'
+        '${reference.month.toString().padLeft(2, '0')}-'
+        '${reference.day.toString().padLeft(2, '0')}';
+    if (startDate.isNotEmpty && todayKey.compareTo(startDate) < 0) {
+      return AcademicYearPeriodState.upcoming;
+    }
+    return AcademicYearPeriodState.current;
+  }
+
   factory AcademicYearRecord.fromJson(Map<String, dynamic> json) =>
       AcademicYearRecord(
         schoolYear: json['schoolYear']?.toString() ?? '',
