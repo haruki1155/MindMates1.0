@@ -9,11 +9,82 @@ import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
 if (!getApps().length) initializeApp();
 
+const STAGING_STAFF_VERIFICATION_URL = "https://paaccmindmate.com";
+const PRODUCTION_ADMIN_WEB_URL = "https://mind-mates-cd2cf.web.app";
+const STAGING_PROJECT_ID = "mindmate-staging";
+const PRODUCTION_PROJECT_ID = "mind-mates-cd2cf";
+const OBSOLETE_ADMIN_WEB_HOSTS = new Set(["mindmate-admin-staging.vercel.app"]);
+const STAGING_ADMIN_WEB_HOSTS = new Set([
+  "paaccmindmate.com",
+  "www.paaccmindmate.com",
+  "mindmate-staging.web.app",
+  "mindmate-staging.firebaseapp.com",
+]);
+const PRODUCTION_ADMIN_WEB_HOSTS = new Set([
+  "mind-mates-cd2cf.web.app",
+  "mind-mates-cd2cf.firebaseapp.com",
+]);
+const DEVELOPMENT_ADMIN_WEB_HOSTS = new Set([
+  "mindmate-dev-4e91c.web.app",
+  "mindmate-dev-4e91c.firebaseapp.com",
+]);
+
 const db = getFirestore();
 const smtpAppPassword = defineSecret("SMTP_APP_PASSWORD");
 const adminWebUrl = defineString("ADMIN_WEB_URL", {
   default: "https://mindmate-admin-staging.vercel.app",
 });
+
+function currentFirebaseProjectId(): string | undefined {
+  if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
+  const rawConfig = process.env.FIREBASE_CONFIG;
+  if (!rawConfig) return undefined;
+  try {
+    const parsed = JSON.parse(rawConfig) as {projectId?: unknown};
+    return typeof parsed.projectId === "string" ? parsed.projectId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveStaffVerificationWebUrl(
+  configuredUrl = adminWebUrl.value(),
+  projectId = currentFirebaseProjectId(),
+): string {
+  const trimmed = configuredUrl.trim().replace(/\/$/, "");
+  if (projectId === STAGING_PROJECT_ID) {
+    if (!trimmed) return STAGING_STAFF_VERIFICATION_URL;
+    try {
+      const parsed = new URL(trimmed);
+      const host = parsed.hostname.toLowerCase();
+      const isLocalhost = host === "localhost" || host === "127.0.0.1";
+      if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLocalhost)) {
+        return STAGING_STAFF_VERIFICATION_URL;
+      }
+      if (
+        OBSOLETE_ADMIN_WEB_HOSTS.has(host) ||
+        PRODUCTION_ADMIN_WEB_HOSTS.has(host) ||
+        DEVELOPMENT_ADMIN_WEB_HOSTS.has(host)
+      ) {
+        return STAGING_STAFF_VERIFICATION_URL;
+      }
+      return parsed.origin;
+    } catch {
+      return STAGING_STAFF_VERIFICATION_URL;
+    }
+  }
+  if (projectId === PRODUCTION_PROJECT_ID) {
+    try {
+      const host = new URL(trimmed).hostname.toLowerCase();
+      if (STAGING_ADMIN_WEB_HOSTS.has(host) || DEVELOPMENT_ADMIN_WEB_HOSTS.has(host)) {
+        return PRODUCTION_ADMIN_WEB_URL;
+      }
+    } catch {
+      // Preserve existing configured value handling for non-staging URLs.
+    }
+  }
+  return trimmed;
+}
 const smtpHost = defineString("SMTP_HOST", {default: "smtp.gmail.com"});
 const smtpPort = defineString("SMTP_PORT", {default: "587"});
 const smtpUsername = defineString("SMTP_USERNAME", {
@@ -284,10 +355,11 @@ async function requestStaffEmailVerificationHandler(request: CallableRequest) {
   const email = authUser.email;
   if (!email) throw new HttpsError("failed-precondition", "This account does not have an email address.");
   await enforceVerificationRateLimit(userId, requestIp(request));
+  const webBaseUrl = resolveStaffVerificationWebUrl();
   const firebaseLink = await getAuth().generateEmailVerificationLink(email, {
-    url: `${adminWebUrl.value().replace(/\/$/, "")}/verify-email`,
+    url: `${webBaseUrl}/verify-email`,
   });
-  const verificationLink = directEmailActionLink(firebaseLink, adminWebUrl.value());
+  const verificationLink = directEmailActionLink(firebaseLink, webBaseUrl);
   const name = String(profile.data()?.firstName ?? profile.data()?.name ?? "there").trim();
   const safeName = escapeHtml(name || "there");
   const safeEmail = escapeHtml(email);
