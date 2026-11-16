@@ -78,7 +78,7 @@ class AdminReportPdfService {
     };
     final subtitle = switch (reportType) {
       AdminReportType.users =>
-        'Year: $activeYear | Period: ${filters.periodLabel} | Category: $activeCategory | College: $activeCollege | Program: $activeProgram | Active window: last ${report.activeWindowDays} days.',
+        'Year: $activeYear | Period: ${filters.periodLabel} | Category: $activeCategory | College: $activeCollege | Program: $activeProgram | Active window: ${report.activeWindowDays} days.',
       AdminReportType.appointments =>
         'Year: $activeYear | Period: ${filters.periodLabel} | College: $activeCollege | Program: $activeProgram | Category: $activeCategory | Grouped by ${_dimensionLabel(appointmentDimension)}.',
       AdminReportType.emotionalActivity =>

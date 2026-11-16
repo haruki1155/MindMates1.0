@@ -2136,7 +2136,9 @@ class _UserReport extends StatelessWidget {
             _SummaryValue(
               label: 'Active app users',
               value: _formatPercent(active),
-              note: 'Last ${report.activeWindowDays} days',
+              note: report.dateRange.label.isNotEmpty
+                  ? '${report.dateRange.label} · ${report.activeWindowDays}-day window'
+                  : '${report.activeWindowDays}-day window',
               icon: Icons.bolt_outlined,
             ),
             _SummaryValue(

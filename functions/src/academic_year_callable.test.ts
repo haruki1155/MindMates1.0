@@ -32,9 +32,10 @@ const accounts: Record<string, {verified: boolean; profile: Record<string, unkno
   admin: {verified: true, profile: {accessRole: "admin", accountStatus: "active", name: "Portal Admin"}},
   "suspended-admin": {verified: true, profile: {accessRole: "admin", accountStatus: "suspended"}},
   "unverified-admin": {verified: false, profile: {accessRole: "admin", accountStatus: "active"}},
-  counselor: {verified: true, profile: {accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active"}},
+  counselor: {verified: true, profile: {accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: ["cite"]}},
+  "unassigned-counselor": {verified: true, profile: {accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: []}},
   staff: {verified: true, profile: {accessRole: "portalStaff", staffAccountStatus: "approved", accountStatus: "active"}},
-  student: {verified: true, profile: {accessRole: "appUser", role: "student", accountStatus: "active"}},
+  student: {verified: true, profile: {accessRole: "appUser", role: "student", accountStatus: "active", collegeId: "cite"}},
 };
 
 async function as<T>(callable: Callable<T>, actor: string, data?: Record<string, unknown>) {
@@ -112,6 +113,7 @@ test("authorized admin creates, closes and cannot overwrite closed years, while 
   const apptRef = db.doc(`appointments/${prefix}-hist-1`);
   await apptRef.set({
     userId: uid("student"),
+    collegeId: "cite",
     academicYearId: "2030-2031",
     status: "completed",
     scheduledAt: Timestamp.fromDate(new Date("2030-09-15T01:00:00Z")),
@@ -131,6 +133,9 @@ test("authorized admin creates, closes and cannot overwrite closed years, while 
     startDate: "2031-05-31",
     endDate: "2032-05-30",
   }), "failed-precondition");
+
+  // Unassigned counselor fails closed with permission-denied.
+  await rejects(as(fetchReport, "unassigned-counselor", {schoolYear: "2030-2031"}), "permission-denied");
 
   // Historical report & appointment academicYearId are preserved after close.
   assert.equal((await apptRef.get()).data()?.academicYearId, "2030-2031");

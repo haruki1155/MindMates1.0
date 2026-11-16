@@ -182,31 +182,24 @@ function academicYearRange(
   }
   const startYear = Number(schoolYear.slice(0, 4));
   return {
-    start: new Date(Date.UTC(startYear, 5, 1)),
-    end: new Date(Date.UTC(startYear + 1, 5, 1)),
+    start: new Date(`${startYear}-06-01T00:00:00+08:00`),
+    end: new Date(`${startYear + 1}-06-01T00:00:00+08:00`),
   };
 }
 
 function isActiveInWindow(
   user: RecordData,
-  cutoff: Date,
   range: {start: Date; end: Date},
-  useExplicitRange: boolean,
 ): boolean {
-  const lastActive = dateValue(user.lastActiveAt);
-  const inBounds = (instant: Date | undefined): boolean => {
-    if (!instant) return false;
-    return useExplicitRange
-      ? instant >= range.start && instant < range.end
-      : instant >= cutoff;
-  };
-  if (inBounds(lastActive)) return true;
+  const inBounds = (instant: Date | undefined): boolean =>
+    Boolean(instant && instant >= range.start && instant < range.end);
+  if (inBounds(dateValue(user.lastActiveAt))) return true;
   if (!Array.isArray(user.activeDateKeys)) return false;
   return user.activeDateKeys.some((value) => {
     if (typeof value !== "string") return false;
-    const date = useExplicitRange
-      ? new Date(`${value}T00:00:00+08:00`)
-      : new Date(`${value}T00:00:00Z`);
+    const trimmed = value.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return false;
+    const date = new Date(`${trimmed}T00:00:00+08:00`);
     return !Number.isNaN(date.getTime()) && inBounds(date);
   });
 }
@@ -371,14 +364,17 @@ export function buildReportAnalytics(
   const baseUsersForCategory = appUsers.filter(({data}) =>
     matchesUserCollegeAndProgram(data),
   );
-  const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const activeWindowDays = Math.max(
+    1,
+    Math.round((range.end.getTime() - range.start.getTime()) / 86400000),
+  );
   const allCategories = ["student", "teaching", "nonTeaching", "unspecified"]
     .map((key): UserCategoryReport => {
       const categoryUsers = baseUsersForCategory.filter(
         ({data}) => normalizedPopulationRole(data) === key,
       );
       const categoryActive = categoryUsers.filter(({data}) =>
-        isActiveInWindow(data, cutoff, range, hasExplicitRange),
+        isActiveInWindow(data, range),
       );
       return {
         key,
@@ -393,7 +389,7 @@ export function buildReportAnalytics(
     ({data}) => normalizedPopulationRole(data) === requestedUserCategory,
   );
   const scopedActiveUsers = scopedUsers.filter(({data}) =>
-    isActiveInWindow(data, cutoff, range, hasExplicitRange),
+    isActiveInWindow(data, range),
   );
   const selectedCategory = allCategories.find(
     (category) => category.key === requestedUserCategory,
@@ -421,13 +417,17 @@ export function buildReportAnalytics(
     if (requestedUserCategory !== "all" && appointmentCategory(appointment) !== requestedUserCategory) {
       return false;
     }
-    const appointmentDate = dateValue(appointment.scheduledAt) || dateValue(appointment.createdAt);
-    if (hasExplicitRange) {
-      return !!appointmentDate && appointmentDate >= range.start && appointmentDate < range.end;
+    const recordYear = text(appointment.academicYearId);
+    const appointmentDate =
+      dateValue(appointment.scheduledAt) ||
+      dateValue(appointment.createdAt) ||
+      dateValue(appointment.importedAt);
+    if (recordYear) {
+      if (recordYear !== population.schoolYear) return false;
+      if (!hasExplicitRange) return true;
+      return Boolean(appointmentDate && appointmentDate >= range.start && appointmentDate < range.end);
     }
-    if (text(appointment.academicYearId) === population.schoolYear) return true;
-    if (text(appointment.academicYearId)) return false;
-    return !appointmentDate || (appointmentDate >= range.start && appointmentDate < range.end);
+    return Boolean(appointmentDate && appointmentDate >= range.start && appointmentDate < range.end);
   });
 
   const appointmentDepartment = (appointment: RecordData): {label: string; keys: Set<string>} => {
@@ -607,7 +607,7 @@ export function buildReportAnalytics(
 
   return {
     generatedAt: now.toISOString(),
-    activeWindowDays: 30,
+    activeWindowDays,
     dateRange: {
       startDate: range.start.toISOString(),
       endDate: range.end.toISOString(),
@@ -754,7 +754,13 @@ export const getReportAnalytics = onCall(async (request) => {
   const assignedCollegeIds = Array.isArray(actor.assignedCollegeIds)
     ? actor.assignedCollegeIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
     : [];
-  const restrictByCollege = actor.accessRole === "counselor" && assignedCollegeIds.length > 0;
+  const restrictByCollege = actor.accessRole === "counselor";
+  if (restrictByCollege && assignedCollegeIds.length === 0) {
+    throw new HttpsError(
+      "permission-denied",
+      "Your counselor account does not have any assigned colleges.",
+    );
+  }
   const allowedCollegeKeys = new Set<string>();
   if (restrictByCollege) {
     for (const id of assignedCollegeIds) {
