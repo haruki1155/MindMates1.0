@@ -4,6 +4,7 @@ import '../../../models/appointment_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
+import 'student_case_history_page.dart';
 
 enum CounselorWorkflowMode { cases, followUps }
 
@@ -93,6 +94,7 @@ class CounselorWorkflowPage extends StatelessWidget {
                 else
                   ...items.map(
                     (appointment) => _WorkCard(
+                      repository: repository,
                       appointment: appointment,
                       followUp: mode == CounselorWorkflowMode.followUps,
                       onOpenAppointments: onOpenAppointments,
@@ -185,12 +187,14 @@ class _Metric extends StatelessWidget {
 
 class _WorkCard extends StatelessWidget {
   const _WorkCard({
+    required this.repository,
     required this.appointment,
     required this.followUp,
     required this.onOpenAppointments,
     required this.canViewStudentInfo,
     this.studentInfoLoader,
   });
+  final AdminPortalRepository repository;
   final AppointmentModel appointment;
   final bool followUp;
   final VoidCallback onOpenAppointments;
@@ -223,6 +227,7 @@ class _WorkCard extends StatelessWidget {
           ),
           const SizedBox(width: 14),
           Expanded(
+            flex: 3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -251,14 +256,30 @@ class _WorkCard extends StatelessWidget {
               ],
             ),
           ),
-          ViewStudentInformationButton(
-            userId: appointment.userId,
-            canView: canViewStudentInfo,
-            loader: studentInfoLoader,
-          ),
-          TextButton(
-            onPressed: onOpenAppointments,
-            child: const Text('Open appointment'),
+          // Wraps under narrow widths instead of overflowing the row.
+          Flexible(
+            flex: 2,
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ViewStudentInformationButton(
+                  userId: appointment.userId,
+                  canView: canViewStudentInfo,
+                  loader: studentInfoLoader,
+                ),
+                if (id.isNotEmpty && canOpenStudentCaseHistory(repository))
+                  StudentCaseHistoryButton(
+                    repository: repository,
+                    studentId: id,
+                    studentName: displayName,
+                  ),
+                TextButton(
+                  onPressed: onOpenAppointments,
+                  child: const Text('Open appointment'),
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -51,7 +51,7 @@ export const AUDIT_ACTIONS = [
 
 /** Views of a student's record target the student, so the per-staff activity
  * log lists them under the staff member who performed them (actorId). */
-export const ACTOR_SCOPED_AUDIT_ACTIONS: readonly string[] = ["STUDENT_PERSONAL_INFO_VIEWED"];
+export const ACTOR_SCOPED_AUDIT_ACTIONS: readonly string[] = ["STUDENT_PERSONAL_INFO_VIEWED", "COUNSELING_HISTORY_VIEWED"];
 
 export function auditLogOwnerField(action: string): "actorId" | "targetUserId" {
   return ACTOR_SCOPED_AUDIT_ACTIONS.includes(action) ? "actorId" : "targetUserId";

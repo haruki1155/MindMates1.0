@@ -17,6 +17,7 @@ import '../models/appointment_queue_item.dart';
 import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
 import '../models/profile_roles.dart';
+import '../models/student_case_history_model.dart';
 import '../models/pacc_availability_model.dart';
 import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
@@ -204,6 +205,24 @@ class AdminPortalRepository {
     return FirebaseFunctions.instanceFor(
       region: 'us-central1',
     ).routedCallable(name).call<Object?>(data).then((result) => result.data);
+  }
+
+  /// One page of a student's appointments (current and archived), newest
+  /// first. The server matches by the student's verified account ID and
+  /// refuses staff who are not authorized for that student.
+  Future<StudentCaseHistoryResult> fetchStudentCaseHistory({
+    required String studentId,
+    String? cursor,
+    int pageSize = 20,
+  }) async {
+    final data = await _callCallable('getStudentCaseHistory', {
+      'studentId': studentId,
+      'cursor': ?cursor,
+      'pageSize': pageSize,
+    });
+    return StudentCaseHistoryResult.fromJson(
+      data is Map ? Map<String, dynamic>.from(data) : const {},
+    );
   }
 
   /// Dry-runs a catalogue file. [rows] are passed through untouched: an
