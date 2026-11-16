@@ -1585,9 +1585,9 @@ class AdminPortalRepository {
     return (result.data['colleges'] as num?)?.toInt() ?? 0;
   }
 
-  /// Replaces the colleges a staff member or counselor serves. Authorization,
-  /// validation and the revision check happen server-side; returns the new
-  /// revision.
+  /// Replaces the colleges an authorized counselor serves. Authorization,
+  /// uniqueness, and revision checks happen server-side; returns the new
+  /// revision. Legacy portal staff accounts only permit removal/cleanup.
   Future<int> setStaffCollegeAssignments({
     required String userId,
     required List<String> collegeIds,
@@ -1602,6 +1602,32 @@ class AdminPortalRepository {
     });
     final data = result is Map ? result : const {};
     return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Atomically assigns, transfers, unassigns, or resolves a duplicate
+  /// counselor conflict for one college across all affected counselor accounts.
+  Future<Map<String, int>> reassignCollegeCounselor({
+    required String collegeId,
+    required String? toCounselorId,
+    required List<String> expectedOwnerIds,
+    required Map<String, int> expectedRevisions,
+    required String reason,
+  }) async {
+    final result = await _callCallable('reassignCollegeCounselor', {
+      'collegeId': collegeId,
+      'toCounselorId': toCounselorId,
+      'expectedOwnerIds': expectedOwnerIds,
+      'expectedRevisions': expectedRevisions,
+      'reason': reason,
+    });
+    final data = result is Map ? result : const {};
+    final rawRevisions = data['revisions'];
+    if (rawRevisions is! Map) return const {};
+    return {
+      for (final entry in rawRevisions.entries)
+        if (entry.key is String && entry.value is num)
+          entry.key as String: (entry.value as num).toInt(),
+    };
   }
 
   Future<void> updateStaffOrganization({
