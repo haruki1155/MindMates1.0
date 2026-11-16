@@ -33,6 +33,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   String _appointmentDepartment = 'all';
   String _schoolYear = _currentSchoolYear();
   _ReportPeriod _period = _ReportPeriod.wholeYear;
+  EmotionalActivitySource _emotionalSource = EmotionalActivitySource.all;
   DateTimeRange? _customRange;
   bool _downloading = false;
   bool _previewing = false;
@@ -46,7 +47,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   }
 
   Future<AdminReportAnalytics> _fetch() =>
-      widget.repository.fetchReportAnalytics(
+      widget.repository.fetchEmotionalReportAnalytics(
         userCategory: _userCategory,
         appointmentDepartment: _appointmentDepartment,
         schoolYear: _schoolYear,
@@ -56,6 +57,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
         endDate: _period == _ReportPeriod.wholeYear
             ? null
             : _periodRange()?.end,
+        emotionalSource: _emotionalSource.wireKey,
       );
 
   DateTimeRange? _periodRange() {
@@ -217,6 +219,54 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
           onDimensionChanged: (value) => setState(() => _dimension = value),
           onChartChanged: (value) => setState(() => _chartType = value),
         ),
+      ] else if (_reportType == AdminReportType.emotionalActivity) ...[
+        _EmotionalReportControls(
+          schoolYear: _schoolYear,
+          years: report.population.years,
+          period: _period,
+          report: report,
+          chartType: _chartType,
+          source: _emotionalSource,
+          userCategory: _userCategory,
+          userCategories: report.userCategoryOptions,
+          department: _appointmentDepartment,
+          departmentOptions:
+              report.emotionalActivity.departmentOptions.isNotEmpty
+              ? report.emotionalActivity.departmentOptions
+              : report.appointmentDepartmentOptions,
+          onYearChanged: (value) {
+            setState(() => _schoolYear = value);
+            _reloadReport();
+          },
+          onPeriodChanged: (value) {
+            setState(() => _period = value);
+            _reloadReport();
+          },
+          onCustomPeriod: () async {
+            final range = await showDateRangePicker(
+              context: context,
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2100),
+              initialDateRange: _customRange,
+            );
+            if (range == null || !mounted) return;
+            setState(() {
+              _customRange = range;
+              _period = _ReportPeriod.custom;
+            });
+            _reloadReport();
+          },
+          onSourceChanged: (value) {
+            setState(() => _emotionalSource = value);
+            _reloadReport();
+          },
+          onUserCategoryChanged: _selectUserCategory,
+          onDepartmentChanged: (value) {
+            setState(() => _appointmentDepartment = value);
+            _reloadReport();
+          },
+          onChartChanged: (value) => setState(() => _chartType = value),
+        ),
       ] else ...[
         _ControlPanel(
           reportType: _reportType,
@@ -243,6 +293,12 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
                 report: report,
                 chartType: _chartType,
                 categoryKey: _userCategory,
+              )
+            : _reportType == AdminReportType.emotionalActivity
+            ? _EmotionalActivityReportView(
+                key: const ValueKey('emotional'),
+                report: report,
+                chartType: _chartType,
               )
             : _AppointmentReport(
                 key: const ValueKey('appointments'),
@@ -1226,22 +1282,57 @@ class _ReportToggle extends StatelessWidget {
   final ValueChanged<AdminReportType> onChanged;
 
   @override
-  Widget build(BuildContext context) => SegmentedButton<AdminReportType>(
-    showSelectedIcon: false,
-    segments: const [
-      ButtonSegment(
-        value: AdminReportType.users,
-        icon: Icon(Icons.groups_outlined),
-        label: Text('App users'),
-      ),
-      ButtonSegment(
-        value: AdminReportType.appointments,
-        icon: Icon(Icons.calendar_month_outlined),
-        label: Text('Counseling appointments'),
-      ),
-    ],
-    selected: {value},
-    onSelectionChanged: (selection) => onChanged(selection.first),
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      if (constraints.maxWidth < 560) {
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              avatar: const Icon(Icons.groups_outlined, size: 17),
+              label: const Text('App users'),
+              selected: value == AdminReportType.users,
+              onSelected: (_) => onChanged(AdminReportType.users),
+            ),
+            ChoiceChip(
+              avatar: const Icon(Icons.calendar_month_outlined, size: 17),
+              label: const Text('Counseling appointments'),
+              selected: value == AdminReportType.appointments,
+              onSelected: (_) => onChanged(AdminReportType.appointments),
+            ),
+            ChoiceChip(
+              avatar: const Icon(Icons.favorite_outline, size: 17),
+              label: const Text('Emotional activity'),
+              selected: value == AdminReportType.emotionalActivity,
+              onSelected: (_) => onChanged(AdminReportType.emotionalActivity),
+            ),
+          ],
+        );
+      }
+      return SegmentedButton<AdminReportType>(
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(
+            value: AdminReportType.users,
+            icon: Icon(Icons.groups_outlined),
+            label: Text('App users'),
+          ),
+          ButtonSegment(
+            value: AdminReportType.appointments,
+            icon: Icon(Icons.calendar_month_outlined),
+            label: Text('Counseling appointments'),
+          ),
+          ButtonSegment(
+            value: AdminReportType.emotionalActivity,
+            icon: Icon(Icons.favorite_outline),
+            label: Text('Emotional activity'),
+          ),
+        ],
+        selected: {value},
+        onSelectionChanged: (selection) => onChanged(selection.first),
+      );
+    },
   );
 }
 
@@ -1335,8 +1426,14 @@ class _AdminReportControls extends StatelessWidget {
                               (item) => DropdownMenuItem(
                                 value: item.schoolYear,
                                 child: Row(
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(item.schoolYear),
+                                    Flexible(
+                                      child: Text(
+                                        item.schoolYear,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
                                     if (item.status == 'current') ...[
                                       const SizedBox(width: 8),
                                       const _CurrentBadge(),
@@ -2723,6 +2820,536 @@ class _PrivacyNotice extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _EmotionalReportControls extends StatelessWidget {
+  const _EmotionalReportControls({
+    required this.schoolYear,
+    required this.years,
+    required this.period,
+    required this.report,
+    required this.chartType,
+    required this.source,
+    required this.userCategory,
+    required this.userCategories,
+    required this.department,
+    required this.departmentOptions,
+    required this.onYearChanged,
+    required this.onPeriodChanged,
+    required this.onCustomPeriod,
+    required this.onSourceChanged,
+    required this.onUserCategoryChanged,
+    required this.onDepartmentChanged,
+    required this.onChartChanged,
+  });
+
+  final String schoolYear;
+  final List<AcademicYearRecord> years;
+  final _ReportPeriod period;
+  final AdminReportAnalytics report;
+  final ReportChartType chartType;
+  final EmotionalActivitySource source;
+  final String userCategory;
+  final List<ReportFilterOption> userCategories;
+  final String department;
+  final List<ReportFilterOption> departmentOptions;
+  final ValueChanged<String> onYearChanged;
+  final ValueChanged<_ReportPeriod> onPeriodChanged;
+  final VoidCallback onCustomPeriod;
+  final ValueChanged<EmotionalActivitySource> onSourceChanged;
+  final ValueChanged<String> onUserCategoryChanged;
+  final ValueChanged<String> onDepartmentChanged;
+  final ValueChanged<ReportChartType> onChartChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final options = years.isEmpty
+        ? [
+            AcademicYearRecord(
+              schoolYear: schoolYear,
+              startDate: '',
+              endDate: '',
+              status: 'current',
+            ),
+          ]
+        : years;
+    final activeDept = departmentOptions.any((item) => item.key == department)
+        ? department
+        : 'all';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+      decoration: _panelDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'EMOTIONAL ACTIVITY FILTERS',
+            style: TextStyle(
+              color: AdminColors.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final twoColumns = constraints.maxWidth >= 700;
+              final fieldWidth = twoColumns
+                  ? (constraints.maxWidth - 28) / 3
+                  : constraints.maxWidth;
+              return Wrap(
+                spacing: 14,
+                runSpacing: 14,
+                children: [
+                  SizedBox(
+                    width: fieldWidth,
+                    child: _LabeledControl(
+                      label: 'Academic year',
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey('emo-yr-$schoolYear'),
+                        initialValue:
+                            options.any((item) => item.schoolYear == schoolYear)
+                            ? schoolYear
+                            : options.first.schoolYear,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.school_outlined),
+                        ),
+                        items: options
+                            .map(
+                              (item) => DropdownMenuItem(
+                                value: item.schoolYear,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        item.schoolYear,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (item.status == 'current') ...[
+                                      const SizedBox(width: 8),
+                                      const _CurrentBadge(),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) onYearChanged(value);
+                        },
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: fieldWidth,
+                    child: _LabeledControl(
+                      label: 'Reporting period',
+                      child: DropdownButtonFormField<_ReportPeriod>(
+                        key: ValueKey('emo-period-${period.name}'),
+                        initialValue: period,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.date_range_outlined),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: _ReportPeriod.wholeYear,
+                            child: Text('Whole year'),
+                          ),
+                          DropdownMenuItem(
+                            value: _ReportPeriod.firstSemester,
+                            child: Text('1st semester'),
+                          ),
+                          DropdownMenuItem(
+                            value: _ReportPeriod.secondSemester,
+                            child: Text('2nd semester'),
+                          ),
+                          DropdownMenuItem(
+                            value: _ReportPeriod.custom,
+                            child: Text('Custom dates'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == _ReportPeriod.custom) {
+                            onCustomPeriod();
+                          } else if (value != null) {
+                            onPeriodChanged(value);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: fieldWidth,
+                    child: _LabeledControl(
+                      label: 'College / department',
+                      child: DropdownButtonFormField<String>(
+                        key: ValueKey('emo-dept-$activeDept'),
+                        initialValue: activeDept,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.account_balance_outlined),
+                        ),
+                        items: [
+                          const DropdownMenuItem(
+                            value: 'all',
+                            child: Text('All colleges & departments'),
+                          ),
+                          ...departmentOptions.map(
+                            (item) => DropdownMenuItem(
+                              value: item.key,
+                              child: Text(
+                                item.label,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) onDepartmentChanged(value);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 24,
+            runSpacing: 14,
+            crossAxisAlignment: WrapCrossAlignment.end,
+            children: [
+              _LabeledControl(
+                label: 'Approved data source',
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SegmentedButton<EmotionalActivitySource>(
+                    showSelectedIcon: false,
+                    segments: [
+                      for (final option in EmotionalActivitySource.values)
+                        ButtonSegment(value: option, label: Text(option.label)),
+                    ],
+                    selected: {source},
+                    onSelectionChanged: (values) =>
+                        onSourceChanged(values.first),
+                  ),
+                ),
+              ),
+              _LabeledControl(
+                label: 'Population category',
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('All'),
+                      selected: userCategory == 'all',
+                      onSelected: (_) => onUserCategoryChanged('all'),
+                    ),
+                    for (final category in userCategories)
+                      ChoiceChip(
+                        label: Text(category.label),
+                        selected: userCategory == category.key,
+                        onSelected: (_) => onUserCategoryChanged(category.key),
+                      ),
+                  ],
+                ),
+              ),
+              _LabeledControl(
+                label: 'Visualization',
+                child: SegmentedButton<ReportChartType>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(
+                      value: ReportChartType.bar,
+                      icon: Icon(Icons.bar_chart, size: 18),
+                      label: Text('Bar'),
+                    ),
+                    ButtonSegment(
+                      value: ReportChartType.pie,
+                      icon: Icon(Icons.pie_chart_outline, size: 18),
+                      label: Text('Pie'),
+                    ),
+                  ],
+                  selected: {chartType},
+                  onSelectionChanged: (values) => onChartChanged(values.first),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Icon(
+                Icons.privacy_tip_outlined,
+                size: 15,
+                color: AdminColors.muted,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '${report.emotionalActivity.departmentCoverageNote} Small cohorts (n < ${report.emotionalActivity.suppressionThreshold}) are suppressed; journal notes and photos are excluded.',
+                  style: const TextStyle(
+                    color: AdminColors.muted,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmotionalActivityReportView extends StatelessWidget {
+  const _EmotionalActivityReportView({
+    super.key,
+    required this.report,
+    required this.chartType,
+  });
+
+  final AdminReportAnalytics report;
+  final ReportChartType chartType;
+
+  String _bucketValue(
+    EmotionalActivityBucket bucket,
+    int suppressionThreshold,
+  ) => bucket.suppressed || bucket.percentage == null
+      ? 'Suppressed (n < $suppressionThreshold)'
+      : _formatPercent(bucket.percentage!);
+
+  @override
+  Widget build(BuildContext context) {
+    final emotional = report.emotionalActivity;
+    final header = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Emotional activity results · ${report.population.schoolYear}',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${emotional.dateRangeLabel} · ${emotional.sourceScopeLabel} · ${report.userScopeLabel} · ${report.appointmentDepartmentScopeLabel}',
+          style: const TextStyle(color: AdminColors.muted),
+        ),
+      ],
+    );
+
+    if (emotional.suppressed) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: _panelDecoration,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(
+                      Icons.verified_user_outlined,
+                      color: AdminColors.accentStrong,
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Privacy protection active',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  emotional.suppressionReason ??
+                      'Suppressed to protect privacy: fewer than ${emotional.suppressionThreshold} unique participants matched the active filters.',
+                  style: const TextStyle(color: AdminColors.muted),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (emotional.isEmpty || !emotional.isReady) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: _panelDecoration,
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'No emotional activity data available for the selected filters.',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'Try broadening the academic year, reporting period, college, or approved data source.',
+                  style: TextStyle(color: AdminColors.muted),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    final chartItems = emotional.valenceBreakdown
+        .where((item) => !item.suppressed && item.percentage != null)
+        .map(
+          (item) => ReportPercentageItem(
+            key: item.key,
+            label: item.label,
+            percentage: item.percentage!,
+          ),
+        )
+        .toList(growable: false);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        header,
+        const SizedBox(height: 14),
+        _SummaryCards(
+          cards: [
+            _SummaryValue(
+              label: 'Population participation',
+              value: emotional.participationRate != null
+                  ? _formatPercent(emotional.participationRate!)
+                  : emotional.appUserCohortShare != null
+                  ? _formatPercent(emotional.appUserCohortShare!)
+                  : 'Not available',
+              note: emotional.participationRate != null
+                  ? 'Unique participants / ${report.population.schoolYear} population'
+                  : 'Unique participants / active cohort',
+              icon: Icons.groups_outlined,
+            ),
+            _SummaryValue(
+              label: 'Primary emotional pattern',
+              value:
+                  emotional.dominantValenceLabel ??
+                  'Suppressed (n < ${emotional.suppressionThreshold})',
+              note: emotional.hasMixedCategories
+                  ? 'Includes mixed user categories'
+                  : report.userScopeLabel,
+              icon: Icons.favorite_outline,
+            ),
+            _SummaryValue(
+              label: 'Mood vs assessments mix',
+              value:
+                  emotional.moodCheckInShare != null &&
+                      emotional.assessmentShare != null
+                  ? '${_formatPercent(emotional.moodCheckInShare!)} / ${_formatPercent(emotional.assessmentShare!)}'
+                  : emotional.sourceScopeLabel,
+              note:
+                  emotional.moodCheckInShare != null &&
+                      emotional.assessmentShare != null
+                  ? 'Mood check-ins / verified assessments'
+                  : 'Source breakdown gated at n >= ${emotional.suppressionThreshold}',
+              icon: Icons.pie_chart_outline,
+            ),
+            _SummaryValue(
+              label: 'Privacy guard',
+              value: 'n >= ${emotional.suppressionThreshold}',
+              note: 'Small groups & raw text/images omitted',
+              icon: Icons.shield_outlined,
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        if (chartItems.isNotEmpty)
+          _ChartPanel(
+            title: 'Emotional pattern distribution',
+            subtitle:
+                'Unsuppressed aggregate percentages only · small sub-cells marked as suppressed',
+            data: chartItems,
+            chartType: chartType,
+          ),
+        if (chartItems.isNotEmpty) const SizedBox(height: 18),
+        _PercentageTable(
+          title: 'Emotional valence summary',
+          headers: const ['Emotional pattern', 'Share'],
+          rows: emotional.valenceBreakdown
+              .map(
+                (item) => [
+                  item.label,
+                  _bucketValue(item, emotional.suppressionThreshold),
+                ],
+              )
+              .toList(growable: false),
+        ),
+        if (emotional.moodBreakdown.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          _PercentageTable(
+            title: 'Mood check-in breakdown',
+            headers: const ['Mood state', 'Share'],
+            rows: emotional.moodBreakdown
+                .map(
+                  (item) => [
+                    item.label,
+                    _bucketValue(item, emotional.suppressionThreshold),
+                  ],
+                )
+                .toList(growable: false),
+          ),
+        ],
+        if (emotional.assessmentBreakdown.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          _PercentageTable(
+            title: 'Well-being assessment breakdown',
+            headers: const ['Assessment pattern', 'Share'],
+            rows: emotional.assessmentBreakdown
+                .map(
+                  (item) => [
+                    item.label,
+                    _bucketValue(item, emotional.suppressionThreshold),
+                  ],
+                )
+                .toList(growable: false),
+          ),
+        ],
+        if (emotional.periodTrends.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          _PercentageTable(
+            title: 'Monthly emotional activity trend',
+            headers: const ['Period', 'Share of activity'],
+            rows: emotional.periodTrends
+                .map(
+                  (item) => [
+                    item.label,
+                    _bucketValue(item, emotional.suppressionThreshold),
+                  ],
+                )
+                .toList(growable: false),
+          ),
+        ],
+      ],
+    );
+  }
 }
 
 class _LoadingPanel extends StatelessWidget {

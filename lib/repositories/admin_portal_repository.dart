@@ -1014,6 +1014,49 @@ class AdminPortalRepository {
     String? schoolYear,
     DateTime? startDate,
     DateTime? endDate,
+  }) => _callReportAnalytics(
+    userCategory: userCategory,
+    appointmentDepartment: appointmentDepartment,
+    schoolYear: schoolYear,
+    startDate: startDate,
+    endDate: endDate,
+    emotionalSource: 'all',
+  );
+
+  Future<AdminReportAnalytics> fetchEmotionalReportAnalytics({
+    String userCategory = 'all',
+    String appointmentDepartment = 'all',
+    String? schoolYear,
+    DateTime? startDate,
+    DateTime? endDate,
+    String emotionalSource = 'all',
+  }) {
+    if (emotionalSource == 'all') {
+      return fetchReportAnalytics(
+        userCategory: userCategory,
+        appointmentDepartment: appointmentDepartment,
+        schoolYear: schoolYear,
+        startDate: startDate,
+        endDate: endDate,
+      );
+    }
+    return _callReportAnalytics(
+      userCategory: userCategory,
+      appointmentDepartment: appointmentDepartment,
+      schoolYear: schoolYear,
+      startDate: startDate,
+      endDate: endDate,
+      emotionalSource: emotionalSource,
+    );
+  }
+
+  Future<AdminReportAnalytics> _callReportAnalytics({
+    required String userCategory,
+    required String appointmentDepartment,
+    String? schoolYear,
+    DateTime? startDate,
+    DateTime? endDate,
+    required String emotionalSource,
   }) async {
     if (!currentAccessRole.canAccessClinicalData) {
       throw StateError('Counselor or administrator access is required.');
@@ -1026,6 +1069,7 @@ class AdminPortalRepository {
           'schoolYear': ?schoolYear,
           'startDate': ?startDate?.toUtc().toIso8601String(),
           'endDate': ?endDate?.toUtc().toIso8601String(),
+          'emotionalSource': emotionalSource,
         });
     final raw = result.data['report'];
     if (raw is! Map) {
