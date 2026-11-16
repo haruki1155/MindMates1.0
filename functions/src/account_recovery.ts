@@ -9,11 +9,72 @@ import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
 if (!getApps().length) initializeApp();
 
+const STAGING_ADMIN_WEB_URL = "https://paaccmindmate.com";
+const PRODUCTION_ADMIN_WEB_URL = "https://mind-mates-cd2cf.web.app";
+const PRODUCTION_PROJECT_ID = "mind-mates-cd2cf";
+const DEVELOPMENT_PROJECT_ID = "mindmate-dev-4e91c";
+const OBSOLETE_ADMIN_WEB_HOSTS = new Set(["mindmate-admin-staging.vercel.app"]);
+const STAGING_ADMIN_WEB_HOSTS = new Set([
+  "paaccmindmate.com",
+  "www.paaccmindmate.com",
+  "mindmate-staging.web.app",
+  "mindmate-staging.firebaseapp.com",
+  "mindmate-admin-staging.vercel.app",
+]);
+const PRODUCTION_ADMIN_WEB_HOSTS = new Set([
+  "mind-mates-cd2cf.web.app",
+  "mind-mates-cd2cf.firebaseapp.com",
+]);
+const DEVELOPMENT_ADMIN_WEB_HOSTS = new Set([
+  "mindmate-dev-4e91c.web.app",
+  "mindmate-dev-4e91c.firebaseapp.com",
+]);
+
 const db = getFirestore();
 const smtpAppPassword = defineSecret("SMTP_APP_PASSWORD");
 const adminWebUrl = defineString("ADMIN_WEB_URL", {
-  default: "https://mindmate-admin-staging.vercel.app",
+  default: STAGING_ADMIN_WEB_URL,
 });
+
+function currentFirebaseProjectId(): string | undefined {
+  if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
+  const rawConfig = process.env.FIREBASE_CONFIG;
+  if (!rawConfig) return undefined;
+  try {
+    const parsed = JSON.parse(rawConfig) as {projectId?: unknown};
+    return typeof parsed.projectId === "string" ? parsed.projectId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveAdminWebUrl(
+  configuredUrl = adminWebUrl.value(),
+  projectId = currentFirebaseProjectId(),
+): string {
+  const isProduction = projectId === PRODUCTION_PROJECT_ID;
+  const fallback = isProduction ? PRODUCTION_ADMIN_WEB_URL : STAGING_ADMIN_WEB_URL;
+  const trimmed = configuredUrl.trim();
+  if (!trimmed) return fallback;
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    const isLocalhost = host === "localhost" || host === "127.0.0.1";
+    if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLocalhost)) {
+      return fallback;
+    }
+    if (OBSOLETE_ADMIN_WEB_HOSTS.has(host)) return fallback;
+    if (isProduction && (STAGING_ADMIN_WEB_HOSTS.has(host) || DEVELOPMENT_ADMIN_WEB_HOSTS.has(host))) {
+      return fallback;
+    }
+    if (!isProduction && PRODUCTION_ADMIN_WEB_HOSTS.has(host)) {
+      return fallback;
+    }
+    return parsed.origin;
+  } catch {
+    return fallback;
+  }
+}
 const smtpHost = defineString("SMTP_HOST", {default: "smtp.gmail.com"});
 const smtpPort = defineString("SMTP_PORT", {default: "587"});
 const smtpUsername = defineString("SMTP_USERNAME", {
@@ -284,10 +345,11 @@ async function requestStaffEmailVerificationHandler(request: CallableRequest) {
   const email = authUser.email;
   if (!email) throw new HttpsError("failed-precondition", "This account does not have an email address.");
   await enforceVerificationRateLimit(userId, requestIp(request));
+  const webBaseUrl = resolveAdminWebUrl();
   const firebaseLink = await getAuth().generateEmailVerificationLink(email, {
-    url: `${adminWebUrl.value().replace(/\/$/, "")}/verify-email`,
+    url: `${webBaseUrl}/verify-email`,
   });
-  const verificationLink = directEmailActionLink(firebaseLink, adminWebUrl.value());
+  const verificationLink = directEmailActionLink(firebaseLink, webBaseUrl);
   const name = String(profile.data()?.firstName ?? profile.data()?.name ?? "there").trim();
   const safeName = escapeHtml(name || "there");
   const safeEmail = escapeHtml(email);
@@ -329,10 +391,11 @@ async function requestAdminPasswordResetHandler(request: CallableRequest) {
   const email = normalizeRecoveryEmail(request.data?.email);
   await enforcePasswordResetRateLimit(email, requestIp(request));
 
+  const webBaseUrl = resolveAdminWebUrl();
   let firebaseLink: string;
   try {
     firebaseLink = await getAuth().generatePasswordResetLink(email, {
-      url: `${adminWebUrl.value().replace(/\/$/, "")}/`,
+      url: `${webBaseUrl}/`,
     });
   } catch (error: unknown) {
     if ((error as {code?: string})?.code === "auth/user-not-found") {
@@ -341,7 +404,7 @@ async function requestAdminPasswordResetHandler(request: CallableRequest) {
     throw error;
   }
 
-  const resetLink = directPasswordResetLink(firebaseLink, adminWebUrl.value());
+  const resetLink = directPasswordResetLink(firebaseLink, webBaseUrl);
   const sender = smtpSender.value().trim();
   const safeEmail = escapeHtml(email);
   try {
