@@ -64,6 +64,14 @@ const accounts: Record<string, {verified: boolean; profile: Record<string, unkno
       assignedCollegeIds: [collegeAId],
     },
   },
+  "counselor-unassigned": {
+    verified: true,
+    profile: {
+      accessRole: "counselor",
+      staffAccountStatus: "approved",
+      accountStatus: "active",
+    },
+  },
   staff: {
     verified: true,
     profile: {accessRole: "portalStaff", staffAccountStatus: "approved", accountStatus: "active"},
@@ -305,5 +313,29 @@ test(
     assert.equal(emptyRes.report.appointments.totalAppointments, 0);
     assert.equal(emptyRes.report.emotionalActivity.status, "no_data");
     assert.ok(!JSON.stringify(res.report).includes("CONFIDENTIAL_NOTE"));
+
+    // Counselor without college assignments fails closed.
+    await rejects(
+      fetchReport.run({
+        auth: {uid: uid("counselor-unassigned")},
+        data: {schoolYear: "2037-2038"},
+      }),
+      "permission-denied",
+    );
+
+    // Distinct academic years remain isolated: 2038-2039 does not mirror 2037-2038.
+    const wholeYear3738 = await fetchReport.run({
+      auth: {uid: uid("admin")},
+      data: {schoolYear: "2037-2038"},
+    });
+    const wholeYear3839 = await fetchReport.run({
+      auth: {uid: uid("admin")},
+      data: {schoolYear: "2038-2039"},
+    });
+    assert.ok(wholeYear3738.report.users.overallActivePercentage > 0);
+    assert.ok(wholeYear3738.report.appointments.totalAppointments > 0);
+    assert.equal(wholeYear3839.report.users.overallActivePercentage, 0);
+    assert.equal(wholeYear3839.report.appointments.totalAppointments, 0);
+    assert.equal(wholeYear3839.report.emotionalActivity.status, "no_data");
   },
 );
