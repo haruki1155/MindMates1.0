@@ -1050,10 +1050,48 @@ class AdminPortalRepository {
     );
   }
 
+  /// Fetches report analytics with optional college-scoped [program] and
+  /// [periodLabel] filters while preserving backward compatibility for legacy
+  /// test overrides of [fetchReportAnalytics] and
+  /// [fetchEmotionalReportAnalytics].
+  Future<AdminReportAnalytics> fetchFilteredReportAnalytics({
+    String userCategory = 'all',
+    String appointmentDepartment = 'all',
+    String program = 'all',
+    String? schoolYear,
+    String? periodLabel,
+    DateTime? startDate,
+    DateTime? endDate,
+    String emotionalSource = 'all',
+  }) {
+    if (program == 'all' && periodLabel == null) {
+      return fetchEmotionalReportAnalytics(
+        userCategory: userCategory,
+        appointmentDepartment: appointmentDepartment,
+        schoolYear: schoolYear,
+        startDate: startDate,
+        endDate: endDate,
+        emotionalSource: emotionalSource,
+      );
+    }
+    return _callReportAnalytics(
+      userCategory: userCategory,
+      appointmentDepartment: appointmentDepartment,
+      program: program,
+      schoolYear: schoolYear,
+      periodLabel: periodLabel,
+      startDate: startDate,
+      endDate: endDate,
+      emotionalSource: emotionalSource,
+    );
+  }
+
   Future<AdminReportAnalytics> _callReportAnalytics({
     required String userCategory,
     required String appointmentDepartment,
+    String program = 'all',
     String? schoolYear,
+    String? periodLabel,
     DateTime? startDate,
     DateTime? endDate,
     required String emotionalSource,
@@ -1066,7 +1104,9 @@ class AdminPortalRepository {
         .call<Map<String, dynamic>>({
           'userCategory': userCategory,
           'appointmentDepartment': appointmentDepartment,
+          'program': program,
           'schoolYear': ?schoolYear,
+          'periodLabel': ?periodLabel,
           'startDate': ?startDate?.toUtc().toIso8601String(),
           'endDate': ?endDate?.toUtc().toIso8601String(),
           'emotionalSource': emotionalSource,

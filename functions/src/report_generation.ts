@@ -33,10 +33,29 @@ export interface UserCategoryReport {
   activePercentage: number;
 }
 
+export interface AppliedReportFilters {
+  schoolYear: string;
+  periodLabel: string;
+  startDate: string;
+  endDate: string;
+  userCategory: string;
+  userCategoryLabel: string;
+  collegeKey: string;
+  collegeLabel: string;
+  programKey: string;
+  programLabel: string;
+  emotionalSource: EmotionalActivitySourceScope;
+  emotionalSourceLabel: string;
+  collegeOptions: FilterOption[];
+  programOptions: FilterOption[];
+  programOptionsByCollege: Record<string, FilterOption[]>;
+}
+
 export interface ReportAnalytics {
   generatedAt: string;
   activeWindowDays: number;
   dateRange: {startDate: string; endDate: string; label: string};
+  filters: AppliedReportFilters;
   population: {
     schoolYear: string;
     departments: string[];
@@ -94,6 +113,13 @@ const roleLabels: Record<string, string> = {
   unspecified: "Category not specified",
 };
 
+const ALLOWED_PERIOD_LABELS = new Set([
+  "Whole academic year",
+  "1st semester",
+  "2nd semester",
+  "Custom date range",
+]);
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -113,10 +139,25 @@ function dateValue(value: unknown): Date | undefined {
   if (value instanceof Timestamp) return value.toDate();
   if (value instanceof Date) return value;
   if (typeof value === "string") {
-    const parsed = new Date(value);
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const parsed = new Date(`${trimmed}T00:00:00+08:00`);
+      return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+    }
+    const parsed = new Date(trimmed);
     if (!Number.isNaN(parsed.getTime())) return parsed;
   }
   return undefined;
+}
+
+function exclusiveEndDateValue(value: unknown): Date | undefined {
+  const parsed = dateValue(value);
+  if (!parsed) return undefined;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return new Date(parsed.getTime() + 86400000);
+  }
+  return parsed;
 }
 
 function academicYearRange(
@@ -146,14 +187,27 @@ function academicYearRange(
   };
 }
 
-function isActive(user: RecordData, cutoff: Date): boolean {
+function isActiveInWindow(
+  user: RecordData,
+  cutoff: Date,
+  range: {start: Date; end: Date},
+  useExplicitRange: boolean,
+): boolean {
   const lastActive = dateValue(user.lastActiveAt);
-  if (lastActive && lastActive >= cutoff) return true;
+  const inBounds = (instant: Date | undefined): boolean => {
+    if (!instant) return false;
+    return useExplicitRange
+      ? instant >= range.start && instant < range.end
+      : instant >= cutoff;
+  };
+  if (inBounds(lastActive)) return true;
   if (!Array.isArray(user.activeDateKeys)) return false;
   return user.activeDateKeys.some((value) => {
     if (typeof value !== "string") return false;
-    const date = new Date(`${value}T00:00:00Z`);
-    return !Number.isNaN(date.getTime()) && date >= cutoff;
+    const date = useExplicitRange
+      ? new Date(`${value}T00:00:00+08:00`)
+      : new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && inBounds(date);
   });
 }
 
@@ -192,9 +246,43 @@ function rateGroups(values: string[], denominator: number): PercentageItem[] {
     .map(([key, value]) => ({
       key,
       label: value.label,
-      percentage: Math.round((value.count / denominator) * 1000) / 10,
+      percentage: denominator > 0 ? Math.round((value.count / denominator) * 1000) / 10 : 0,
     }))
     .sort((a, b) => b.percentage - a.percentage || a.label.localeCompare(b.label));
+}
+
+function userCollegeInfo(
+  data: RecordData,
+  collegeNameById: ReadonlyMap<string, string>,
+): {label: string; keys: Set<string>} {
+  const collegeId = text(data.collegeId);
+  const resolved = collegeId ? text(collegeNameById.get(collegeId)) : "";
+  const department = text(data.department);
+  const college = text(data.college);
+  const label = department || college || resolved || "Not specified";
+  const keys = new Set<string>();
+  for (const cand of [department, college, resolved, collegeId]) {
+    if (cand) keys.add(cand.toLocaleLowerCase("en-US"));
+  }
+  if (keys.size === 0) keys.add("not specified");
+  return {label, keys};
+}
+
+function userProgramInfo(
+  data: RecordData,
+  courseNameById: ReadonlyMap<string, string>,
+): {label: string; keys: Set<string>} {
+  const courseId = text(data.courseId);
+  const resolved = courseId ? text(courseNameById.get(courseId)) : "";
+  const course = text(data.course);
+  const program = text(data.program);
+  const label = course || program || resolved || "Not specified";
+  const keys = new Set<string>();
+  for (const cand of [course, program, resolved, courseId]) {
+    if (cand) keys.add(cand.toLocaleLowerCase("en-US"));
+  }
+  if (keys.size === 0) keys.add("not specified");
+  return {label, keys};
 }
 
 export function buildReportAnalytics(
@@ -204,6 +292,8 @@ export function buildReportAnalytics(
   filters: {
     userCategory?: string;
     appointmentDepartment?: string;
+    program?: string;
+    periodLabel?: string;
     startDate?: string;
     endDate?: string;
     emotionalSource?: EmotionalActivitySourceScope;
@@ -230,9 +320,20 @@ export function buildReportAnalytics(
     moods?: RecordData[];
     assessments?: RecordData[];
     collegeNameById?: ReadonlyMap<string, string>;
+    courseNameById?: ReadonlyMap<string, string>;
     emotionalDepartmentOptions?: FilterOption[];
+    programOptionsByCollege?: Record<string, FilterOption[]>;
   } = {},
 ): ReportAnalytics {
+  const collegeNameById = emotionalInput.collegeNameById ?? new Map<string, string>();
+  const courseNameById = emotionalInput.courseNameById ?? new Map<string, string>();
+  const requestedUserCategory = filters.userCategory ?? "all";
+  const requestedDepartment = (filters.appointmentDepartment ?? "all")
+    .toLocaleLowerCase("en-US");
+  const requestedProgram = (filters.program ?? "all")
+    .toLocaleLowerCase("en-US");
+  const emotionalSource: EmotionalActivitySourceScope = filters.emotionalSource ?? "all";
+
   const appUsers = users.filter(({data}) => {
     const legacyRole = text(data.role).toLowerCase();
     const accessRole = text(data.accessRole) ||
@@ -240,27 +341,60 @@ export function buildReportAnalytics(
     return accessRole === "appUser" && data.staffAccountStatus == null;
   });
   const appUserIds = new Set(appUsers.map(({id}) => id));
+  const userById = new Map(appUsers.map((user) => [user.id, user.data]));
+
+  const academicRange = academicYearRange(
+    population.schoolYear,
+    population.startDate,
+    population.endDate,
+  );
+  const requestedStart = dateValue(filters.startDate);
+  const requestedEnd = exclusiveEndDateValue(filters.endDate);
+  const hasExplicitRange = Boolean(requestedStart && requestedEnd);
+  const range = hasExplicitRange ?
+    {start: requestedStart!, end: requestedEnd!} : academicRange;
+  const resolvedPeriodLabel = text(filters.periodLabel) ||
+    (hasExplicitRange ? "Custom date range" : `Academic year ${population.schoolYear}`);
+
+  const matchesUserCollegeAndProgram = (data: RecordData): boolean => {
+    if (requestedDepartment !== "all") {
+      const col = userCollegeInfo(data, collegeNameById);
+      if (!col.keys.has(requestedDepartment)) return false;
+    }
+    if (requestedProgram !== "all") {
+      const prog = userProgramInfo(data, courseNameById);
+      if (!prog.keys.has(requestedProgram)) return false;
+    }
+    return true;
+  };
+
+  const baseUsersForCategory = appUsers.filter(({data}) =>
+    matchesUserCollegeAndProgram(data),
+  );
   const cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const allCategories = ["student", "teaching", "nonTeaching", "unspecified"]
     .map((key): UserCategoryReport => {
-      const categoryUsers = appUsers.filter(
+      const categoryUsers = baseUsersForCategory.filter(
         ({data}) => normalizedPopulationRole(data) === key,
       );
-      const categoryActive = categoryUsers.filter(({data}) => isActive(data, cutoff));
+      const categoryActive = categoryUsers.filter(({data}) =>
+        isActiveInWindow(data, cutoff, range, hasExplicitRange),
+      );
       return {
         key,
         label: roleLabels[key],
-        populationPercentage: percent(categoryUsers.length, appUsers.length),
+        populationPercentage: percent(categoryUsers.length, baseUsersForCategory.length),
         activePercentage: percent(categoryActive.length, categoryUsers.length),
       };
     })
     .filter((item) => item.populationPercentage > 0);
 
-  const requestedUserCategory = filters.userCategory ?? "all";
-  const scopedUsers = requestedUserCategory === "all" ? appUsers : appUsers.filter(
+  const scopedUsers = requestedUserCategory === "all" ? baseUsersForCategory : baseUsersForCategory.filter(
     ({data}) => normalizedPopulationRole(data) === requestedUserCategory,
   );
-  const scopedActiveUsers = scopedUsers.filter(({data}) => isActive(data, cutoff));
+  const scopedActiveUsers = scopedUsers.filter(({data}) =>
+    isActiveInWindow(data, cutoff, range, hasExplicitRange),
+  );
   const selectedCategory = allCategories.find(
     (category) => category.key === requestedUserCategory,
   );
@@ -274,73 +408,114 @@ export function buildReportAnalytics(
   const eligibleAppointments = appointments.filter((appointment) =>
     appointment.source === "walk_in_import" || appUserIds.has(text(appointment.userId)),
   );
-  const academicRange = academicYearRange(
-    population.schoolYear,
-    population.startDate,
-    population.endDate,
-  );
-  const requestedStart = dateValue(filters.startDate);
-  const requestedEnd = dateValue(filters.endDate);
-  const range = requestedStart && requestedEnd ?
-    {start: requestedStart, end: requestedEnd} : academicRange;
-  const yearAppointments = eligibleAppointments.filter((appointment) => {
+  const appointmentCategory = (appointment: RecordData): string => {
+    const explicit = normalizedPopulationRole(appointment);
+    if (explicit !== "unspecified") return explicit;
+    const profile = userById.get(text(appointment.userId));
+    if (profile) return normalizedPopulationRole(profile);
+    if (appointment.source === "walk_in_import") return "student";
+    return "unspecified";
+  };
+
+  const categoryAndYearAppointments = eligibleAppointments.filter((appointment) => {
+    if (requestedUserCategory !== "all" && appointmentCategory(appointment) !== requestedUserCategory) {
+      return false;
+    }
     const appointmentDate = dateValue(appointment.scheduledAt) || dateValue(appointment.createdAt);
-    if (requestedStart && requestedEnd) {
+    if (hasExplicitRange) {
       return !!appointmentDate && appointmentDate >= range.start && appointmentDate < range.end;
     }
     if (text(appointment.academicYearId) === population.schoolYear) return true;
     if (text(appointment.academicYearId)) return false;
     return !appointmentDate || (appointmentDate >= range.start && appointmentDate < range.end);
   });
-  const userById = new Map(appUsers.map((user) => [user.id, user.data]));
-  const appointmentDepartment = (appointment: RecordData): string => {
+
+  const appointmentDepartment = (appointment: RecordData): {label: string; keys: Set<string>} => {
     const profile = userById.get(text(appointment.userId));
-    return text(appointment.department) || text(profile?.department) || "Not specified";
+    const directDept = text(appointment.department) || text(appointment.college);
+    const directId = text(appointment.collegeId);
+    const resolvedId = directId ? text(collegeNameById.get(directId)) : "";
+    const profileInfo = profile ? userCollegeInfo(profile, collegeNameById) : null;
+    const label = directDept || resolvedId || profileInfo?.label || "Not specified";
+    const keys = new Set<string>(profileInfo?.keys ?? []);
+    for (const cand of [directDept, resolvedId, directId]) {
+      if (cand) keys.add(cand.toLocaleLowerCase("en-US"));
+    }
+    if (keys.size === 0) keys.add("not specified");
+    return {label, keys};
   };
+
+  const appointmentProgram = (appointment: RecordData): {label: string; keys: Set<string>} => {
+    const profile = userById.get(text(appointment.userId));
+    const directCourse = text(appointment.course) || text(appointment.program);
+    const directCourseId = text(appointment.courseId);
+    const resolved = directCourseId ? text(courseNameById.get(directCourseId)) : "";
+    const profileInfo = profile ? userProgramInfo(profile, courseNameById) : null;
+    const label = directCourse || resolved || profileInfo?.label || "Not specified";
+    const keys = new Set<string>(profileInfo?.keys ?? []);
+    for (const cand of [directCourse, resolved, directCourseId]) {
+      if (cand) keys.add(cand.toLocaleLowerCase("en-US"));
+    }
+    if (keys.size === 0) keys.add("not specified");
+    return {label, keys};
+  };
+
   const departmentGroups = percentageGroups(
-    yearAppointments.map(appointmentDepartment),
+    categoryAndYearAppointments.map((a) => appointmentDepartment(a).label),
   );
   const departmentAppointmentRates = departmentGroups.map((item) => ({
     ...item,
     percentage: population.configured && population.populations[item.label] != null ?
-      Math.round((yearAppointments.filter((appointment) => appointmentDepartment(appointment) === item.label).length /
+      Math.round((categoryAndYearAppointments.filter((a) => appointmentDepartment(a).label === item.label).length /
         population.populations[item.label]) * 1000) / 10 : 0,
   }));
-  const requestedDepartment = (filters.appointmentDepartment ?? "all")
-    .toLocaleLowerCase("en-US");
   const selectedDepartment = departmentGroups.find(
     (department) => department.key === requestedDepartment,
   );
-  const includedAppointments = requestedDepartment === "all" ?
-    yearAppointments : yearAppointments.filter(
-      (appointment) => appointmentDepartment(appointment)
-        .toLocaleLowerCase("en-US") === requestedDepartment,
-    );
+  const includedAppointments = categoryAndYearAppointments.filter((appointment) => {
+    if (requestedDepartment !== "all" && !appointmentDepartment(appointment).keys.has(requestedDepartment)) {
+      return false;
+    }
+    if (requestedProgram !== "all" && !appointmentProgram(appointment).keys.has(requestedProgram)) {
+      return false;
+    }
+    return true;
+  });
   const includedDepartmentRates = requestedDepartment === "all" ?
     departmentAppointmentRates : departmentAppointmentRates.filter(
       (department) => department.key === requestedDepartment,
     );
   const valuesFor = (field: "department" | "course" | "yearLevel"): string[] =>
     includedAppointments.map((appointment) => {
+      if (field === "department") return appointmentDepartment(appointment).label;
+      if (field === "course") return appointmentProgram(appointment).label;
       const profile = userById.get(text(appointment.userId));
-      if (field === "department") return appointmentDepartment(appointment);
       return text(appointment[field]) || text(profile?.[field]) || "Not specified";
     });
-  const selectedPopulation = requestedDepartment === "all" ?
-    population.totalPopulation : population.populations[selectedDepartment?.label ?? ""] ?? 0;
-  const studentKeys = new Set(yearAppointments.map((appointment) =>
+  const matchedPopulationKey = Object.keys(population.populations).find(
+    (name) => name.toLocaleLowerCase("en-US") === requestedDepartment,
+  );
+  const selectedPopulation = !population.configured
+    ? 0
+    : requestedDepartment === "all"
+    ? population.totalPopulation
+    : matchedPopulationKey != null
+    ? population.populations[matchedPopulationKey] ?? 0
+    : population.populations[selectedDepartment?.label ?? ""] ?? 0;
+
+  const studentKeys = new Set(includedAppointments.map((appointment) =>
     text(appointment.studentId) || text(appointment.userId) || text(appointment.fullName),
   ).filter(Boolean));
   const statusCounts: Record<string, number> = {};
-  for (const appointment of yearAppointments) {
+  for (const appointment of includedAppointments) {
     const status = text(appointment.status).toLowerCase() || "pending";
     statusCounts[status] = (statusCounts[status] ?? 0) + 1;
   }
   const completed = statusCounts.completed ?? statusCounts.complete ?? 0;
-  const scheduled = yearAppointments.filter((appointment) =>
+  const scheduled = includedAppointments.filter((appointment) =>
     !["cancelled", "canceled", "no-show", "noshow"].includes(text(appointment.status).toLowerCase()),
   ).length;
-  const waitingTimes = yearAppointments.map((appointment) => {
+  const waitingTimes = includedAppointments.map((appointment) => {
     const created = dateValue(appointment.createdAt);
     const scheduledAt = dateValue(appointment.scheduledAt);
     return created && scheduledAt && scheduledAt >= created ?
@@ -348,21 +523,16 @@ export function buildReportAnalytics(
   }).filter((value): value is number => value != null);
   const waitingTimeDays = waitingTimes.length === 0 ? null :
     Math.round(waitingTimes.reduce((sum, value) => sum + value, 0) / waitingTimes.length * 10) / 10;
-  const rescheduledAppointments = yearAppointments.filter((appointment) => {
+  const rescheduledAppointments = includedAppointments.filter((appointment) => {
     const status = text(appointment.status).toLowerCase();
     return status === "rescheduled" || status === "schedule_adjustment_needed" ||
       status === "schedule-adjustment-needed";
   }).length;
 
-  const emotionalPopKey = Object.keys(population.populations).find(
-    (name) => name.toLocaleLowerCase("en-US") === requestedDepartment,
-  );
   const emotionalPopulation = !population.configured
     ? null
-    : requestedDepartment === "all"
-    ? population.totalPopulation
-    : emotionalPopKey != null
-    ? population.populations[emotionalPopKey] ?? null
+    : selectedPopulation > 0
+    ? selectedPopulation
     : null;
 
   const fallbackDepartmentOptions: FilterOption[] = (
@@ -373,6 +543,15 @@ export function buildReportAnalytics(
     }))
   ).slice();
 
+  const programOptionsByCollege: Record<string, FilterOption[]> =
+    emotionalInput.programOptionsByCollege ?? {};
+  const currentProgramOptions: FilterOption[] =
+    requestedDepartment === "all"
+      ? [...new Map(
+          Object.values(programOptionsByCollege).flat().map((opt) => [opt.key, opt]),
+        ).values()].sort((a, b) => a.label.localeCompare(b.label))
+      : programOptionsByCollege[requestedDepartment] ?? [];
+
   const emotionalActivity = {
     ...buildEmotionalActivityReport({
       users,
@@ -381,14 +560,16 @@ export function buildReportAnalytics(
       assessments: emotionalInput.assessments ?? [],
       range: {
         ...range,
-        label: requestedStart && requestedEnd ? "Custom date range" : `Academic year ${population.schoolYear}`,
+        label: resolvedPeriodLabel,
       },
       schoolYear: population.schoolYear,
       userCategory: requestedUserCategory,
       department: requestedDepartment,
-      source: filters.emotionalSource ?? "all",
+      program: requestedProgram,
+      source: emotionalSource,
       configuredPopulation: emotionalPopulation,
-      collegeNameById: emotionalInput.collegeNameById,
+      collegeNameById,
+      courseNameById,
     }),
     departmentOptions: fallbackDepartmentOptions,
   };
@@ -396,14 +577,33 @@ export function buildReportAnalytics(
   const requestedDeptOption = fallbackDepartmentOptions.find(
     (option) => option.key === requestedDepartment,
   );
-  const resolvedCollegeLabel = emotionalInput.collegeNameById
-    ? [...emotionalInput.collegeNameById.entries()]
-        .find(
-          ([id, name]) =>
-            id.toLocaleLowerCase("en-US") === requestedDepartment ||
-            name.toLocaleLowerCase("en-US") === requestedDepartment,
-        )?.[1]
-    : undefined;
+  const resolvedCollegeLabel = [...collegeNameById.entries()]
+    .find(
+      ([id, name]) =>
+        id.toLocaleLowerCase("en-US") === requestedDepartment ||
+        name.toLocaleLowerCase("en-US") === requestedDepartment,
+    )?.[1];
+  const resolvedCollegeDisplay = requestedDepartment === "all"
+    ? "All colleges & departments"
+    : selectedDepartment?.label ??
+      requestedDeptOption?.label ??
+      resolvedCollegeLabel ??
+      "Selected college";
+
+  const requestedProgramOption =
+    currentProgramOptions.find((o) => o.key === requestedProgram) ??
+    Object.values(programOptionsByCollege)
+      .flat()
+      .find((o) => o.key === requestedProgram);
+  const resolvedCourseLabel = [...courseNameById.entries()]
+    .find(
+      ([id, name]) =>
+        id.toLocaleLowerCase("en-US") === requestedProgram ||
+        name.toLocaleLowerCase("en-US") === requestedProgram,
+    )?.[1];
+  const resolvedProgramDisplay = requestedProgram === "all"
+    ? "All programs"
+    : requestedProgramOption?.label ?? resolvedCourseLabel ?? requestedProgram;
 
   return {
     generatedAt: now.toISOString(),
@@ -411,7 +611,27 @@ export function buildReportAnalytics(
     dateRange: {
       startDate: range.start.toISOString(),
       endDate: range.end.toISOString(),
-      label: requestedStart && requestedEnd ? "Custom date range" : `Academic year ${population.schoolYear}`,
+      label: resolvedPeriodLabel,
+    },
+    filters: {
+      schoolYear: population.schoolYear,
+      periodLabel: resolvedPeriodLabel,
+      startDate: range.start.toISOString(),
+      endDate: range.end.toISOString(),
+      userCategory: requestedUserCategory,
+      userCategoryLabel:
+        requestedUserCategory === "all"
+          ? "All categories"
+          : roleLabels[requestedUserCategory] ?? "Category",
+      collegeKey: requestedDepartment,
+      collegeLabel: resolvedCollegeDisplay,
+      programKey: requestedProgram,
+      programLabel: resolvedProgramDisplay,
+      emotionalSource,
+      emotionalSourceLabel: emotionalActivity.sourceScopeLabel,
+      collegeOptions: fallbackDepartmentOptions,
+      programOptions: currentProgramOptions,
+      programOptionsByCollege,
     },
     population,
     users: {
@@ -423,10 +643,10 @@ export function buildReportAnalytics(
       categories,
     },
     appointments: {
-      totalAppointments: yearAppointments.length,
+      totalAppointments: includedAppointments.length,
       uniqueStudentsServed: studentKeys.size,
-      counselingReach: percent(studentKeys.size, population.totalPopulation),
-      appointmentRate: percent(yearAppointments.length, population.totalPopulation),
+      counselingReach: percent(studentKeys.size, selectedPopulation),
+      appointmentRate: percent(includedAppointments.length, selectedPopulation),
       completionRate: percent(completed, scheduled),
       waitingTimeDays,
       rescheduledAppointments,
@@ -464,6 +684,17 @@ export const getReportAnalytics = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "The department filter is invalid.");
   }
 
+  const program = (text(request.data?.program) || "all")
+    .toLocaleLowerCase("en-US");
+  if (program.length > 160) {
+    throw new HttpsError("invalid-argument", "The program filter is invalid.");
+  }
+
+  const periodLabel = text(request.data?.periodLabel);
+  if (periodLabel && !ALLOWED_PERIOD_LABELS.has(periodLabel)) {
+    throw new HttpsError("invalid-argument", "The reporting period label is invalid.");
+  }
+
   const emotionalSourceRaw = text(request.data?.emotionalSource) || "all";
   if (!["all", "mood", "assessment"].includes(emotionalSourceRaw)) {
     throw new HttpsError("invalid-argument", "The emotional activity source is invalid.");
@@ -477,8 +708,10 @@ export const getReportAnalytics = onCall(async (request) => {
 
   const startDate = text(request.data?.startDate);
   const endDate = text(request.data?.endDate);
-  if ((startDate && !dateValue(startDate)) || (endDate && !dateValue(endDate)) ||
-      (startDate && endDate && dateValue(startDate)! >= dateValue(endDate)!)) {
+  const parsedStart = startDate ? dateValue(startDate) : undefined;
+  const parsedEnd = endDate ? exclusiveEndDateValue(endDate) : undefined;
+  if ((startDate && !parsedStart) || (endDate && !parsedEnd) ||
+      (parsedStart && parsedEnd && parsedStart >= parsedEnd)) {
     throw new HttpsError("invalid-argument", "The report date range is invalid.");
   }
 
@@ -491,6 +724,7 @@ export const getReportAnalytics = onCall(async (request) => {
     moodsSnapshot,
     assessmentsSnapshot,
     collegesSnapshot,
+    coursesSnapshot,
   ] = await Promise.all([
     db.collection("users").where("accessRole", "==", "appUser").get(),
     db.collection("appointments").get(),
@@ -500,6 +734,7 @@ export const getReportAnalytics = onCall(async (request) => {
     db.collection("moods").get(),
     db.collection("assessments").get(),
     db.collection("colleges").get(),
+    db.collection("courses").get(),
   ]);
 
   const collegeNameById = new Map<string, string>();
@@ -537,22 +772,54 @@ export const getReportAnalytics = onCall(async (request) => {
     }
   }
 
+  const courseNameById = new Map<string, string>();
+  const courseCollegeKeysByProgram = new Map<string, Set<string>>();
+  const programsByCollegeMap = new Map<string, Map<string, string>>();
+
+  const addProgramToCollege = (collegeLabel: string, progLabel: string, keys: string[] = []) => {
+    if (!collegeLabel || !progLabel) return;
+    const cKey = collegeLabel.toLocaleLowerCase("en-US");
+    const pKey = progLabel.toLocaleLowerCase("en-US");
+    let progMap = programsByCollegeMap.get(cKey);
+    if (!progMap) {
+      progMap = new Map<string, string>();
+      programsByCollegeMap.set(cKey, progMap);
+    }
+    if (!progMap.has(pKey)) progMap.set(pKey, progLabel);
+
+    for (const k of [pKey, ...keys.map((x) => x.toLocaleLowerCase("en-US")).filter(Boolean)]) {
+      let colSet = courseCollegeKeysByProgram.get(k);
+      if (!colSet) {
+        colSet = new Set<string>();
+        courseCollegeKeysByProgram.set(k, colSet);
+      }
+      colSet.add(cKey);
+      const colId = [...collegeNameById.entries()].find(([, n]) => n.toLocaleLowerCase("en-US") === cKey)?.[0];
+      if (colId) colSet.add(colId.toLocaleLowerCase("en-US"));
+    }
+  };
+
+  for (const doc of coursesSnapshot.docs) {
+    const data = doc.data();
+    if (data.active === false) continue;
+    const cname = text(data.name);
+    const ccode = text(data.code);
+    const collegeId = text(data.collegeId);
+    if (cname) courseNameById.set(doc.id, cname);
+    const collegeLabel = collegeNameById.get(collegeId) || collegeId;
+    if (collegeLabel && cname) {
+      addProgramToCollege(collegeLabel, cname, [doc.id, ccode]);
+    }
+  }
+
   const allUsers = usersSnapshot.docs.map((document) => ({
     id: document.id,
     data: document.data() as RecordData,
   }));
   const userMatchesAllowedColleges = (data: RecordData): boolean => {
     if (!restrictByCollege) return true;
-    const cid = text(data.collegeId).toLocaleLowerCase("en-US");
-    const cname = cid ? text(collegeNameById.get(text(data.collegeId))).toLocaleLowerCase("en-US") : "";
-    const dept = text(data.department).toLocaleLowerCase("en-US");
-    const col = text(data.college).toLocaleLowerCase("en-US");
-    return (
-      (cid !== "" && allowedCollegeKeys.has(cid)) ||
-      (cname !== "" && allowedCollegeKeys.has(cname)) ||
-      (dept !== "" && allowedCollegeKeys.has(dept)) ||
-      (col !== "" && allowedCollegeKeys.has(col))
-    );
+    const col = userCollegeInfo(data, collegeNameById);
+    return [...col.keys].some((k) => allowedCollegeKeys.has(k));
   };
 
   const scopedUsers = restrictByCollege
@@ -562,17 +829,79 @@ export const getReportAnalytics = onCall(async (request) => {
   const allAppointments = appointmentsSnapshot.docs.map((document) => document.data() as RecordData);
   const scopedAppointments = restrictByCollege
     ? allAppointments.filter((appointment) => {
-        const apptDept = text(appointment.department).toLocaleLowerCase("en-US");
+        const apptDept = (
+          text(appointment.department) ||
+          text(appointment.college) ||
+          text(appointment.collegeId)
+        ).toLocaleLowerCase("en-US");
         if (apptDept && allowedCollegeKeys.has(apptDept)) return true;
         const owner = userById.get(text(appointment.userId));
         return owner ? userMatchesAllowedColleges(owner) : false;
       })
     : allAppointments;
 
+  // Enrich college -> programs map from authorized user/appointment records (fallback when catalog is sparse).
+  for (const {data} of scopedUsers) {
+    const colLabel = userCollegeInfo(data, collegeNameById).label;
+    const progLabel = userProgramInfo(data, courseNameById).label;
+    if (colLabel !== "Not specified" && progLabel !== "Not specified") {
+      addProgramToCollege(colLabel, progLabel);
+    }
+  }
+  for (const appt of scopedAppointments) {
+    const colLabel = text(appt.department) || text(appt.college);
+    const progLabel = text(appt.course) || text(appt.program);
+    if (colLabel && progLabel) {
+      addProgramToCollege(colLabel, progLabel);
+    }
+  }
+
+  // Enforce authorized & valid college -> program combinations.
+  if (program !== "all" && program !== "not specified") {
+    const knownCollegesForProgram = courseCollegeKeysByProgram.get(program);
+    if (restrictByCollege) {
+      if (knownCollegesForProgram && ![...knownCollegesForProgram].some((k) => allowedCollegeKeys.has(k))) {
+        throw new HttpsError(
+          "permission-denied",
+          "You are not authorized to access reports outside your assigned colleges.",
+        );
+      }
+      if (!knownCollegesForProgram) {
+        throw new HttpsError(
+          "permission-denied",
+          "You are not authorized to access reports outside your assigned colleges.",
+        );
+      }
+    }
+    if (appointmentDepartment !== "all") {
+      const allowedPrograms = programsByCollegeMap.get(appointmentDepartment);
+      if (knownCollegesForProgram && !knownCollegesForProgram.has(appointmentDepartment)) {
+        throw new HttpsError(
+          "invalid-argument",
+          "The selected program does not belong to the selected college.",
+        );
+      }
+      if (allowedPrograms && allowedPrograms.size > 0 && !allowedPrograms.has(program)) {
+        throw new HttpsError(
+          "invalid-argument",
+          "The selected program does not belong to the selected college.",
+        );
+      }
+    }
+  }
+
   const emotionalDepartmentOptions: FilterOption[] = [...institutionCollegeNames]
     .filter((label) => !restrictByCollege || allowedCollegeKeys.has(label.toLocaleLowerCase("en-US")))
     .sort((a, b) => a.localeCompare(b))
     .map((label) => ({key: label.toLocaleLowerCase("en-US"), label}));
+
+  const programOptionsByCollege: Record<string, FilterOption[]> = {};
+  for (const [colKey, progMap] of programsByCollegeMap.entries()) {
+    if (restrictByCollege && !allowedCollegeKeys.has(colKey)) continue;
+    programOptionsByCollege[colKey] = [...progMap.entries()]
+      .map(([key, label]) => ({key, label}))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }
 
   const populationWithYears = {...population, years};
   const moodEntries = moodEntriesSnapshot.docs.map((document) => document.data() as RecordData);
@@ -586,6 +915,8 @@ export const getReportAnalytics = onCall(async (request) => {
     {
       userCategory,
       appointmentDepartment,
+      program,
+      periodLabel: periodLabel || undefined,
       startDate: startDate || undefined,
       endDate: endDate || undefined,
       emotionalSource,
@@ -596,7 +927,9 @@ export const getReportAnalytics = onCall(async (request) => {
       moods,
       assessments,
       collegeNameById,
+      courseNameById,
       emotionalDepartmentOptions,
+      programOptionsByCollege,
     },
   );
   const previousYear = years
@@ -608,8 +941,9 @@ export const getReportAnalytics = onCall(async (request) => {
       scopedUsers,
       scopedAppointments,
       new Date(),
-      {userCategory, appointmentDepartment, emotionalSource},
+      {userCategory, appointmentDepartment, program, emotionalSource},
       {...previousPopulation, years: []},
+      {collegeNameById, courseNameById},
     );
     result.comparison = {
       schoolYear: previousYear.schoolYear,
@@ -625,8 +959,9 @@ export const getReportAnalytics = onCall(async (request) => {
       scopedUsers,
       scopedAppointments,
       new Date(),
-      {userCategory, appointmentDepartment, emotionalSource},
+      {userCategory, appointmentDepartment, program, emotionalSource},
       {...yearPopulation, years: []},
+      {collegeNameById, courseNameById},
     );
     return {
       schoolYear: year.schoolYear,

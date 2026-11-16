@@ -77,3 +77,45 @@ test("department and population scopes return only selected report metrics", () 
   );
   assert.ok(!JSON.stringify(report.appointments.course).includes("BSEE"));
 });
+
+test("combined filters intersect userCategory, college, program, and Manila date bounds", () => {
+  const now = new Date("2026-09-10T00:00:00.000Z");
+  const users = [
+    {id: "u1", data: {accessRole: "appUser", populationRole: "student", department: "CAS", course: "BA Psychology", lastActiveAt: "2026-09-05T08:00:00+08:00"}},
+    {id: "u2", data: {accessRole: "appUser", populationRole: "student", department: "CAS", course: "BA English", lastActiveAt: "2026-09-05T08:00:00+08:00"}},
+    {id: "u3", data: {accessRole: "appUser", populationRole: "teaching", department: "CAS", course: "BA Psychology", lastActiveAt: "2026-09-05T08:00:00+08:00"}},
+  ];
+  const appointments = [
+    {userId: "u1", status: "completed", scheduledAt: "2026-09-05T08:00:00+08:00"},
+    {userId: "u2", status: "completed", scheduledAt: "2026-09-05T08:00:00+08:00"},
+    {userId: "u3", status: "completed", scheduledAt: "2026-09-05T08:00:00+08:00"},
+  ];
+
+  const filtered = buildReportAnalytics(
+    users,
+    appointments,
+    now,
+    {
+      userCategory: "student",
+      appointmentDepartment: "cas",
+      program: "ba psychology",
+      periodLabel: "1st semester",
+      startDate: "2026-06-01T00:00:00+08:00",
+      endDate: "2026-12-01T00:00:00+08:00",
+    },
+    {
+      schoolYear: "2026-2027",
+      departments: ["CAS"],
+      populations: {CAS: 10},
+      configured: true,
+      totalPopulation: 10,
+      years: [],
+    },
+  );
+
+  assert.equal(filtered.filters.periodLabel, "1st semester");
+  assert.equal(filtered.filters.programKey, "ba psychology");
+  assert.equal(filtered.appointments.totalAppointments, 1);
+  assert.equal(filtered.appointments.uniqueStudentsServed, 1);
+  assert.equal(filtered.users.overallActivePercentage, 100);
+});

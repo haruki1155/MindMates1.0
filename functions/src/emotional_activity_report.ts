@@ -147,6 +147,23 @@ function resolveUserDepartmentKeys(
   return {primaryLabel, keys};
 }
 
+function resolveUserProgramKeys(
+  user: RecordData,
+  courseNameById: ReadonlyMap<string, string>,
+): {primaryLabel: string; keys: Set<string>} {
+  const courseId = text(user.courseId);
+  const resolvedCourseName = courseId ? text(courseNameById.get(courseId)) : "";
+  const course = text(user.course);
+  const program = text(user.program);
+  const primaryLabel = course || program || resolvedCourseName || "Not specified";
+  const keys = new Set<string>();
+  for (const candidate of [course, program, resolvedCourseName, courseId]) {
+    if (candidate) keys.add(candidate.toLocaleLowerCase("en-US"));
+  }
+  if (keys.size === 0) keys.add("not specified");
+  return {primaryLabel, keys};
+}
+
 function canonicalMood(record: RecordData): {
   key: string;
   label: string;
@@ -311,14 +328,18 @@ export function buildEmotionalActivityReport(input: {
   schoolYear: string;
   userCategory?: string;
   department?: string;
+  program?: string;
   source?: EmotionalActivitySourceScope;
   configuredPopulation?: number | null;
   collegeNameById?: ReadonlyMap<string, string>;
+  courseNameById?: ReadonlyMap<string, string>;
 }): EmotionalActivityReport {
   const source: EmotionalActivitySourceScope = input.source ?? "all";
   const requestedCategory = input.userCategory ?? "all";
   const requestedDept = (input.department ?? "all").toLocaleLowerCase("en-US");
+  const requestedProgram = (input.program ?? "all").toLocaleLowerCase("en-US");
   const collegeNameById = input.collegeNameById ?? new Map<string, string>();
+  const courseNameById = input.courseNameById ?? new Map<string, string>();
 
   const appUsers = input.users.filter(({data}) => {
     const legacyRole = text(data.role).toLowerCase();
@@ -334,6 +355,8 @@ export function buildEmotionalActivityReport(input: {
     if (requestedCategory !== "all" && roleKey !== requestedCategory) continue;
     const dept = resolveUserDepartmentKeys(data, collegeNameById);
     if (requestedDept !== "all" && !dept.keys.has(requestedDept)) continue;
+    const prog = resolveUserProgramKeys(data, courseNameById);
+    if (requestedProgram !== "all" && !prog.keys.has(requestedProgram)) continue;
     scopedUsers.set(id, {roleKey, primaryDept: dept.primaryLabel});
   }
 
@@ -413,6 +436,8 @@ export function buildEmotionalActivityReport(input: {
   const departmentCoverageNote =
     missingDemographicsCount > 0 && participants.size >= MIN_EMOTIONAL_COHORT_SIZE
       ? "Some participants have unspecified role or college metadata and appear under Category not specified / Not specified when viewing all."
+      : requestedProgram !== "all"
+      ? "Filtered strictly to the selected college and program within your access scope."
       : requestedDept === "all"
       ? "Includes all app-user colleges/departments within your access scope."
       : "Filtered to the selected college/department only.";

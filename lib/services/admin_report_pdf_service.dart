@@ -56,21 +56,33 @@ class AdminReportPdfService {
             : const <ReportPercentageItem>[],
     };
     final chartData = _compact(data);
+    final filters = report.filters;
+    final activeYear = filters.schoolYear.isNotEmpty
+        ? filters.schoolYear
+        : report.population.schoolYear;
+    final activeCollege = filters.collegeKey != 'all'
+        ? filters.collegeLabel
+        : report.appointmentDepartmentScopeLabel;
+    final activeProgram = filters.programKey != 'all'
+        ? filters.programLabel
+        : 'All programs';
+    final activeCategory = filters.userCategory != 'all'
+        ? filters.userCategoryLabel
+        : report.userScopeLabel;
     final title = switch (reportType) {
-      AdminReportType.users =>
-        'App User Activity Report - ${report.userScopeLabel}',
+      AdminReportType.users => 'App User Activity Report - $activeCategory',
       AdminReportType.appointments =>
-        'Counseling Appointments - ${report.appointmentDepartmentScopeLabel}',
+        'Counseling Appointments - $activeCollege',
       AdminReportType.emotionalActivity =>
-        'Emotional Activity Report - ${report.population.schoolYear}',
+        'Emotional Activity Report - $activeYear',
     };
     final subtitle = switch (reportType) {
       AdminReportType.users =>
-        'Active means activity recorded within the last ${report.activeWindowDays} days.',
+        'Year: $activeYear | Period: ${filters.periodLabel} | Category: $activeCategory | College: $activeCollege | Program: $activeProgram | Active window: last ${report.activeWindowDays} days.',
       AdminReportType.appointments =>
-        'Grouped by ${_dimensionLabel(appointmentDimension)}. Only appointments within the selected department scope are included.',
+        'Year: $activeYear | Period: ${filters.periodLabel} | College: $activeCollege | Program: $activeProgram | Category: $activeCategory | Grouped by ${_dimensionLabel(appointmentDimension)}.',
       AdminReportType.emotionalActivity =>
-        '${emotional.dateRangeLabel} | ${emotional.sourceScopeLabel} | Scope: ${report.userScopeLabel} / ${report.appointmentDepartmentScopeLabel}.',
+        'Year: $activeYear | Period: ${emotional.dateRangeLabel} | ${emotional.sourceScopeLabel} | Category: $activeCategory | College: $activeCollege | Program: $activeProgram.',
     };
 
     document.addPage(
@@ -251,6 +263,29 @@ class AdminReportPdfService {
     return document.save();
   }
 
+  static String filenameFor(
+    AdminReportAnalytics report,
+    AdminReportType reportType,
+  ) {
+    final scope = switch (reportType) {
+      AdminReportType.users => report.userScopeLabel,
+      AdminReportType.appointments => report.appointmentDepartmentScopeLabel,
+      AdminReportType.emotionalActivity =>
+        '${report.population.schoolYear}_${report.appointmentDepartmentScopeLabel}',
+    };
+    final programSuffix = report.filters.programKey != 'all'
+        ? '_${_safe(report.filters.programLabel)}'
+        : '';
+    final type = switch (reportType) {
+      AdminReportType.users => 'app_users_${_safe(scope)}$programSuffix',
+      AdminReportType.appointments =>
+        'appointments_${_safe(scope)}$programSuffix',
+      AdminReportType.emotionalActivity =>
+        'emotional_activity_${_safe(scope)}$programSuffix',
+    };
+    return 'mindmate_${type}_${_date(report.generatedAt)}.pdf';
+  }
+
   static Future<void> download({
     required AdminReportAnalytics report,
     required AdminReportType reportType,
@@ -258,28 +293,20 @@ class AdminReportPdfService {
     String userCategoryKey = 'all',
     AppointmentReportDimension appointmentDimension =
         AppointmentReportDimension.department,
+    Uint8List? prebuiltBytes,
   }) async {
-    final bytes = await build(
-      report: report,
-      reportType: reportType,
-      chartType: chartType,
-      userCategoryKey: userCategoryKey,
-      appointmentDimension: appointmentDimension,
-    );
-    final scope = switch (reportType) {
-      AdminReportType.users => report.userScopeLabel,
-      AdminReportType.appointments => report.appointmentDepartmentScopeLabel,
-      AdminReportType.emotionalActivity =>
-        '${report.population.schoolYear}_${report.appointmentDepartmentScopeLabel}',
-    };
-    final type = switch (reportType) {
-      AdminReportType.users => 'app_users_${_safe(scope)}',
-      AdminReportType.appointments => 'appointments_${_safe(scope)}',
-      AdminReportType.emotionalActivity => 'emotional_activity_${_safe(scope)}',
-    };
+    final bytes =
+        prebuiltBytes ??
+        await build(
+          report: report,
+          reportType: reportType,
+          chartType: chartType,
+          userCategoryKey: userCategoryKey,
+          appointmentDimension: appointmentDimension,
+        );
     await Printing.sharePdf(
       bytes: bytes,
-      filename: 'mindmate_${type}_${_date(report.generatedAt)}.pdf',
+      filename: filenameFor(report, reportType),
     );
   }
 
