@@ -76,14 +76,20 @@ test("resolveStaffVerificationWebUrl blocks cross-environment hosts and preserve
   );
 });
 
-test("Vercel SPA rewrites route /verify-email and /__/auth/action to index.html", () => {
+test("Vercel SPA rewrites route /verify-email and /__/auth/action without cleanUrls /index.html 404", () => {
   const repoRoot = path.resolve(__dirname, "..", "..");
   const rootVercel = JSON.parse(
     fs.readFileSync(path.join(repoRoot, "vercel.json"), "utf8"),
-  ) as {rewrites?: Array<{source?: string; destination?: string}>};
+  ) as {cleanUrls?: boolean; rewrites?: Array<{source?: string; destination?: string}>};
+  assert.equal(rootVercel.cleanUrls, true);
   assert.ok(
     rootVercel.rewrites?.some(
-      (rule) => rule.source === "/(.*)" && rule.destination === "/index.html",
+      (rule) => rule.source === "/(.*)" && rule.destination === "/",
+    ),
+  );
+  assert.ok(
+    !rootVercel.rewrites?.some(
+      (rule) => rule.destination === "/index.html",
     ),
   );
 
