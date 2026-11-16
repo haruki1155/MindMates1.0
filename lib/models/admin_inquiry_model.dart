@@ -25,6 +25,40 @@ enum InquiryStatus {
       };
 }
 
+/// Server-side college routing state (functions/src/inquiry_routing_service.ts).
+enum InquiryRoutingStatus {
+  unrouted,
+  routed,
+  needsTriage;
+
+  String get label => switch (this) {
+    InquiryRoutingStatus.unrouted => 'Not yet routed',
+    InquiryRoutingStatus.routed => 'Routed',
+    InquiryRoutingStatus.needsTriage => 'Needs triage',
+  };
+
+  static InquiryRoutingStatus fromValue(Object? value) => switch (value) {
+    'routed' => InquiryRoutingStatus.routed,
+    'needs_triage' => InquiryRoutingStatus.needsTriage,
+    _ => InquiryRoutingStatus.unrouted,
+  };
+}
+
+/// One bounded batch of the super-administrator backfill for unrouted
+/// inquiries. When [done] is false, pass [nextCursor] to continue.
+class InquiryRoutingBackfillResult {
+  const InquiryRoutingBackfillResult({
+    required this.routed,
+    required this.needsTriage,
+    required this.done,
+    required this.nextCursor,
+  });
+  final int routed;
+  final int needsTriage;
+  final bool done;
+  final String? nextCursor;
+}
+
 class AdminInquiryModel {
   const AdminInquiryModel({
     required this.id,
@@ -41,6 +75,16 @@ class AdminInquiryModel {
     this.formData = const {},
     this.acknowledgedAt,
     this.assignedStaffId,
+    this.collegeId = '',
+    this.routingStatus = InquiryRoutingStatus.unrouted,
+    this.routingReason,
+    this.routingMode,
+    this.routingRevision = 0,
+    this.assigneeIds = const [],
+    this.assigneeLabels = const {},
+    this.ownerId,
+    this.escalationStatus,
+    this.escalationReason,
   });
 
   final String id;
@@ -60,6 +104,21 @@ class AdminInquiryModel {
   /// Portal account that owns this inquiry, when one has been recorded.
   /// Not written by any server flow yet; `null` means unassigned.
   final String? assignedStaffId;
+
+  /// Routing fields are written only by Cloud Functions.
+  final String collegeId;
+  final InquiryRoutingStatus routingStatus;
+  final String? routingReason;
+  final String? routingMode;
+  final int routingRevision;
+  final List<String> assigneeIds;
+  final Map<String, String> assigneeLabels;
+  final String? ownerId;
+  final String? escalationStatus;
+  final String? escalationReason;
+
+  bool get isManuallyRouted => routingMode == 'manual';
+  bool get isEscalated => escalationStatus == 'requested';
 
   bool get isFormSubmission => formType != null && formType!.isNotEmpty;
   bool get isAcknowledged => acknowledgedAt != null;
@@ -91,6 +150,29 @@ class AdminInquiryModel {
           : const {},
       acknowledgedAt: dateTimeFromFirestore(json['acknowledgedAt']),
       assignedStaffId: _optional(json['assignedStaffId']),
+      collegeId: json['collegeId']?.toString() ?? '',
+      routingStatus: InquiryRoutingStatus.fromValue(json['routingStatus']),
+      routingReason: _optional(json['routingReason']),
+      routingMode: _optional(json['routingMode']),
+      routingRevision: json['routingRevision'] is num
+          ? (json['routingRevision'] as num).toInt()
+          : 0,
+      assigneeIds: json['assigneeIds'] is List
+          ? (json['assigneeIds'] as List).whereType<String>().toList()
+          : const [],
+      assigneeLabels: json['assigneeLabels'] is Map
+          ? {
+              for (final entry in (json['assigneeLabels'] as Map).entries)
+                entry.key.toString(): entry.value?.toString() ?? '',
+            }
+          : const {},
+      ownerId: _optional(json['ownerId']),
+      escalationStatus: json['escalation'] is Map
+          ? _optional((json['escalation'] as Map)['status'])
+          : null,
+      escalationReason: json['escalation'] is Map
+          ? _optional((json['escalation'] as Map)['reason'])
+          : null,
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
       status: InquiryStatus.fromValue(json['status']),
     );

@@ -6,9 +6,15 @@ import {
   assertFails,
   assertSucceeds,
   initializeTestEnvironment,
+  RulesTestContext,
   RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import {collection, doc, getDoc, getDocs, setDoc, updateDoc} from "firebase/firestore";
+import {collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where} from "firebase/firestore";
+
+// Since college routing, staff and counselors read inquiries only through an
+// assignee-filtered query; an unfiltered list is denied for them.
+const assigned = (firestore: ReturnType<RulesTestContext["firestore"]>, uid: string) =>
+  getDocs(query(collection(firestore, "inquiries"), where("assigneeIds", "array-contains", uid)));
 
 // Role matrix for PACC portal data visibility. Every portal account state that
 // the staff lifecycle can produce is represented, so a client that resolves a
@@ -83,6 +89,12 @@ beforeEach(async () => {
       setDoc(doc(firestore, "inquiries/inquiry-1"), {
         userId: "student", subject: "Schedule", message: "When is PACC open?",
         category: "General", email: "student@example.edu", status: "pending",
+        routingStatus: "routed", collegeId: "cite",
+        assigneeIds: [
+          "staff-approved", "staff-legacy", "counselor", "staff-pending", "staff-stale-role",
+          "staff-suspended", "counselor-legacy", "counselor-legacy-active",
+          "counselor-legacy-suspended", "staff-legacy-disabled",
+        ],
       }),
       setDoc(doc(firestore, "appointment_queue/appointment-1"), {
         appointmentId: "appointment-1", studentDisplayName: "Student Name",
@@ -99,7 +111,7 @@ after(async () => environment.cleanup());
 
 test("approved, active, verified portal staff can list inquiries and the queue only", async () => {
   const staff = environment.authenticatedContext("staff-approved", verified).firestore();
-  await assertSucceeds(getDocs(collection(staff, "inquiries")));
+  await assertSucceeds(assigned(staff, "staff-approved"));
   await assertSucceeds(getDocs(collection(staff, "appointment_queue")));
   await assertFails(getDocs(collection(staff, "appointments")));
   await assertFails(getDoc(doc(staff, "users/student")));
@@ -107,17 +119,17 @@ test("approved, active, verified portal staff can list inquiries and the queue o
 
 test("legacy portal staff record without lifecycle fields keeps read access when verified", async () => {
   const legacy = environment.authenticatedContext("staff-legacy", verified).firestore();
-  await assertSucceeds(getDocs(collection(legacy, "inquiries")));
+  await assertSucceeds(assigned(legacy, "staff-legacy"));
   await assertSucceeds(getDocs(collection(legacy, "appointment_queue")));
   await assertFails(getDocs(collection(legacy, "appointments")));
   const legacyUnverified = environment.authenticatedContext("staff-legacy", unverified).firestore();
-  await assertFails(getDocs(collection(legacyUnverified, "inquiries")));
+  await assertFails(assigned(legacyUnverified, "staff-legacy"));
   await assertFails(getDocs(collection(legacyUnverified, "appointment_queue")));
 });
 
 test("approved counselor can list inquiries and appointments but not other profiles", async () => {
   const counselor = environment.authenticatedContext("counselor", verified).firestore();
-  await assertSucceeds(getDocs(collection(counselor, "inquiries")));
+  await assertSucceeds(assigned(counselor, "counselor"));
   await assertSucceeds(getDocs(collection(counselor, "appointments")));
   await assertFails(getDoc(doc(counselor, "users/student")));
   await assertFails(getDoc(doc(counselor, "users/staff-approved")));
@@ -148,26 +160,26 @@ test("administrator clinical reads require a verified email token", async () => 
 
 test("pending staff registration cannot read any portal data", async () => {
   const pending = environment.authenticatedContext("staff-pending", verified).firestore();
-  await assertFails(getDocs(collection(pending, "inquiries")));
+  await assertFails(assigned(pending, "staff-pending"));
   await assertFails(getDocs(collection(pending, "appointment_queue")));
   await assertFails(getDocs(collection(pending, "appointments")));
 });
 
 test("approvedRole alone never grants portal access", async () => {
   const stale = environment.authenticatedContext("staff-stale-role", verified).firestore();
-  await assertFails(getDocs(collection(stale, "inquiries")));
+  await assertFails(assigned(stale, "staff-stale-role"));
   await assertFails(getDocs(collection(stale, "appointment_queue")));
 });
 
 test("suspended staff cannot read inquiries or the appointment queue", async () => {
   const suspended = environment.authenticatedContext("staff-suspended", verified).firestore();
-  await assertFails(getDocs(collection(suspended, "inquiries")));
+  await assertFails(assigned(suspended, "staff-suspended"));
   await assertFails(getDocs(collection(suspended, "appointment_queue")));
 });
 
 test("approved staff without a verified email token cannot read inquiries or the queue", async () => {
   const staff = environment.authenticatedContext("staff-approved", unverified).firestore();
-  await assertFails(getDocs(collection(staff, "inquiries")));
+  await assertFails(assigned(staff, "staff-approved"));
   await assertFails(getDocs(collection(staff, "appointment_queue")));
 });
 
@@ -183,17 +195,17 @@ test("explicit suspended or disabled status denies legacy records; absent or act
   const legacyActive = environment.authenticatedContext("counselor-legacy-active", verified).firestore();
   await assertSucceeds(getDoc(doc(legacy, "appointments/appointment-1")));
   await assertSucceeds(getDoc(doc(legacyActive, "appointments/appointment-1/clinical_notes/session")));
-  await assertSucceeds(getDocs(collection(legacyActive, "inquiries")));
+  await assertSucceeds(assigned(legacyActive, "counselor-legacy-active"));
 
   const suspended = environment.authenticatedContext("counselor-legacy-suspended", verified).firestore();
   await assertFails(getDoc(doc(suspended, "appointments/appointment-1")));
   await assertFails(getDoc(doc(suspended, "appointments/appointment-1/clinical_notes/session")));
   await assertFails(getDocs(collection(suspended, "mind_aid_emergency_alerts")));
-  await assertFails(getDocs(collection(suspended, "inquiries")));
+  await assertFails(assigned(suspended, "counselor-legacy-suspended"));
 
   const disabledStaff = environment.authenticatedContext("staff-legacy-disabled", verified).firestore();
   await assertFails(getDocs(collection(disabledStaff, "appointment_queue")));
-  await assertFails(getDocs(collection(disabledStaff, "inquiries")));
+  await assertFails(assigned(disabledStaff, "staff-legacy-disabled"));
 });
 
 test("administrator rule gates require the verified, active lifecycle", async () => {
@@ -216,13 +228,12 @@ test("administrator rule gates require the verified, active lifecycle", async ()
   await assertFails(getDoc(doc(adminSuspended, "admin_audit_logs/audit-1")));
 });
 
-test("portal accounts may only change an inquiry's status, never its content or assignment", async () => {
+test("no client may update an inquiry; status, assignment and content change only server-side", async () => {
   const counselor = environment.authenticatedContext("counselor", verified).firestore();
-  await assertSucceeds(updateDoc(doc(counselor, "inquiries/inquiry-1"), {status: "in_progress", updatedAt: new Date()}));
+  await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {status: "in_progress", updatedAt: new Date()}));
   await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {assignedStaffId: "counselor"}));
   await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {message: "rewritten"}));
-  await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {status: "deleted"}));
-  await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {userId: "counselor", status: "resolved"}));
+  await assertFails(updateDoc(doc(counselor, "inquiries/inquiry-1"), {assigneeIds: ["counselor"]}));
 
   const suspended = environment.authenticatedContext("counselor-legacy-suspended", verified).firestore();
   await assertFails(updateDoc(doc(suspended, "inquiries/inquiry-1"), {status: "resolved", updatedAt: new Date()}));

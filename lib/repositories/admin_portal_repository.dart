@@ -445,6 +445,7 @@ class AdminPortalRepository {
   }
 
   User? get currentAuthUser => FirebaseAuth.instance.currentUser;
+  String? get currentUserId => currentAuthUser?.uid;
   Stream<User?> get authStateChanges =>
       FirebaseAuth.instance.authStateChanges();
 
@@ -1289,24 +1290,43 @@ class AdminPortalRepository {
     );
   }
 
-  /// Counselors see the unassigned pool plus their own assignments; see
-  /// [scopeInquiriesForRole]. Access itself is enforced by Firestore rules.
-  Stream<List<AdminInquiryModel>> watchInquiries() => _firestoreService
-      .watchDocuments(FirestoreCollections.inquiries)
-      .map(
-        (items) => scopeInquiriesForRole(
-          items
-              .map(
-                (item) => AdminInquiryModel.fromJson(
-                  item,
-                  id: item['id']?.toString(),
-                ),
-              )
-              .toList(),
-          role: currentAccessRole,
-          uid: currentAuthUser?.uid,
-        )..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+  /// Inquiries visible to this session. Firestore rules are the boundary:
+  /// the super-administrator lists all, staff and counselors must query the
+  /// inquiries routed to them (`assigneeIds array-contains uid`), and any
+  /// other portal account gets an error rather than an empty inbox.
+  Stream<List<AdminInquiryModel>> watchInquiries() {
+    final uid = currentUserId;
+    final role = currentAccessRole;
+    final assignee =
+        role == AccessRole.portalStaff || role == AccessRole.counselor;
+    if (!isSuperAdmin && (!assignee || uid == null)) {
+      return Stream.error(
+        StateError(
+          'Inquiries are visible to assigned staff and the super-administrator.',
+        ),
       );
+    }
+    return _firestoreService
+        .watchDocuments(
+          FirestoreCollections.inquiries,
+          whereArrayContains: isSuperAdmin ? const {} : {'assigneeIds': uid},
+        )
+        .map(
+          (items) => scopeInquiriesForRole(
+            items
+                .map(
+                  (item) => AdminInquiryModel.fromJson(
+                    item,
+                    id: item['id']?.toString(),
+                  ),
+                )
+                .toList(),
+            role: role,
+            uid: uid,
+            isSuperAdmin: isSuperAdmin,
+          )..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+        );
+  }
 
   Stream<List<AdminActivityAnalyticsModel>> watchActivityAnalytics() =>
       _firestoreService
@@ -1629,15 +1649,58 @@ class AdminPortalRepository {
     );
   }
 
+  /// Status changes are audited server-side; clients cannot write inquiries.
   Future<void> updateInquiryStatus(String id, InquiryStatus status) =>
-      _firestoreService.updateDocument(FirestoreCollections.inquiries, id, {
+      _callCallable('setInquiryStatus', {
+        'inquiryId': id,
         'status': status.storedValue,
-        'updatedAt': FieldValue.serverTimestamp(),
       });
 
-  Future<void> acknowledgeInquiry(String id) => FirebaseFunctions.instance
-      .httpsCallable('acknowledgeInquiry')
-      .call({'inquiryId': id});
+  Future<void> acknowledgeInquiry(String id) =>
+      _callCallable('acknowledgeInquiry', {'inquiryId': id});
+
+  /// Assignee asks the super-administrator to review the inquiry.
+  Future<void> escalateInquiry(String id, {required String reason}) =>
+      _callCallable('escalateInquiry', {'inquiryId': id, 'reason': reason});
+
+  /// Super-administrator replaces the assignees; returns the new revision.
+  Future<int> reassignInquiry(
+    String id, {
+    required List<String> assigneeIds,
+    required int expectedRevision,
+    required String reason,
+  }) async {
+    final result = await _callCallable('reassignInquiry', {
+      'inquiryId': id,
+      'assigneeIds': assigneeIds,
+      'expectedRevision': expectedRevision,
+      'reason': reason,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Super-administrator routes inquiries created before college routing,
+  /// one bounded batch per call. Resume with the returned cursor until done.
+  Future<InquiryRoutingBackfillResult> routeExistingInquiries({
+    int limit = 100,
+    String? cursor,
+  }) async {
+    final result = await _callCallable('routeExistingInquiries', {
+      'limit': limit,
+      'cursor': ?cursor,
+    });
+    final data = result is Map ? result : const {};
+    int count(String key) => (data[key] as num?)?.toInt() ?? 0;
+    final next = data['nextCursor']?.toString();
+    return InquiryRoutingBackfillResult(
+      routed: count('routed'),
+      needsTriage: count('needsTriage'),
+      // Absent or malformed responses are never treated as finished.
+      done: data['done'] == true,
+      nextCursor: next == null || next.isEmpty ? null : next,
+    );
+  }
 
   Stream<PaccAvailabilityModel?> watchPaccAvailability() =>
       _paccAvailabilityRepository.watchCurrent();
