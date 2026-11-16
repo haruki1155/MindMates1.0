@@ -37,7 +37,6 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   bool _downloading = false;
   bool _previewing = false;
   bool _filterLoading = false;
-  bool _creatingAcademicYear = false;
   int _reportRequestId = 0;
 
   @override
@@ -196,10 +195,6 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
             setState(() => _schoolYear = value);
             _reloadReport();
           },
-          onAddYear: widget.repository.currentAccessRole == AccessRole.admin
-              ? () => _createAcademicYear(report.population.schoolYear)
-              : null,
-          creatingYear: _creatingAcademicYear,
           onPeriodChanged: (value) {
             setState(() => _period = value);
             _reloadReport();
@@ -424,38 +419,6 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
     if (!mounted || imported == null) return;
     _refresh();
     _showReportSnackBar(context, '$imported walk-in appointments imported.');
-  }
-
-  Future<void> _createAcademicYear(String copyFrom) async {
-    if (_creatingAcademicYear) return;
-    final choice = await showDialog<_NewAcademicYearChoice>(
-      context: context,
-      builder: (_) => const _NewAcademicYearDialog(),
-    );
-    if (choice == null) return;
-    setState(() => _creatingAcademicYear = true);
-    try {
-      await widget.repository.createAcademicYear(
-        schoolYear: choice.schoolYear,
-        copyFrom: copyFrom,
-        copyPopulation: choice.copyPopulation,
-      );
-      if (!mounted) return;
-      setState(() {
-        _schoolYear = choice.schoolYear;
-        _report = _fetch();
-      });
-      _showReportSnackBar(
-        context,
-        'Academic year ${choice.schoolYear} created.',
-      );
-    } catch (error) {
-      if (mounted) {
-        _showReportSnackBar(context, _friendlyReportError(error), error: true);
-      }
-    } finally {
-      if (mounted) setState(() => _creatingAcademicYear = false);
-    }
   }
 }
 
@@ -1293,8 +1256,6 @@ class _AdminReportControls extends StatelessWidget {
     required this.department,
     required this.departmentOptions,
     required this.onYearChanged,
-    required this.onAddYear,
-    required this.creatingYear,
     required this.onPeriodChanged,
     required this.onCustomPeriod,
     required this.onDepartmentChanged,
@@ -1311,8 +1272,6 @@ class _AdminReportControls extends StatelessWidget {
   final String department;
   final List<ReportFilterOption> departmentOptions;
   final ValueChanged<String> onYearChanged;
-  final VoidCallback? onAddYear;
-  final bool creatingYear;
   final ValueChanged<_ReportPeriod> onPeriodChanged;
   final VoidCallback onCustomPeriod;
   final ValueChanged<String> onDepartmentChanged;
@@ -1338,34 +1297,14 @@ class _AdminReportControls extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'REPORT CONTROLS',
-                  style: TextStyle(
-                    color: AdminColors.muted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1,
-                  ),
-                ),
-              ),
-              if (onAddYear != null)
-                TextButton.icon(
-                  onPressed: creatingYear ? null : onAddYear,
-                  icon: creatingYear
-                      ? const SizedBox(
-                          width: 17,
-                          height: 17,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.add, size: 17),
-                  label: Text(
-                    creatingYear ? 'Creating year…' : 'Add academic year',
-                  ),
-                ),
-            ],
+          const Text(
+            'REPORT CONTROLS',
+            style: TextStyle(
+              color: AdminColors.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
+            ),
           ),
           const SizedBox(height: 12),
           LayoutBuilder(
@@ -2297,19 +2236,6 @@ class _PopulationSetupState extends State<_PopulationSetup> {
                     : 'Save population',
               ),
             ),
-            if (widget.config.status != 'closed') ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [
-                  TextButton.icon(
-                    onPressed: _saving ? null : _confirmCloseYear,
-                    icon: const Icon(Icons.lock_outline),
-                    label: const Text('Close this year'),
-                  ),
-                ],
-              ),
-            ],
           ],
         ),
       ),
@@ -2380,147 +2306,6 @@ class _PopulationSetupState extends State<_PopulationSetup> {
       });
     }
   }
-
-  Future<void> _confirmCloseYear() async {
-    final allValid =
-        widget.config.configured &&
-        _fields.values.every((field) {
-          final value = int.tryParse(field.text.trim());
-          return value != null && value > 0;
-        });
-    if (!allValid) {
-      setState(
-        () => _error =
-            'Save a valid population for every department before locking this year.',
-      );
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) =>
-          _CloseAcademicYearDialog(schoolYear: widget.config.schoolYear),
-    );
-    if (confirmed != true) return;
-    try {
-      await widget.repository.closeAcademicYear(widget.config.schoolYear);
-      if (mounted) widget.onYearChanged(widget.config.schoolYear);
-    } catch (error) {
-      if (mounted) setState(() => _error = _friendlyReportError(error));
-    }
-  }
-}
-
-class _CloseAcademicYearDialog extends StatefulWidget {
-  const _CloseAcademicYearDialog({required this.schoolYear});
-  final String schoolYear;
-  @override
-  State<_CloseAcademicYearDialog> createState() =>
-      _CloseAcademicYearDialogState();
-}
-
-class _CloseAcademicYearDialogState extends State<_CloseAcademicYearDialog> {
-  final _controller = TextEditingController();
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final phrase = 'CLOSE ${widget.schoolYear}';
-    return AlertDialog(
-      title: const Text('Lock academic year?'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'This locks the saved population and preserves this year for historical reports. This cannot be edited afterward.',
-          ),
-          const SizedBox(height: 12),
-          Text('Type $phrase to confirm.'),
-          TextField(
-            controller: _controller,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(labelText: 'Confirmation'),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _controller.text.trim() == phrase
-              ? () => Navigator.pop(context, true)
-              : null,
-          child: const Text('Lock year'),
-        ),
-      ],
-    );
-  }
-}
-
-class _NewAcademicYearDialog extends StatefulWidget {
-  const _NewAcademicYearDialog();
-  @override
-  State<_NewAcademicYearDialog> createState() => _NewAcademicYearDialogState();
-}
-
-class _NewAcademicYearDialogState extends State<_NewAcademicYearDialog> {
-  final _controller = TextEditingController();
-  bool _copyPopulation = false;
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Create academic year'),
-    content: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        TextField(
-          controller: _controller,
-          decoration: const InputDecoration(
-            labelText: 'School year',
-            hintText: '2027-2028',
-          ),
-        ),
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          value: _copyPopulation,
-          onChanged: (value) =>
-              setState(() => _copyPopulation = value ?? false),
-          title: const Text('Copy previous population as a starting point'),
-          subtitle: const Text('Leave unchecked to start empty.'),
-        ),
-      ],
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed: () => Navigator.pop(
-          context,
-          _NewAcademicYearChoice(_controller.text.trim(), _copyPopulation),
-        ),
-        child: const Text('Create'),
-      ),
-    ],
-  );
-}
-
-class _NewAcademicYearChoice {
-  const _NewAcademicYearChoice(this.schoolYear, this.copyPopulation);
-  final String schoolYear;
-  final bool copyPopulation;
 }
 
 String _currentSchoolYear() {
