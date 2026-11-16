@@ -155,6 +155,7 @@ class AdminReportAnalytics {
     this.trends = const [],
     this.waitingTimeDays,
     this.rescheduledAppointments = 0,
+    this.filters = const ReportAppliedFilters.empty(),
     this.emotionalActivity = const EmotionalActivityReport.empty(),
   });
 
@@ -183,6 +184,7 @@ class AdminReportAnalytics {
   final List<ReportTrendPoint> trends;
   final double? waitingTimeDays;
   final int rescheduledAppointments;
+  final ReportAppliedFilters filters;
   final EmotionalActivityReport emotionalActivity;
 
   List<ReportPercentageItem> appointmentsFor(
@@ -236,9 +238,110 @@ class AdminReportAnalytics {
         appointments['rescheduledAppointments'],
         0,
       ),
+      filters: json['filters'] is Map
+          ? ReportAppliedFilters.fromJson(_map(json['filters']))
+          : const ReportAppliedFilters.empty(),
       emotionalActivity: json['emotionalActivity'] is Map
           ? EmotionalActivityReport.fromJson(_map(json['emotionalActivity']))
           : const EmotionalActivityReport.empty(),
+    );
+  }
+}
+
+class ReportAppliedFilters {
+  const ReportAppliedFilters({
+    required this.schoolYear,
+    required this.periodLabel,
+    required this.startDate,
+    required this.endDate,
+    required this.userCategory,
+    required this.userCategoryLabel,
+    required this.collegeKey,
+    required this.collegeLabel,
+    required this.programKey,
+    required this.programLabel,
+    required this.emotionalSource,
+    required this.emotionalSourceLabel,
+    required this.collegeOptions,
+    required this.programOptions,
+    required this.programOptionsByCollege,
+  });
+
+  const ReportAppliedFilters.empty()
+    : schoolYear = '',
+      periodLabel = 'Whole academic year',
+      startDate = null,
+      endDate = null,
+      userCategory = 'all',
+      userCategoryLabel = 'All categories',
+      collegeKey = 'all',
+      collegeLabel = 'All colleges & departments',
+      programKey = 'all',
+      programLabel = 'All programs',
+      emotionalSource = 'all',
+      emotionalSourceLabel = 'All approved sources',
+      collegeOptions = const [],
+      programOptions = const [],
+      programOptionsByCollege = const {};
+
+  final String schoolYear;
+  final String periodLabel;
+  final DateTime? startDate;
+  final DateTime? endDate;
+  final String userCategory;
+  final String userCategoryLabel;
+  final String collegeKey;
+  final String collegeLabel;
+  final String programKey;
+  final String programLabel;
+  final String emotionalSource;
+  final String emotionalSourceLabel;
+  final List<ReportFilterOption> collegeOptions;
+  final List<ReportFilterOption> programOptions;
+  final Map<String, List<ReportFilterOption>> programOptionsByCollege;
+
+  List<ReportFilterOption> programsForCollege(String college) {
+    final normalized = college.trim().toLowerCase();
+    if (normalized.isEmpty || normalized == 'all') {
+      if (programOptions.isNotEmpty) return programOptions;
+      final merged = <String, ReportFilterOption>{};
+      for (final list in programOptionsByCollege.values) {
+        for (final item in list) {
+          merged[item.key] = item;
+        }
+      }
+      final values = merged.values.toList()
+        ..sort((a, b) => a.label.compareTo(b.label));
+      return values;
+    }
+    return programOptionsByCollege[normalized] ?? const [];
+  }
+
+  factory ReportAppliedFilters.fromJson(Map<String, dynamic> json) {
+    final rawByCollege = _map(json['programOptionsByCollege']);
+    final byCollege = <String, List<ReportFilterOption>>{
+      for (final entry in rawByCollege.entries)
+        entry.key.toLowerCase(): _options(entry.value),
+    };
+    return ReportAppliedFilters(
+      schoolYear: json['schoolYear']?.toString() ?? '',
+      periodLabel: json['periodLabel']?.toString() ?? 'Whole academic year',
+      startDate: DateTime.tryParse(json['startDate']?.toString() ?? ''),
+      endDate: DateTime.tryParse(json['endDate']?.toString() ?? ''),
+      userCategory: json['userCategory']?.toString() ?? 'all',
+      userCategoryLabel:
+          json['userCategoryLabel']?.toString() ?? 'All categories',
+      collegeKey: json['collegeKey']?.toString() ?? 'all',
+      collegeLabel:
+          json['collegeLabel']?.toString() ?? 'All colleges & departments',
+      programKey: json['programKey']?.toString() ?? 'all',
+      programLabel: json['programLabel']?.toString() ?? 'All programs',
+      emotionalSource: json['emotionalSource']?.toString() ?? 'all',
+      emotionalSourceLabel:
+          json['emotionalSourceLabel']?.toString() ?? 'All approved sources',
+      collegeOptions: _options(json['collegeOptions']),
+      programOptions: _options(json['programOptions']),
+      programOptionsByCollege: byCollege,
     );
   }
 }

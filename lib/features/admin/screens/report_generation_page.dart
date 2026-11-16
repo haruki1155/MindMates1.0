@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:excel_plus/excel_plus.dart' as excel;
 import 'package:flutter/material.dart';
@@ -16,9 +17,19 @@ import '../services/admin_import_file_picker.dart';
 enum _ReportPeriod { wholeYear, firstSemester, secondSemester, custom }
 
 class ReportGenerationPage extends StatefulWidget {
-  const ReportGenerationPage({super.key, required this.repository});
+  const ReportGenerationPage({
+    super.key,
+    required this.repository,
+    this.pdfPreviewBuilder,
+    this.onPrintPdf,
+    this.onSharePdf,
+  });
 
   final AdminPortalRepository repository;
+  final Widget Function(BuildContext context, Uint8List bytes)?
+  pdfPreviewBuilder;
+  final Future<void> Function(Uint8List bytes)? onPrintPdf;
+  final Future<void> Function(Uint8List bytes, String filename)? onSharePdf;
 
   @override
   State<ReportGenerationPage> createState() => _ReportGenerationPageState();
@@ -31,10 +42,12 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   AppointmentReportDimension _dimension = AppointmentReportDimension.department;
   String _userCategory = 'all';
   String _appointmentDepartment = 'all';
+  String _program = 'all';
   String _schoolYear = _currentSchoolYear();
   _ReportPeriod _period = _ReportPeriod.wholeYear;
   EmotionalActivitySource _emotionalSource = EmotionalActivitySource.all;
   DateTimeRange? _customRange;
+  AdminReportAnalytics? _latestReport;
   bool _downloading = false;
   bool _previewing = false;
   bool _filterLoading = false;
@@ -43,35 +56,120 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   @override
   void initState() {
     super.initState();
-    _report = _fetch();
+    _report = _runFetch(_reportRequestId);
   }
 
-  Future<AdminReportAnalytics> _fetch() =>
-      widget.repository.fetchEmotionalReportAnalytics(
-        userCategory: _userCategory,
-        appointmentDepartment: _appointmentDepartment,
-        schoolYear: _schoolYear,
-        startDate: _period == _ReportPeriod.wholeYear
-            ? null
-            : _periodRange()?.start,
-        endDate: _period == _ReportPeriod.wholeYear
-            ? null
-            : _periodRange()?.end,
-        emotionalSource: _emotionalSource.wireKey,
-      );
+  String get _periodLabel => switch (_period) {
+    _ReportPeriod.wholeYear => 'Whole academic year',
+    _ReportPeriod.firstSemester => '1st semester',
+    _ReportPeriod.secondSemester => '2nd semester',
+    _ReportPeriod.custom => 'Custom date range',
+  };
+
+  Future<AdminReportAnalytics> _fetch() {
+    final range = _period == _ReportPeriod.wholeYear ? null : _periodRange();
+    return widget.repository.fetchFilteredReportAnalytics(
+      userCategory: _userCategory,
+      appointmentDepartment: _appointmentDepartment,
+      program: _program,
+      schoolYear: _schoolYear,
+      periodLabel: _period == _ReportPeriod.wholeYear ? null : _periodLabel,
+      startDate: range?.start,
+      endDate: range?.end,
+      emotionalSource: _emotionalSource.wireKey,
+    );
+  }
+
+  Future<AdminReportAnalytics> _runFetch(int requestId) {
+    final future = _fetch();
+    future.then(
+      (value) {
+        if (!mounted || requestId != _reportRequestId) return;
+        setState(() {
+          _latestReport = value;
+          _filterLoading = false;
+        });
+      },
+      onError: (_, _) {
+        if (!mounted || requestId != _reportRequestId) return;
+        setState(() => _filterLoading = false);
+      },
+    );
+    return future;
+  }
+
+  /// Converts a Philippines (UTC+8) calendar date midnight to its UTC instant.
+  static DateTime _manilaDayStart(int year, int month, int day) =>
+      DateTime.utc(year, month, day).subtract(const Duration(hours: 8));
+
+  static DateTime? _parseCalendarDate(String raw) {
+    final match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(raw.trim());
+    if (match == null) return null;
+    final year = int.tryParse(match.group(1)!);
+    final month = int.tryParse(match.group(2)!);
+    final day = int.tryParse(match.group(3)!);
+    if (year == null || month == null || day == null) return null;
+    return DateTime.utc(year, month, day);
+  }
 
   DateTimeRange? _periodRange() {
-    if (_period == _ReportPeriod.custom) return _customRange;
+    if (_period == _ReportPeriod.custom) {
+      final range = _customRange;
+      if (range == null) return null;
+      return DateTimeRange(
+        start: _manilaDayStart(
+          range.start.year,
+          range.start.month,
+          range.start.day,
+        ),
+        end: _manilaDayStart(
+          range.end.year,
+          range.end.month,
+          range.end.day + 1,
+        ),
+      );
+    }
+    final activeYear = _latestReport?.population.years
+        .where((item) => item.schoolYear == _schoolYear)
+        .firstOrNull;
+    final configuredStart = activeYear == null
+        ? null
+        : _parseCalendarDate(activeYear.startDate);
+    final configuredEnd = activeYear == null
+        ? null
+        : _parseCalendarDate(activeYear.endDate);
+    if (configuredStart != null && configuredEnd != null) {
+      final yearStart = _manilaDayStart(
+        configuredStart.year,
+        configuredStart.month,
+        configuredStart.day,
+      );
+      final yearEndExclusive = _manilaDayStart(
+        configuredEnd.year,
+        configuredEnd.month,
+        configuredEnd.day + 1,
+      );
+      final mid = _manilaDayStart(
+        configuredStart.year,
+        configuredStart.month + 6,
+        configuredStart.day,
+      );
+      if (mid.isAfter(yearStart) && mid.isBefore(yearEndExclusive)) {
+        return _period == _ReportPeriod.firstSemester
+            ? DateTimeRange(start: yearStart, end: mid)
+            : DateTimeRange(start: mid, end: yearEndExclusive);
+      }
+    }
     final startYear =
         int.tryParse(_schoolYear.split('-').first) ?? DateTime.now().year;
     return _period == _ReportPeriod.firstSemester
         ? DateTimeRange(
-            start: DateTime(startYear, 6, 1),
-            end: DateTime(startYear, 12, 1),
+            start: _manilaDayStart(startYear, 6, 1),
+            end: _manilaDayStart(startYear, 12, 1),
           )
         : DateTimeRange(
-            start: DateTime(startYear, 12, 1),
-            end: DateTime(startYear + 1, 6, 1),
+            start: _manilaDayStart(startYear, 12, 1),
+            end: _manilaDayStart(startYear + 1, 6, 1),
           );
   }
 
@@ -79,23 +177,10 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
 
   void _reloadReport() {
     final requestId = ++_reportRequestId;
-    final future = _fetch();
     setState(() {
-      _report = future;
       _filterLoading = true;
+      _report = _runFetch(requestId);
     });
-    future.then(
-      (_) {
-        if (mounted && requestId == _reportRequestId) {
-          setState(() => _filterLoading = false);
-        }
-      },
-      onError: (_, _) {
-        if (mounted && requestId == _reportRequestId) {
-          setState(() => _filterLoading = false);
-        }
-      },
-    );
   }
 
   void _selectUserCategory(String value) {
@@ -108,10 +193,53 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   void _selectDepartment(String value) {
     setState(() {
       _appointmentDepartment = value;
+      _program = 'all';
       if (value != 'all' &&
           _dimension == AppointmentReportDimension.department) {
         _dimension = AppointmentReportDimension.course;
       }
+    });
+    _reloadReport();
+  }
+
+  void _selectProgram(String value) {
+    setState(() {
+      _program = value;
+    });
+    _reloadReport();
+  }
+
+  void _resetFilters() {
+    final currentYear =
+        _latestReport?.population.years
+            .where((item) => item.status == 'current')
+            .firstOrNull
+            ?.schoolYear ??
+        _currentSchoolYear();
+    setState(() {
+      _userCategory = 'all';
+      _appointmentDepartment = 'all';
+      _program = 'all';
+      _schoolYear = currentYear;
+      _period = _ReportPeriod.wholeYear;
+      _customRange = null;
+      _emotionalSource = EmotionalActivitySource.all;
+      _dimension = AppointmentReportDimension.department;
+    });
+    _reloadReport();
+  }
+
+  Future<void> _pickCustomPeriod() async {
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      initialDateRange: _customRange,
+    );
+    if (range == null || !mounted) return;
+    setState(() {
+      _customRange = range;
+      _period = _ReportPeriod.custom;
     });
     _reloadReport();
   }
@@ -128,241 +256,300 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
     }
     return FutureBuilder<AdminReportAnalytics>(
       future: _report,
-      builder: (context, snapshot) => SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
-          28,
-          MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
-          40,
-        ),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1440),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Header(
-                  loading:
-                      snapshot.connectionState == ConnectionState.waiting &&
-                      !snapshot.hasData,
-                  downloading: _downloading,
-                  previewing: _previewing,
-                  canDownload: snapshot.hasData,
-                  showImport: _reportType == AdminReportType.appointments,
-                  onDownload: snapshot.hasData
-                      ? () => _download(snapshot.requireData)
-                      : null,
-                  onPreview: snapshot.hasData
-                      ? () => _preview(snapshot.requireData)
-                      : null,
-                  onImport: _reportType == AdminReportType.appointments
-                      ? _showBulkImport
-                      : null,
-                ),
-                const SizedBox(height: 22),
-                _ReportToggle(
-                  value: _reportType,
-                  onChanged: (value) => setState(() => _reportType = value),
-                ),
-                const SizedBox(height: 18),
-                if (snapshot.connectionState == ConnectionState.waiting &&
-                    !snapshot.hasData)
-                  const _LoadingPanel()
-                else if (snapshot.hasError)
-                  _ErrorPanel(onRetry: _refresh)
-                else if (snapshot.hasData)
-                  _content(snapshot.requireData),
-              ],
+      builder: (context, snapshot) {
+        final readySnapshot =
+            snapshot.hasData && !snapshot.hasError && !_filterLoading;
+        return SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
+            28,
+            MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
+            40,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1440),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Header(
+                    loading:
+                        snapshot.connectionState == ConnectionState.waiting &&
+                        !snapshot.hasData,
+                    downloading: _downloading,
+                    previewing: _previewing,
+                    canDownload: readySnapshot,
+                    showImport: _reportType == AdminReportType.appointments,
+                    onDownload: readySnapshot
+                        ? () => _download(snapshot.requireData)
+                        : null,
+                    onPreview: readySnapshot
+                        ? () => _preview(snapshot.requireData)
+                        : null,
+                    onImport: _reportType == AdminReportType.appointments
+                        ? _showBulkImport
+                        : null,
+                  ),
+                  const SizedBox(height: 22),
+                  _ReportToggle(
+                    value: _reportType,
+                    onChanged: (value) => setState(() => _reportType = value),
+                  ),
+                  const SizedBox(height: 18),
+                  if (snapshot.connectionState == ConnectionState.waiting &&
+                      !snapshot.hasData)
+                    const _LoadingPanel()
+                  else if (snapshot.hasError)
+                    _ErrorPanel(
+                      onRetry: _refresh,
+                      onResetFilters: _resetFilters,
+                    )
+                  else if (snapshot.hasData)
+                    _content(snapshot.requireData),
+                ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  Widget _content(AdminReportAnalytics report) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      if (_reportType == AdminReportType.appointments) ...[
-        _AdminReportControls(
-          schoolYear: _schoolYear,
-          years: report.population.years,
-          period: _period,
-          report: report,
-          chartType: _chartType,
-          dimension: _dimension,
-          department: _appointmentDepartment,
-          departmentOptions: report.appointmentDepartmentOptions,
-          onYearChanged: (value) {
-            setState(() => _schoolYear = value);
-            _reloadReport();
-          },
-          onPeriodChanged: (value) {
-            setState(() => _period = value);
-            _reloadReport();
-          },
-          onCustomPeriod: () async {
-            final range = await showDateRangePicker(
-              context: context,
-              firstDate: DateTime(2020),
-              lastDate: DateTime(2100),
-              initialDateRange: _customRange,
-            );
-            if (range == null || !mounted) return;
-            setState(() {
-              _customRange = range;
-              _period = _ReportPeriod.custom;
-            });
-            _reloadReport();
-          },
-          onDepartmentChanged: _selectDepartment,
-          onDimensionChanged: (value) => setState(() => _dimension = value),
-          onChartChanged: (value) => setState(() => _chartType = value),
-        ),
-      ] else if (_reportType == AdminReportType.emotionalActivity) ...[
-        _EmotionalReportControls(
-          schoolYear: _schoolYear,
-          years: report.population.years,
-          period: _period,
-          report: report,
-          chartType: _chartType,
-          source: _emotionalSource,
-          userCategory: _userCategory,
-          userCategories: report.userCategoryOptions,
-          department: _appointmentDepartment,
-          departmentOptions:
-              report.emotionalActivity.departmentOptions.isNotEmpty
+  Widget _content(AdminReportAnalytics report) {
+    final collegeOptions = report.filters.collegeOptions.isNotEmpty
+        ? report.filters.collegeOptions
+        : (_reportType == AdminReportType.emotionalActivity &&
+                  report.emotionalActivity.departmentOptions.isNotEmpty
               ? report.emotionalActivity.departmentOptions
-              : report.appointmentDepartmentOptions,
-          onYearChanged: (value) {
-            setState(() => _schoolYear = value);
-            _reloadReport();
-          },
-          onPeriodChanged: (value) {
-            setState(() => _period = value);
-            _reloadReport();
-          },
-          onCustomPeriod: () async {
-            final range = await showDateRangePicker(
-              context: context,
-              firstDate: DateTime(2020),
-              lastDate: DateTime(2100),
-              initialDateRange: _customRange,
-            );
-            if (range == null || !mounted) return;
-            setState(() {
-              _customRange = range;
-              _period = _ReportPeriod.custom;
-            });
-            _reloadReport();
-          },
-          onSourceChanged: (value) {
-            setState(() => _emotionalSource = value);
-            _reloadReport();
-          },
-          onUserCategoryChanged: _selectUserCategory,
-          onDepartmentChanged: (value) {
-            setState(() => _appointmentDepartment = value);
-            _reloadReport();
-          },
-          onChartChanged: (value) => setState(() => _chartType = value),
+              : report.appointmentDepartmentOptions);
+    final programOptions = report.filters.programsForCollege(
+      _appointmentDepartment,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_reportType == AdminReportType.appointments) ...[
+          _AdminReportControls(
+            schoolYear: _schoolYear,
+            years: report.population.years,
+            period: _period,
+            report: report,
+            chartType: _chartType,
+            dimension: _dimension,
+            userCategory: _userCategory,
+            userCategories: report.userCategoryOptions,
+            department: _appointmentDepartment,
+            departmentOptions: collegeOptions,
+            program: _program,
+            programOptions: programOptions,
+            onYearChanged: (value) {
+              setState(() => _schoolYear = value);
+              _reloadReport();
+            },
+            onPeriodChanged: (value) {
+              setState(() => _period = value);
+              _reloadReport();
+            },
+            onCustomPeriod: _pickCustomPeriod,
+            onUserCategoryChanged: _selectUserCategory,
+            onDepartmentChanged: _selectDepartment,
+            onProgramChanged: _selectProgram,
+            onDimensionChanged: (value) => setState(() => _dimension = value),
+            onChartChanged: (value) => setState(() => _chartType = value),
+          ),
+        ] else if (_reportType == AdminReportType.emotionalActivity) ...[
+          _EmotionalReportControls(
+            schoolYear: _schoolYear,
+            years: report.population.years,
+            period: _period,
+            report: report,
+            chartType: _chartType,
+            source: _emotionalSource,
+            userCategory: _userCategory,
+            userCategories: report.userCategoryOptions,
+            department: _appointmentDepartment,
+            departmentOptions: collegeOptions,
+            program: _program,
+            programOptions: programOptions,
+            onYearChanged: (value) {
+              setState(() => _schoolYear = value);
+              _reloadReport();
+            },
+            onPeriodChanged: (value) {
+              setState(() => _period = value);
+              _reloadReport();
+            },
+            onCustomPeriod: _pickCustomPeriod,
+            onSourceChanged: (value) {
+              setState(() => _emotionalSource = value);
+              _reloadReport();
+            },
+            onUserCategoryChanged: _selectUserCategory,
+            onDepartmentChanged: _selectDepartment,
+            onProgramChanged: _selectProgram,
+            onChartChanged: (value) => setState(() => _chartType = value),
+          ),
+        ] else ...[
+          _ControlPanel(
+            schoolYear: _schoolYear,
+            years: report.population.years,
+            period: _period,
+            reportType: _reportType,
+            chartType: _chartType,
+            dimension: _dimension,
+            userCategory: _userCategory,
+            userCategories: report.userCategoryOptions,
+            appointmentDepartment: _appointmentDepartment,
+            departmentOptions: collegeOptions,
+            program: _program,
+            programOptions: programOptions,
+            onYearChanged: (value) {
+              setState(() => _schoolYear = value);
+              _reloadReport();
+            },
+            onPeriodChanged: (value) {
+              setState(() => _period = value);
+              _reloadReport();
+            },
+            onCustomPeriod: _pickCustomPeriod,
+            onChartChanged: (value) => setState(() => _chartType = value),
+            onDimensionChanged: (value) => setState(() => _dimension = value),
+            onUserCategoryChanged: _selectUserCategory,
+            onDepartmentChanged: _selectDepartment,
+            onProgramChanged: _selectProgram,
+          ),
+        ],
+        const SizedBox(height: 22),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: _filterLoading
+              ? const _ReportSkeleton(key: ValueKey('report-skeleton'))
+              : _reportType == AdminReportType.users
+              ? _UserReport(
+                  key: const ValueKey('users'),
+                  report: report,
+                  chartType: _chartType,
+                  categoryKey: _userCategory,
+                )
+              : _reportType == AdminReportType.emotionalActivity
+              ? _EmotionalActivityReportView(
+                  key: const ValueKey('emotional'),
+                  report: report,
+                  chartType: _chartType,
+                )
+              : _AppointmentReport(
+                  key: const ValueKey('appointments'),
+                  report: report,
+                  chartType: _chartType,
+                  dimension: _dimension,
+                ),
         ),
-      ] else ...[
-        _ControlPanel(
-          reportType: _reportType,
-          chartType: _chartType,
-          dimension: _dimension,
-          userCategory: _userCategory,
-          userCategories: report.userCategoryOptions,
-          appointmentDepartment: _appointmentDepartment,
-          departmentOptions: report.appointmentDepartmentOptions,
-          onChartChanged: (value) => setState(() => _chartType = value),
-          onDimensionChanged: (value) => setState(() => _dimension = value),
-          onUserCategoryChanged: _selectUserCategory,
-          onDepartmentChanged: _selectDepartment,
-        ),
+        if (_reportType == AdminReportType.appointments &&
+            widget.repository.currentAccessRole == AccessRole.admin) ...[
+          const SizedBox(height: 26),
+          Text('Report setup', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 10),
+          _PopulationSetup(
+            repository: widget.repository,
+            config: report.population,
+            onSaved: (config) {
+              setState(() {
+                _schoolYear = config.schoolYear;
+              });
+              _reloadReport();
+              _showReportSnackBar(
+                context,
+                'Population saved for ${config.schoolYear}. Reports are now updating.',
+              );
+            },
+            onYearChanged: (schoolYear) {
+              setState(() {
+                _schoolYear = schoolYear;
+              });
+              _reloadReport();
+            },
+          ),
+          const SizedBox(height: 18),
+          _ImportedFilesPanel(repository: widget.repository),
+        ],
+        const SizedBox(height: 14),
+        _PrivacyNotice(generatedAt: report.generatedAt),
       ],
-      const SizedBox(height: 22),
-      AnimatedSwitcher(
-        duration: const Duration(milliseconds: 180),
-        child: _filterLoading
-            ? const _ReportSkeleton(key: ValueKey('report-skeleton'))
-            : _reportType == AdminReportType.users
-            ? _UserReport(
-                key: const ValueKey('users'),
-                report: report,
-                chartType: _chartType,
-                categoryKey: _userCategory,
-              )
-            : _reportType == AdminReportType.emotionalActivity
-            ? _EmotionalActivityReportView(
-                key: const ValueKey('emotional'),
-                report: report,
-                chartType: _chartType,
-              )
-            : _AppointmentReport(
-                key: const ValueKey('appointments'),
-                report: report,
-                chartType: _chartType,
-                dimension: _dimension,
-              ),
-      ),
-      if (_reportType == AdminReportType.appointments &&
-          widget.repository.currentAccessRole == AccessRole.admin) ...[
-        const SizedBox(height: 26),
-        Text('Report setup', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 10),
-        _PopulationSetup(
-          repository: widget.repository,
-          config: report.population,
-          onSaved: (config) {
-            setState(() {
-              _schoolYear = config.schoolYear;
-            });
-            _reloadReport();
-            _showReportSnackBar(
-              context,
-              'Population saved for ${config.schoolYear}. Reports are now updating.',
-            );
-          },
-          onYearChanged: (schoolYear) {
-            setState(() {
-              _schoolYear = schoolYear;
-            });
-            _reloadReport();
-          },
-        ),
-        const SizedBox(height: 18),
-        _ImportedFilesPanel(repository: widget.repository),
-      ],
-      const SizedBox(height: 14),
-      _PrivacyNotice(generatedAt: report.generatedAt),
-    ],
-  );
+    );
+  }
 
-  Future<void> _download(AdminReportAnalytics report) async {
-    setState(() => _downloading = true);
-    try {
-      await AdminReportPdfService.download(
+  Future<Uint8List> _buildPdf(AdminReportAnalytics report) =>
+      AdminReportPdfService.build(
         report: report,
         reportType: _reportType,
         chartType: _chartType,
         userCategoryKey: _userCategory,
         appointmentDimension: _dimension,
       );
-      try {
-        await widget.repository.recordAuditEvent(
-          action: 'REPORT_EXPORTED_PDF',
-          category: 'REPORTS',
-          targetType: 'report',
-          targetId: report.population.schoolYear,
-          metadata: {
-            'reportType': _reportType.name,
-            'department': _appointmentDepartment,
-            'period': report.dateRange.label,
-          },
-        );
-      } catch (_) {}
+
+  Future<void> _recordReportAudit(
+    String action,
+    AdminReportAnalytics report,
+  ) async {
+    try {
+      await widget.repository.recordAuditEvent(
+        action: action,
+        category: 'REPORTS',
+        targetType: 'report',
+        targetId: report.population.schoolYear,
+        metadata: {
+          'reportType': _reportType.name,
+          'department': _appointmentDepartment,
+          'program': _program,
+          'period': report.filters.periodLabel,
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _shareOrDownloadPdf(
+    AdminReportAnalytics report,
+    Uint8List pdfBytes,
+  ) async {
+    if (widget.onSharePdf != null) {
+      await widget.onSharePdf!(
+        pdfBytes,
+        AdminReportPdfService.filenameFor(report, _reportType),
+      );
+    } else {
+      await AdminReportPdfService.download(
+        report: report,
+        reportType: _reportType,
+        chartType: _chartType,
+        userCategoryKey: _userCategory,
+        appointmentDimension: _dimension,
+        prebuiltBytes: pdfBytes,
+      );
+    }
+    await _recordReportAudit('REPORT_EXPORTED_PDF', report);
+  }
+
+  Future<void> _printPdf(
+    AdminReportAnalytics report,
+    Uint8List pdfBytes,
+  ) async {
+    if (widget.onPrintPdf != null) {
+      await widget.onPrintPdf!(pdfBytes);
+    } else {
+      await Printing.layoutPdf(
+        name: AdminReportPdfService.filenameFor(report, _reportType),
+        onLayout: (_) async => pdfBytes,
+      );
+    }
+    await _recordReportAudit('REPORT_PRINTED', report);
+  }
+
+  Future<void> _download(AdminReportAnalytics report) async {
+    if (_downloading || _filterLoading) return;
+    setState(() => _downloading = true);
+    try {
+      final pdfBytes = await _buildPdf(report);
+      await _shareOrDownloadPdf(report, pdfBytes);
     } catch (_) {
       if (mounted) {
         _showReportSnackBar(
@@ -377,81 +564,24 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   }
 
   Future<void> _preview(AdminReportAnalytics report) async {
-    if (_previewing) return;
+    if (_previewing || _filterLoading) return;
     setState(() => _previewing = true);
     try {
-      final pdfBytes = await AdminReportPdfService.build(
-        report: report,
-        reportType: _reportType,
-        chartType: _chartType,
-        userCategoryKey: _userCategory,
-        appointmentDimension: _dimension,
-      );
+      final pdfBytes = await _buildPdf(report);
       if (!mounted) return;
-      try {
-        await widget.repository.recordAuditEvent(
-          action: 'REPORT_VIEWED',
-          category: 'REPORTS',
-          targetType: 'report',
-          targetId: report.population.schoolYear,
-          metadata: {
-            'reportType': _reportType.name,
-            'period': report.dateRange.label,
-          },
-        );
-      } catch (_) {}
+      await _recordReportAudit('REPORT_VIEWED', report);
       if (!mounted) return;
+      setState(() => _previewing = false);
       await showDialog<void>(
         context: context,
         barrierColor: Colors.black54,
-        builder: (dialogContext) => Dialog(
-          insetPadding: const EdgeInsets.all(24),
-          clipBehavior: Clip.antiAlias,
-          child: SizedBox(
-            width: 980,
-            height: 760,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.picture_as_pdf_outlined),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          'PDF preview',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Close preview',
-                        onPressed: () => Navigator.pop(dialogContext),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: PdfPreview(
-                    build: (format) async => pdfBytes,
-                    allowPrinting: false,
-                    allowSharing: false,
-                    canChangeOrientation: false,
-                    canChangePageFormat: false,
-                    padding: const EdgeInsets.all(16),
-                    pdfPreviewPageDecoration: const BoxDecoration(
-                      color: Color(0xFFECEFF1),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        builder: (dialogContext) => _ReportPreviewDialog(
+          report: report,
+          reportType: _reportType,
+          pdfBytes: pdfBytes,
+          pdfPreviewBuilder: widget.pdfPreviewBuilder,
+          onPrint: () => _printPdf(report, pdfBytes),
+          onDownload: () => _shareOrDownloadPdf(report, pdfBytes),
         ),
       );
     } catch (_) {
@@ -463,7 +593,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
         );
       }
     } finally {
-      if (mounted) setState(() => _previewing = false);
+      if (mounted && _previewing) setState(() => _previewing = false);
     }
   }
 
@@ -1336,38 +1466,18 @@ class _ReportToggle extends StatelessWidget {
   );
 }
 
-class _AdminReportControls extends StatelessWidget {
-  const _AdminReportControls({
+class _AcademicYearField extends StatelessWidget {
+  const _AcademicYearField({
+    this.dropdownKey,
     required this.schoolYear,
     required this.years,
-    required this.period,
-    required this.report,
-    required this.chartType,
-    required this.dimension,
-    required this.department,
-    required this.departmentOptions,
-    required this.onYearChanged,
-    required this.onPeriodChanged,
-    required this.onCustomPeriod,
-    required this.onDepartmentChanged,
-    required this.onDimensionChanged,
-    required this.onChartChanged,
+    required this.onChanged,
   });
 
+  final Key? dropdownKey;
   final String schoolYear;
   final List<AcademicYearRecord> years;
-  final _ReportPeriod period;
-  final AdminReportAnalytics report;
-  final ReportChartType chartType;
-  final AppointmentReportDimension dimension;
-  final String department;
-  final List<ReportFilterOption> departmentOptions;
-  final ValueChanged<String> onYearChanged;
-  final ValueChanged<_ReportPeriod> onPeriodChanged;
-  final VoidCallback onCustomPeriod;
-  final ValueChanged<String> onDepartmentChanged;
-  final ValueChanged<AppointmentReportDimension> onDimensionChanged;
-  final ValueChanged<ReportChartType> onChartChanged;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1381,178 +1491,136 @@ class _AdminReportControls extends StatelessWidget {
             ),
           ]
         : years;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-      decoration: _panelDecoration,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'REPORT CONTROLS',
-            style: TextStyle(
-              color: AdminColors.muted,
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1,
-            ),
-          ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final twoColumns = constraints.maxWidth >= 700;
-              final width = twoColumns
-                  ? (constraints.maxWidth - 14) / 2
-                  : constraints.maxWidth;
-              return Wrap(
-                spacing: 14,
-                runSpacing: 14,
-                children: [
-                  SizedBox(
-                    width: width,
-                    child: _LabeledControl(
-                      label: 'Academic year',
-                      child: DropdownButtonFormField<String>(
-                        initialValue:
-                            options.any((item) => item.schoolYear == schoolYear)
-                            ? schoolYear
-                            : options.first.schoolYear,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.school_outlined),
-                        ),
-                        items: options
-                            .map(
-                              (item) => DropdownMenuItem(
-                                value: item.schoolYear,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        item.schoolYear,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    if (item.status == 'current') ...[
-                                      const SizedBox(width: 8),
-                                      const _CurrentBadge(),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) onYearChanged(value);
-                        },
+    final activeYear = options.any((item) => item.schoolYear == schoolYear)
+        ? schoolYear
+        : options.first.schoolYear;
+    return _LabeledControl(
+      label: 'Academic year',
+      child: DropdownButtonFormField<String>(
+        key: dropdownKey ?? ValueKey('yr-$activeYear'),
+        initialValue: activeYear,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.school_outlined),
+        ),
+        items: options
+            .map(
+              (item) => DropdownMenuItem(
+                value: item.schoolYear,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        item.schoolYear,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  ),
-                  SizedBox(
-                    width: width,
-                    child: _LabeledControl(
-                      label: 'Reporting period',
-                      child: DropdownButtonFormField<_ReportPeriod>(
-                        initialValue: period,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.date_range_outlined),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: _ReportPeriod.wholeYear,
-                            child: Text('Whole year'),
-                          ),
-                          DropdownMenuItem(
-                            value: _ReportPeriod.firstSemester,
-                            child: Text('1st semester'),
-                          ),
-                          DropdownMenuItem(
-                            value: _ReportPeriod.secondSemester,
-                            child: Text('2nd semester'),
-                          ),
-                          DropdownMenuItem(
-                            value: _ReportPeriod.custom,
-                            child: Text('Custom dates'),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value == _ReportPeriod.custom) {
-                            onCustomPeriod();
-                          } else if (value != null) {
-                            onPeriodChanged(value);
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 14),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final wide = constraints.maxWidth >= 950;
-              return wide
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(child: _scopeControl()),
-                        const SizedBox(width: 14),
-                        Expanded(child: _groupControl()),
-                        const SizedBox(width: 14),
-                        _visualControl(),
-                      ],
-                    )
-                  : Wrap(
-                      spacing: 14,
-                      runSpacing: 14,
-                      children: [
-                        _scopeControl(),
-                        _groupControl(),
-                        _visualControl(),
-                      ],
-                    );
-            },
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(
-                Icons.info_outline,
-                size: 15,
-                color: AdminColors.muted,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Percentages are calculated using the population snapshot for ${report.population.schoolYear}.',
-                  style: const TextStyle(
-                    color: AdminColors.muted,
-                    fontSize: 12,
-                  ),
+                    if (item.status == 'current') ...[
+                      const SizedBox(width: 8),
+                      const _CurrentBadge(),
+                    ],
+                  ],
                 ),
               ),
-            ],
-          ),
-        ],
+            )
+            .toList(),
+        onChanged: (value) {
+          if (value != null) onChanged(value);
+        },
       ),
     );
   }
+}
 
-  Widget _scopeControl() => SizedBox(
-    width: 280,
-    child: _LabeledControl(
-      label: 'Department scope',
+class _ReportingPeriodField extends StatelessWidget {
+  const _ReportingPeriodField({
+    this.dropdownKey,
+    required this.period,
+    required this.onPeriodChanged,
+    required this.onCustomPeriod,
+  });
+
+  final Key? dropdownKey;
+  final _ReportPeriod period;
+  final ValueChanged<_ReportPeriod> onPeriodChanged;
+  final VoidCallback onCustomPeriod;
+
+  @override
+  Widget build(BuildContext context) => _LabeledControl(
+    label: 'Reporting period',
+    child: DropdownButtonFormField<_ReportPeriod>(
+      key: dropdownKey ?? ValueKey('period-${period.name}'),
+      initialValue: period,
+      isExpanded: true,
+      decoration: const InputDecoration(
+        prefixIcon: Icon(Icons.date_range_outlined),
+      ),
+      items: const [
+        DropdownMenuItem(
+          value: _ReportPeriod.wholeYear,
+          child: Text('Whole year'),
+        ),
+        DropdownMenuItem(
+          value: _ReportPeriod.firstSemester,
+          child: Text('1st semester'),
+        ),
+        DropdownMenuItem(
+          value: _ReportPeriod.secondSemester,
+          child: Text('2nd semester'),
+        ),
+        DropdownMenuItem(
+          value: _ReportPeriod.custom,
+          child: Text('Custom dates'),
+        ),
+      ],
+      onChanged: (value) {
+        if (value == _ReportPeriod.custom) {
+          onCustomPeriod();
+        } else if (value != null) {
+          onPeriodChanged(value);
+        }
+      },
+    ),
+  );
+}
+
+class _CollegeDropdownField extends StatelessWidget {
+  const _CollegeDropdownField({
+    required this.dropdownKey,
+    required this.label,
+    required this.allLabel,
+    required this.department,
+    required this.departmentOptions,
+    required this.onChanged,
+  });
+
+  final Key dropdownKey;
+  final String label;
+  final String allLabel;
+  final String department;
+  final List<ReportFilterOption> departmentOptions;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeDept = departmentOptions.any((item) => item.key == department)
+        ? department
+        : 'all';
+    return _LabeledControl(
+      label: label,
       child: DropdownButtonFormField<String>(
-        initialValue: department,
+        key: dropdownKey,
+        initialValue: activeDept,
         isExpanded: true,
         decoration: const InputDecoration(
           prefixIcon: Icon(Icons.account_balance_outlined),
         ),
         items: [
-          const DropdownMenuItem(value: 'all', child: Text('All departments')),
+          DropdownMenuItem(
+            value: 'all',
+            child: Text(allLabel, overflow: TextOverflow.ellipsis),
+          ),
           ...departmentOptions.map(
             (item) => DropdownMenuItem(
               value: item.key,
@@ -1561,32 +1629,272 @@ class _AdminReportControls extends StatelessWidget {
           ),
         ],
         onChanged: (value) {
-          if (value != null) onDepartmentChanged(value);
+          if (value != null) onChanged(value);
         },
       ),
+    );
+  }
+}
+
+class _ProgramDropdownField extends StatelessWidget {
+  const _ProgramDropdownField({
+    required this.dropdownKey,
+    required this.program,
+    required this.programOptions,
+    required this.onChanged,
+  });
+
+  final Key dropdownKey;
+  final String program;
+  final List<ReportFilterOption> programOptions;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeProgram = programOptions.any((item) => item.key == program)
+        ? program
+        : 'all';
+    final optionsSignature = programOptions.map((item) => item.key).join('|');
+    return _LabeledControl(
+      label: 'Program',
+      child: KeyedSubtree(
+        key: dropdownKey,
+        child: DropdownButtonFormField<String>(
+          key: ValueKey('program-field-$activeProgram-$optionsSignature'),
+          initialValue: activeProgram,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.menu_book_outlined),
+          ),
+          items: [
+            const DropdownMenuItem(
+              value: 'all',
+              child: Text('All programs', overflow: TextOverflow.ellipsis),
+            ),
+            ...programOptions.map(
+              (item) => DropdownMenuItem(
+                value: item.key,
+                child: Text(item.label, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ],
+          onChanged: (value) {
+            if (value != null) onChanged(value);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryChipsField extends StatelessWidget {
+  const _CategoryChipsField({
+    required this.label,
+    required this.allLabel,
+    required this.userCategory,
+    required this.userCategories,
+    required this.onChanged,
+  });
+
+  final String label;
+  final String allLabel;
+  final String userCategory;
+  final List<ReportFilterOption> userCategories;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) => _LabeledControl(
+    label: label,
+    child: Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        ChoiceChip(
+          label: Text(allLabel),
+          selected: userCategory == 'all',
+          onSelected: (_) => onChanged('all'),
+        ),
+        for (final category in userCategories)
+          ChoiceChip(
+            label: Text(category.label),
+            selected: userCategory == category.key,
+            onSelected: (_) => onChanged(category.key),
+          ),
+      ],
+    ),
+  );
+}
+
+class _AdminReportControls extends StatelessWidget {
+  const _AdminReportControls({
+    required this.schoolYear,
+    required this.years,
+    required this.period,
+    required this.report,
+    required this.chartType,
+    required this.dimension,
+    required this.userCategory,
+    required this.userCategories,
+    required this.department,
+    required this.departmentOptions,
+    required this.program,
+    required this.programOptions,
+    required this.onYearChanged,
+    required this.onPeriodChanged,
+    required this.onCustomPeriod,
+    required this.onUserCategoryChanged,
+    required this.onDepartmentChanged,
+    required this.onProgramChanged,
+    required this.onDimensionChanged,
+    required this.onChartChanged,
+  });
+
+  final String schoolYear;
+  final List<AcademicYearRecord> years;
+  final _ReportPeriod period;
+  final AdminReportAnalytics report;
+  final ReportChartType chartType;
+  final AppointmentReportDimension dimension;
+  final String userCategory;
+  final List<ReportFilterOption> userCategories;
+  final String department;
+  final List<ReportFilterOption> departmentOptions;
+  final String program;
+  final List<ReportFilterOption> programOptions;
+  final ValueChanged<String> onYearChanged;
+  final ValueChanged<_ReportPeriod> onPeriodChanged;
+  final VoidCallback onCustomPeriod;
+  final ValueChanged<String> onUserCategoryChanged;
+  final ValueChanged<String> onDepartmentChanged;
+  final ValueChanged<String> onProgramChanged;
+  final ValueChanged<AppointmentReportDimension> onDimensionChanged;
+  final ValueChanged<ReportChartType> onChartChanged;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+    decoration: _panelDecoration,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'REPORT CONTROLS',
+          style: TextStyle(
+            color: AdminColors.muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1,
+          ),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final twoColumns = constraints.maxWidth >= 700;
+            final width = twoColumns
+                ? (constraints.maxWidth - 14) / 2
+                : constraints.maxWidth;
+            return Wrap(
+              spacing: 14,
+              runSpacing: 14,
+              children: [
+                SizedBox(
+                  width: width,
+                  child: _AcademicYearField(
+                    schoolYear: schoolYear,
+                    years: years,
+                    onChanged: onYearChanged,
+                  ),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _ReportingPeriodField(
+                    period: period,
+                    onPeriodChanged: onPeriodChanged,
+                    onCustomPeriod: onCustomPeriod,
+                  ),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _CollegeDropdownField(
+                    dropdownKey: const ValueKey('appt-dept-dropdown'),
+                    label: 'Department scope',
+                    allLabel: 'All departments',
+                    department: department,
+                    departmentOptions: departmentOptions,
+                    onChanged: onDepartmentChanged,
+                  ),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _ProgramDropdownField(
+                    dropdownKey: const ValueKey('appt-program-dropdown'),
+                    program: program,
+                    programOptions: programOptions,
+                    onChanged: onProgramChanged,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 14,
+          runSpacing: 14,
+          crossAxisAlignment: WrapCrossAlignment.end,
+          children: [
+            _CategoryChipsField(
+              label: 'Population category',
+              allLabel: 'All',
+              userCategory: userCategory,
+              userCategories: userCategories,
+              onChanged: onUserCategoryChanged,
+            ),
+            _groupControl(),
+            _visualControl(),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            const Icon(Icons.info_outline, size: 15, color: AdminColors.muted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Percentages are calculated using the population snapshot for ${report.population.schoolYear}.',
+                style: const TextStyle(color: AdminColors.muted, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ],
     ),
   );
 
   Widget _groupControl() => _LabeledControl(
     label: 'Group by',
-    child: SegmentedButton<AppointmentReportDimension>(
-      showSelectedIcon: false,
-      segments: const [
-        ButtonSegment(
-          value: AppointmentReportDimension.department,
-          label: Text('Department'),
-        ),
-        ButtonSegment(
-          value: AppointmentReportDimension.course,
-          label: Text('Course'),
-        ),
-        ButtonSegment(
-          value: AppointmentReportDimension.yearLevel,
-          label: Text('Year level'),
-        ),
-      ],
-      selected: {dimension},
-      onSelectionChanged: (values) => onDimensionChanged(values.first),
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SegmentedButton<AppointmentReportDimension>(
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(
+            value: AppointmentReportDimension.department,
+            label: Text('Department'),
+          ),
+          ButtonSegment(
+            value: AppointmentReportDimension.course,
+            label: Text('Course'),
+          ),
+          ButtonSegment(
+            value: AppointmentReportDimension.yearLevel,
+            label: Text('Year level'),
+          ),
+        ],
+        selected: {dimension},
+        onSelectionChanged: (values) => onDimensionChanged(values.first),
+      ),
     ),
   );
 
@@ -1630,6 +1938,9 @@ class _CurrentBadge extends StatelessWidget {
 
 class _ControlPanel extends StatelessWidget {
   const _ControlPanel({
+    required this.schoolYear,
+    required this.years,
+    required this.period,
     required this.reportType,
     required this.chartType,
     required this.dimension,
@@ -1637,12 +1948,21 @@ class _ControlPanel extends StatelessWidget {
     required this.userCategories,
     required this.appointmentDepartment,
     required this.departmentOptions,
+    required this.program,
+    required this.programOptions,
+    required this.onYearChanged,
+    required this.onPeriodChanged,
+    required this.onCustomPeriod,
     required this.onChartChanged,
     required this.onDimensionChanged,
     required this.onUserCategoryChanged,
     required this.onDepartmentChanged,
+    required this.onProgramChanged,
   });
 
+  final String schoolYear;
+  final List<AcademicYearRecord> years;
+  final _ReportPeriod period;
   final AdminReportType reportType;
   final ReportChartType chartType;
   final AppointmentReportDimension dimension;
@@ -1650,119 +1970,111 @@ class _ControlPanel extends StatelessWidget {
   final List<ReportFilterOption> userCategories;
   final String appointmentDepartment;
   final List<ReportFilterOption> departmentOptions;
+  final String program;
+  final List<ReportFilterOption> programOptions;
+  final ValueChanged<String> onYearChanged;
+  final ValueChanged<_ReportPeriod> onPeriodChanged;
+  final VoidCallback onCustomPeriod;
   final ValueChanged<ReportChartType> onChartChanged;
   final ValueChanged<AppointmentReportDimension> onDimensionChanged;
   final ValueChanged<String> onUserCategoryChanged;
   final ValueChanged<String> onDepartmentChanged;
+  final ValueChanged<String> onProgramChanged;
 
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
     padding: const EdgeInsets.all(18),
     decoration: _panelDecoration,
-    child: Wrap(
-      spacing: 30,
-      runSpacing: 18,
-      crossAxisAlignment: WrapCrossAlignment.end,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _LabeledControl(
-          label: reportType == AdminReportType.users
-              ? 'USER CATEGORY'
-              : 'GROUP APPOINTMENTS BY',
-          child: reportType == AdminReportType.users
-              ? Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ChoiceChip(
-                      label: const Text('Overall'),
-                      selected: userCategory == 'all',
-                      onSelected: (_) => onUserCategoryChanged('all'),
-                    ),
-                    for (final category in userCategories)
-                      ChoiceChip(
-                        label: Text(category.label),
-                        selected: userCategory == category.key,
-                        onSelected: (_) => onUserCategoryChanged(category.key),
-                      ),
-                  ],
-                )
-              : Wrap(
-                  spacing: 14,
-                  runSpacing: 12,
-                  crossAxisAlignment: WrapCrossAlignment.end,
-                  children: [
-                    SizedBox(
-                      width: 280,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: appointmentDepartment,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Department scope',
-                          prefixIcon: Icon(Icons.account_balance_outlined),
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: 'all',
-                            child: Text('All departments'),
-                          ),
-                          ...departmentOptions.map(
-                            (department) => DropdownMenuItem(
-                              value: department.key,
-                              child: Text(
-                                department.label,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) onDepartmentChanged(value);
-                        },
-                      ),
-                    ),
-                    SegmentedButton<AppointmentReportDimension>(
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(
-                          value: AppointmentReportDimension.department,
-                          label: Text('Department'),
-                        ),
-                        ButtonSegment(
-                          value: AppointmentReportDimension.course,
-                          label: Text('Course'),
-                        ),
-                        ButtonSegment(
-                          value: AppointmentReportDimension.yearLevel,
-                          label: Text('Year level'),
-                        ),
-                      ],
-                      selected: {dimension},
-                      onSelectionChanged: (values) =>
-                          onDimensionChanged(values.first),
-                    ),
-                  ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final twoColumns = constraints.maxWidth >= 700;
+            final width = twoColumns
+                ? (constraints.maxWidth - 14) / 2
+                : constraints.maxWidth;
+            return Wrap(
+              spacing: 14,
+              runSpacing: 14,
+              children: [
+                SizedBox(
+                  width: width,
+                  child: _AcademicYearField(
+                    dropdownKey: const ValueKey('users-yr-dropdown'),
+                    schoolYear: schoolYear,
+                    years: years,
+                    onChanged: onYearChanged,
+                  ),
                 ),
+                SizedBox(
+                  width: width,
+                  child: _ReportingPeriodField(
+                    dropdownKey: const ValueKey('users-period-dropdown'),
+                    period: period,
+                    onPeriodChanged: onPeriodChanged,
+                    onCustomPeriod: onCustomPeriod,
+                  ),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _CollegeDropdownField(
+                    dropdownKey: const ValueKey('users-dept-dropdown'),
+                    label: 'College / department',
+                    allLabel: 'All colleges & departments',
+                    department: appointmentDepartment,
+                    departmentOptions: departmentOptions,
+                    onChanged: onDepartmentChanged,
+                  ),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _ProgramDropdownField(
+                    dropdownKey: const ValueKey('users-program-dropdown'),
+                    program: program,
+                    programOptions: programOptions,
+                    onChanged: onProgramChanged,
+                  ),
+                ),
+              ],
+            );
+          },
         ),
-        _LabeledControl(
-          label: 'CHART TYPE',
-          child: SegmentedButton<ReportChartType>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(
-                value: ReportChartType.pie,
-                icon: Icon(Icons.pie_chart_outline, size: 18),
-                label: Text('Pie'),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 30,
+          runSpacing: 18,
+          crossAxisAlignment: WrapCrossAlignment.end,
+          children: [
+            _CategoryChipsField(
+              label: 'USER CATEGORY',
+              allLabel: 'Overall',
+              userCategory: userCategory,
+              userCategories: userCategories,
+              onChanged: onUserCategoryChanged,
+            ),
+            _LabeledControl(
+              label: 'CHART TYPE',
+              child: SegmentedButton<ReportChartType>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                    value: ReportChartType.pie,
+                    icon: Icon(Icons.pie_chart_outline, size: 18),
+                    label: Text('Pie'),
+                  ),
+                  ButtonSegment(
+                    value: ReportChartType.bar,
+                    icon: Icon(Icons.bar_chart, size: 18),
+                    label: Text('Bar'),
+                  ),
+                ],
+                selected: {chartType},
+                onSelectionChanged: (values) => onChartChanged(values.first),
               ),
-              ButtonSegment(
-                value: ReportChartType.bar,
-                icon: Icon(Icons.bar_chart, size: 18),
-                label: Text('Bar'),
-              ),
-            ],
-            selected: {chartType},
-            onSelectionChanged: (values) => onChartChanged(values.first),
-          ),
+            ),
+          ],
         ),
       ],
     ),
@@ -2834,12 +3146,15 @@ class _EmotionalReportControls extends StatelessWidget {
     required this.userCategories,
     required this.department,
     required this.departmentOptions,
+    required this.program,
+    required this.programOptions,
     required this.onYearChanged,
     required this.onPeriodChanged,
     required this.onCustomPeriod,
     required this.onSourceChanged,
     required this.onUserCategoryChanged,
     required this.onDepartmentChanged,
+    required this.onProgramChanged,
     required this.onChartChanged,
   });
 
@@ -2853,30 +3168,19 @@ class _EmotionalReportControls extends StatelessWidget {
   final List<ReportFilterOption> userCategories;
   final String department;
   final List<ReportFilterOption> departmentOptions;
+  final String program;
+  final List<ReportFilterOption> programOptions;
   final ValueChanged<String> onYearChanged;
   final ValueChanged<_ReportPeriod> onPeriodChanged;
   final VoidCallback onCustomPeriod;
   final ValueChanged<EmotionalActivitySource> onSourceChanged;
   final ValueChanged<String> onUserCategoryChanged;
   final ValueChanged<String> onDepartmentChanged;
+  final ValueChanged<String> onProgramChanged;
   final ValueChanged<ReportChartType> onChartChanged;
 
   @override
   Widget build(BuildContext context) {
-    final options = years.isEmpty
-        ? [
-            AcademicYearRecord(
-              schoolYear: schoolYear,
-              startDate: '',
-              endDate: '',
-              status: 'current',
-            ),
-          ]
-        : years;
-    final activeDept = departmentOptions.any((item) => item.key == department)
-        ? department
-        : 'all';
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
@@ -2898,7 +3202,7 @@ class _EmotionalReportControls extends StatelessWidget {
             builder: (context, constraints) {
               final twoColumns = constraints.maxWidth >= 700;
               final fieldWidth = twoColumns
-                  ? (constraints.maxWidth - 28) / 3
+                  ? (constraints.maxWidth - 14) / 2
                   : constraints.maxWidth;
               return Wrap(
                 spacing: 14,
@@ -2906,114 +3210,40 @@ class _EmotionalReportControls extends StatelessWidget {
                 children: [
                   SizedBox(
                     width: fieldWidth,
-                    child: _LabeledControl(
-                      label: 'Academic year',
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey('emo-yr-$schoolYear'),
-                        initialValue:
-                            options.any((item) => item.schoolYear == schoolYear)
-                            ? schoolYear
-                            : options.first.schoolYear,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.school_outlined),
-                        ),
-                        items: options
-                            .map(
-                              (item) => DropdownMenuItem(
-                                value: item.schoolYear,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Flexible(
-                                      child: Text(
-                                        item.schoolYear,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    if (item.status == 'current') ...[
-                                      const SizedBox(width: 8),
-                                      const _CurrentBadge(),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) onYearChanged(value);
-                        },
-                      ),
+                    child: _AcademicYearField(
+                      dropdownKey: ValueKey('emo-yr-$schoolYear'),
+                      schoolYear: schoolYear,
+                      years: years,
+                      onChanged: onYearChanged,
                     ),
                   ),
                   SizedBox(
                     width: fieldWidth,
-                    child: _LabeledControl(
-                      label: 'Reporting period',
-                      child: DropdownButtonFormField<_ReportPeriod>(
-                        key: ValueKey('emo-period-${period.name}'),
-                        initialValue: period,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.date_range_outlined),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: _ReportPeriod.wholeYear,
-                            child: Text('Whole year'),
-                          ),
-                          DropdownMenuItem(
-                            value: _ReportPeriod.firstSemester,
-                            child: Text('1st semester'),
-                          ),
-                          DropdownMenuItem(
-                            value: _ReportPeriod.secondSemester,
-                            child: Text('2nd semester'),
-                          ),
-                          DropdownMenuItem(
-                            value: _ReportPeriod.custom,
-                            child: Text('Custom dates'),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value == _ReportPeriod.custom) {
-                            onCustomPeriod();
-                          } else if (value != null) {
-                            onPeriodChanged(value);
-                          }
-                        },
-                      ),
+                    child: _ReportingPeriodField(
+                      dropdownKey: ValueKey('emo-period-${period.name}'),
+                      period: period,
+                      onPeriodChanged: onPeriodChanged,
+                      onCustomPeriod: onCustomPeriod,
                     ),
                   ),
                   SizedBox(
                     width: fieldWidth,
-                    child: _LabeledControl(
+                    child: _CollegeDropdownField(
+                      dropdownKey: const ValueKey('emo-dept-dropdown'),
                       label: 'College / department',
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey('emo-dept-$activeDept'),
-                        initialValue: activeDept,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.account_balance_outlined),
-                        ),
-                        items: [
-                          const DropdownMenuItem(
-                            value: 'all',
-                            child: Text('All colleges & departments'),
-                          ),
-                          ...departmentOptions.map(
-                            (item) => DropdownMenuItem(
-                              value: item.key,
-                              child: Text(
-                                item.label,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                        ],
-                        onChanged: (value) {
-                          if (value != null) onDepartmentChanged(value);
-                        },
-                      ),
+                      allLabel: 'All colleges & departments',
+                      department: department,
+                      departmentOptions: departmentOptions,
+                      onChanged: onDepartmentChanged,
+                    ),
+                  ),
+                  SizedBox(
+                    width: fieldWidth,
+                    child: _ProgramDropdownField(
+                      dropdownKey: const ValueKey('emo-program-dropdown'),
+                      program: program,
+                      programOptions: programOptions,
+                      onChanged: onProgramChanged,
                     ),
                   ),
                 ],
@@ -3042,25 +3272,12 @@ class _EmotionalReportControls extends StatelessWidget {
                   ),
                 ),
               ),
-              _LabeledControl(
+              _CategoryChipsField(
                 label: 'Population category',
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ChoiceChip(
-                      label: const Text('All'),
-                      selected: userCategory == 'all',
-                      onSelected: (_) => onUserCategoryChanged('all'),
-                    ),
-                    for (final category in userCategories)
-                      ChoiceChip(
-                        label: Text(category.label),
-                        selected: userCategory == category.key,
-                        onSelected: (_) => onUserCategoryChanged(category.key),
-                      ),
-                  ],
-                ),
+                allLabel: 'All',
+                userCategory: userCategory,
+                userCategories: userCategories,
+                onChanged: onUserCategoryChanged,
               ),
               _LabeledControl(
                 label: 'Visualization',
@@ -3413,8 +3630,10 @@ class _SkeletonBlock extends StatelessWidget {
 }
 
 class _ErrorPanel extends StatelessWidget {
-  const _ErrorPanel({required this.onRetry});
+  const _ErrorPanel({required this.onRetry, this.onResetFilters});
   final VoidCallback onRetry;
+  final VoidCallback? onResetFilters;
+
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
@@ -3431,17 +3650,253 @@ class _ErrorPanel extends StatelessWidget {
         const Text(
           'The report could not be loaded.',
           style: TextStyle(fontWeight: FontWeight.w800),
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: 5),
         const Text(
-          'Check the report function deployment and your access, then try again.',
+          'Check your filters, access scope, or report function deployment, then try again.',
           style: TextStyle(color: AdminColors.muted),
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: 14),
-        OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          alignment: WrapAlignment.center,
+          children: [
+            OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+            if (onResetFilters != null)
+              FilledButton.tonal(
+                onPressed: onResetFilters,
+                child: const Text('Reset filters'),
+              ),
+          ],
+        ),
       ],
     ),
   );
+}
+
+class _ReportPreviewDialog extends StatefulWidget {
+  const _ReportPreviewDialog({
+    required this.report,
+    required this.reportType,
+    required this.pdfBytes,
+    required this.onPrint,
+    required this.onDownload,
+    this.pdfPreviewBuilder,
+  });
+
+  final AdminReportAnalytics report;
+  final AdminReportType reportType;
+  final Uint8List pdfBytes;
+  final Future<void> Function() onPrint;
+  final Future<void> Function() onDownload;
+  final Widget Function(BuildContext context, Uint8List bytes)?
+  pdfPreviewBuilder;
+
+  @override
+  State<_ReportPreviewDialog> createState() => _ReportPreviewDialogState();
+}
+
+class _ReportPreviewDialogState extends State<_ReportPreviewDialog> {
+  bool _printing = false;
+  bool _downloading = false;
+
+  Future<void> _handlePrint() async {
+    if (_printing) return;
+    setState(() => _printing = true);
+    try {
+      await widget.onPrint();
+    } catch (_) {
+      if (mounted) {
+        _showReportSnackBar(
+          context,
+          'Unable to launch the print dialog.',
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _printing = false);
+    }
+  }
+
+  Future<void> _handleDownload() async {
+    if (_downloading) return;
+    setState(() => _downloading = true);
+    try {
+      await widget.onDownload();
+    } catch (_) {
+      if (mounted) {
+        _showReportSnackBar(
+          context,
+          'Unable to download the PDF report.',
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 600;
+    final filters = widget.report.filters;
+    final schoolYear = filters.schoolYear.isNotEmpty
+        ? filters.schoolYear
+        : widget.report.population.schoolYear;
+    final chips = <String>[
+      'AY $schoolYear',
+      filters.periodLabel,
+      filters.userCategoryLabel,
+      filters.collegeLabel,
+      filters.programLabel,
+      if (widget.reportType == AdminReportType.emotionalActivity)
+        filters.emotionalSourceLabel,
+    ];
+    return Dialog(
+      insetPadding: EdgeInsets.all(compact ? 12 : 24),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 980,
+          maxHeight: compact ? 680 : 780,
+        ),
+        child: Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                compact ? 14 : 20,
+                14,
+                compact ? 8 : 12,
+                12,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Icon(Icons.picture_as_pdf_outlined),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            const Text(
+                              'Report Preview',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AdminColors.accentSoft,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'CONFIDENTIAL · AGGREGATE DATA',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                  color: AdminColors.accentStrong,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Generated ${_formatDateTime(widget.report.generatedAt.toLocal())} · ${chips.join(' · ')}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AdminColors.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Close preview',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child:
+                  widget.pdfPreviewBuilder?.call(context, widget.pdfBytes) ??
+                  PdfPreview(
+                    build: (format) async => widget.pdfBytes,
+                    allowPrinting: false,
+                    allowSharing: false,
+                    canChangeOrientation: false,
+                    canChangePageFormat: false,
+                    padding: EdgeInsets.all(compact ? 8 : 16),
+                    pdfPreviewPageDecoration: const BoxDecoration(
+                      color: Color(0xFFECEFF1),
+                    ),
+                  ),
+            ),
+            const Divider(height: 1),
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 14 : 20,
+                vertical: 12,
+              ),
+              child: SizedBox(
+                width: double.infinity,
+                child: Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.end,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _printing ? null : _handlePrint,
+                      icon: _printing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.print_outlined, size: 18),
+                      label: Text(_printing ? 'Printing...' : 'Print'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: _downloading ? null : _handleDownload,
+                      icon: _downloading
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.download_outlined, size: 18),
+                      label: Text(
+                        _downloading ? 'Preparing...' : 'Download PDF',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 List<ReportPercentageItem> _compact(List<ReportPercentageItem> items) {
