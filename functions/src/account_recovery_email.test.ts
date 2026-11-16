@@ -6,7 +6,7 @@ import {
   directEmailActionLink,
   directPasswordResetLink,
   normalizeRecoveryEmail,
-  resolveAdminWebUrl,
+  resolveStaffVerificationWebUrl,
 } from "./account_recovery";
 
 test("normalizes a recovery email", () => {
@@ -20,9 +20,9 @@ test("rejects an invalid recovery email", () => {
 test("moves a Firebase reset action onto the public admin host", () => {
   const result = new URL(directPasswordResetLink(
     "https://project.firebaseapp.com/__/auth/action?mode=resetPassword&oobCode=secret-code&apiKey=public-key&lang=en",
-    "https://paaccmindmate.com",
+    "https://mindmate-admin-staging.vercel.app",
   ));
-  assert.equal(result.origin, "https://paaccmindmate.com");
+  assert.equal(result.origin, "https://mindmate-admin-staging.vercel.app");
   assert.equal(result.pathname, "/__/auth/action");
   assert.equal(result.searchParams.get("oobCode"), "secret-code");
   assert.equal(result.searchParams.get("apiKey"), "public-key");
@@ -42,37 +42,37 @@ test("moves a Firebase verification action onto /verify-email on the public admi
   assert.equal(result.searchParams.get("lang"), "en");
 });
 
-test("resolveAdminWebUrl defaults staging to paaccmindmate.com and rejects obsolete Vercel domain", () => {
+test("resolveStaffVerificationWebUrl routes staging to paaccmindmate.com and rejects obsolete Vercel domain", () => {
   assert.equal(
-    resolveAdminWebUrl("", "mindmate-staging"),
+    resolveStaffVerificationWebUrl("", "mindmate-staging"),
     "https://paaccmindmate.com",
   );
   assert.equal(
-    resolveAdminWebUrl("https://mindmate-admin-staging.vercel.app", "mindmate-staging"),
+    resolveStaffVerificationWebUrl("https://mindmate-admin-staging.vercel.app", "mindmate-staging"),
     "https://paaccmindmate.com",
   );
   assert.equal(
-    resolveAdminWebUrl("https://paaccmindmate.com/some/path", "mindmate-staging"),
+    resolveStaffVerificationWebUrl("https://paaccmindmate.com/some/path", "mindmate-staging"),
     "https://paaccmindmate.com",
   );
 });
 
-test("resolveAdminWebUrl blocks cross-environment hosts between staging and production", () => {
+test("resolveStaffVerificationWebUrl blocks cross-environment hosts and preserves dev/production config", () => {
   assert.equal(
-    resolveAdminWebUrl("https://mind-mates-cd2cf.web.app", "mindmate-staging"),
+    resolveStaffVerificationWebUrl("https://mind-mates-cd2cf.web.app", "mindmate-staging"),
     "https://paaccmindmate.com",
   );
   assert.equal(
-    resolveAdminWebUrl("https://paaccmindmate.com", "mind-mates-cd2cf"),
+    resolveStaffVerificationWebUrl("https://paaccmindmate.com", "mind-mates-cd2cf"),
     "https://mind-mates-cd2cf.web.app",
   );
   assert.equal(
-    resolveAdminWebUrl("https://mindmate-admin-staging.vercel.app", "mind-mates-cd2cf"),
+    resolveStaffVerificationWebUrl("https://mind-mates-cd2cf.web.app/", "mind-mates-cd2cf"),
     "https://mind-mates-cd2cf.web.app",
   );
   assert.equal(
-    resolveAdminWebUrl("https://mind-mates-cd2cf.web.app", "mind-mates-cd2cf"),
-    "https://mind-mates-cd2cf.web.app",
+    resolveStaffVerificationWebUrl("http://localhost:5000/", "mindmate-dev-4e91c"),
+    "http://localhost:5000",
   );
 });
 
