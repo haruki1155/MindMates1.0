@@ -26,20 +26,52 @@ class AdminReportPdfService {
     AppointmentReportDimension appointmentDimension =
         AppointmentReportDimension.department,
   }) async {
+    final emotional = report.emotionalActivity;
     final document = pw.Document(
-      title: reportType == AdminReportType.users
-          ? 'App User Activity Report'
-          : 'Counseling Appointments Report',
+      title: switch (reportType) {
+        AdminReportType.users => 'App User Activity Report',
+        AdminReportType.appointments => 'Counseling Appointments Report',
+        AdminReportType.emotionalActivity => 'Emotional Activity Report',
+      },
       author: 'MindMate PACC',
       subject: 'Privacy-preserving aggregate report',
     );
-    final data = reportType == AdminReportType.users
-        ? _userData(report, userCategoryKey)
-        : report.appointmentsFor(appointmentDimension);
+    final data = switch (reportType) {
+      AdminReportType.users => _userData(report, userCategoryKey),
+      AdminReportType.appointments => report.appointmentsFor(
+        appointmentDimension,
+      ),
+      AdminReportType.emotionalActivity =>
+        emotional.isReady
+            ? emotional.valenceBreakdown
+                  .where((item) => !item.suppressed && item.percentage != null)
+                  .map(
+                    (item) => ReportPercentageItem(
+                      key: item.key,
+                      label: item.label,
+                      percentage: item.percentage!,
+                    ),
+                  )
+                  .toList(growable: false)
+            : const <ReportPercentageItem>[],
+    };
     final chartData = _compact(data);
-    final title = reportType == AdminReportType.users
-        ? 'App User Activity Report - ${report.userScopeLabel}'
-        : 'Counseling Appointments - ${report.appointmentDepartmentScopeLabel}';
+    final title = switch (reportType) {
+      AdminReportType.users =>
+        'App User Activity Report - ${report.userScopeLabel}',
+      AdminReportType.appointments =>
+        'Counseling Appointments - ${report.appointmentDepartmentScopeLabel}',
+      AdminReportType.emotionalActivity =>
+        'Emotional Activity Report - ${report.population.schoolYear}',
+    };
+    final subtitle = switch (reportType) {
+      AdminReportType.users =>
+        'Active means activity recorded within the last ${report.activeWindowDays} days.',
+      AdminReportType.appointments =>
+        'Grouped by ${_dimensionLabel(appointmentDimension)}. Only appointments within the selected department scope are included.',
+      AdminReportType.emotionalActivity =>
+        '${emotional.dateRangeLabel} | ${emotional.sourceScopeLabel} | Scope: ${report.userScopeLabel} / ${report.appointmentDepartmentScopeLabel}.',
+    };
 
     document.addPage(
       pw.MultiPage(
@@ -85,18 +117,17 @@ class AdminReportPdfService {
           ),
           pw.SizedBox(height: 6),
           pw.Text(
-            reportType == AdminReportType.users
-                ? 'Active means activity recorded within the last ${report.activeWindowDays} days.'
-                : 'Grouped by ${_dimensionLabel(appointmentDimension)}. Only appointments within the selected department scope are included.',
+            subtitle,
             style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
           ),
           pw.SizedBox(height: 3),
           pw.Text(
-            'Generated ${_dateTime(report.generatedAt.toLocal())}. Counts and personal identifiers are intentionally omitted.',
+            'Generated ${_dateTime(report.generatedAt.toLocal())}. Raw notes, questionnaire answers, photos, and personal identifiers are intentionally omitted.',
             style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
           ),
           pw.SizedBox(height: 24),
-          if (data.isEmpty)
+          if (reportType == AdminReportType.emotionalActivity &&
+              emotional.suppressed)
             pw.Container(
               width: double.infinity,
               padding: const pw.EdgeInsets.all(20),
@@ -105,7 +136,24 @@ class AdminReportPdfService {
                 border: pw.Border.all(color: PdfColors.grey300),
               ),
               child: pw.Text(
-                'No reportable data is available for this category.',
+                emotional.suppressionReason ??
+                    'Results suppressed to protect privacy (n < ${emotional.suppressionThreshold}).',
+              ),
+            )
+          else if (data.isEmpty)
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(20),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.grey100,
+                border: pw.Border.all(color: PdfColors.grey300),
+              ),
+              child: pw.Text(
+                reportType == AdminReportType.emotionalActivity
+                    ? (emotional.isReady
+                          ? 'Chart omitted: all category distributions are suppressed to protect privacy (n < ${emotional.suppressionThreshold}).'
+                          : 'No reportable emotional activity data is available for the selected filters.')
+                    : 'No reportable data is available for this category.',
               ),
             )
           else
@@ -115,13 +163,61 @@ class AdminReportPdfService {
                   ? _pieChart(chartData)
                   : _barChart(chartData),
             ),
-          pw.SizedBox(height: 24),
-          pw.Text(
-            'Percentage summary',
-            style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
-          ),
-          pw.SizedBox(height: 8),
-          if (data.isNotEmpty)
+          if (reportType == AdminReportType.emotionalActivity &&
+              emotional.isReady &&
+              (emotional.valenceBreakdown.isNotEmpty ||
+                  emotional.moodBreakdown.isNotEmpty ||
+                  emotional.assessmentBreakdown.isNotEmpty ||
+                  emotional.periodTrends.isNotEmpty)) ...[
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'Percentage summary',
+              style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+            ),
+            if (emotional.valenceBreakdown.isNotEmpty) ...[
+              pw.SizedBox(height: 10),
+              _emotionalTable(
+                'Emotional valence summary',
+                const ['Pattern', 'Share'],
+                emotional.valenceBreakdown,
+                emotional.suppressionThreshold,
+              ),
+            ],
+            if (emotional.moodBreakdown.isNotEmpty) ...[
+              pw.SizedBox(height: 14),
+              _emotionalTable(
+                'Mood check-in breakdown',
+                const ['Mood state', 'Share'],
+                emotional.moodBreakdown,
+                emotional.suppressionThreshold,
+              ),
+            ],
+            if (emotional.assessmentBreakdown.isNotEmpty) ...[
+              pw.SizedBox(height: 14),
+              _emotionalTable(
+                'Well-being assessment breakdown',
+                const ['Assessment pattern', 'Share'],
+                emotional.assessmentBreakdown,
+                emotional.suppressionThreshold,
+              ),
+            ],
+            if (emotional.periodTrends.isNotEmpty) ...[
+              pw.SizedBox(height: 14),
+              _emotionalTable(
+                'Monthly emotional activity trend',
+                const ['Period', 'Share of activity'],
+                emotional.periodTrends,
+                emotional.suppressionThreshold,
+              ),
+            ],
+          ] else if (reportType != AdminReportType.emotionalActivity &&
+              data.isNotEmpty) ...[
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'Percentage summary',
+              style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 8),
             pw.TableHelper.fromTextArray(
               headers: const ['Category', 'Share / rate'],
               data: data
@@ -137,6 +233,7 @@ class AdminReportPdfService {
               ),
               border: pw.TableBorder.all(color: PdfColors.grey300),
             ),
+          ],
           pw.SizedBox(height: 18),
           pw.Container(
             padding: const pw.EdgeInsets.all(12),
@@ -169,12 +266,17 @@ class AdminReportPdfService {
       userCategoryKey: userCategoryKey,
       appointmentDimension: appointmentDimension,
     );
-    final scope = reportType == AdminReportType.users
-        ? report.userScopeLabel
-        : report.appointmentDepartmentScopeLabel;
-    final type = reportType == AdminReportType.users
-        ? 'app_users_${_safe(scope)}'
-        : 'appointments_${_safe(scope)}';
+    final scope = switch (reportType) {
+      AdminReportType.users => report.userScopeLabel,
+      AdminReportType.appointments => report.appointmentDepartmentScopeLabel,
+      AdminReportType.emotionalActivity =>
+        '${report.population.schoolYear}_${report.appointmentDepartmentScopeLabel}',
+    };
+    final type = switch (reportType) {
+      AdminReportType.users => 'app_users_${_safe(scope)}',
+      AdminReportType.appointments => 'appointments_${_safe(scope)}',
+      AdminReportType.emotionalActivity => 'emotional_activity_${_safe(scope)}',
+    };
     await Printing.sharePdf(
       bytes: bytes,
       filename: 'mindmate_${type}_${_date(report.generatedAt)}.pdf',
@@ -252,6 +354,39 @@ class AdminReportPdfService {
         ),
         pw.SizedBox(height: 14),
       ],
+    ],
+  );
+
+  static pw.Widget _emotionalTable(
+    String sectionTitle,
+    List<String> headers,
+    List<EmotionalActivityBucket> buckets,
+    int suppressionThreshold,
+  ) => pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Text(
+        sectionTitle,
+        style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+      ),
+      pw.SizedBox(height: 6),
+      pw.TableHelper.fromTextArray(
+        headers: headers,
+        data: buckets
+            .map(
+              (item) => [
+                item.label,
+                item.suppressed || item.percentage == null
+                    ? 'Suppressed (n < $suppressionThreshold)'
+                    : _percent(item.percentage!),
+              ],
+            )
+            .toList(growable: false),
+        headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
+        headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+        cellPadding: const pw.EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+        border: pw.TableBorder.all(color: PdfColors.grey300),
+      ),
     ],
   );
 

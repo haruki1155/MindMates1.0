@@ -1,6 +1,16 @@
 enum ReportChartType { pie, bar }
 
-enum AdminReportType { users, appointments }
+enum AdminReportType { users, appointments, emotionalActivity }
+
+enum EmotionalActivitySource {
+  all('all', 'All sources'),
+  mood('mood', 'Mood check-ins'),
+  assessment('assessment', 'Assessments');
+
+  const EmotionalActivitySource(this.wireKey, this.label);
+  final String wireKey;
+  final String label;
+}
 
 enum AppointmentReportDimension { department, course, yearLevel }
 
@@ -145,6 +155,7 @@ class AdminReportAnalytics {
     this.trends = const [],
     this.waitingTimeDays,
     this.rescheduledAppointments = 0,
+    this.emotionalActivity = const EmotionalActivityReport.empty(),
   });
 
   final DateTime generatedAt;
@@ -172,6 +183,7 @@ class AdminReportAnalytics {
   final List<ReportTrendPoint> trends;
   final double? waitingTimeDays;
   final int rescheduledAppointments;
+  final EmotionalActivityReport emotionalActivity;
 
   List<ReportPercentageItem> appointmentsFor(
     AppointmentReportDimension dimension,
@@ -224,8 +236,140 @@ class AdminReportAnalytics {
         appointments['rescheduledAppointments'],
         0,
       ),
+      emotionalActivity: json['emotionalActivity'] is Map
+          ? EmotionalActivityReport.fromJson(_map(json['emotionalActivity']))
+          : const EmotionalActivityReport.empty(),
     );
   }
+}
+
+class EmotionalActivityBucket {
+  const EmotionalActivityBucket({
+    required this.key,
+    required this.label,
+    required this.percentage,
+    required this.suppressed,
+  });
+
+  final String key;
+  final String label;
+  final double? percentage;
+  final bool suppressed;
+
+  factory EmotionalActivityBucket.fromJson(Map<String, dynamic> json) =>
+      EmotionalActivityBucket(
+        key: json['key']?.toString() ?? '',
+        label: json['label']?.toString() ?? 'Category',
+        percentage: json['suppressed'] == true
+            ? null
+            : _nullableNumber(json['percentage']),
+        suppressed: json['suppressed'] == true,
+      );
+}
+
+class EmotionalActivityReport {
+  const EmotionalActivityReport({
+    required this.status,
+    required this.suppressed,
+    required this.suppressionThreshold,
+    required this.suppressionReason,
+    required this.sourceScopeKey,
+    required this.sourceScopeLabel,
+    required this.schoolYear,
+    required this.dateRangeLabel,
+    required this.participationRate,
+    required this.appUserCohortShare,
+    required this.dominantValenceLabel,
+    required this.hasMixedCategories,
+    required this.moodCheckInShare,
+    required this.assessmentShare,
+    required this.departmentOptions,
+    required this.valenceBreakdown,
+    required this.moodBreakdown,
+    required this.assessmentBreakdown,
+    required this.periodTrends,
+    required this.departmentCoverageNote,
+  });
+
+  const EmotionalActivityReport.empty()
+    : status = 'no_data',
+      suppressed = false,
+      suppressionThreshold = 10,
+      suppressionReason = null,
+      sourceScopeKey = 'all',
+      sourceScopeLabel = 'All approved sources',
+      schoolYear = '',
+      dateRangeLabel = 'Selected period',
+      participationRate = null,
+      appUserCohortShare = null,
+      dominantValenceLabel = null,
+      hasMixedCategories = false,
+      moodCheckInShare = null,
+      assessmentShare = null,
+      departmentOptions = const [],
+      valenceBreakdown = const [],
+      moodBreakdown = const [],
+      assessmentBreakdown = const [],
+      periodTrends = const [],
+      departmentCoverageNote = '';
+
+  final String status;
+  final bool suppressed;
+  final int suppressionThreshold;
+  final String? suppressionReason;
+  final String sourceScopeKey;
+  final String sourceScopeLabel;
+  final String schoolYear;
+  final String dateRangeLabel;
+  final double? participationRate;
+  final double? appUserCohortShare;
+  final String? dominantValenceLabel;
+  final bool hasMixedCategories;
+  final double? moodCheckInShare;
+  final double? assessmentShare;
+  final List<ReportFilterOption> departmentOptions;
+  final List<EmotionalActivityBucket> valenceBreakdown;
+  final List<EmotionalActivityBucket> moodBreakdown;
+  final List<EmotionalActivityBucket> assessmentBreakdown;
+  final List<EmotionalActivityBucket> periodTrends;
+  final String departmentCoverageNote;
+
+  bool get isReady => status == 'ready' && !suppressed;
+  bool get isEmpty => status == 'no_data';
+
+  factory EmotionalActivityReport.fromJson(Map<String, dynamic> json) =>
+      EmotionalActivityReport(
+        status: json['status']?.toString() ?? 'no_data',
+        suppressed: json['suppressed'] == true,
+        suppressionThreshold: _integer(json['suppressionThreshold'], 10),
+        suppressionReason: json['suppressionReason']?.toString(),
+        sourceScopeKey: json['sourceScopeKey']?.toString() ?? 'all',
+        sourceScopeLabel:
+            json['sourceScopeLabel']?.toString() ?? 'All approved sources',
+        schoolYear: json['schoolYear']?.toString() ?? '',
+        dateRangeLabel: json['dateRangeLabel']?.toString() ?? 'Selected period',
+        participationRate: _nullableNumber(json['participationRate']),
+        appUserCohortShare: _nullableNumber(json['appUserCohortShare']),
+        dominantValenceLabel: json['dominantValenceLabel']?.toString(),
+        hasMixedCategories: json['hasMixedCategories'] == true,
+        moodCheckInShare: _nullableNumber(json['moodCheckInShare']),
+        assessmentShare: _nullableNumber(json['assessmentShare']),
+        departmentOptions: _options(json['departmentOptions']),
+        valenceBreakdown: _list(
+          json['valenceBreakdown'],
+        ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+        moodBreakdown: _list(
+          json['moodBreakdown'],
+        ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+        assessmentBreakdown: _list(
+          json['assessmentBreakdown'],
+        ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+        periodTrends: _list(
+          json['periodTrends'],
+        ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+        departmentCoverageNote:
+            json['departmentCoverageNote']?.toString() ?? '',
+      );
 }
 
 double? _nullableNumber(Object? value) => value == null ? null : _number(value);

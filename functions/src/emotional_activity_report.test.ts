@@ -1,0 +1,354 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  buildEmotionalActivityReport,
+  MIN_EMOTIONAL_COHORT_SIZE,
+} from "./emotional_activity_report";
+
+type Rec = Record<string, unknown>;
+
+function makeUsers(
+  count: number,
+  overrides: (index: number) => Rec = () => ({}),
+): Array<{id: string; data: Rec}> {
+  return Array.from({length: count}, (_, i) => ({
+    id: `u-${i + 1}`,
+    data: {
+      accessRole: "appUser",
+      populationRole: "student",
+      department: "College of Computing",
+      collegeId: "ccs",
+      course: "BSIT",
+      yearLevel: "2nd Year",
+      ...overrides(i),
+    },
+  }));
+}
+
+function makeMoods(
+  count: number,
+  overrides: (index: number) => Rec = () => ({}),
+): Rec[] {
+  return Array.from({length: count}, (_, i) => ({
+    userId: `u-${i + 1}`,
+    level: i % 2 === 0 ? 5 : 2,
+    label: i % 2 === 0 ? "Great" : "Stressed",
+    note: `PRIVATE_JOURNAL_TEXT_${i + 1}`,
+    expressionModelVersion: "justinshenk_fer_tflite_v1",
+    photoUrl: `https://example.invalid/face-${i + 1}.jpg`,
+    occurredAt: "2026-09-10T08:00:00.000Z",
+    ...overrides(i),
+  }));
+}
+
+test("MIN_EMOTIONAL_COHORT_SIZE is 10", () => {
+  assert.equal(MIN_EMOTIONAL_COHORT_SIZE, 10);
+});
+
+test("returns no_data when no approved records match filters", () => {
+  const report = buildEmotionalActivityReport({
+    users: makeUsers(12),
+    moodEntries: [],
+    moods: [],
+    assessments: [],
+    range: {
+      start: new Date("2026-06-01T00:00:00+08:00"),
+      end: new Date("2027-06-01T00:00:00+08:00"),
+      label: "Academic year 2026-2027",
+    },
+    schoolYear: "2026-2027",
+  });
+
+  assert.equal(report.status, "no_data");
+  assert.equal(report.suppressed, false);
+  assert.equal(report.participationRate, null);
+  assert.deepEqual(report.valenceBreakdown, []);
+  assert.deepEqual(report.moodBreakdown, []);
+  assert.deepEqual(report.assessmentBreakdown, []);
+  assert.deepEqual(report.periodTrends, []);
+});
+
+test("suppresses entire cohort when unique participants < 10 even with many repeated entries", () => {
+  const repeatedSingleUserEntries = Array.from({length: 25}, (_, idx) => ({
+    userId: "u-1",
+    level: 1,
+    label: "Sad",
+    note: "SENSITIVE_NOTE_SHOULD_NEVER_LEAK",
+    occurredAt: `2026-09-${String((idx % 20) + 1).padStart(2, "0")}T08:00:00.000Z`,
+  }));
+  const nineUsersEntries = makeMoods(9);
+
+  for (const entries of [repeatedSingleUserEntries, nineUsersEntries]) {
+    const report = buildEmotionalActivityReport({
+      users: makeUsers(15),
+      moodEntries: entries,
+      moods: [],
+      assessments: [],
+      range: {
+        start: new Date("2026-06-01T00:00:00+08:00"),
+        end: new Date("2027-06-01T00:00:00+08:00"),
+        label: "Academic year 2026-2027",
+      },
+      schoolYear: "2026-2027",
+      configuredPopulation: 100,
+    });
+
+    assert.equal(report.status, "suppressed");
+    assert.equal(report.suppressed, true);
+    assert.equal(report.suppressionThreshold, 10);
+    assert.equal(report.participationRate, null);
+    assert.equal(report.dominantValenceLabel, null);
+    assert.deepEqual(report.valenceBreakdown, []);
+    assert.deepEqual(report.moodBreakdown, []);
+    assert.deepEqual(report.assessmentBreakdown, []);
+    assert.deepEqual(report.periodTrends, []);
+    const serialized = JSON.stringify(report);
+    assert.ok(!serialized.includes("SENSITIVE_NOTE"));
+    assert.ok(!serialized.includes("PRIVATE_JOURNAL"));
+    assert.ok(!serialized.includes("face-"));
+    assert.ok(!serialized.includes("u-1"));
+  }
+});
+
+test("aggregates approved sources by percentages without exposing raw notes, responses, or PII", () => {
+  const users = makeUsers(24, (i) => ({
+    populationRole: i < 20 ? "student" : i < 22 ? "teaching" : "",
+    department: i < 22 ? "College of Computing" : "",
+  }));
+  const moodEntries = makeMoods(20, (i) => ({
+    level: i < 10 ? 5 : 2,
+    label: i < 10 ? "Great" : "Custom Unsanitized Text PII",
+  }));
+  const legacyMoods = [
+    // Archived & non-appUser entries must be ignored.
+    {userId: "u-21", level: 4, label: "Okay", occurredAt: "2026-09-12T08:00:00Z"},
+    {userId: "u-22", level: 4, label: "Okay", dateKey: "2026-09-15"},
+    {userId: "u-23", level: 1, label: "Sad", archivedAt: "2026-09-15T00:00:00Z", createdAt: "2026-09-14T00:00:00Z"},
+    {userId: "counselor-1", level: 1, label: "Angry", createdAt: "2026-09-14T00:00:00Z"},
+  ];
+  const assessments = Array.from({length: 20}, (_, i) => ({
+    userId: `u-${i + 1}`,
+    schemaVersion: "assessment_record_v4",
+    verificationStatus: "verified",
+    result: {
+      profileStatus: i < 10 ? "generallySupported" : "supportMayHelp",
+      domainResults: [
+        {
+          domainId: "emotionalWellbeing",
+          status: i < 10 ? "supported" : "supportMayHelp",
+          isScorable: true,
+        },
+      ],
+    },
+    responses: [{itemId: "q1", secretAnswer: "NEVER_LEAK"}],
+    counselorSummary: "CLINICAL_TEXT_NEVER_LEAK",
+    createdAt: "2026-09-18T09:00:00.000Z",
+  }));
+  // Unconsented & archived assessments must be excluded.
+  assessments.push(
+    {
+      userId: "u-24",
+      schemaVersion: "assessment_record_v4",
+      verificationStatus: "verified",
+      privacyOptOut: true,
+      result: {profileStatus: "supportMayHelp", domainResults: []},
+      responses: [],
+      counselorSummary: "OPT_OUT_SECRET",
+      createdAt: "2026-09-18T09:00:00.000Z",
+    } as unknown as (typeof assessments)[number],
+  );
+
+  const report = buildEmotionalActivityReport({
+    users,
+    moodEntries,
+    moods: legacyMoods,
+    assessments,
+    range: {
+      start: new Date("2026-06-01T00:00:00+08:00"),
+      end: new Date("2027-06-01T00:00:00+08:00"),
+      label: "Academic year 2026-2027",
+    },
+    schoolYear: "2026-2027",
+    configuredPopulation: 44,
+    source: "all",
+  });
+
+  assert.equal(report.status, "ready");
+  assert.equal(report.suppressed, false);
+  assert.equal(report.hasMixedCategories, true);
+  // 22 unique active app users matched (u-1..u-22); u-23 had only archived mood, u-24 opted out.
+  assert.equal(report.participationRate, 50);
+  assert.ok(report.valenceBreakdown.some((b) => b.key === "positive" && b.percentage !== null));
+  const serialized = JSON.stringify(report);
+  for (const forbidden of [
+    "Custom Unsanitized Text PII",
+    "NEVER_LEAK",
+    "CLINICAL_TEXT_NEVER_LEAK",
+    "OPT_OUT_SECRET",
+    "PRIVATE_JOURNAL_TEXT",
+    "counselor-1",
+    "u-1",
+  ]) {
+    assert.ok(!serialized.includes(forbidden), `Leaked forbidden string: ${forbidden}`);
+  }
+});
+
+test("enforces per-cell suppression and secondary suppression against subtraction inference", () => {
+  // 10 Positive users + 2 Strained users => total 12 >= 10, so cohort is ready,
+  // but Strained cell (<10) AND Positive cell (secondary suppression) are both suppressed!
+  const moodEntries = [
+    ...Array.from({length: 10}, (_, i) => ({
+      userId: `u-${i + 1}`,
+      level: 5,
+      label: "Great",
+      occurredAt: "2026-10-01T08:00:00Z",
+    })),
+    ...Array.from({length: 2}, (_, i) => ({
+      userId: `u-${i + 11}`,
+      level: 1,
+      label: "Sad",
+      occurredAt: "2026-10-02T08:00:00Z",
+    })),
+  ];
+
+  const report = buildEmotionalActivityReport({
+    users: makeUsers(12),
+    moodEntries,
+    moods: [],
+    assessments: [],
+    range: {
+      start: new Date("2026-06-01T00:00:00+08:00"),
+      end: new Date("2027-06-01T00:00:00+08:00"),
+      label: "Academic year 2026-2027",
+    },
+    schoolYear: "2026-2027",
+    source: "mood",
+  });
+
+  assert.equal(report.status, "ready");
+  assert.equal(report.valenceBreakdown.length, 2);
+  assert.ok(report.valenceBreakdown.every((bucket) => bucket.suppressed && bucket.percentage === null));
+});
+
+test("filters strictly by college/department, source, userCategory, and academic year without leakage", () => {
+  const users = [
+    ...Array.from({length: 10}, (_, i) => ({
+      id: `n-${i + 1}`,
+      data: {
+        accessRole: "appUser",
+        populationRole: "student",
+        department: "College of Nursing",
+        collegeId: "con",
+      },
+    })),
+    ...Array.from({length: 10}, (_, i) => ({
+      id: `e-${i + 1}`,
+      data: {
+        accessRole: "appUser",
+        populationRole: "teaching",
+        department: "College of Engineering",
+        collegeId: "coe",
+      },
+    })),
+  ];
+  const moodEntries = [
+    ...Array.from({length: 10}, (_, i) => ({
+      userId: `n-${i + 1}`,
+      level: 5,
+      label: "Great",
+      occurredAt: "2025-09-10T08:00:00Z",
+    })),
+    ...Array.from({length: 10}, (_, i) => ({
+      userId: `e-${i + 1}`,
+      level: 1,
+      label: "Sad",
+      occurredAt: "2026-09-10T08:00:00Z",
+    })),
+  ];
+
+  const historicalNursing = buildEmotionalActivityReport({
+    users,
+    moodEntries,
+    moods: [],
+    assessments: [],
+    range: {
+      start: new Date("2025-06-01T00:00:00+08:00"),
+      end: new Date("2026-06-01T00:00:00+08:00"),
+      label: "Academic year 2025-2026",
+    },
+    schoolYear: "2025-2026",
+    department: "college of nursing",
+    userCategory: "student",
+    source: "mood",
+    configuredPopulation: 50,
+  });
+
+  assert.equal(historicalNursing.status, "ready");
+  assert.equal(historicalNursing.participationRate, 20);
+  assert.deepEqual(
+    historicalNursing.valenceBreakdown.map((b) => [b.key, b.percentage]),
+    [["positive", 100]],
+  );
+  // Engineering strained entries must never appear in Nursing report.
+  assert.ok(!historicalNursing.moodBreakdown.some((b) => b.key === "sad"));
+});
+
+test("gates source share split at >= 10 users per source and omits draft/unscorable edge cases cleanly", () => {
+  const users = makeUsers(12, (i) => ({
+    populationRole: i < 10 ? "student" : "",
+    department: i < 10 ? "College of Nursing" : "",
+  }));
+  const moodEntries = makeMoods(12, () => ({level: 5, label: "Great"}));
+  // Only 3 users have assessments (<10), plus a draft and unscorable domain result.
+  const assessments = [
+    {
+      userId: "u-1",
+      schemaVersion: "assessment_record_v4",
+      verificationStatus: "verified",
+      result: {
+        profileStatus: "generallySupported",
+        domainResults: [{domainId: "emotionalWellbeing", status: "supportMayHelp", isScorable: false}],
+      },
+      createdAt: "2026-09-10T08:00:00Z",
+    },
+    {
+      userId: "u-2",
+      schemaVersion: "assessment_record_v4",
+      status: "draft",
+      result: {profileStatus: "supportMayHelp"},
+      createdAt: "2026-09-10T08:00:00Z",
+    },
+    {
+      userId: "u-3",
+      schemaVersion: "assessment_record_v4",
+      verificationStatus: "rejected",
+      result: {profileStatus: "supportMayHelp"},
+      createdAt: "2026-09-10T08:00:00Z",
+    },
+  ];
+
+  const report = buildEmotionalActivityReport({
+    users,
+    moodEntries,
+    moods: [],
+    assessments,
+    range: {
+      start: new Date("2026-06-01T00:00:00+08:00"),
+      end: new Date("2027-06-01T00:00:00+08:00"),
+      label: "Academic year 2026-2027",
+    },
+    schoolYear: "2026-2027",
+    source: "all",
+  });
+
+  assert.equal(report.status, "ready");
+  // Fewer than 10 assessment users -> source shares remain suppressed (null).
+  assert.equal(report.moodCheckInShare, null);
+  assert.equal(report.assessmentShare, null);
+  assert.ok(report.departmentCoverageNote.includes("unspecified role or college"));
+  // Only u-1's verified non-draft assessment counts -> cell suppressed (<10).
+  assert.equal(report.assessmentBreakdown.length, 1);
+  assert.equal(report.assessmentBreakdown[0].key, "supported");
+  assert.equal(report.assessmentBreakdown[0].suppressed, true);
+});
