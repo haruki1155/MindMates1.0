@@ -795,92 +795,92 @@ class PortalWorkspaceNavigation extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                  for (final section in sections)
-                    if (section.pages.any(_allowed)) ...[
-                      if (!collapsed)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 5),
-                          child: Text(
-                            section.title.toUpperCase(),
-                            style: const TextStyle(
-                              color: AdminColors.muted,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.8,
+                    for (final section in sections)
+                      if (section.pages.any(_allowed)) ...[
+                        if (!collapsed)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 5),
+                            child: Text(
+                              section.title.toUpperCase(),
+                              style: const TextStyle(
+                                color: AdminColors.muted,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                              ),
                             ),
                           ),
-                        ),
-                      for (final item in section.pages.where(_allowed))
-                        if (collapsed)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 3,
-                            ),
-                            child: Tooltip(
-                              message: item.workspaceLabel,
-                              child: Material(
-                                color: page == item
-                                    ? AdminColors.accentSoft
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(9),
-                                child: InkWell(
+                        for (final item in section.pages.where(_allowed))
+                          if (collapsed)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 3,
+                              ),
+                              child: Tooltip(
+                                message: item.workspaceLabel,
+                                child: Material(
+                                  color: page == item
+                                      ? AdminColors.accentSoft
+                                      : Colors.transparent,
                                   borderRadius: BorderRadius.circular(9),
-                                  onTap: () => onChanged(item),
-                                  child: SizedBox(
-                                    height: 46,
-                                    child: Icon(
-                                      item.icon,
-                                      color: page == item
-                                          ? AdminColors.ink
-                                          : AdminColors.muted,
-                                      size: 21,
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(9),
+                                    onTap: () => onChanged(item),
+                                    child: SizedBox(
+                                      height: 46,
+                                      child: Icon(
+                                        item.icon,
+                                        color: page == item
+                                            ? AdminColors.ink
+                                            : AdminColors.muted,
+                                        size: 21,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          )
-                        else
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 2,
-                            ),
-                            child: ListTile(
-                              dense: true,
-                              minTileHeight: 46,
-                              leading: Icon(
-                                item.icon,
-                                color: page == item
-                                    ? AdminColors.ink
-                                    : AdminColors.muted,
-                                size: 21,
+                            )
+                          else
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 2,
                               ),
-                              trailing:
-                                  item == AdminPortalPage.inquiries &&
-                                      canShowCounselorMessagingInInquiries(
-                                        accessRole,
-                                      )
-                                  ? const CounselorInboxUnreadBadge()
-                                  : null,
-                              title: Text(
-                                item.workspaceLabel,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  color: AdminColors.ink,
-                                  fontSize: 13,
+                              child: ListTile(
+                                dense: true,
+                                minTileHeight: 46,
+                                leading: Icon(
+                                  item.icon,
+                                  color: page == item
+                                      ? AdminColors.ink
+                                      : AdminColors.muted,
+                                  size: 21,
                                 ),
+                                trailing:
+                                    item == AdminPortalPage.inquiries &&
+                                        canShowCounselorMessagingInInquiries(
+                                          accessRole,
+                                        )
+                                    ? const CounselorInboxUnreadBadge()
+                                    : null,
+                                title: Text(
+                                  item.workspaceLabel,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    color: AdminColors.ink,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                                selected: page == item,
+                                selectedTileColor: AdminColors.accentSoft,
+                                onTap: () => onChanged(item),
                               ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(9),
-                              ),
-                              selected: page == item,
-                              selectedTileColor: AdminColors.accentSoft,
-                              onTap: () => onChanged(item),
                             ),
-                          ),
-                    ],
+                      ],
                   ],
                 ),
               ),
@@ -3395,8 +3395,9 @@ class _AppointmentCard extends StatelessWidget {
                                 ),
                               ],
                             );
-                            if (!dialogContext.mounted || chosen.isEmpty)
+                            if (!dialogContext.mounted || chosen.isEmpty) {
                               return;
+                            }
                             if (selectedClinicalFiles.length + chosen.length >
                                 maxSessionEvidenceFiles) {
                               throw const FormatException(
