@@ -4,6 +4,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/screens/student_case_history_page.dart';
+import 'package:mind_mates/models/case_remarks_model.dart';
 import 'package:mind_mates/models/student_case_history_model.dart';
 
 StudentCaseHistoryEntry _entry(
@@ -267,5 +268,46 @@ void main() {
     pending.complete(_page(const []));
     await tester.pumpAndSettle();
     expect(find.text('No cases recorded'), findsOneWidget);
+  });
+
+  testWidgets('counselors can open Transcript / Remarks lazily per case', (
+    tester,
+  ) async {
+    final loaded = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StudentCaseHistoryPage(
+          studentId: 's1',
+          studentName: 'Ana Cruz',
+          loader: ({cursor}) async => _page([_entry('a1')]),
+          canEditRemarks: true,
+          remarksLoader: (id) async {
+            loaded.add(id);
+            return CaseRemarks(
+              appointmentId: id,
+              text: 'Loaded note',
+              revision: 1,
+              updatedAt: DateTime.utc(2026, 11, 16, 1),
+              authorName: 'Coach Cite',
+              versions: const [],
+            );
+          },
+          remarksSaver: (id, text, rev) async => CaseRemarks(
+            appointmentId: id,
+            text: text,
+            revision: rev + 1,
+            updatedAt: DateTime.utc(2026, 11, 16, 1),
+            authorName: 'Coach Cite',
+            versions: const [],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(loaded, isEmpty);
+    await tester.tap(find.text('Transcript / Remarks'));
+    await tester.pumpAndSettle();
+    expect(loaded, ['a1']);
+    expect(find.text('Loaded note'), findsOneWidget);
   });
 }

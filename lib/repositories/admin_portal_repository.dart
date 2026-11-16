@@ -17,6 +17,7 @@ import '../models/appointment_queue_item.dart';
 import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
 import '../models/profile_roles.dart';
+import '../models/case_remarks_model.dart';
 import '../models/student_case_history_model.dart';
 import '../models/pacc_availability_model.dart';
 import 'appointment_repository.dart';
@@ -221,6 +222,34 @@ class AdminPortalRepository {
       'pageSize': pageSize,
     });
     return StudentCaseHistoryResult.fromJson(
+      data is Map ? Map<String, dynamic>.from(data) : const {},
+    );
+  }
+
+  /// Optional counselor transcript / remarks for one case. The server enforces
+  /// counselor entitlement and audits every read.
+  Future<CaseRemarks> fetchCaseRemarks(String appointmentId) async {
+    final data = await _callCallable('getCaseRemarks', {
+      'appointmentId': appointmentId,
+    });
+    return CaseRemarks.fromJson(
+      data is Map ? Map<String, dynamic>.from(data) : const {},
+    );
+  }
+
+  /// Saves (or clears) counselor transcript / remarks for one case. Blank is
+  /// valid; [expectedRevision] prevents overwriting concurrent edits.
+  Future<CaseRemarks> saveCaseRemarks({
+    required String appointmentId,
+    required String text,
+    required int expectedRevision,
+  }) async {
+    final data = await _callCallable('saveCaseRemarks', {
+      'appointmentId': appointmentId,
+      'text': text,
+      'expectedRevision': expectedRevision,
+    });
+    return CaseRemarks.fromJson(
       data is Map ? Map<String, dynamic>.from(data) : const {},
     );
   }
@@ -838,15 +867,16 @@ class AdminPortalRepository {
     return _firestoreService
         .watchDocuments(FirestoreCollections.appointmentQueue)
         .map(
-          (items) => items
-              .map(
-                (item) => AppointmentQueueItem.fromJson(
-                  item,
-                  id: item['id']?.toString(),
-                ),
-              )
-              .toList()
-            ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
+          (items) =>
+              items
+                  .map(
+                    (item) => AppointmentQueueItem.fromJson(
+                      item,
+                      id: item['id']?.toString(),
+                    ),
+                  )
+                  .toList()
+                ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
         );
   }
 
@@ -1158,20 +1188,18 @@ class AdminPortalRepository {
   Stream<List<AdminInquiryModel>> watchInquiries() => _firestoreService
       .watchDocuments(FirestoreCollections.inquiries)
       .map(
-        (items) =>
-            scopeInquiriesForRole(
-                items
-                    .map(
-                      (item) => AdminInquiryModel.fromJson(
-                        item,
-                        id: item['id']?.toString(),
-                      ),
-                    )
-                    .toList(),
-                role: currentAccessRole,
-                uid: currentAuthUser?.uid,
+        (items) => scopeInquiriesForRole(
+          items
+              .map(
+                (item) => AdminInquiryModel.fromJson(
+                  item,
+                  id: item['id']?.toString(),
+                ),
               )
-              ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+              .toList(),
+          role: currentAccessRole,
+          uid: currentAuthUser?.uid,
+        )..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
       );
 
   Stream<List<AdminActivityAnalyticsModel>> watchActivityAnalytics() =>
@@ -1192,19 +1220,35 @@ class AdminPortalRepository {
                   ..sort((a, b) => b.dateKey.compareTo(a.dateKey)),
           );
 
-  Future<void> initializeAppointmentScheduleRevision({required String appointmentId, required DateTime scheduledAt, required String status}) async {
-    await FirebaseFunctions.instance.httpsCallable('initializeAppointmentScheduleRevision').call({
-      'appointmentId': appointmentId, 'expectedScheduledAt': scheduledAt.millisecondsSinceEpoch, 'expectedStatus': status,
-    });
+  Future<void> initializeAppointmentScheduleRevision({
+    required String appointmentId,
+    required DateTime scheduledAt,
+    required String status,
+  }) async {
+    await FirebaseFunctions.instance
+        .httpsCallable('initializeAppointmentScheduleRevision')
+        .call({
+          'appointmentId': appointmentId,
+          'expectedScheduledAt': scheduledAt.millisecondsSinceEpoch,
+          'expectedStatus': status,
+        });
   }
 
-  Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId) async {
-    await FirebaseFunctions.instance.httpsCallable('changeAppointmentAgreement').call({
-      'appointmentId': appointment.id, 'action': action, 'requestId': requestId,
-      'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
-      'expectedScheduleRevision': appointment.scheduleRevision,
-      'expectedProposalRevision': appointment.proposalRevision,
-    });
+  Future<void> changeAppointmentAgreement(
+    AppointmentModel appointment,
+    String action,
+    String requestId,
+  ) async {
+    await FirebaseFunctions.instance
+        .httpsCallable('changeAppointmentAgreement')
+        .call({
+          'appointmentId': appointment.id,
+          'action': action,
+          'requestId': requestId,
+          'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
+          'expectedScheduleRevision': appointment.scheduleRevision,
+          'expectedProposalRevision': appointment.proposalRevision,
+        });
   }
 
   Future<SessionEvidenceRecord?> getClinicalSessionEvidence(
@@ -1254,25 +1298,27 @@ class AdminPortalRepository {
           file.size > maxSessionEvidenceFileBytes) {
         throw const FormatException('Unsupported file or file size.');
       }
-      final path = buildSessionEvidencePath(
-        appointmentId, uid, file.name,
-      );
-      await FirebaseStorage.instance.ref(path).putData(
-        file.bytes,
-        SettableMetadata(
+      final path = buildSessionEvidencePath(appointmentId, uid, file.name);
+      await FirebaseStorage.instance
+          .ref(path)
+          .putData(
+            file.bytes,
+            SettableMetadata(
+              contentType: file.contentType,
+              customMetadata: {
+                'uploadedBy': uid,
+                'appointmentId': appointmentId,
+              },
+            ),
+          );
+      attachments.add(
+        SessionEvidenceAttachment(
+          path: path,
+          name: file.name,
           contentType: file.contentType,
-          customMetadata: {
-            'uploadedBy': uid,
-            'appointmentId': appointmentId,
-          },
+          size: file.size,
         ),
       );
-      attachments.add(SessionEvidenceAttachment(
-        path: path,
-        name: file.name,
-        contentType: file.contentType,
-        size: file.size,
-      ));
     }
     return attachments;
   }
