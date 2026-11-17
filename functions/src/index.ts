@@ -95,7 +95,9 @@ export {
   saveCounselingPopulation,
   getAcademicYears,
   createAcademicYear,
+  activateAcademicYear,
   closeAcademicYear,
+  voidAcademicYear,
 } from "./counseling_population";
 
 if (!getApps().length) initializeApp();

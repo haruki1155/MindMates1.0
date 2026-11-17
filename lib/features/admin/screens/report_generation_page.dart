@@ -212,7 +212,9 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   void _resetFilters() {
     final currentYear =
         _latestReport?.population.years
-            .where((item) => item.status == 'current')
+            .where(
+              (item) => item.periodState() == AcademicYearPeriodState.current,
+            )
             .firstOrNull
             ?.schoolYear ??
         _currentSchoolYear();
@@ -1481,7 +1483,10 @@ class _AcademicYearField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final options = years.isEmpty
+    final visibleYears = years
+        .where((item) => !item.isVoided && !item.isUnknown)
+        .toList(growable: false);
+    final options = visibleYears.isEmpty
         ? [
             AcademicYearRecord(
               schoolYear: schoolYear,
@@ -1490,7 +1495,7 @@ class _AcademicYearField extends StatelessWidget {
               status: 'current',
             ),
           ]
-        : years;
+        : visibleYears;
     final activeYear = options.any((item) => item.schoolYear == schoolYear)
         ? schoolYear
         : options.first.schoolYear;
@@ -1516,10 +1521,8 @@ class _AcademicYearField extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    if (item.status == 'current') ...[
-                      const SizedBox(width: 8),
-                      const _CurrentBadge(),
-                    ],
+                    const SizedBox(width: 8),
+                    _AcademicYearStateBadge(state: item.periodState()),
                   ],
                 ),
               ),
@@ -1934,6 +1937,60 @@ class _CurrentBadge extends StatelessWidget {
       style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800),
     ),
   );
+}
+
+class _AcademicYearStateBadge extends StatelessWidget {
+  const _AcademicYearStateBadge({required this.state});
+  final AcademicYearPeriodState state;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state == AcademicYearPeriodState.current) {
+      return const _CurrentBadge();
+    }
+    final (label, bg, fg) = switch (state) {
+      AcademicYearPeriodState.planned => (
+        'Planned',
+        const Color(0xFFE0F2FE),
+        const Color(0xFF075985),
+      ),
+      AcademicYearPeriodState.upcoming => (
+        'Upcoming',
+        const Color(0xFFFEF3C7),
+        const Color(0xFF92400E),
+      ),
+      AcademicYearPeriodState.closed => (
+        'Closed',
+        const Color(0xFFF1F5F9),
+        AdminColors.muted,
+      ),
+      AcademicYearPeriodState.voided => (
+        'Voided',
+        const Color(0xFFFEE2E2),
+        AdminColors.danger,
+      ),
+      AcademicYearPeriodState.unknown || AcademicYearPeriodState.current => (
+        'Unknown',
+        const Color(0xFFFEE2E2),
+        AdminColors.danger,
+      ),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          color: fg,
+        ),
+      ),
+    );
+  }
 }
 
 class _ControlPanel extends StatelessWidget {
@@ -2555,6 +2612,25 @@ class _PopulationSetupState extends State<_PopulationSetup> {
     super.dispose();
   }
 
+  bool get _isLocked => const {
+    'closed',
+    'voided',
+    'unknown',
+  }.contains(widget.config.status);
+
+  String get _populationSubtitle {
+    if (widget.config.status == 'voided') {
+      return 'Voided for ${widget.config.schoolYear}. Population editing is disabled.';
+    }
+    if (widget.config.status == 'unknown') {
+      return 'Status unavailable for ${widget.config.schoolYear}. Population editing is locked.';
+    }
+    if (widget.config.status == 'closed') {
+      return 'Locked for ${widget.config.schoolYear}. Historical reports are protected.';
+    }
+    return 'Set department populations for ${widget.config.schoolYear}.';
+  }
+
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
@@ -2574,9 +2650,7 @@ class _PopulationSetupState extends State<_PopulationSetup> {
             style: Theme.of(context).textTheme.titleLarge,
           ),
           subtitle: Text(
-            widget.config.status == 'closed'
-                ? 'Locked for ${widget.config.schoolYear}. Historical reports are protected.'
-                : 'Set department populations for ${widget.config.schoolYear}.',
+            _populationSubtitle,
             style: const TextStyle(color: AdminColors.muted),
           ),
           children: [
@@ -2608,7 +2682,7 @@ class _PopulationSetupState extends State<_PopulationSetup> {
                     child: TextField(
                       controller: entry.value,
                       readOnly:
-                          widget.config.status == 'closed' ||
+                          _isLocked ||
                           (widget.config.configured && !_editingPopulation),
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
@@ -2625,7 +2699,7 @@ class _PopulationSetupState extends State<_PopulationSetup> {
             ],
             const SizedBox(height: 16),
             FilledButton.icon(
-              onPressed: _saving || widget.config.status == 'closed'
+              onPressed: _saving || _isLocked
                   ? null
                   : widget.config.configured && !_editingPopulation
                   ? _confirmEditPopulation
@@ -2638,7 +2712,7 @@ class _PopulationSetupState extends State<_PopulationSetup> {
                     )
                   : const Icon(Icons.save_outlined),
               label: Text(
-                widget.config.status == 'closed'
+                _isLocked
                     ? 'Population locked'
                     : widget.config.configured && !_editingPopulation
                     ? 'Edit population'
@@ -2720,8 +2794,7 @@ class _PopulationSetupState extends State<_PopulationSetup> {
 }
 
 String _currentSchoolYear() {
-  final now = DateTime.now();
-  final start = now.month >= 6 ? now.year : now.year - 1;
+  final start = manilaCurrentSchoolStartYear();
   return '$start-${start + 1}';
 }
 

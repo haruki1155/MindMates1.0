@@ -6,9 +6,15 @@ import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/repositories/admin_portal_repository.dart';
 
 class _ReportRepository extends AdminPortalRepository {
-  _ReportRepository({this.role = AccessRole.admin});
+  _ReportRepository({
+    this.role = AccessRole.admin,
+    this.statusOverride,
+    this.customYears,
+  });
 
   final AccessRole role;
+  final String? statusOverride;
+  final List<Map<String, dynamic>>? customYears;
   final requestedYears = <String>[];
   bool configured = true;
 
@@ -30,13 +36,13 @@ class _ReportRepository extends AdminPortalRepository {
       'population': {
         'schoolYear': year,
         'configured': configured,
-        'status': year == '2025-2026' ? 'closed' : 'current',
+        'status': statusOverride ?? (year == '2025-2026' ? 'closed' : 'current'),
         'departments': ['College of Computing'],
         'populations': {
           'College of Computing': year == '2025-2026' ? 120 : 240,
         },
         'totalPopulation': configured ? (year == '2025-2026' ? 120 : 240) : 0,
-        'years': [
+        'years': customYears ?? [
           {
             'schoolYear': '2026-2027',
             'startDate': '2026-06-01',
@@ -288,4 +294,91 @@ void main() {
     expect(find.text('Student population setup'), findsNothing);
     expect(find.text('Imported files'), findsNothing);
   });
+
+  testWidgets(
+    'academic year dropdown hides voided and unknown years and separates Current from Planned and Upcoming',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = _ReportRepository(
+        customYears: const [
+          {
+            'schoolYear': '2026-2027',
+            'startDate': '2026-06-01',
+            'endDate': '2027-05-31',
+            'status': 'current',
+          },
+          {
+            'schoolYear': '2027-2028',
+            'startDate': '2027-06-01',
+            'endDate': '2028-05-31',
+            'status': 'planned',
+          },
+          {
+            'schoolYear': '2028-2029',
+            'startDate': '2028-06-01',
+            'endDate': '2029-05-31',
+            'status': 'voided',
+          },
+          {
+            'schoolYear': '2099-2100',
+            'startDate': '2099-06-01',
+            'endDate': '2100-05-31',
+            'status': 'corrupted',
+          },
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ReportGenerationPage(repository: repo)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Counseling appointments'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('2026-2027'), findsWidgets);
+      expect(find.text('2027-2028'), findsWidgets);
+      expect(find.text('Planned'), findsWidgets);
+      expect(find.text('2028-2029'), findsNothing);
+      expect(find.text('2099-2100'), findsNothing);
+    },
+  );
+
+  for (final lockedStatus in ['closed', 'voided', 'unknown']) {
+    testWidgets('population setup locks for $lockedStatus status', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReportGenerationPage(
+              repository: _ReportRepository(statusOverride: lockedStatus),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Counseling appointments'));
+      await tester.pumpAndSettle();
+
+      final popHeader = find.text('Student population setup');
+      await tester.ensureVisible(popHeader);
+      await tester.tap(popHeader);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Population locked'), findsOneWidget);
+      final popField = find.widgetWithText(TextField, 'College of Computing');
+      expect(tester.widget<TextField>(popField).readOnly, isTrue);
+    });
+  }
 }

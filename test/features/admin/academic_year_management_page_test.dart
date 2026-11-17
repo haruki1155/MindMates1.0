@@ -14,6 +14,7 @@ import 'package:mind_mates/repositories/admin_portal_repository.dart';
 class _AcademicYearFakeRepository extends AdminPortalRepository {
   _AcademicYearFakeRepository({
     this.role = AccessRole.admin,
+    this.superAdmin = false,
     List<AcademicYearRecord>? initialYears,
   }) : years = List<AcademicYearRecord>.of(
          initialYears ??
@@ -40,22 +41,36 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
        );
 
   final AccessRole role;
+  final bool superAdmin;
   List<AcademicYearRecord> years;
   Object? fetchError;
   Object? createError;
+  Object? activateError;
   Object? closeError;
+  Object? voidError;
   Completer<List<AcademicYearRecord>>? pendingFetch;
+  final fetchIncludeVoidedCalls = <bool>[];
   final createCalls = <Map<String, Object?>>[];
+  final activateCalls = <String>[];
   final closeCalls = <String>[];
+  final voidCalls = <Map<String, Object?>>[];
 
   @override
   AccessRole get currentAccessRole => role;
 
   @override
-  Future<List<AcademicYearRecord>> fetchAcademicYears() async {
+  bool get isSuperAdmin => superAdmin;
+
+  @override
+  Future<List<AcademicYearRecord>> fetchAcademicYears({
+    bool includeVoided = false,
+  }) async {
+    fetchIncludeVoidedCalls.add(includeVoided);
     if (pendingFetch != null) return pendingFetch!.future;
     if (fetchError != null) throw fetchError!;
-    return List<AcademicYearRecord>.of(years);
+    return List<AcademicYearRecord>.of(
+      includeVoided ? years : years.where((y) => !y.isVoided),
+    );
   }
 
   @override
@@ -65,6 +80,7 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
     String? endDate,
     String? copyFrom,
     bool copyPopulation = false,
+    String? reinstateReason,
   }) async {
     createCalls.add({
       'schoolYear': schoolYear,
@@ -72,22 +88,48 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
       'endDate': endDate,
       'copyFrom': copyFrom,
       'copyPopulation': copyPopulation,
+      'reinstateReason': reinstateReason,
     });
     if (createError != null) throw createError!;
-    years = [
-      AcademicYearRecord(
-        schoolYear: schoolYear,
-        startDate: startDate ?? '2028-06-01',
-        endDate: endDate ?? '2029-05-31',
-        status: 'current',
-      ),
-      ...years,
-    ];
+    final hasCurrent = years.any((y) => y.isCurrent);
+    final next = AcademicYearRecord(
+      schoolYear: schoolYear,
+      startDate: startDate ?? '2028-06-01',
+      endDate: endDate ?? '2029-05-31',
+      status: hasCurrent ? 'planned' : 'current',
+    );
+    years = [next, ...years.where((y) => y.schoolYear != schoolYear)];
     return List<AcademicYearRecord>.of(years);
   }
 
   @override
-  Future<List<AcademicYearRecord>> closeAcademicYear(String schoolYear) async {
+  Future<List<AcademicYearRecord>> activateAcademicYear(
+    String schoolYear, {
+    int? expectedRevision,
+  }) async {
+    activateCalls.add(schoolYear);
+    if (activateError != null) throw activateError!;
+    years = years
+        .map(
+          (year) => year.schoolYear == schoolYear
+              ? AcademicYearRecord(
+                  schoolYear: year.schoolYear,
+                  startDate: year.startDate,
+                  endDate: year.endDate,
+                  status: 'current',
+                  revision: year.revision + 1,
+                )
+              : year,
+        )
+        .toList();
+    return List<AcademicYearRecord>.of(years);
+  }
+
+  @override
+  Future<List<AcademicYearRecord>> closeAcademicYear(
+    String schoolYear, {
+    int? expectedRevision,
+  }) async {
     closeCalls.add(schoolYear);
     if (closeError != null) throw closeError!;
     years = years
@@ -98,6 +140,38 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
                   startDate: year.startDate,
                   endDate: year.endDate,
                   status: 'closed',
+                  revision: year.revision + 1,
+                )
+              : year,
+        )
+        .toList();
+    return List<AcademicYearRecord>.of(years);
+  }
+
+  @override
+  Future<List<AcademicYearRecord>> voidAcademicYear({
+    required String schoolYear,
+    required String reason,
+    required String confirmationText,
+    int? expectedRevision,
+  }) async {
+    voidCalls.add({
+      'schoolYear': schoolYear,
+      'reason': reason,
+      'confirmationText': confirmationText,
+      'expectedRevision': expectedRevision,
+    });
+    if (voidError != null) throw voidError!;
+    years = years
+        .map(
+          (year) => year.schoolYear == schoolYear
+              ? AcademicYearRecord(
+                  schoolYear: year.schoolYear,
+                  startDate: year.startDate,
+                  endDate: year.endDate,
+                  status: 'voided',
+                  revision: year.revision + 1,
+                  voidReason: reason,
                 )
               : year,
         )
@@ -458,4 +532,216 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets(
+    'planning horizon rejects far-future year and Planned year disables Activate until eligible',
+    (tester) async {
+      final repo = _AcademicYearFakeRepository(
+        initialYears: const [
+          AcademicYearRecord(
+            schoolYear: '2026-2027',
+            startDate: '2026-06-01',
+            endDate: '2027-05-31',
+            status: 'current',
+            revision: 1,
+          ),
+          AcademicYearRecord(
+            schoolYear: '2027-2028',
+            startDate: '2027-06-01',
+            endDate: '2028-05-31',
+            status: 'planned',
+            revision: 1,
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: AcademicYearManagementPage(
+              repository: repo,
+              nowProvider: () => DateTime.utc(2026, 11, 17),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Planned row displays Activate year disabled with explicit explanation while 2026-2027 is current.
+      final activateFinder = find.widgetWithText(
+        FilledButton,
+        'Activate year',
+      );
+      expect(activateFinder, findsOneWidget);
+      expect(tester.widget<FilledButton>(activateFinder).onPressed, isNull);
+      expect(
+        find.textContaining('Close the active current academic year'),
+        findsOneWidget,
+      );
+
+      // Far-future year 2028-2029 is blocked cleanly by planning horizon check.
+      await tester.tap(find.text('Create academic year'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'School year'),
+        '2028-2029',
+      );
+      await tester.pump();
+      expect(find.textContaining('too far in the future'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Create'));
+      await tester.pumpAndSettle();
+      expect(repo.createCalls, isEmpty);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+
+      // Close 2026-2027 -> Planned 2027-2028 remains disabled with start-date explanation on 2026-11-17.
+      await tester.tap(find.text('Close year'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Confirmation'),
+        'CLOSE 2026-2027',
+      );
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Lock year'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Activation opens on 2027-06-01'), findsOneWidget);
+
+      // On June 1, 2027 Manila time, Activate year enables and confirms cleanly.
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: AcademicYearManagementPage(
+              repository: repo,
+              nowProvider: () => DateTime.utc(2027, 6, 1),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Activate year'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Confirmation'),
+        'ACTIVATE 2027-2028',
+      );
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Activate year').last);
+      await tester.pumpAndSettle();
+      expect(repo.activateCalls, ['2027-2028']);
+    },
+  );
+
+  testWidgets(
+    'only super-admin can Void year with written reason and confirmation, and voided year can be reinstated',
+    (tester) async {
+      // Regular admin never sees Void year (nor Delete).
+      final adminRepo = _AcademicYearFakeRepository(
+        superAdmin: false,
+        initialYears: const [
+          AcademicYearRecord(
+            schoolYear: '2028-2029',
+            startDate: '2028-06-01',
+            endDate: '2029-05-31',
+            status: 'current',
+            revision: 1,
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: AcademicYearManagementPage(
+              repository: adminRepo,
+              nowProvider: () => DateTime.utc(2026, 11, 17),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(adminRepo.fetchIncludeVoidedCalls, [true]);
+      expect(find.text('Void year'), findsNothing);
+      expect(find.textContaining('Delete'), findsNothing);
+
+      // Super-admin voids 2028-2029 cleanly and can reinstate it with note.
+      final superRepo = _AcademicYearFakeRepository(
+        superAdmin: true,
+        initialYears: const [
+          AcademicYearRecord(
+            schoolYear: '2026-2027',
+            startDate: '2026-06-01',
+            endDate: '2027-05-31',
+            status: 'current',
+            revision: 1,
+          ),
+          AcademicYearRecord(
+            schoolYear: '2027-2028',
+            startDate: '2027-06-01',
+            endDate: '2028-05-31',
+            status: 'planned',
+            revision: 2,
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: AcademicYearManagementPage(
+              key: const ValueKey('super-admin-ay'),
+              repository: superRepo,
+              nowProvider: () => DateTime.utc(2026, 11, 17),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Void year').last);
+      await tester.pumpAndSettle();
+
+      final submitVoid = find.widgetWithText(FilledButton, 'Void year');
+      expect(tester.widget<FilledButton>(submitVoid).onPressed, isNull);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Void reason (required)'),
+        'Created before enrollment confirmation',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Confirmation'),
+        'VOID 2027-2028',
+      );
+      await tester.pump();
+      await tester.tap(submitVoid);
+      await tester.pumpAndSettle();
+
+      expect(superRepo.voidCalls.single['schoolYear'], '2027-2028');
+      expect(superRepo.voidCalls.single['expectedRevision'], 2);
+      expect(find.text('Voided · audit preserved'), findsOneWidget);
+      expect(
+        find.textContaining('Created before enrollment confirmation'),
+        findsOneWidget,
+      );
+
+      // Reinstatement uses Create flow and shows Reinstatement note field.
+      await tester.tap(find.text('Create academic year'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'School year'),
+        '2027-2028',
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Reinstatement note (optional)'),
+        'Confirmed next school year schedule',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Reinstate'));
+      await tester.pumpAndSettle();
+      expect(
+        superRepo.createCalls.single['reinstateReason'],
+        'Confirmed next school year schedule',
+      );
+    },
+  );
 }

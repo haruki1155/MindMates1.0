@@ -581,7 +581,7 @@ class CounselingPopulationConfig {
       populations: populations,
       configured: json['configured'] == true,
       totalPopulation: _integer(json['totalPopulation'], 0),
-      status: json['status']?.toString() ?? 'current',
+      status: normalizeAcademicYearStatus(json['status']),
       years: json['years'] is List
           ? (json['years'] as List)
                 .whereType<Map>()
@@ -596,7 +596,44 @@ class CounselingPopulationConfig {
   }
 }
 
-enum AcademicYearPeriodState { current, upcoming, closed }
+const Set<String> _validAcademicYearStatuses = <String>{
+  'current',
+  'planned',
+  'closed',
+  'voided',
+};
+
+String normalizeAcademicYearStatus(Object? raw) {
+  final value = raw?.toString().trim().toLowerCase() ?? '';
+  if (_validAcademicYearStatuses.contains(value)) {
+    return value;
+  }
+  return 'unknown';
+}
+
+DateTime manilaDateTime([DateTime? now]) =>
+    (now ?? DateTime.now()).toUtc().add(const Duration(hours: 8));
+
+String manilaTodayDateKey([DateTime? now]) {
+  final manila = manilaDateTime(now);
+  return '${manila.year.toString().padLeft(4, '0')}-'
+      '${manila.month.toString().padLeft(2, '0')}-'
+      '${manila.day.toString().padLeft(2, '0')}';
+}
+
+int manilaCurrentSchoolStartYear([DateTime? now]) {
+  final manila = manilaDateTime(now);
+  return manila.month >= 6 ? manila.year : manila.year - 1;
+}
+
+enum AcademicYearPeriodState {
+  current,
+  planned,
+  upcoming,
+  closed,
+  voided,
+  unknown,
+}
 
 class AcademicYearRecord {
   const AcademicYearRecord({
@@ -604,21 +641,30 @@ class AcademicYearRecord {
     required this.startDate,
     required this.endDate,
     required this.status,
+    this.revision = 0,
+    this.voidReason = '',
   });
+
   final String schoolYear;
   final String startDate;
   final String endDate;
   final String status;
+  final int revision;
+  final String voidReason;
 
+  bool get isCurrent => status == 'current';
+  bool get isPlanned => status == 'planned';
   bool get isClosed => status == 'closed';
+  bool get isVoided => status == 'voided';
+  bool get isUnknown =>
+      !isCurrent && !isPlanned && !isClosed && !isVoided;
 
   AcademicYearPeriodState periodState({DateTime? now}) {
+    if (isVoided) return AcademicYearPeriodState.voided;
     if (isClosed) return AcademicYearPeriodState.closed;
-    final reference = (now ?? DateTime.now()).toLocal();
-    final todayKey =
-        '${reference.year.toString().padLeft(4, '0')}-'
-        '${reference.month.toString().padLeft(2, '0')}-'
-        '${reference.day.toString().padLeft(2, '0')}';
+    if (isPlanned) return AcademicYearPeriodState.planned;
+    if (isUnknown) return AcademicYearPeriodState.unknown;
+    final todayKey = manilaTodayDateKey(now);
     if (startDate.isNotEmpty && todayKey.compareTo(startDate) < 0) {
       return AcademicYearPeriodState.upcoming;
     }
@@ -630,7 +676,9 @@ class AcademicYearRecord {
         schoolYear: json['schoolYear']?.toString() ?? '',
         startDate: json['startDate']?.toString() ?? '',
         endDate: json['endDate']?.toString() ?? '',
-        status: json['status']?.toString() ?? 'current',
+        status: normalizeAcademicYearStatus(json['status']),
+        revision: _integer(json['revision'], 0),
+        voidReason: json['voidReason']?.toString() ?? '',
       );
 }
 

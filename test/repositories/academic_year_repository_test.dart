@@ -6,12 +6,20 @@ import 'package:mind_mates/repositories/admin_portal_repository.dart';
 Map<Object?, Object?> _m(Map<Object?, Object?> v) => v;
 
 class _RoleAwareTestRepository extends AdminPortalRepository {
-  _RoleAwareTestRepository({required this.role, super.callableInvoker});
+  _RoleAwareTestRepository({
+    required this.role,
+    this.superAdmin = false,
+    super.callableInvoker,
+  });
 
   final AccessRole role;
+  final bool superAdmin;
 
   @override
   AccessRole get currentAccessRole => role;
+
+  @override
+  bool get isSuperAdmin => superAdmin;
 }
 
 void main() {
@@ -126,6 +134,114 @@ void main() {
         throwsStateError,
       );
       expect(calls, isEmpty);
+    },
+  );
+
+  test(
+    'manilaTodayDateKey and AcademicYearRecord fail closed on unknown and distinguish planned/voided',
+    () {
+      expect(manilaTodayDateKey(DateTime.utc(2026, 5, 31, 15, 59)), '2026-05-31');
+      expect(manilaTodayDateKey(DateTime.utc(2026, 5, 31, 16, 0)), '2026-06-01');
+      expect(manilaCurrentSchoolStartYear(DateTime.utc(2026, 5, 31, 15, 59)), 2025);
+      expect(manilaCurrentSchoolStartYear(DateTime.utc(2026, 5, 31, 16, 0)), 2026);
+
+      final planned = AcademicYearRecord.fromJson(const {
+        'schoolYear': '2027-2028',
+        'startDate': '2027-06-01',
+        'endDate': '2028-05-31',
+        'status': 'planned',
+        'revision': 2,
+      });
+      final voided = AcademicYearRecord.fromJson(const {
+        'schoolYear': '2028-2029',
+        'startDate': '2028-06-01',
+        'endDate': '2029-05-31',
+        'status': 'voided',
+        'revision': 3,
+        'voidReason': 'Created prematurely',
+      });
+      final unknown = AcademicYearRecord.fromJson(const {
+        'schoolYear': '2029-2030',
+        'startDate': '2029-06-01',
+        'endDate': '2030-05-31',
+        'status': 'corrupted_value',
+      });
+      final missing = AcademicYearRecord.fromJson(const {
+        'schoolYear': '2030-2031',
+        'startDate': '2030-06-01',
+        'endDate': '2031-05-31',
+      });
+
+      expect(planned.periodState(), AcademicYearPeriodState.planned);
+      expect(planned.revision, 2);
+      expect(voided.periodState(), AcademicYearPeriodState.voided);
+      expect(voided.voidReason, 'Created prematurely');
+      expect(unknown.status, 'unknown');
+      expect(unknown.periodState(), AcademicYearPeriodState.unknown);
+      expect(missing.status, 'unknown');
+    },
+  );
+
+  test(
+    'fetchAcademicYears(includeVoided), activateAcademicYear and super-admin voidAcademicYear call callables',
+    () async {
+      final calls = <(String, Map<String, Object?>)>[];
+      Future<Object?> invoker(String name, Map<String, Object?> data) async {
+        calls.add((name, data));
+        return _m({
+          'years': <Object?>[
+            _m({
+              'schoolYear': '2027-2028',
+              'startDate': '2027-06-01',
+              'endDate': '2028-05-31',
+              'status': 'current',
+              'revision': 3,
+            }),
+          ],
+        });
+      }
+
+      final adminRepo = _RoleAwareTestRepository(
+        role: AccessRole.admin,
+        superAdmin: false,
+        callableInvoker: invoker,
+      );
+      await adminRepo.fetchAcademicYears(includeVoided: true);
+      await adminRepo.activateAcademicYear('2027-2028', expectedRevision: 2);
+      await expectLater(
+        adminRepo.voidAcademicYear(
+          schoolYear: '2028-2029',
+          reason: 'Accidental future year',
+          confirmationText: 'VOID 2028-2029',
+          expectedRevision: 1,
+        ),
+        throwsStateError,
+      );
+
+      final superRepo = _RoleAwareTestRepository(
+        role: AccessRole.admin,
+        superAdmin: true,
+        callableInvoker: invoker,
+      );
+      await superRepo.voidAcademicYear(
+        schoolYear: '2028-2029',
+        reason: 'Accidental future year',
+        confirmationText: 'VOID 2028-2029',
+        expectedRevision: 1,
+      );
+
+      expect(calls[0].$1, 'getAcademicYears');
+      expect(calls[0].$2, {'includeVoided': true});
+      expect(calls[1].$1, 'activateAcademicYear');
+      expect(calls[1].$2, {'schoolYear': '2027-2028', 'expectedRevision': 2});
+      expect(calls[2].$1, 'voidAcademicYear');
+      expect(calls[2].$2, {
+        'schoolYear': '2028-2029',
+        'reason': 'Accidental future year',
+        'confirmationText': 'VOID 2028-2029',
+        'expectedRevision': 1,
+      });
+      expect(calls.length, 3);
     },
   );
 }
