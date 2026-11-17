@@ -1,6 +1,16 @@
 enum ReportChartType { pie, bar }
 
-enum AdminReportType { users, appointments }
+enum AdminReportType { users, appointments, emotionalActivity }
+
+enum EmotionalActivitySource {
+  all('all', 'All sources'),
+  mood('mood', 'Mood check-ins'),
+  assessment('assessment', 'Assessments');
+
+  const EmotionalActivitySource(this.wireKey, this.label);
+  final String wireKey;
+  final String label;
+}
 
 enum AppointmentReportDimension { department, course, yearLevel }
 
@@ -53,10 +63,9 @@ class ImportedWalkInFile {
         id: json['id']?.toString() ?? '',
         fileName: json['fileName']?.toString() ?? 'Imported walk-in entries',
         rowCount: (json['rowCount'] as num?)?.toInt() ?? 0,
-        importedAt:
-            DateTime.fromMillisecondsSinceEpoch(
-              (json['importedAtMillis'] as num?)?.toInt() ?? 0,
-            ).toLocal(),
+        importedAt: DateTime.fromMillisecondsSinceEpoch(
+          (json['importedAtMillis'] as num?)?.toInt() ?? 0,
+        ).toLocal(),
         archived: json['archived'] == true,
       );
 }
@@ -146,6 +155,8 @@ class AdminReportAnalytics {
     this.trends = const [],
     this.waitingTimeDays,
     this.rescheduledAppointments = 0,
+    this.filters = const ReportAppliedFilters.empty(),
+    this.emotionalActivity = const EmotionalActivityReport.empty(),
   });
 
   final DateTime generatedAt;
@@ -173,6 +184,8 @@ class AdminReportAnalytics {
   final List<ReportTrendPoint> trends;
   final double? waitingTimeDays;
   final int rescheduledAppointments;
+  final ReportAppliedFilters filters;
+  final EmotionalActivityReport emotionalActivity;
 
   List<ReportPercentageItem> appointmentsFor(
     AppointmentReportDimension dimension,
@@ -225,8 +238,241 @@ class AdminReportAnalytics {
         appointments['rescheduledAppointments'],
         0,
       ),
+      filters: json['filters'] is Map
+          ? ReportAppliedFilters.fromJson(_map(json['filters']))
+          : const ReportAppliedFilters.empty(),
+      emotionalActivity: json['emotionalActivity'] is Map
+          ? EmotionalActivityReport.fromJson(_map(json['emotionalActivity']))
+          : const EmotionalActivityReport.empty(),
     );
   }
+}
+
+class ReportAppliedFilters {
+  const ReportAppliedFilters({
+    required this.schoolYear,
+    required this.periodLabel,
+    required this.startDate,
+    required this.endDate,
+    required this.userCategory,
+    required this.userCategoryLabel,
+    required this.collegeKey,
+    required this.collegeLabel,
+    required this.programKey,
+    required this.programLabel,
+    required this.emotionalSource,
+    required this.emotionalSourceLabel,
+    required this.collegeOptions,
+    required this.programOptions,
+    required this.programOptionsByCollege,
+  });
+
+  const ReportAppliedFilters.empty()
+    : schoolYear = '',
+      periodLabel = 'Whole academic year',
+      startDate = null,
+      endDate = null,
+      userCategory = 'all',
+      userCategoryLabel = 'All categories',
+      collegeKey = 'all',
+      collegeLabel = 'All colleges & departments',
+      programKey = 'all',
+      programLabel = 'All programs',
+      emotionalSource = 'all',
+      emotionalSourceLabel = 'All approved sources',
+      collegeOptions = const [],
+      programOptions = const [],
+      programOptionsByCollege = const {};
+
+  final String schoolYear;
+  final String periodLabel;
+  final DateTime? startDate;
+  final DateTime? endDate;
+  final String userCategory;
+  final String userCategoryLabel;
+  final String collegeKey;
+  final String collegeLabel;
+  final String programKey;
+  final String programLabel;
+  final String emotionalSource;
+  final String emotionalSourceLabel;
+  final List<ReportFilterOption> collegeOptions;
+  final List<ReportFilterOption> programOptions;
+  final Map<String, List<ReportFilterOption>> programOptionsByCollege;
+
+  List<ReportFilterOption> programsForCollege(String college) {
+    final normalized = college.trim().toLowerCase();
+    if (normalized.isEmpty || normalized == 'all') {
+      if (programOptions.isNotEmpty) return programOptions;
+      final merged = <String, ReportFilterOption>{};
+      for (final list in programOptionsByCollege.values) {
+        for (final item in list) {
+          merged[item.key] = item;
+        }
+      }
+      final values = merged.values.toList()
+        ..sort((a, b) => a.label.compareTo(b.label));
+      return values;
+    }
+    return programOptionsByCollege[normalized] ?? const [];
+  }
+
+  factory ReportAppliedFilters.fromJson(Map<String, dynamic> json) {
+    final rawByCollege = _map(json['programOptionsByCollege']);
+    final byCollege = <String, List<ReportFilterOption>>{
+      for (final entry in rawByCollege.entries)
+        entry.key.toLowerCase(): _options(entry.value),
+    };
+    return ReportAppliedFilters(
+      schoolYear: json['schoolYear']?.toString() ?? '',
+      periodLabel: json['periodLabel']?.toString() ?? 'Whole academic year',
+      startDate: DateTime.tryParse(json['startDate']?.toString() ?? ''),
+      endDate: DateTime.tryParse(json['endDate']?.toString() ?? ''),
+      userCategory: json['userCategory']?.toString() ?? 'all',
+      userCategoryLabel:
+          json['userCategoryLabel']?.toString() ?? 'All categories',
+      collegeKey: json['collegeKey']?.toString() ?? 'all',
+      collegeLabel:
+          json['collegeLabel']?.toString() ?? 'All colleges & departments',
+      programKey: json['programKey']?.toString() ?? 'all',
+      programLabel: json['programLabel']?.toString() ?? 'All programs',
+      emotionalSource: json['emotionalSource']?.toString() ?? 'all',
+      emotionalSourceLabel:
+          json['emotionalSourceLabel']?.toString() ?? 'All approved sources',
+      collegeOptions: _options(json['collegeOptions']),
+      programOptions: _options(json['programOptions']),
+      programOptionsByCollege: byCollege,
+    );
+  }
+}
+
+class EmotionalActivityBucket {
+  const EmotionalActivityBucket({
+    required this.key,
+    required this.label,
+    required this.percentage,
+    required this.suppressed,
+  });
+
+  final String key;
+  final String label;
+  final double? percentage;
+  final bool suppressed;
+
+  factory EmotionalActivityBucket.fromJson(Map<String, dynamic> json) =>
+      EmotionalActivityBucket(
+        key: json['key']?.toString() ?? '',
+        label: json['label']?.toString() ?? 'Category',
+        percentage: json['suppressed'] == true
+            ? null
+            : _nullableNumber(json['percentage']),
+        suppressed: json['suppressed'] == true,
+      );
+}
+
+class EmotionalActivityReport {
+  const EmotionalActivityReport({
+    required this.status,
+    required this.suppressed,
+    required this.suppressionThreshold,
+    required this.suppressionReason,
+    required this.sourceScopeKey,
+    required this.sourceScopeLabel,
+    required this.schoolYear,
+    required this.dateRangeLabel,
+    required this.participationRate,
+    required this.appUserCohortShare,
+    required this.dominantValenceLabel,
+    required this.hasMixedCategories,
+    required this.moodCheckInShare,
+    required this.assessmentShare,
+    required this.departmentOptions,
+    required this.valenceBreakdown,
+    required this.moodBreakdown,
+    required this.assessmentBreakdown,
+    required this.periodTrends,
+    required this.departmentCoverageNote,
+  });
+
+  const EmotionalActivityReport.empty()
+    : status = 'no_data',
+      suppressed = false,
+      suppressionThreshold = 10,
+      suppressionReason = null,
+      sourceScopeKey = 'all',
+      sourceScopeLabel = 'All approved sources',
+      schoolYear = '',
+      dateRangeLabel = 'Selected period',
+      participationRate = null,
+      appUserCohortShare = null,
+      dominantValenceLabel = null,
+      hasMixedCategories = false,
+      moodCheckInShare = null,
+      assessmentShare = null,
+      departmentOptions = const [],
+      valenceBreakdown = const [],
+      moodBreakdown = const [],
+      assessmentBreakdown = const [],
+      periodTrends = const [],
+      departmentCoverageNote = '';
+
+  final String status;
+  final bool suppressed;
+  final int suppressionThreshold;
+  final String? suppressionReason;
+  final String sourceScopeKey;
+  final String sourceScopeLabel;
+  final String schoolYear;
+  final String dateRangeLabel;
+  final double? participationRate;
+  final double? appUserCohortShare;
+  final String? dominantValenceLabel;
+  final bool hasMixedCategories;
+  final double? moodCheckInShare;
+  final double? assessmentShare;
+  final List<ReportFilterOption> departmentOptions;
+  final List<EmotionalActivityBucket> valenceBreakdown;
+  final List<EmotionalActivityBucket> moodBreakdown;
+  final List<EmotionalActivityBucket> assessmentBreakdown;
+  final List<EmotionalActivityBucket> periodTrends;
+  final String departmentCoverageNote;
+
+  bool get isReady => status == 'ready' && !suppressed;
+  bool get isEmpty => status == 'no_data';
+
+  factory EmotionalActivityReport.fromJson(Map<String, dynamic> json) =>
+      EmotionalActivityReport(
+        status: json['status']?.toString() ?? 'no_data',
+        suppressed: json['suppressed'] == true,
+        suppressionThreshold: _integer(json['suppressionThreshold'], 10),
+        suppressionReason: json['suppressionReason']?.toString(),
+        sourceScopeKey: json['sourceScopeKey']?.toString() ?? 'all',
+        sourceScopeLabel:
+            json['sourceScopeLabel']?.toString() ?? 'All approved sources',
+        schoolYear: json['schoolYear']?.toString() ?? '',
+        dateRangeLabel: json['dateRangeLabel']?.toString() ?? 'Selected period',
+        participationRate: _nullableNumber(json['participationRate']),
+        appUserCohortShare: _nullableNumber(json['appUserCohortShare']),
+        dominantValenceLabel: json['dominantValenceLabel']?.toString(),
+        hasMixedCategories: json['hasMixedCategories'] == true,
+        moodCheckInShare: _nullableNumber(json['moodCheckInShare']),
+        assessmentShare: _nullableNumber(json['assessmentShare']),
+        departmentOptions: _options(json['departmentOptions']),
+        valenceBreakdown: _list(
+          json['valenceBreakdown'],
+        ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+        moodBreakdown: _list(
+          json['moodBreakdown'],
+        ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+        assessmentBreakdown: _list(
+          json['assessmentBreakdown'],
+        ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+        periodTrends: _list(
+          json['periodTrends'],
+        ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+        departmentCoverageNote:
+            json['departmentCoverageNote']?.toString() ?? '',
+      );
 }
 
 double? _nullableNumber(Object? value) => value == null ? null : _number(value);
@@ -335,7 +581,7 @@ class CounselingPopulationConfig {
       populations: populations,
       configured: json['configured'] == true,
       totalPopulation: _integer(json['totalPopulation'], 0),
-      status: json['status']?.toString() ?? 'current',
+      status: normalizeAcademicYearStatus(json['status']),
       years: json['years'] is List
           ? (json['years'] as List)
                 .whereType<Map>()
@@ -350,23 +596,89 @@ class CounselingPopulationConfig {
   }
 }
 
+const Set<String> _validAcademicYearStatuses = <String>{
+  'current',
+  'planned',
+  'closed',
+  'voided',
+};
+
+String normalizeAcademicYearStatus(Object? raw) {
+  final value = raw?.toString().trim().toLowerCase() ?? '';
+  if (_validAcademicYearStatuses.contains(value)) {
+    return value;
+  }
+  return 'unknown';
+}
+
+DateTime manilaDateTime([DateTime? now]) =>
+    (now ?? DateTime.now()).toUtc().add(const Duration(hours: 8));
+
+String manilaTodayDateKey([DateTime? now]) {
+  final manila = manilaDateTime(now);
+  return '${manila.year.toString().padLeft(4, '0')}-'
+      '${manila.month.toString().padLeft(2, '0')}-'
+      '${manila.day.toString().padLeft(2, '0')}';
+}
+
+int manilaCurrentSchoolStartYear([DateTime? now]) {
+  final manila = manilaDateTime(now);
+  return manila.month >= 6 ? manila.year : manila.year - 1;
+}
+
+enum AcademicYearPeriodState {
+  current,
+  planned,
+  upcoming,
+  closed,
+  voided,
+  unknown,
+}
+
 class AcademicYearRecord {
   const AcademicYearRecord({
     required this.schoolYear,
     required this.startDate,
     required this.endDate,
     required this.status,
+    this.revision = 0,
+    this.voidReason = '',
   });
+
   final String schoolYear;
   final String startDate;
   final String endDate;
   final String status;
+  final int revision;
+  final String voidReason;
+
+  bool get isCurrent => status == 'current';
+  bool get isPlanned => status == 'planned';
+  bool get isClosed => status == 'closed';
+  bool get isVoided => status == 'voided';
+  bool get isUnknown =>
+      !isCurrent && !isPlanned && !isClosed && !isVoided;
+
+  AcademicYearPeriodState periodState({DateTime? now}) {
+    if (isVoided) return AcademicYearPeriodState.voided;
+    if (isClosed) return AcademicYearPeriodState.closed;
+    if (isPlanned) return AcademicYearPeriodState.planned;
+    if (isUnknown) return AcademicYearPeriodState.unknown;
+    final todayKey = manilaTodayDateKey(now);
+    if (startDate.isNotEmpty && todayKey.compareTo(startDate) < 0) {
+      return AcademicYearPeriodState.upcoming;
+    }
+    return AcademicYearPeriodState.current;
+  }
+
   factory AcademicYearRecord.fromJson(Map<String, dynamic> json) =>
       AcademicYearRecord(
         schoolYear: json['schoolYear']?.toString() ?? '',
         startDate: json['startDate']?.toString() ?? '',
         endDate: json['endDate']?.toString() ?? '',
-        status: json['status']?.toString() ?? 'current',
+        status: normalizeAcademicYearStatus(json['status']),
+        revision: _integer(json['revision'], 0),
+        voidReason: json['voidReason']?.toString() ?? '',
       );
 }
 

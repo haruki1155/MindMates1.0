@@ -113,7 +113,7 @@ Production scales linearly with document count (≈ $0.60 per export per 1M docu
 
 1. Pick a verified job and its `outputUriPrefix`.
 2. In an **isolated test project** (`mindmate-restore-drill`), grant that project's Firestore service agent `roles/storage.objectViewer` on the backup bucket.
-3. `gcloud firestore import gs://<bucket>/firestore-exports/<prefix> --project=mindmate-restore-drill`
+3. `gcloud firestore import <outputUriPrefix> --project=mindmate-restore-drill` (where `<outputUriPrefix>` is `gs://<bucket>/firestore-exports/<stamp>-<jobId>`).
 4. Verify: collection list and document counts match the source at export time (use `runAggregationQuery` counts), sample non-clinical fields (e.g. `colleges`, `system_config`) for integrity. Do not open or copy clinical documents beyond counts.
 5. Record the drill (date, job id, counts, duration) in the operations log; delete the drill database afterwards under its own authorization.
 

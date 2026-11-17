@@ -1,6 +1,12 @@
 import {handleAppointmentAgreement} from "./appointment_agreement";
 export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callable";
 export {requestFirestoreBackup, refreshFirestoreBackupStatus, scheduledFirestoreBackup} from "./backup_management";
+export {
+  reassignCollegeCounselor,
+  setStaffCollegeAssignments,
+} from "./college_assignments_callable";
+export {getStudentCaseHistory} from "./student_case_history_callable";
+export {getCaseRemarks, saveCaseRemarks} from "./case_remarks_callable";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {getMessaging} from "firebase-admin/messaging";
@@ -90,7 +96,9 @@ export {
   saveCounselingPopulation,
   getAcademicYears,
   createAcademicYear,
+  activateAcademicYear,
   closeAcademicYear,
+  voidAcademicYear,
 } from "./counseling_population";
 
 if (!getApps().length) initializeApp();

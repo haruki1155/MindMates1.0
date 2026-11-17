@@ -46,12 +46,20 @@ export const AUDIT_ACTIONS = [
   "STUDENT_ROSTER_STATUS_CHANGED", "STUDENT_ACTIVATION_LOCK_RESET", "STUDENT_ACTIVATION_CODES_ISSUED",
   "STUDENT_ACTIVATION_REVOKED", "STUDENT_INFO_REQUIREMENT_BACKFILLED",
   "ACADEMIC_CATALOGUE_IMPORTED",
-  "BACKUP_REQUESTED", "BACKUP_COMPLETED", "BACKUP_FAILED", "BACKUP_SKIPPED",
+  "STAFF_COLLEGE_ASSIGNMENTS_UPDATED",
+  // Server-only backup lifecycle events (BACKUP_REQUESTED, BACKUP_COMPLETED,
+  // BACKUP_FAILED, BACKUP_SKIPPED) are written by backup_management.ts and
+  // omitted from AUDIT_ACTIONS so recordAuditEvent cannot forge them.
 ] as const;
 
 /** Views of a student's record target the student, so the per-staff activity
  * log lists them under the staff member who performed them (actorId). */
-export const ACTOR_SCOPED_AUDIT_ACTIONS: readonly string[] = ["STUDENT_PERSONAL_INFO_VIEWED"];
+export const ACTOR_SCOPED_AUDIT_ACTIONS: readonly string[] = [
+  "STUDENT_PERSONAL_INFO_VIEWED", "COUNSELING_HISTORY_VIEWED",
+  // Server-only (case_remarks_callable.ts); deliberately absent from
+  // AUDIT_ACTIONS so recordAuditEvent cannot forge them.
+  "CASE_REMARKS_VIEWED", "CASE_REMARKS_UPDATED",
+];
 
 export function auditLogOwnerField(action: string): "actorId" | "targetUserId" {
   return ACTOR_SCOPED_AUDIT_ACTIONS.includes(action) ? "actorId" : "targetUserId";

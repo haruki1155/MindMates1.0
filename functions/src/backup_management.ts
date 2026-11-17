@@ -64,6 +64,17 @@ export const ORPHAN_GRACE_MS = 10 * 60 * 1_000;
 
 let adminClient: InstanceType<typeof firestoreAdmin.FirestoreAdminClient> | null = null;
 
+function resolveProjectId(env: Record<string, string | undefined> = process.env): string {
+  const direct = (env.GCLOUD_PROJECT ?? env.GOOGLE_CLOUD_PROJECT ?? "").trim();
+  if (direct) return direct;
+  try {
+    const parsed = JSON.parse(env.FIREBASE_CONFIG ?? "{}") as {projectId?: unknown};
+    return typeof parsed.projectId === "string" ? parsed.projectId.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
 export function defaultDeps(): BackupDeps {
   adminClient ??= new firestoreAdmin.FirestoreAdminClient();
   const client = adminClient;
@@ -94,7 +105,7 @@ export function defaultDeps(): BackupDeps {
       return exists;
     },
     env: process.env,
-    projectId: process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT ?? "",
+    projectId: resolveProjectId(process.env),
     now: () => new Date(),
     newJobId: () => randomUUID(),
   };
@@ -154,9 +165,14 @@ export async function startBackup(deps: BackupDeps, actor: BackupActor, trigger:
   const requestedAt = Timestamp.fromDate(now);
 
   await deps.db.runTransaction(async (tx) => {
-    const recent = await tx.get(deps.db.collection(JOBS).orderBy("requestedAt", "desc").limit(50));
+    const [running, recent] = await Promise.all([
+      tx.get(deps.db.collection(JOBS).where("status", "==", "running").limit(1)),
+      tx.get(deps.db.collection(JOBS).orderBy("requestedAt", "desc").limit(50)),
+    ]);
+    const uniqueDocs = new Map<string, FirebaseFirestore.DocumentData>();
+    for (const doc of [...running.docs, ...recent.docs]) uniqueDocs.set(doc.id, doc.data());
     try {
-      assertCanStart(recent.docs.map((doc) => toRecord(doc.data())), now, {trigger, manualDailyLimit: config.manualDailyLimit});
+      assertCanStart([...uniqueDocs.values()].map(toRecord), now, {trigger, manualDailyLimit: config.manualDailyLimit});
     } catch (error) {
       if (error instanceof StartBlockedError) throw new HttpsError("failed-precondition", error.message);
       throw error;
@@ -286,7 +302,9 @@ export async function refreshBackup(deps: BackupDeps, actor: BackupActor, jobId:
   const revision = Number(data.revision ?? 0);
   const metadataPath = String(data.verification?.metadataPath ?? "");
   const bucket = String(data.outputUriPrefix ?? "").replace(/^gs:\/\//, "").split("/")[0];
-  const exists = next.status === "exported" ? await deps.objectExists(bucket, metadataPath) : false;
+  const exists = next.status === "exported" && bucket.length > 0 && metadataPath.length > 0
+    ? await deps.objectExists(bucket, metadataPath)
+    : false;
 
   return deps.db.runTransaction(async (tx) => {
     const current = await tx.get(ref);

@@ -4,10 +4,11 @@ import {getAuth} from "firebase-admin/auth";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import {HttpsError} from "firebase-functions/v2/https";
 
-import "./index";
+import {recordAuditEvent} from "./index";
 import {
   BackupDeps,
   refreshBackup,
+  refreshFirestoreBackupStatus,
   requestFirestoreBackup,
   runScheduledBackup,
   startBackup,
@@ -425,14 +426,46 @@ test("the enabled scheduler skips while a job runs and otherwise starts a system
   assert.equal(jobs.docs[0].data().trigger, "scheduled");
 });
 
-test("the callable refuses everyone but the configured super-administrator", {skip: !emulated}, async () => {
+test("the callable refuses everyone but an active verified configured super-administrator", {skip: !emulated}, async () => {
   const previous = process.env.SUPER_ADMIN_UID;
   process.env.SUPER_ADMIN_UID = adminUid;
+  const otherAdminUid = `${prefix}-other-admin`;
+  await getAuth().createUser({uid: otherAdminUid, email: `${otherAdminUid}@example.invalid`, emailVerified: true});
+  await db.doc(`users/${otherAdminUid}`).set({accessRole: "admin", accountStatus: "active", name: "Other Admin"});
   try {
-    const callable = requestFirestoreBackup as unknown as {run: (request: {auth?: {uid: string}; data?: unknown}) => Promise<unknown>};
-    await denied(callable.run({auth: {uid: counselorUid}, data: {}}), "permission-denied");
-    await assert.rejects(callable.run({data: {}}), (error: unknown) => error instanceof HttpsError && error.code === "unauthenticated");
+    const requestCallable = requestFirestoreBackup as unknown as {run: (request: {auth?: {uid: string}; data?: unknown}) => Promise<unknown>};
+    const refreshCallable = refreshFirestoreBackupStatus as unknown as {run: (request: {auth?: {uid: string}; data?: unknown}) => Promise<unknown>};
+    await denied(requestCallable.run({auth: {uid: counselorUid}, data: {}}), "permission-denied");
+    await denied(requestCallable.run({auth: {uid: otherAdminUid}, data: {}}), "permission-denied");
+    await denied(refreshCallable.run({auth: {uid: otherAdminUid}, data: {jobId: "job-1"}}), "permission-denied");
+    await assert.rejects(requestCallable.run({data: {}}), (error: unknown) => error instanceof HttpsError && error.code === "unauthenticated");
+
+    await getAuth().updateUser(adminUid, {emailVerified: false});
+    await denied(requestCallable.run({auth: {uid: adminUid}, data: {}}), "permission-denied");
+    await denied(refreshCallable.run({auth: {uid: adminUid}, data: {jobId: "job-1"}}), "permission-denied");
+    await getAuth().updateUser(adminUid, {emailVerified: true});
+
+    await db.doc(`users/${adminUid}`).update({accountStatus: "suspended"});
+    await denied(requestCallable.run({auth: {uid: adminUid}, data: {}}), "permission-denied");
+    await denied(refreshCallable.run({auth: {uid: adminUid}, data: {jobId: "job-1"}}), "permission-denied");
+    await db.doc(`users/${adminUid}`).update({accountStatus: "active"});
+
+    // Active, verified configured super-admin passes authorization and reaches validation/lookup.
+    await denied(refreshCallable.run({auth: {uid: adminUid}, data: {jobId: ""}}), "invalid-argument");
+    await denied(refreshCallable.run({auth: {uid: adminUid}, data: {jobId: `${prefix}-missing-job`}}), "not-found");
+
+    // Staff cannot forge server-only backup audit events through recordAuditEvent.
+    const auditCallable = recordAuditEvent as unknown as {run: (request: {auth?: {uid: string}; data?: unknown}) => Promise<unknown>};
+    for (const action of ["BACKUP_REQUESTED", "BACKUP_COMPLETED", "BACKUP_FAILED", "BACKUP_SKIPPED"]) {
+      await denied(auditCallable.run({auth: {uid: counselorUid}, data: {action, category: "SYSTEM", targetType: "backup_job", targetId: "forged"}}), "invalid-argument");
+    }
   } finally {
+    await getAuth().updateUser(adminUid, {emailVerified: true}).catch(() => undefined);
+    await db.doc(`users/${adminUid}`).set({accessRole: "admin", accountStatus: "active", name: "Test Admin"}, {merge: true});
+    await Promise.all([
+      db.doc(`users/${otherAdminUid}`).delete().catch(() => undefined),
+      getAuth().deleteUser(otherAdminUid).catch(() => undefined),
+    ]);
     if (previous == null) delete process.env.SUPER_ADMIN_UID; else process.env.SUPER_ADMIN_UID = previous;
   }
 });

@@ -43,7 +43,7 @@ const MAX_ERROR_MESSAGE = 300;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export class BackupConfigError extends Error {
-  constructor(public readonly code: "bucket-missing" | "invalid-number", message: string) {
+  constructor(public readonly code: "bucket-missing" | "bucket-invalid" | "invalid-number", message: string) {
     super(message);
     this.name = "BackupConfigError";
   }
@@ -68,6 +68,9 @@ function positiveInteger(raw: string | undefined, fallback: number, label: strin
 export function resolveBackupConfig(env: Record<string, string | undefined>): BackupConfig {
   const bucket = (env.BACKUP_BUCKET ?? "").trim();
   if (!bucket) throw new BackupConfigError("bucket-missing", "Backup destination is not configured.");
+  if (bucket.includes("/") || bucket.includes(":") || /\s/.test(bucket)) {
+    throw new BackupConfigError("bucket-invalid", "BACKUP_BUCKET must be a plain bucket name without 'gs://' or '/'.");
+  }
   return {
     bucket,
     retentionDays: positiveInteger(env.BACKUP_RETENTION_DAYS, BACKUP_DEFAULTS.retentionDays, "BACKUP_RETENTION_DAYS"),

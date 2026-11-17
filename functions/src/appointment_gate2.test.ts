@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import * as functions from "./index";
+import {ensureAuthUser} from "./test_auth_helper";
 
 test("queue delayed and duplicate events project authoritative confirmation", async () => {
   assert.ok(process.env.FIRESTORE_EMULATOR_HOST);
@@ -23,6 +24,7 @@ test("queue delayed and duplicate events project authoritative confirmation", as
   const olderPending = await ref.get();
   await ref.update({status: "confirmed"}); // confirmation keeps the revision
   await trigger.run({params: {appointmentId: ref.id}, data: {after: olderPending}});
+  await ensureAuthUser("gate2-refresh-staff", true);
   await db.doc("users/gate2-refresh-staff").set({accessRole: "portalStaff"});
   await db.doc(`appointment_queue/${ref.id}`).delete();
   const refresh = functions.refreshPortalAppointmentQueue as unknown as {run: (request: unknown) => Promise<unknown>};
@@ -38,6 +40,7 @@ test("queue delayed and duplicate events project authoritative confirmation", as
 test("reschedule notifications reject delayed pending events after confirmation", async () => {
   const db = getFirestore();
   const ref = db.doc("appointments/gate2-notification");
+  await ensureAuthUser("gate2-staff", true);
   await db.doc("users/gate2-staff").set({accessRole: "portalStaff"});
   await ref.set({userId: "gate2-student", status: "confirmed", scheduleRevision: 0, scheduledAt: Timestamp.fromMillis(2000000000000), concern: "PRIVATE"});
   const before = await ref.get();
@@ -61,9 +64,26 @@ test("reminder A to B to A uses revision identities and legacy remains compatibl
   await run.run({});
   await ref.update({scheduleRevision: 2, reminders: {}, scheduledAt: time, studentScheduleRequestId: "g2-edit-2"});
   await Promise.all([run.run({}), run.run({})]);
-  const notes = await db.collection("notifications").where("appointmentId", "==", ref.id).get();
-  assert.equal(notes.size, 3);
-  assert.equal(notes.docs.filter((n) => n.data().scheduleRevision === 2).length, 1);
+  const reminders = await db.collection("notifications")
+    .where("appointmentId", "==", ref.id)
+    .where("type", "==", "appointment_reminder")
+    .get();
+  assert.equal(reminders.size, 3);
+  assert.deepEqual(
+    reminders.docs.map((doc) => doc.id).sort(),
+    [
+      `appointment_reminder_oneHour_${ref.id}`,
+      `appointment_reminder_oneHour_${ref.id}_revision_1`,
+      `appointment_reminder_oneHour_${ref.id}_revision_2`,
+    ].sort(),
+  );
+  for (const doc of reminders.docs) {
+    assert.equal(doc.data().type, "appointment_reminder");
+    assert.equal(doc.data().reminderStage, "oneHour");
+  }
+  assert.equal(reminders.docs.filter((n) => (n.data().scheduleRevision ?? null) === null).length, 1);
+  assert.equal(reminders.docs.filter((n) => n.data().scheduleRevision === 1).length, 1);
+  assert.equal(reminders.docs.filter((n) => n.data().scheduleRevision === 2).length, 1);
 });
 
 test("push dispatcher rejects an obsolete reminder immediately before delivery", async () => {
@@ -123,6 +143,7 @@ test("integrated reschedule, notification retries, queue, confirmation, and revi
   const uid = "gate2-integrated-student";
   const staff = "gate2-integrated-staff";
   const ref = db.doc(`appointments/${id}`);
+  await ensureAuthUser(staff, true);
   await db.doc(`users/${staff}`).set({accessRole: "admin"});
   await db.doc("pacc_availability/current").set({openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, blackoutDates: []});
   await ref.set({userId: uid, fullName: "Private name", concern: "PRIVATE CONCERN", status: "confirmed", scheduleRevision: 0, scheduledAt: Timestamp.fromMillis(a), scheduledTime: "11:00 AM"});

@@ -6,6 +6,7 @@ import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../domain/admin_management_models.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/college_assignment_dialog.dart';
 import '../widgets/app_user_directory_table.dart';
 
 enum UserManagementCategory { students, employees, staff, admin }
@@ -195,9 +196,14 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   ),
                   const SizedBox(height: 16),
                 ],
-                if (category == UserManagementCategory.staff)
-                  _staffTable(staff)
-                else
+                if (category == UserManagementCategory.staff) ...[
+                  _staffTable(staff, all),
+                  const SizedBox(height: 24),
+                  _CollegeCounselorAssignmentsSection(
+                    users: all,
+                    repository: widget.repository,
+                  ),
+                ] else
                   Card(
                     child: Padding(
                       padding: EdgeInsets.all(
@@ -335,7 +341,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
     query: query,
   );
 
-  Widget _staffTable(List<UserModel> values) {
+  Widget _staffTable(List<UserModel> values, List<UserModel> allUsers) {
     final staff = values
         .where(
           (user) =>
@@ -384,7 +390,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                 _selectedStaffIds.remove(user.id);
               }
             }),
-            actions: _staffActions(user),
+            actions: _staffActions(user, allUsers),
           ),
         )
         .toList();
@@ -554,7 +560,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
     reason.dispose();
   }
 
-  List<Widget> _staffActions(UserModel user) {
+  List<Widget> _staffActions(UserModel user, List<UserModel> allUsers) {
     final status = user.staffAccountStatus;
     return [
       OutlinedButton.icon(
@@ -574,7 +580,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
         tooltip: 'More staff actions',
         onSelected: _updatingStaff.contains(user.id)
             ? null
-            : (action) => _handleStaffAction(user, action),
+            : (action) => _handleStaffAction(user, action, allUsers),
         itemBuilder: (_) => [
           if (status == StaffAccountStatus.pending)
             const PopupMenuItem(
@@ -596,13 +602,30 @@ class _UserManagementPageState extends State<UserManagementPage> {
               value: 'enable',
               child: Text('Reactivate account'),
             ),
+          if (widget.repository.isSuperAdmin &&
+              user.accessRole == AccessRole.counselor)
+            const PopupMenuItem(
+              value: 'colleges',
+              child: Text('College assignments'),
+            ),
+          if (widget.repository.isSuperAdmin &&
+              user.accessRole == AccessRole.portalStaff &&
+              user.assignedCollegeIds.isNotEmpty)
+            const PopupMenuItem(
+              value: 'clear_legacy_colleges',
+              child: Text('Clear legacy college assignments'),
+            ),
           const PopupMenuItem(value: 'history', child: Text('Activity Log')),
         ],
       ),
     ];
   }
 
-  Future<void> _handleStaffAction(UserModel user, String action) async {
+  Future<void> _handleStaffAction(
+    UserModel user,
+    String action,
+    List<UserModel> allUsers,
+  ) async {
     switch (action) {
       case 'verify':
         await _verify(user);
@@ -612,8 +635,34 @@ class _UserManagementPageState extends State<UserManagementPage> {
         await _setEnabled(user, false);
       case 'enable':
         await _setEnabled(user, true);
+      case 'colleges':
+        await showCollegeAssignmentDialog(
+          context,
+          repository: widget.repository,
+          user: user,
+          allUsers: allUsers,
+        );
+      case 'clear_legacy_colleges':
+        await _clearLegacyStaffColleges(user);
       case 'history':
         await _openManageDrawer(user, historyOnly: true);
+    }
+  }
+
+  Future<void> _clearLegacyStaffColleges(UserModel user) async {
+    final cleaned = await showDialog<bool>(
+      context: context,
+      builder: (_) => _LegacyStaffCleanupDialog(
+        user: user,
+        repository: widget.repository,
+      ),
+    );
+    if (cleaned == true && mounted && Scaffold.maybeOf(context) != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Legacy portal staff college assignments cleared.'),
+        ),
+      );
     }
   }
 
@@ -930,6 +979,16 @@ class _UserManagementPageState extends State<UserManagementPage> {
             _detail('Position', user.position),
             _detail('Department', user.department ?? user.departmentId),
             _detail('College', user.collegeId),
+            if (user.accessRole == AccessRole.counselor ||
+                user.assignedCollegeIds.isNotEmpty)
+              _detail(
+                user.accessRole == AccessRole.counselor
+                    ? 'Assigned colleges'
+                    : 'Legacy college assignments',
+                user.assignedCollegeIds.isEmpty
+                    ? 'Unassigned'
+                    : user.assignedCollegeIds.join(', '),
+              ),
             _detail('Course', user.courseId),
             _detail('Account status', user.staffAccountStatus?.label),
             _detail('Portal role', user.accessRole.storedValue),
@@ -1935,6 +1994,10 @@ String _auditActionLabel(String action) => switch (action) {
   'STAFF_ACCESS_REVOKED' => 'Portal access revoked',
   'STAFF_ACCOUNT_SUSPENDED' => 'Account suspended',
   'STAFF_ACCOUNT_REACTIVATED' => 'Account reactivated',
+  'STAFF_ACCOUNT_ACTIVATED' => 'Account activated',
+  'STAFF_COLLEGE_ASSIGNMENTS_UPDATED' =>
+    'Counselor college assignments updated',
+  'COLLEGE_COUNSELOR_TRANSFERRED' => 'College counselor transferred',
   'STAFF_REGISTRATION_APPROVED' => 'Staff registration approved',
   'STAFF_REGISTRATION_REJECTED' => 'Staff registration removed',
   'STUDENT_PERSONAL_INFO_VIEWED' => 'Student information viewed',
@@ -1962,3 +2025,496 @@ String _auditCategoryLabel(String category) => switch (category) {
 String _date(DateTime? value) => value == null
     ? '—'
     : '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+
+class _LegacyStaffCleanupDialog extends StatefulWidget {
+  const _LegacyStaffCleanupDialog({
+    required this.user,
+    required this.repository,
+  });
+
+  final UserModel user;
+  final AdminPortalRepository repository;
+
+  @override
+  State<_LegacyStaffCleanupDialog> createState() =>
+      _LegacyStaffCleanupDialogState();
+}
+
+class _LegacyStaffCleanupDialogState extends State<_LegacyStaffCleanupDialog> {
+  final _reason = TextEditingController();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.repository.setStaffCollegeAssignments(
+        userId: widget.user.id,
+        collegeIds: const [],
+        expectedRevision: widget.user.collegeAssignmentRevision,
+        reason: _reason.text.trim(),
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _error = error.message?.trim().isNotEmpty == true
+            ? error.message!
+            : 'Unable to clear legacy assignments (${error.code}).',
+      );
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = 'Unable to clear legacy assignments.');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('Clear legacy college assignments · ${widget.user.displayName}'),
+    content: SizedBox(
+      width: 460,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Portal staff accounts can no longer hold college assignments. '
+              'Removing: ${widget.user.assignedCollegeIds.join(', ')}',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _reason,
+              enabled: !_saving,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Reason for cleanup',
+                helperText: 'Minimum 3 characters; recorded in audit history.',
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: !_saving && _reason.text.trim().length >= 3 ? _submit : null,
+        child: const Text('Clear assignments'),
+      ),
+    ],
+  );
+}
+
+enum _CollegeCounselorAssignmentFilter { all, assigned, unassigned, conflicts }
+
+class _CollegeCounselorAssignmentsSection extends StatefulWidget {
+  const _CollegeCounselorAssignmentsSection({
+    required this.users,
+    required this.repository,
+  });
+
+  final List<UserModel> users;
+  final AdminPortalRepository repository;
+
+  @override
+  State<_CollegeCounselorAssignmentsSection> createState() =>
+      _CollegeCounselorAssignmentsSectionState();
+}
+
+class _CollegeCounselorAssignmentsSectionState
+    extends State<_CollegeCounselorAssignmentsSection> {
+  _CollegeCounselorAssignmentFilter _filter =
+      _CollegeCounselorAssignmentFilter.all;
+  String _search = '';
+  final _searchController = TextEditingController();
+  late final Stream<List<College>> _collegesStream = widget.repository
+      .watchColleges();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  String _statusFor(College college, List<UserModel> owners) {
+    if (owners.length > 1) return 'Conflict';
+    if (owners.length == 1) return 'Assigned';
+    return college.active ? 'Unassigned' : 'Inactive';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.repository.isSuperAdmin) return const SizedBox.shrink();
+
+    final eligibleCounselors =
+        widget.users.where(isEligibleCounselorAccount).toList()
+          ..sort((a, b) => a.displayName.compareTo(b.displayName));
+    final ownersByCollege = <String, List<UserModel>>{};
+    final legacyStaffByCollege = <String, List<UserModel>>{};
+    for (final user in widget.users) {
+      if (user.assignedCollegeIds.isEmpty) continue;
+      if (user.accessRole == AccessRole.counselor) {
+        for (final cid in user.assignedCollegeIds) {
+          (ownersByCollege[cid] ??= []).add(user);
+        }
+      } else if (user.accessRole == AccessRole.portalStaff) {
+        for (final cid in user.assignedCollegeIds) {
+          (legacyStaffByCollege[cid] ??= []).add(user);
+        }
+      }
+    }
+
+    return Card(
+      key: const Key('college-counselor-assignments-section'),
+      child: Padding(
+        padding: EdgeInsets.all(
+          MediaQuery.sizeOf(context).width < 600 ? 14 : 22,
+        ),
+        child: StreamBuilder<List<College>>(
+          stream: _collegesStream,
+          builder: (context, snapshot) {
+            final colleges = [...(snapshot.data ?? const <College>[])]
+              ..sort((a, b) => a.name.compareTo(b.name));
+            var assignedCount = 0;
+            var unassignedCount = 0;
+            var conflictCount = 0;
+            for (final college in colleges) {
+              final owners = ownersByCollege[college.id] ?? const [];
+              if (owners.length > 1) {
+                conflictCount += 1;
+              } else if (owners.length == 1) {
+                assignedCount += 1;
+              } else if (college.active) {
+                unassignedCount += 1;
+              }
+            }
+
+            final filtered = colleges.where((college) {
+              final owners = ownersByCollege[college.id] ?? const [];
+              final status = _statusFor(college, owners);
+              final matchesFilter = switch (_filter) {
+                _CollegeCounselorAssignmentFilter.all => true,
+                _CollegeCounselorAssignmentFilter.assigned =>
+                  status == 'Assigned',
+                _CollegeCounselorAssignmentFilter.unassigned =>
+                  status == 'Unassigned',
+                _CollegeCounselorAssignmentFilter.conflicts =>
+                  status == 'Conflict',
+              };
+              if (!matchesFilter) return false;
+              if (_search.isEmpty) return true;
+              return college.name.toLowerCase().contains(_search) ||
+                  college.code.toLowerCase().contains(_search);
+            }).toList();
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'College Counselor Assignments',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Each college may have at most one assigned counselor. One '
+                  'counselor may serve multiple colleges.',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: AdminColors.muted),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _UserBadge(
+                      label: '$assignedCount Assigned',
+                      highlighted: true,
+                    ),
+                    _UserBadge(label: '$unassignedCount Unassigned'),
+                    if (conflictCount > 0)
+                      _UserBadge(label: '$conflictCount Conflicts'),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 280,
+                      child: TextField(
+                        key: const Key('college-assignment-search'),
+                        controller: _searchController,
+                        onChanged: (value) => setState(
+                          () => _search = value.trim().toLowerCase(),
+                        ),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          prefixIcon: const Icon(Icons.search, size: 18),
+                          hintText: 'Search college name or code',
+                          suffixIcon: _search.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear college search',
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    setState(() => _search = '');
+                                  },
+                                  icon: const Icon(Icons.close, size: 16),
+                                ),
+                        ),
+                      ),
+                    ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final option in const [
+                          (
+                            _CollegeCounselorAssignmentFilter.all,
+                            'All Colleges',
+                          ),
+                          (
+                            _CollegeCounselorAssignmentFilter.assigned,
+                            'Assigned',
+                          ),
+                          (
+                            _CollegeCounselorAssignmentFilter.unassigned,
+                            'Unassigned',
+                          ),
+                          (
+                            _CollegeCounselorAssignmentFilter.conflicts,
+                            'Conflicts',
+                          ),
+                        ])
+                          ChoiceChip(
+                            label: Text(option.$2),
+                            selected: _filter == option.$1,
+                            onSelected: (_) =>
+                                setState(() => _filter = option.$1),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                if (snapshot.hasError)
+                  const Text('Unable to load college assignments.')
+                else if (!snapshot.hasData)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (filtered.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Text('No colleges match the selected filter.'),
+                  )
+                else
+                  Column(
+                    children: [
+                      for (final college in filtered)
+                        _CollegeAssignmentRow(
+                          college: college,
+                          owners: ownersByCollege[college.id] ?? const [],
+                          legacyStaff:
+                              legacyStaffByCollege[college.id] ?? const [],
+                          status: _statusFor(
+                            college,
+                            ownersByCollege[college.id] ?? const [],
+                          ),
+                          eligibleCounselors: eligibleCounselors,
+                          repository: widget.repository,
+                        ),
+                    ],
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _CollegeAssignmentRow extends StatelessWidget {
+  const _CollegeAssignmentRow({
+    required this.college,
+    required this.owners,
+    required this.legacyStaff,
+    required this.status,
+    required this.eligibleCounselors,
+    required this.repository,
+  });
+
+  final College college;
+  final List<UserModel> owners;
+  final List<UserModel> legacyStaff;
+  final String status;
+  final List<UserModel> eligibleCounselors;
+  final AdminPortalRepository repository;
+
+  @override
+  Widget build(BuildContext context) {
+    final counselorText = owners.isEmpty
+        ? 'Unassigned'
+        : owners.map((u) => u.displayName).join(', ');
+    final statusColor = switch (status) {
+      'Assigned' => AdminColors.accentSoft,
+      'Conflict' => Colors.red.withValues(alpha: 0.14),
+      'Inactive' => AdminColors.surfaceMuted,
+      _ => AdminColors.canvas,
+    };
+
+    Future<void> openTransfer({bool readOnly = false}) =>
+        showCollegeCounselorTransferDialog(
+          context,
+          repository: repository,
+          college: college,
+          currentOwners: owners,
+          eligibleCounselors: eligibleCounselors,
+          readOnly: readOnly,
+        );
+
+    final actionButtons = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        if (status == 'Conflict')
+          FilledButton(
+            onPressed: () => openTransfer(),
+            child: const Text('Resolve Conflict'),
+          )
+        else if (status == 'Assigned') ...[
+          OutlinedButton(
+            onPressed: () => openTransfer(readOnly: true),
+            child: const Text('View'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => openTransfer(),
+            child: const Text('Change'),
+          ),
+        ] else if (status == 'Unassigned')
+          FilledButton.tonal(
+            onPressed: () => openTransfer(),
+            child: const Text('Assign'),
+          )
+        else
+          OutlinedButton(
+            onPressed: () => openTransfer(readOnly: true),
+            child: const Text('View'),
+          ),
+      ],
+    );
+
+    final info = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              college.name,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+            ),
+            if (college.code.isNotEmpty)
+              _UserBadge(label: 'Code ${college.code}'),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: statusColor,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AdminColors.border),
+              ),
+              child: Text(
+                status,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Assigned counselor: $counselorText',
+          style: const TextStyle(fontSize: 13),
+        ),
+        if (!college.active && status == 'Assigned')
+          const Padding(
+            padding: EdgeInsets.only(top: 3),
+            child: Text(
+              'College archived — existing counselor may retain or release assignment.',
+              style: TextStyle(color: AdminColors.muted, fontSize: 12),
+            ),
+          ),
+        if (legacyStaff.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+              'Legacy portal staff reference (${legacyStaff.length}) — clear from staff menu.',
+              style: const TextStyle(color: AdminColors.muted, fontSize: 12),
+            ),
+          ),
+      ],
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        border: Border.all(color: AdminColors.border),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 640) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [info, const SizedBox(height: 12), actionButtons],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: info),
+              const SizedBox(width: 16),
+              actionButtons,
+            ],
+          );
+        },
+      ),
+    );
+  }
+}

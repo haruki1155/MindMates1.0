@@ -73,7 +73,11 @@ void main() {
             ChangeNotifierProvider<AuthProvider>.value(value: auth),
             ChangeNotifierProvider<MoodProvider>.value(value: mood),
           ],
-          child: const MaterialApp(home: MoodJourneyScreen()),
+          child: MaterialApp(
+            home: MoodJourneyScreen(
+              nowProvider: () => DateTime.utc(2026, 11, 12),
+            ),
+          ),
         ),
       );
       await tester.pump();

@@ -17,6 +17,8 @@ import '../models/appointment_queue_item.dart';
 import '../models/app_notification_model.dart';
 import '../models/user_model.dart';
 import '../models/profile_roles.dart';
+import '../models/case_remarks_model.dart';
+import '../models/student_case_history_model.dart';
 import '../models/pacc_availability_model.dart';
 import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
@@ -205,6 +207,52 @@ class AdminPortalRepository {
     return FirebaseFunctions.instanceFor(
       region: 'us-central1',
     ).routedCallable(name).call<Object?>(data).then((result) => result.data);
+  }
+
+  /// One page of a student's appointments (current and archived), newest
+  /// first. The server matches by the student's verified account ID and
+  /// refuses staff who are not authorized for that student.
+  Future<StudentCaseHistoryResult> fetchStudentCaseHistory({
+    required String studentId,
+    String? cursor,
+    int pageSize = 20,
+  }) async {
+    final data = await _callCallable('getStudentCaseHistory', {
+      'studentId': studentId,
+      'cursor': ?cursor,
+      'pageSize': pageSize,
+    });
+    return StudentCaseHistoryResult.fromJson(
+      data is Map ? Map<String, dynamic>.from(data) : const {},
+    );
+  }
+
+  /// Optional counselor transcript / remarks for one case. The server enforces
+  /// counselor entitlement and audits every read.
+  Future<CaseRemarks> fetchCaseRemarks(String appointmentId) async {
+    final data = await _callCallable('getCaseRemarks', {
+      'appointmentId': appointmentId,
+    });
+    return CaseRemarks.fromJson(
+      data is Map ? Map<String, dynamic>.from(data) : const {},
+    );
+  }
+
+  /// Saves (or clears) counselor transcript / remarks for one case. Blank is
+  /// valid; [expectedRevision] prevents overwriting concurrent edits.
+  Future<CaseRemarks> saveCaseRemarks({
+    required String appointmentId,
+    required String text,
+    required int expectedRevision,
+  }) async {
+    final data = await _callCallable('saveCaseRemarks', {
+      'appointmentId': appointmentId,
+      'text': text,
+      'expectedRevision': expectedRevision,
+    });
+    return CaseRemarks.fromJson(
+      data is Map ? Map<String, dynamic>.from(data) : const {},
+    );
   }
 
   /// Dry-runs a catalogue file. [rows] are passed through untouched: an
@@ -855,15 +903,16 @@ class AdminPortalRepository {
     return _firestoreService
         .watchDocuments(FirestoreCollections.appointmentQueue)
         .map(
-          (items) => items
-              .map(
-                (item) => AppointmentQueueItem.fromJson(
-                  item,
-                  id: item['id']?.toString(),
-                ),
-              )
-              .toList()
-            ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
+          (items) =>
+              items
+                  .map(
+                    (item) => AppointmentQueueItem.fromJson(
+                      item,
+                      id: item['id']?.toString(),
+                    ),
+                  )
+                  .toList()
+                ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
         );
   }
 
@@ -1001,6 +1050,87 @@ class AdminPortalRepository {
     String? schoolYear,
     DateTime? startDate,
     DateTime? endDate,
+  }) => _callReportAnalytics(
+    userCategory: userCategory,
+    appointmentDepartment: appointmentDepartment,
+    schoolYear: schoolYear,
+    startDate: startDate,
+    endDate: endDate,
+    emotionalSource: 'all',
+  );
+
+  Future<AdminReportAnalytics> fetchEmotionalReportAnalytics({
+    String userCategory = 'all',
+    String appointmentDepartment = 'all',
+    String? schoolYear,
+    DateTime? startDate,
+    DateTime? endDate,
+    String emotionalSource = 'all',
+  }) {
+    if (emotionalSource == 'all') {
+      return fetchReportAnalytics(
+        userCategory: userCategory,
+        appointmentDepartment: appointmentDepartment,
+        schoolYear: schoolYear,
+        startDate: startDate,
+        endDate: endDate,
+      );
+    }
+    return _callReportAnalytics(
+      userCategory: userCategory,
+      appointmentDepartment: appointmentDepartment,
+      schoolYear: schoolYear,
+      startDate: startDate,
+      endDate: endDate,
+      emotionalSource: emotionalSource,
+    );
+  }
+
+  /// Fetches report analytics with optional college-scoped [program] and
+  /// [periodLabel] filters while preserving backward compatibility for legacy
+  /// test overrides of [fetchReportAnalytics] and
+  /// [fetchEmotionalReportAnalytics].
+  Future<AdminReportAnalytics> fetchFilteredReportAnalytics({
+    String userCategory = 'all',
+    String appointmentDepartment = 'all',
+    String program = 'all',
+    String? schoolYear,
+    String? periodLabel,
+    DateTime? startDate,
+    DateTime? endDate,
+    String emotionalSource = 'all',
+  }) {
+    if (program == 'all' && periodLabel == null) {
+      return fetchEmotionalReportAnalytics(
+        userCategory: userCategory,
+        appointmentDepartment: appointmentDepartment,
+        schoolYear: schoolYear,
+        startDate: startDate,
+        endDate: endDate,
+        emotionalSource: emotionalSource,
+      );
+    }
+    return _callReportAnalytics(
+      userCategory: userCategory,
+      appointmentDepartment: appointmentDepartment,
+      program: program,
+      schoolYear: schoolYear,
+      periodLabel: periodLabel,
+      startDate: startDate,
+      endDate: endDate,
+      emotionalSource: emotionalSource,
+    );
+  }
+
+  Future<AdminReportAnalytics> _callReportAnalytics({
+    required String userCategory,
+    required String appointmentDepartment,
+    String program = 'all',
+    String? schoolYear,
+    String? periodLabel,
+    DateTime? startDate,
+    DateTime? endDate,
+    required String emotionalSource,
   }) async {
     if (!currentAccessRole.canAccessClinicalData) {
       throw StateError('Counselor or administrator access is required.');
@@ -1010,9 +1140,12 @@ class AdminPortalRepository {
         .call<Map<String, dynamic>>({
           'userCategory': userCategory,
           'appointmentDepartment': appointmentDepartment,
+          'program': program,
           'schoolYear': ?schoolYear,
+          'periodLabel': ?periodLabel,
           'startDate': ?startDate?.toUtc().toIso8601String(),
           'endDate': ?endDate?.toUtc().toIso8601String(),
+          'emotionalSource': emotionalSource,
         });
     final raw = result.data['report'];
     if (raw is! Map) {
@@ -1024,8 +1157,8 @@ class AdminPortalRepository {
   Future<CounselingPopulationConfig> fetchCounselingPopulation(
     String schoolYear,
   ) async {
-    if (!currentAccessRole.canAccessClinicalData) {
-      throw StateError('Counselor or administrator access is required.');
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
     }
     final result = await FirebaseFunctions.instance
         .httpsCallable('getCounselingPopulation')
@@ -1037,8 +1170,8 @@ class AdminPortalRepository {
     required String schoolYear,
     required Map<String, int> populations,
   }) async {
-    if (!currentAccessRole.canAccessClinicalData) {
-      throw StateError('Counselor or administrator access is required.');
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
     }
     final result = await FirebaseFunctions.instance
         .httpsCallable('saveCounselingPopulation')
@@ -1049,26 +1182,89 @@ class AdminPortalRepository {
     return CounselingPopulationConfig.fromJson(result.data);
   }
 
-  Future<List<AcademicYearRecord>> createAcademicYear({
-    required String schoolYear,
-    String? copyFrom,
-    bool copyPopulation = false,
-  }) async {
-    final result = await FirebaseFunctions.instance
-        .httpsCallable('createAcademicYear')
-        .call<Map<String, dynamic>>({
-          'schoolYear': schoolYear,
-          'copyFrom': ?copyFrom,
-          'copyPopulation': copyPopulation,
-        });
-    return _academicYears(result.data);
+  bool? _extendedAcademicYearLifecycleEnabled;
+
+  bool get isExtendedAcademicYearLifecycleEnabled =>
+      _extendedAcademicYearLifecycleEnabled ?? false;
+
+  Future<List<AcademicYearRecord>> _callAcademicYearAction(
+    String callable,
+    Map<String, dynamic> payload,
+  ) async {
+    if (currentAccessRole != AccessRole.admin) {
+      throw StateError('Administrator access is required.');
+    }
+    final data = await _callCallable(callable, payload);
+    final map = data is Map
+        ? Map<String, dynamic>.from(data)
+        : const <String, dynamic>{};
+    if (map['extendedLifecycleEnabled'] is bool) {
+      _extendedAcademicYearLifecycleEnabled =
+          map['extendedLifecycleEnabled'] as bool;
+    } else if (callable == 'getAcademicYears') {
+      _extendedAcademicYearLifecycleEnabled = false;
+    }
+    return _academicYears(map);
   }
 
-  Future<List<AcademicYearRecord>> closeAcademicYear(String schoolYear) async {
-    final result = await FirebaseFunctions.instance
-        .httpsCallable('closeAcademicYear')
-        .call<Map<String, dynamic>>({'schoolYear': schoolYear});
-    return _academicYears(result.data);
+  Future<List<AcademicYearRecord>> fetchAcademicYears({
+    bool includeVoided = false,
+  }) => _callAcademicYearAction(
+    'getAcademicYears',
+    includeVoided ? const {'includeVoided': true} : const {},
+  );
+
+  Future<List<AcademicYearRecord>> createAcademicYear({
+    required String schoolYear,
+    String? startDate,
+    String? endDate,
+    String? copyFrom,
+    bool copyPopulation = false,
+    String? reinstateReason,
+    int? expectedRevision,
+  }) => _callAcademicYearAction('createAcademicYear', {
+    'schoolYear': schoolYear,
+    'startDate': ?startDate,
+    'endDate': ?endDate,
+    'copyFrom': ?copyFrom,
+    'copyPopulation': copyPopulation,
+    'reinstateReason': ?reinstateReason,
+    'expectedRevision': ?expectedRevision,
+  });
+
+  Future<List<AcademicYearRecord>> activateAcademicYear(
+    String schoolYear, {
+    int? expectedRevision,
+  }) => _callAcademicYearAction('activateAcademicYear', {
+    'schoolYear': schoolYear,
+    'expectedRevision': ?expectedRevision,
+  });
+
+  Future<List<AcademicYearRecord>> closeAcademicYear(
+    String schoolYear, {
+    int? expectedRevision,
+    String? confirmation,
+  }) => _callAcademicYearAction('closeAcademicYear', {
+    'schoolYear': schoolYear,
+    'expectedRevision': ?expectedRevision,
+    'confirmation': ?confirmation,
+  });
+
+  Future<List<AcademicYearRecord>> voidAcademicYear({
+    required String schoolYear,
+    required String reason,
+    required String confirmationText,
+    int? expectedRevision,
+  }) async {
+    if (!isSuperAdmin) {
+      throw StateError('Super-admin access is required.');
+    }
+    return _callAcademicYearAction('voidAcademicYear', {
+      'schoolYear': schoolYear,
+      'reason': reason,
+      'confirmation': confirmationText,
+      'expectedRevision': ?expectedRevision,
+    });
   }
 
   static List<AcademicYearRecord> _academicYears(Map<String, dynamic> data) =>
@@ -1175,20 +1371,18 @@ class AdminPortalRepository {
   Stream<List<AdminInquiryModel>> watchInquiries() => _firestoreService
       .watchDocuments(FirestoreCollections.inquiries)
       .map(
-        (items) =>
-            scopeInquiriesForRole(
-                items
-                    .map(
-                      (item) => AdminInquiryModel.fromJson(
-                        item,
-                        id: item['id']?.toString(),
-                      ),
-                    )
-                    .toList(),
-                role: currentAccessRole,
-                uid: currentAuthUser?.uid,
+        (items) => scopeInquiriesForRole(
+          items
+              .map(
+                (item) => AdminInquiryModel.fromJson(
+                  item,
+                  id: item['id']?.toString(),
+                ),
               )
-              ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+              .toList(),
+          role: currentAccessRole,
+          uid: currentAuthUser?.uid,
+        )..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
       );
 
   Stream<List<AdminActivityAnalyticsModel>> watchActivityAnalytics() =>
@@ -1209,19 +1403,35 @@ class AdminPortalRepository {
                   ..sort((a, b) => b.dateKey.compareTo(a.dateKey)),
           );
 
-  Future<void> initializeAppointmentScheduleRevision({required String appointmentId, required DateTime scheduledAt, required String status}) async {
-    await FirebaseFunctions.instance.httpsCallable('initializeAppointmentScheduleRevision').call({
-      'appointmentId': appointmentId, 'expectedScheduledAt': scheduledAt.millisecondsSinceEpoch, 'expectedStatus': status,
-    });
+  Future<void> initializeAppointmentScheduleRevision({
+    required String appointmentId,
+    required DateTime scheduledAt,
+    required String status,
+  }) async {
+    await FirebaseFunctions.instance
+        .httpsCallable('initializeAppointmentScheduleRevision')
+        .call({
+          'appointmentId': appointmentId,
+          'expectedScheduledAt': scheduledAt.millisecondsSinceEpoch,
+          'expectedStatus': status,
+        });
   }
 
-  Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId) async {
-    await FirebaseFunctions.instance.httpsCallable('changeAppointmentAgreement').call({
-      'appointmentId': appointment.id, 'action': action, 'requestId': requestId,
-      'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
-      'expectedScheduleRevision': appointment.scheduleRevision,
-      'expectedProposalRevision': appointment.proposalRevision,
-    });
+  Future<void> changeAppointmentAgreement(
+    AppointmentModel appointment,
+    String action,
+    String requestId,
+  ) async {
+    await FirebaseFunctions.instance
+        .httpsCallable('changeAppointmentAgreement')
+        .call({
+          'appointmentId': appointment.id,
+          'action': action,
+          'requestId': requestId,
+          'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
+          'expectedScheduleRevision': appointment.scheduleRevision,
+          'expectedProposalRevision': appointment.proposalRevision,
+        });
   }
 
   Future<SessionEvidenceRecord?> getClinicalSessionEvidence(
@@ -1271,25 +1481,27 @@ class AdminPortalRepository {
           file.size > maxSessionEvidenceFileBytes) {
         throw const FormatException('Unsupported file or file size.');
       }
-      final path = buildSessionEvidencePath(
-        appointmentId, uid, file.name,
-      );
-      await FirebaseStorage.instance.ref(path).putData(
-        file.bytes,
-        SettableMetadata(
+      final path = buildSessionEvidencePath(appointmentId, uid, file.name);
+      await FirebaseStorage.instance
+          .ref(path)
+          .putData(
+            file.bytes,
+            SettableMetadata(
+              contentType: file.contentType,
+              customMetadata: {
+                'uploadedBy': uid,
+                'appointmentId': appointmentId,
+              },
+            ),
+          );
+      attachments.add(
+        SessionEvidenceAttachment(
+          path: path,
+          name: file.name,
           contentType: file.contentType,
-          customMetadata: {
-            'uploadedBy': uid,
-            'appointmentId': appointmentId,
-          },
+          size: file.size,
         ),
       );
-      attachments.add(SessionEvidenceAttachment(
-        path: path,
-        name: file.name,
-        contentType: file.contentType,
-        size: file.size,
-      ));
     }
     return attachments;
   }
@@ -1448,6 +1660,51 @@ class AdminPortalRepository {
         .httpsCallable('initializeAcademicStructure')
         .call<Map<String, dynamic>>();
     return (result.data['colleges'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Replaces the colleges an authorized counselor serves. Authorization,
+  /// uniqueness, and revision checks happen server-side; returns the new
+  /// revision. Legacy portal staff accounts only permit removal/cleanup.
+  Future<int> setStaffCollegeAssignments({
+    required String userId,
+    required List<String> collegeIds,
+    required int expectedRevision,
+    required String reason,
+  }) async {
+    final result = await _callCallable('setStaffCollegeAssignments', {
+      'userId': userId,
+      'collegeIds': collegeIds,
+      'expectedRevision': expectedRevision,
+      'reason': reason,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Atomically assigns, transfers, unassigns, or resolves a duplicate
+  /// counselor conflict for one college across all affected counselor accounts.
+  Future<Map<String, int>> reassignCollegeCounselor({
+    required String collegeId,
+    required String? toCounselorId,
+    required List<String> expectedOwnerIds,
+    required Map<String, int> expectedRevisions,
+    required String reason,
+  }) async {
+    final result = await _callCallable('reassignCollegeCounselor', {
+      'collegeId': collegeId,
+      'toCounselorId': toCounselorId,
+      'expectedOwnerIds': expectedOwnerIds,
+      'expectedRevisions': expectedRevisions,
+      'reason': reason,
+    });
+    final data = result is Map ? result : const {};
+    final rawRevisions = data['revisions'];
+    if (rawRevisions is! Map) return const {};
+    return {
+      for (final entry in rawRevisions.entries)
+        if (entry.key is String && entry.value is num)
+          entry.key as String: (entry.value as num).toInt(),
+    };
   }
 
   Future<void> updateStaffOrganization({

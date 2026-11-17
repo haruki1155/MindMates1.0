@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
@@ -73,7 +74,47 @@ class _AdminDeploymentConfigurationError extends StatelessWidget {
 }
 
 class MindMateAdminApp extends StatelessWidget {
-  const MindMateAdminApp({super.key});
+  const MindMateAdminApp({
+    super.key,
+    this.initialUri,
+    this.auth,
+    this.onReplaceLocation,
+    this.authGateBuilder,
+  });
+
+  final Uri? initialUri;
+  final FirebaseAuth? auth;
+  final void Function(String url)? onReplaceLocation;
+  final WidgetBuilder? authGateBuilder;
+
+  static Uri resolveActionUri(String? routeName, Uri baseUri) {
+    if (routeName != null && routeName.isNotEmpty) {
+      final parsed = Uri.tryParse(routeName);
+      if (parsed != null && AdminEmailActionScreen.supports(parsed)) {
+        if (!parsed.hasAuthority &&
+            baseUri.hasAuthority &&
+            (baseUri.scheme == 'http' || baseUri.scheme == 'https')) {
+          return baseUri.replace(
+            path: parsed.path,
+            query: parsed.hasQuery ? parsed.query : null,
+          );
+        }
+        return parsed;
+      }
+    }
+    return baseUri;
+  }
+
+  Widget _buildScreenForUri(BuildContext context, Uri uri) {
+    if (AdminEmailActionScreen.supports(uri)) {
+      return AdminEmailActionScreen(
+        uri: uri,
+        auth: auth,
+        onReplaceLocation: onReplaceLocation,
+      );
+    }
+    return authGateBuilder?.call(context) ?? const AdminAuthGate();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -81,9 +122,22 @@ class MindMateAdminApp extends StatelessWidget {
       title: 'MindMate',
       debugShowCheckedModeBanner: false,
       theme: AdminTheme.data,
-      home: AdminEmailActionScreen.supports(Uri.base)
-          ? AdminEmailActionScreen(uri: Uri.base)
-          : const AdminAuthGate(),
+      onGenerateInitialRoutes: (initialRoute) {
+        final targetUri = initialUri ?? resolveActionUri(initialRoute, Uri.base);
+        return [
+          MaterialPageRoute<void>(
+            settings: RouteSettings(name: initialRoute),
+            builder: (context) => _buildScreenForUri(context, targetUri),
+          ),
+        ];
+      },
+      onGenerateRoute: (settings) {
+        final targetUri = initialUri ?? resolveActionUri(settings.name, Uri.base);
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (context) => _buildScreenForUri(context, targetUri),
+        );
+      },
     );
   }
 }

@@ -59,3 +59,15 @@ test("no client may create, update or delete backup jobs, not even the super-adm
   await assertFails(updateDoc(doc(admin, "backup_jobs/job-1"), {status: "failed"}));
   await assertFails(deleteDoc(doc(admin, "backup_jobs/job-1")));
 });
+
+test("unverified or suspended super-administrator cannot read backup jobs", async () => {
+  const unverifiedAdmin = environment.authenticatedContext("admin", {email_verified: false}).firestore();
+  await assertFails(getDoc(doc(unverifiedAdmin, "backup_jobs/job-1")));
+  await assertFails(getDocs(collection(unverifiedAdmin, "backup_jobs")));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "users/admin"), {accessRole: "admin", accountStatus: "suspended"});
+  });
+  const suspendedAdmin = environment.authenticatedContext("admin", verified).firestore();
+  await assertFails(getDoc(doc(suspendedAdmin, "backup_jobs/job-1")));
+  await assertFails(getDocs(collection(suspendedAdmin, "backup_jobs")));
+});

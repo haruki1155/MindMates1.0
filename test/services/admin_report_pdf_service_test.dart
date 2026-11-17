@@ -61,4 +61,101 @@ void main() {
       expect(bytes.length, greaterThan(1000));
     });
   }
+
+  test(
+    'builds all 3 report types with filters metadata and deterministic filename',
+    () async {
+      final filteredReport = AdminReportAnalytics.fromJson({
+        'generatedAt': '2026-11-16T04:00:00Z',
+        'dateRange': {
+          'startDate': '2026-06-01T00:00:00+08:00',
+          'endDate': '2026-12-01T00:00:00+08:00',
+          'label': '1st semester',
+        },
+        'filters': {
+          'schoolYear': '2026-2027',
+          'periodLabel': '1st semester',
+          'userCategory': 'student',
+          'userCategoryLabel': 'Students',
+          'collegeKey': 'cas',
+          'collegeLabel': 'College of Arts and Sciences',
+          'programKey': 'ba psychology',
+          'programLabel': 'BA Psychology',
+          'emotionalSource': 'mood',
+          'emotionalSourceLabel': 'Mood check-ins only',
+        },
+        'population': {
+          'schoolYear': '2026-2027',
+          'configured': true,
+          'status': 'current',
+          'departments': ['CAS'],
+          'populations': {'CAS': 120},
+          'totalPopulation': 120,
+        },
+        'users': {
+          'scopeKey': 'student',
+          'scopeLabel': 'Students',
+          'overallActivePercentage': 55.0,
+          'categories': [
+            {
+              'key': 'student',
+              'label': 'Students',
+              'populationPercentage': 100.0,
+              'activePercentage': 55.0,
+            },
+          ],
+        },
+        'appointments': {
+          'totalAppointments': 14,
+          'uniqueStudentsServed': 11,
+          'counselingReach': 9.2,
+          'appointmentRate': 11.7,
+          'completionRate': 85.7,
+          'departmentScopeKey': 'cas',
+          'departmentScopeLabel': 'College of Arts and Sciences',
+          'department': [
+            {'key': 'cas', 'label': 'CAS', 'percentage': 100.0},
+          ],
+        },
+        'emotionalActivity': {
+          'status': 'ready',
+          'suppressed': false,
+          'suppressionThreshold': 10,
+          'sourceScopeKey': 'mood',
+          'sourceScopeLabel': 'Mood check-ins only',
+          'schoolYear': '2026-2027',
+          'dateRangeLabel': '1st semester',
+          'participationRate': 20.0,
+          'dominantValenceLabel': 'Positive (Levels 4-5)',
+          'valenceBreakdown': [
+            {
+              'key': 'positive',
+              'label': 'Positive (Levels 4-5)',
+              'percentage': 75.0,
+              'suppressed': false,
+            },
+          ],
+        },
+      });
+
+      expect(
+        AdminReportPdfService.filenameFor(
+          filteredReport,
+          AdminReportType.emotionalActivity,
+        ),
+        'mindmate_emotional_activity_2026_2027_college_of_arts_and_sciences_ba_psychology_2026-11-16.pdf',
+      );
+
+      for (final reportType in AdminReportType.values) {
+        final bytes = await AdminReportPdfService.build(
+          report: filteredReport,
+          reportType: reportType,
+          chartType: ReportChartType.bar,
+          userCategoryKey: 'student',
+        );
+        expect(bytes, isNotEmpty);
+        expect(bytes.length, greaterThan(1000));
+      }
+    },
+  );
 }

@@ -1,20 +1,87 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/config/app_environment.dart';
 import '../../../core/platform/browser_navigation.dart';
 import '../theme/admin_theme.dart';
 
-const _adminUrl = 'https://mindmate-admin-staging.vercel.app';
-
 class AdminEmailActionScreen extends StatefulWidget {
-  const AdminEmailActionScreen({required this.uri, super.key});
+  const AdminEmailActionScreen({
+    required this.uri,
+    this.auth,
+    this.onReplaceLocation,
+    super.key,
+  });
 
   final Uri uri;
+  final FirebaseAuth? auth;
+  final void Function(String url)? onReplaceLocation;
+
+  static const _obsoleteAdminHosts = <String>{
+    'mindmate-admin-staging.vercel.app',
+  };
+  static const _stagingOnlyHosts = <String>{
+    'paaccmindmate.com',
+    'www.paaccmindmate.com',
+    'mindmate-staging.web.app',
+    'mindmate-staging.firebaseapp.com',
+    'mindmate-admin-staging.vercel.app',
+  };
+  static const _productionOnlyHosts = <String>{
+    'mind-mates-cd2cf.web.app',
+    'mind-mates-cd2cf.firebaseapp.com',
+  };
+  static const _developmentOnlyHosts = <String>{
+    'mindmate-dev-4e91c.web.app',
+    'mindmate-dev-4e91c.firebaseapp.com',
+  };
 
   static bool supports(Uri uri) {
     final mode = uri.queryParameters['mode'];
     return uri.queryParameters['oobCode']?.isNotEmpty == true &&
         const {'resetPassword', 'verifyEmail', 'recoverEmail'}.contains(mode);
+  }
+
+  /// Resolves a validated same-environment sign-in origin without retaining
+  /// sensitive action-code query parameters.
+  static String resolveReturnToSignInUrl(
+    Uri currentUri, {
+    Uri? fallbackBaseUri,
+    AppEnvironment? environment,
+  }) {
+    final env = environment ?? AppEnvironmentConfig.current;
+    for (final candidate in [currentUri, ?fallbackBaseUri]) {
+      final validated = _validatedOriginRoot(candidate, env);
+      if (validated != null) return validated;
+    }
+    return '/';
+  }
+
+  static String? _validatedOriginRoot(Uri candidate, AppEnvironment env) {
+    final scheme = candidate.scheme.toLowerCase();
+    final host = candidate.host.toLowerCase();
+    if (host.isEmpty || _obsoleteAdminHosts.contains(host)) return null;
+    final isLocalhost =
+        host == 'localhost' || host == '127.0.0.1' || host == '::1';
+    if (scheme != 'https' && !(scheme == 'http' && isLocalhost)) return null;
+    final disallowedHosts = switch (env) {
+      AppEnvironment.staging => {
+        ..._productionOnlyHosts,
+        ..._developmentOnlyHosts,
+      },
+      AppEnvironment.production => {
+        ..._stagingOnlyHosts,
+        ..._developmentOnlyHosts,
+      },
+      AppEnvironment.development => _productionOnlyHosts,
+    };
+    if (disallowedHosts.contains(host)) return null;
+    return Uri(
+      scheme: scheme,
+      host: host,
+      port: candidate.hasPort ? candidate.port : null,
+      path: '/',
+    ).toString();
   }
 
   @override
@@ -31,6 +98,7 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
   String? _email;
   String? _error;
 
+  FirebaseAuth get _auth => widget.auth ?? FirebaseAuth.instance;
   String get _mode => widget.uri.queryParameters['mode'] ?? '';
   String get _code => widget.uri.queryParameters['oobCode'] ?? '';
 
@@ -50,22 +118,22 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
   Future<void> _prepareAction() async {
     try {
       if (_mode == 'resetPassword') {
-        _email = await FirebaseAuth.instance.verifyPasswordResetCode(_code);
+        _email = await _auth.verifyPasswordResetCode(_code);
       } else {
-        final info = await FirebaseAuth.instance.checkActionCode(_code);
+        final info = await _auth.checkActionCode(_code);
         _email = info.data['email']?.toString();
         if (_mode == 'verifyEmail') {
           // A verification link has one clear purpose. Apply Firebase's
           // signed action code automatically, then show the MindMate result.
-          await FirebaseAuth.instance.applyActionCode(_code);
-          await FirebaseAuth.instance.currentUser?.reload();
+          await _auth.applyActionCode(_code);
+          await _auth.currentUser?.reload();
           _complete = true;
         }
       }
     } on FirebaseAuthException catch (error) {
       if (_mode == 'verifyEmail' &&
           error.code == 'invalid-action-code' &&
-          FirebaseAuth.instance.currentUser?.emailVerified == true) {
+          _auth.currentUser?.emailVerified == true) {
         _alreadyVerified = true;
       } else {
         _error = _messageFor(error);
@@ -87,12 +155,12 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
     setState(() => _loading = true);
     try {
       if (_mode == 'resetPassword') {
-        await FirebaseAuth.instance.confirmPasswordReset(
+        await _auth.confirmPasswordReset(
           code: _code,
           newPassword: _password.text,
         );
       } else {
-        await FirebaseAuth.instance.applyActionCode(_code);
+        await _auth.applyActionCode(_code);
       }
       if (mounted) setState(() => _complete = true);
     } on FirebaseAuthException catch (error) {
@@ -304,6 +372,10 @@ class _AdminEmailActionScreenState extends State<AdminEmailActionScreen> {
 
   void _returnToAdmin() {
     // A full navigation removes the one-time action code from browser history.
-    replaceBrowserLocation(_adminUrl);
+    final destination = AdminEmailActionScreen.resolveReturnToSignInUrl(
+      widget.uri,
+      fallbackBaseUri: Uri.base,
+    );
+    (widget.onReplaceLocation ?? replaceBrowserLocation)(destination);
   }
 }

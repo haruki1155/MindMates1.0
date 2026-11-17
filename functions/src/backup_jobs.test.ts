@@ -33,6 +33,8 @@ test("resolveBackupConfig applies defaults and rejects a missing bucket", () => 
   assert.deepEqual(custom, {bucket: "b", retentionDays: 7, scheduleEnabled: true, manualDailyLimit: 1});
   assert.throws(() => resolveBackupConfig({}), (e: unknown) => e instanceof BackupConfigError && e.code === "bucket-missing");
   assert.throws(() => resolveBackupConfig({BACKUP_BUCKET: ""}), (e: unknown) => e instanceof BackupConfigError && e.code === "bucket-missing");
+  assert.throws(() => resolveBackupConfig({BACKUP_BUCKET: "gs://b"}), (e: unknown) => e instanceof BackupConfigError && e.code === "bucket-invalid");
+  assert.throws(() => resolveBackupConfig({BACKUP_BUCKET: "b/prefix"}), (e: unknown) => e instanceof BackupConfigError && e.code === "bucket-invalid");
   assert.throws(() => resolveBackupConfig({BACKUP_BUCKET: "b", BACKUP_RETENTION_DAYS: "0"}), (e: unknown) => e instanceof BackupConfigError && e.code === "invalid-number");
   assert.throws(() => resolveBackupConfig({BACKUP_BUCKET: "b", BACKUP_MANUAL_DAILY_LIMIT: "x"}), (e: unknown) => e instanceof BackupConfigError && e.code === "invalid-number");
 });
