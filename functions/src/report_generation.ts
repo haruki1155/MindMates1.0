@@ -729,13 +729,22 @@ export const getReportAnalytics = onCall(async (request) => {
     db.collection("users").where("accessRole", "==", "appUser").get(),
     db.collection("appointments").get(),
     readPopulationConfig(schoolYear),
-    listAcademicYears(),
+    listAcademicYears({includeVoided: false}),
     db.collection("moodEntries").get(),
     db.collection("moods").get(),
     db.collection("assessments").get(),
     db.collection("colleges").get(),
     db.collection("courses").get(),
   ]);
+  if (population.status === "voided") {
+    throw new HttpsError("failed-precondition", "Voided academic years cannot be used in reporting.");
+  }
+  if (population.status === "planned") {
+    throw new HttpsError("failed-precondition", "Planned academic years cannot generate official reports.");
+  }
+  if (population.exists && population.status === "unknown") {
+    throw new HttpsError("failed-precondition", "Academic year has an unrecognized status and cannot generate official reports.");
+  }
 
   const collegeNameById = new Map<string, string>();
   const collegeCodeById = new Map<string, string>();
@@ -914,9 +923,11 @@ export const getReportAnalytics = onCall(async (request) => {
   const moods = moodsSnapshot.docs.map((document) => document.data() as RecordData);
   const assessments = assessmentsSnapshot.docs.map((document) => document.data() as RecordData);
 
+  const hasReportableStatus =
+    population.status === "current" || population.status === "closed";
   const result = buildReportAnalytics(
-    scopedUsers,
-    scopedAppointments,
+    hasReportableStatus ? scopedUsers : [],
+    hasReportableStatus ? scopedAppointments : [],
     new Date(),
     {
       userCategory,
@@ -929,16 +940,19 @@ export const getReportAnalytics = onCall(async (request) => {
     },
     populationWithYears,
     {
-      moodEntries,
-      moods,
-      assessments,
+      moodEntries: hasReportableStatus ? moodEntries : [],
+      moods: hasReportableStatus ? moods : [],
+      assessments: hasReportableStatus ? assessments : [],
       collegeNameById,
       courseNameById,
       emotionalDepartmentOptions,
       programOptionsByCollege,
     },
   );
-  const previousYear = years
+  const reportableYears = hasReportableStatus
+    ? years.filter((year) => year.status === "current" || year.status === "closed")
+    : [];
+  const previousYear = reportableYears
     .filter((year) => year.schoolYear < schoolYear)
     .sort((a, b) => b.schoolYear.localeCompare(a.schoolYear))[0];
   if (previousYear) {
@@ -959,7 +973,7 @@ export const getReportAnalytics = onCall(async (request) => {
       completionRate: previous.appointments.completionRate,
     };
   }
-  result.trends = (await Promise.all(years.map(async (year) => {
+  result.trends = (await Promise.all(reportableYears.map(async (year) => {
     const yearPopulation = await readPopulationConfig(year.schoolYear);
     const yearReport = buildReportAnalytics(
       scopedUsers,

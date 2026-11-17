@@ -1146,15 +1146,37 @@ class AdminPortalRepository {
     return CounselingPopulationConfig.fromJson(result.data);
   }
 
-  Future<List<AcademicYearRecord>> fetchAcademicYears() async {
+  bool? _extendedAcademicYearLifecycleEnabled;
+
+  bool get isExtendedAcademicYearLifecycleEnabled =>
+      _extendedAcademicYearLifecycleEnabled ?? false;
+
+  Future<List<AcademicYearRecord>> _callAcademicYearAction(
+    String callable,
+    Map<String, dynamic> payload,
+  ) async {
     if (currentAccessRole != AccessRole.admin) {
       throw StateError('Administrator access is required.');
     }
-    final data = await _callCallable('getAcademicYears', const {});
-    return _academicYears(
-      data is Map ? Map<String, dynamic>.from(data) : const {},
-    );
+    final data = await _callCallable(callable, payload);
+    final map = data is Map
+        ? Map<String, dynamic>.from(data)
+        : const <String, dynamic>{};
+    if (map['extendedLifecycleEnabled'] is bool) {
+      _extendedAcademicYearLifecycleEnabled =
+          map['extendedLifecycleEnabled'] as bool;
+    } else if (callable == 'getAcademicYears') {
+      _extendedAcademicYearLifecycleEnabled = false;
+    }
+    return _academicYears(map);
   }
+
+  Future<List<AcademicYearRecord>> fetchAcademicYears({
+    bool includeVoided = false,
+  }) => _callAcademicYearAction(
+    'getAcademicYears',
+    includeVoided ? const {'includeVoided': true} : const {},
+  );
 
   Future<List<AcademicYearRecord>> createAcademicYear({
     required String schoolYear,
@@ -1162,32 +1184,51 @@ class AdminPortalRepository {
     String? endDate,
     String? copyFrom,
     bool copyPopulation = false,
-  }) async {
-    if (currentAccessRole != AccessRole.admin) {
-      throw StateError('Administrator access is required.');
-    }
-    final data = await _callCallable('createAcademicYear', {
-      'schoolYear': schoolYear,
-      'startDate': ?startDate,
-      'endDate': ?endDate,
-      'copyFrom': ?copyFrom,
-      'copyPopulation': copyPopulation,
-    });
-    return _academicYears(
-      data is Map ? Map<String, dynamic>.from(data) : const {},
-    );
-  }
+    String? reinstateReason,
+    int? expectedRevision,
+  }) => _callAcademicYearAction('createAcademicYear', {
+    'schoolYear': schoolYear,
+    'startDate': ?startDate,
+    'endDate': ?endDate,
+    'copyFrom': ?copyFrom,
+    'copyPopulation': copyPopulation,
+    'reinstateReason': ?reinstateReason,
+    'expectedRevision': ?expectedRevision,
+  });
 
-  Future<List<AcademicYearRecord>> closeAcademicYear(String schoolYear) async {
-    if (currentAccessRole != AccessRole.admin) {
-      throw StateError('Administrator access is required.');
+  Future<List<AcademicYearRecord>> activateAcademicYear(
+    String schoolYear, {
+    int? expectedRevision,
+  }) => _callAcademicYearAction('activateAcademicYear', {
+    'schoolYear': schoolYear,
+    'expectedRevision': ?expectedRevision,
+  });
+
+  Future<List<AcademicYearRecord>> closeAcademicYear(
+    String schoolYear, {
+    int? expectedRevision,
+    String? confirmation,
+  }) => _callAcademicYearAction('closeAcademicYear', {
+    'schoolYear': schoolYear,
+    'expectedRevision': ?expectedRevision,
+    'confirmation': ?confirmation,
+  });
+
+  Future<List<AcademicYearRecord>> voidAcademicYear({
+    required String schoolYear,
+    required String reason,
+    required String confirmationText,
+    int? expectedRevision,
+  }) async {
+    if (!isSuperAdmin) {
+      throw StateError('Super-admin access is required.');
     }
-    final data = await _callCallable('closeAcademicYear', {
+    return _callAcademicYearAction('voidAcademicYear', {
       'schoolYear': schoolYear,
+      'reason': reason,
+      'confirmation': confirmationText,
+      'expectedRevision': ?expectedRevision,
     });
-    return _academicYears(
-      data is Map ? Map<String, dynamic>.from(data) : const {},
-    );
   }
 
   static List<AcademicYearRecord> _academicYears(Map<String, dynamic> data) =>
