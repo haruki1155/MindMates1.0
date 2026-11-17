@@ -64,7 +64,7 @@ PROJECT_NUMBER=978195258114
 BUCKET=${PROJECT}-firestore-backups
 BACKUP_SA_ID=firestore-backup
 BACKUP_SA=${BACKUP_SA_ID}@${PROJECT}.iam.gserviceaccount.com
-DEPLOYER=<deployer-email-or-service-account>
+DEPLOYER=user:<deployer-email> # or serviceAccount:<ci-deployer-sa>
 
 # 1. Create dedicated backup runtime SA (only for the 3 backup Functions)
 gcloud iam service-accounts create $BACKUP_SA_ID --project=$PROJECT \
@@ -80,7 +80,7 @@ gcloud projects add-iam-policy-binding $PROJECT \
 
 # 3. Allow the deployer to attach the dedicated SA during firebase deploy
 gcloud iam service-accounts add-iam-policy-binding $BACKUP_SA --project=$PROJECT \
-  --member=user:$DEPLOYER --role=roles/iam.serviceAccountUser
+  --member=$DEPLOYER --role=roles/iam.serviceAccountUser
 
 # 4. Create the private same-region backup bucket with retention + lifecycle
 gcloud storage buckets create gs://$BUCKET --project=$PROJECT --location=asia-east1 \
@@ -126,6 +126,18 @@ for fn in requestFirestoreBackup refreshFirestoreBackupStatus; do
 done
 gcloud functions describe scheduledFirestoreBackup --gen2 --region=asia-east1 --project=mindmate-staging \
   --format="value(serviceConfig.serviceAccountEmail)"
+gcloud scheduler jobs describe firebase-schedule-scheduledFirestoreBackup-asia-east1 \
+  --location=asia-east1 --project=mindmate-staging \
+  --format="value(httpTarget.oidcToken.serviceAccountEmail)"
+gcloud run services get-iam-policy scheduledfirestorebackup --region=asia-east1 --project=mindmate-staging
+```
+
+Note on rotating or retrofitting `$BACKUP_SA` for an already-deployed `scheduledFirestoreBackup`: `firebase-tools` (`cloudscheduler.js::needUpdate`) does not compare `httpTarget.oidcToken.serviceAccountEmail` when updating an existing Cloud Scheduler job, whereas `firebase deploy` replaces the Cloud Run `roles/run.invoker` binding with the new SA. If the scheduler job's `oidcToken.serviceAccountEmail` is stale, run:
+
+```bash
+gcloud scheduler jobs update http firebase-schedule-scheduledFirestoreBackup-asia-east1 \
+  --location=asia-east1 --project=mindmate-staging \
+  --oidc-service-account-email=$BACKUP_SA
 ```
 
 Enable the schedule only after one successful manual job and one restore drill: set `BACKUP_SCHEDULE_ENABLED=true` in `functions/.env.<project>` and redeploy `functions:scheduledFirestoreBackup`.

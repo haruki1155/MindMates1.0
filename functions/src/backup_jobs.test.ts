@@ -128,6 +128,8 @@ test("resolveBackupServiceAccount validates project-scoped SA and leaves unset c
     "serviceAccount:firestore-backup@mindmate-staging.iam.gserviceaccount.com",
     "mindmate-staging@appspot.gserviceaccount.com",
     "978195258114-compute@developer.gserviceaccount.com",
+    "firebase-adminsdk-xxxxx@mindmate-staging.iam.gserviceaccount.com",
+    "firebase-adminsdk-xxxxx@",
     "firestore-backup@mindmate-staging.iam.gserviceaccount.com extra",
     "ab@",
     "BadUpper@mindmate-staging.iam.gserviceaccount.com",

@@ -105,6 +105,13 @@ export function resolveBackupServiceAccount(
     );
   }
   const normalizedProject = (projectId ?? "").trim();
+  const saId = raw.split("@", 1)[0];
+  if (saId.startsWith("firebase-adminsdk-")) {
+    throw new BackupConfigError(
+      "service-account-invalid",
+      "BACKUP_SERVICE_ACCOUNT must use a dedicated least-privilege service account, not a Firebase Admin SDK service account.",
+    );
+  }
   if (SERVICE_ACCOUNT_SHORTHAND_RE.test(raw)) {
     return normalizedProject ? `${raw}${normalizedProject}.iam.gserviceaccount.com` : raw;
   }
