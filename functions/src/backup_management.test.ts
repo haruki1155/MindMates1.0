@@ -2,18 +2,22 @@ import assert from "node:assert/strict";
 import {after, before, test} from "node:test";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
-import {HttpsError} from "firebase-functions/v2/https";
+import {HttpsError, onCall} from "firebase-functions/v2/https";
+import {onSchedule} from "firebase-functions/v2/scheduler";
 
 import {recordAuditEvent} from "./index";
 import {
   BackupDeps,
+  backupRuntimeOptions,
+  backupScheduledOptions,
   refreshBackup,
   refreshFirestoreBackupStatus,
   requestFirestoreBackup,
   runScheduledBackup,
+  scheduledFirestoreBackup,
   startBackup,
 } from "./backup_management";
-import {OperationState} from "./backup_jobs";
+import {BackupConfigError, OperationState} from "./backup_jobs";
 
 // Runs against the Auth + Firestore emulators with fake GCP export/storage
 // clients. Skipped elsewhere; see docs/operations/firestore-backup-runbook.md
@@ -468,4 +472,68 @@ test("the callable refuses everyone but an active verified configured super-admi
     ]);
     if (previous == null) delete process.env.SUPER_ADMIN_UID; else process.env.SUPER_ADMIN_UID = previous;
   }
+});
+
+test("backup RuntimeOptions bind only the three backup Functions cleanly and keep regions intact", () => {
+  assert.deepEqual(backupRuntimeOptions({GCLOUD_PROJECT: "mindmate-staging"}), {});
+  assert.deepEqual(backupScheduledOptions({GCLOUD_PROJECT: "mindmate-staging"}), {
+    schedule: "every day 02:30",
+    timeZone: "Asia/Manila",
+    region: "asia-east1",
+    timeoutSeconds: 300,
+  });
+
+  const stagingEnv = {
+    GCLOUD_PROJECT: "mindmate-staging",
+    BACKUP_SERVICE_ACCOUNT: "firestore-backup@mindmate-staging.iam.gserviceaccount.com",
+  };
+  assert.deepEqual(backupRuntimeOptions(stagingEnv), {
+    serviceAccount: "firestore-backup@mindmate-staging.iam.gserviceaccount.com",
+  });
+  assert.deepEqual(backupScheduledOptions({
+    FIREBASE_CONFIG: JSON.stringify({projectId: "mindmate-staging"}),
+    BACKUP_SERVICE_ACCOUNT: "firestore-backup@",
+  }), {
+    schedule: "every day 02:30",
+    timeZone: "Asia/Manila",
+    region: "asia-east1",
+    timeoutSeconds: 300,
+    serviceAccount: "firestore-backup@mindmate-staging.iam.gserviceaccount.com",
+  });
+  assert.throws(
+    () =>
+      backupRuntimeOptions({
+        GCLOUD_PROJECT: "mind-mates-cd2cf",
+        BACKUP_SERVICE_ACCOUNT: "firestore-backup@mindmate-staging.iam.gserviceaccount.com",
+      }),
+    (e: unknown) => e instanceof BackupConfigError && e.code === "service-account-invalid",
+  );
+
+  // Verify v2 endpoint metadata generation for both callables and scheduled Function.
+  const builtCallable = onCall(backupRuntimeOptions(stagingEnv), async () => ({ok: true})) as unknown as {
+    __endpoint: {serviceAccountEmail?: unknown; region?: unknown};
+  };
+  const builtSchedule = onSchedule(backupScheduledOptions(stagingEnv), async () => {}) as unknown as {
+    __endpoint: {serviceAccountEmail?: unknown; region?: unknown; scheduleTrigger?: {schedule?: string; timeZone?: string}; timeoutSeconds?: number};
+  };
+  assert.equal(builtCallable.__endpoint.serviceAccountEmail, "firestore-backup@mindmate-staging.iam.gserviceaccount.com");
+  assert.equal(builtCallable.__endpoint.region, undefined);
+  assert.equal(builtSchedule.__endpoint.serviceAccountEmail, "firestore-backup@mindmate-staging.iam.gserviceaccount.com");
+  assert.deepEqual(builtSchedule.__endpoint.region, ["asia-east1"]);
+  assert.equal(builtSchedule.__endpoint.scheduleTrigger?.schedule, "every day 02:30");
+  assert.equal(builtSchedule.__endpoint.scheduleTrigger?.timeZone, "Asia/Manila");
+  assert.equal(builtSchedule.__endpoint.timeoutSeconds, 300);
+
+  // Exported default endpoints keep regions intact and never hardcode a staging SA on unrelated Functions.
+  const reqEp = (requestFirestoreBackup as unknown as {__endpoint: {region?: unknown; serviceAccountEmail?: unknown}}).__endpoint;
+  const refEp = (refreshFirestoreBackupStatus as unknown as {__endpoint: {region?: unknown; serviceAccountEmail?: unknown}}).__endpoint;
+  const schEp = (scheduledFirestoreBackup as unknown as {__endpoint: {region?: unknown; scheduleTrigger?: {schedule?: string; timeZone?: string}; timeoutSeconds?: number}}).__endpoint;
+  const auditEp = (recordAuditEvent as unknown as {__endpoint: {serviceAccountEmail?: unknown}}).__endpoint;
+  assert.equal(reqEp.region, undefined);
+  assert.equal(refEp.region, undefined);
+  assert.deepEqual(schEp.region, ["asia-east1"]);
+  assert.equal(schEp.scheduleTrigger?.schedule, "every day 02:30");
+  assert.equal(schEp.scheduleTrigger?.timeZone, "Asia/Manila");
+  assert.equal(schEp.timeoutSeconds, 300);
+  assert.notEqual(String(auditEp.serviceAccountEmail), "firestore-backup@mindmate-staging.iam.gserviceaccount.com");
 });

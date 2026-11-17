@@ -41,9 +41,15 @@ export const BACKUP_COVERAGE = {firestore: "included", auth: "excluded", storage
 export const BACKUP_DEFAULTS = {retentionDays: 30, manualDailyLimit: 3} as const;
 const MAX_ERROR_MESSAGE = 300;
 const DAY_MS = 24 * 60 * 60 * 1_000;
+const SERVICE_ACCOUNT_ID = "[a-z][a-z0-9-]{4,28}[a-z0-9]";
+const SERVICE_ACCOUNT_SHORTHAND_RE = new RegExp(`^${SERVICE_ACCOUNT_ID}@$`);
+const SERVICE_ACCOUNT_EMAIL_RE = new RegExp(`^${SERVICE_ACCOUNT_ID}@([a-z0-9-]+)\\.iam\\.gserviceaccount\\.com$`);
 
 export class BackupConfigError extends Error {
-  constructor(public readonly code: "bucket-missing" | "bucket-invalid" | "invalid-number", message: string) {
+  constructor(
+    public readonly code: "bucket-missing" | "bucket-invalid" | "invalid-number" | "service-account-invalid",
+    message: string,
+  ) {
     super(message);
     this.name = "BackupConfigError";
   }
@@ -77,6 +83,46 @@ export function resolveBackupConfig(env: Record<string, string | undefined>): Ba
     scheduleEnabled: (env.BACKUP_SCHEDULE_ENABLED ?? "").trim().toLowerCase() === "true",
     manualDailyLimit: positiveInteger(env.BACKUP_MANUAL_DAILY_LIMIT, BACKUP_DEFAULTS.manualDailyLimit, "BACKUP_MANUAL_DAILY_LIMIT"),
   };
+}
+
+/**
+ * Resolves the optional dedicated least-privilege runtime service account for
+ * the three backup Functions only. Leaving `BACKUP_SERVICE_ACCOUNT` unset or
+ * empty omits `serviceAccount` so unit tests, CI, and Firebase emulator
+ * discovery work without cloud IAM state while per-project `.env.<projectId>`
+ * files bind staging and production independently.
+ */
+export function resolveBackupServiceAccount(
+  env: Record<string, string | undefined>,
+  projectId?: string,
+): string | undefined {
+  const raw = (env.BACKUP_SERVICE_ACCOUNT ?? "").trim();
+  if (!raw) return undefined;
+  if (/\s/.test(raw) || raw.includes(":")) {
+    throw new BackupConfigError(
+      "service-account-invalid",
+      "BACKUP_SERVICE_ACCOUNT must be a plain service account email or '{account-id}@' shorthand.",
+    );
+  }
+  const normalizedProject = (projectId ?? "").trim();
+  if (SERVICE_ACCOUNT_SHORTHAND_RE.test(raw)) {
+    return normalizedProject ? `${raw}${normalizedProject}.iam.gserviceaccount.com` : raw;
+  }
+  const match = SERVICE_ACCOUNT_EMAIL_RE.exec(raw);
+  if (!match) {
+    throw new BackupConfigError(
+      "service-account-invalid",
+      "BACKUP_SERVICE_ACCOUNT must match '<account-id>@<project>.iam.gserviceaccount.com' or '<account-id>@'.",
+    );
+  }
+  const saProject = match[1];
+  if (normalizedProject && !normalizedProject.startsWith("demo-") && saProject !== normalizedProject) {
+    throw new BackupConfigError(
+      "service-account-invalid",
+      `BACKUP_SERVICE_ACCOUNT belongs to project '${saProject}', expected '${normalizedProject}'.`,
+    );
+  }
+  return raw;
 }
 
 function stamp(now: Date): string {

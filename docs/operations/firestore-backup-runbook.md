@@ -31,27 +31,58 @@ The admin page states these exclusions on every job (`coverage` field) so nobody
 | `BACKUP_RETENTION_DAYS` | `30` | Informational `expiresAt` on jobs; must match the bucket retention/lifecycle below. |
 | `BACKUP_SCHEDULE_ENABLED` | `false` | Scheduler is a no-op until `true`. |
 | `BACKUP_MANUAL_DAILY_LIMIT` | `3` | Billing safeguard for manual requests. |
+| `BACKUP_SERVICE_ACCOUNT` | unset | Dedicated runtime SA email (`firestore-backup@<project>.iam.gserviceaccount.com` or `firestore-backup@`) applied **only** to `requestFirestoreBackup`, `refreshFirestoreBackupStatus`, and `scheduledFirestoreBackup`. Must match the target project when set. Leave empty for local emulator/CI discovery. |
 
-Set them in `functions/.env.<project>` (gitignored). See `functions/.env.example`.
+Set them in `functions/.env.<project>` (gitignored; see `functions/.env.example`), keeping `mindmate-staging` and `mind-mates-cd2cf` in separate files:
+
+- **Never overwrite an existing `functions/.env.<project>`** (or re-run provisioning scripts that overwrite it). Merge `BACKUP_*` entries alongside existing keys such as `SUPER_ADMIN_UID`, `ADMIN_WEB_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_SENDER`, `MOOD_V2_STAGING_PILOT_UIDS`, `MOOD_V2_STAGING_STUDENT_ROLLOUT_ENABLED`, and `ACADEMIC_YEAR_EXTENDED_LIFECYCLE_ENABLED`.
+- If setting up from a fresh worktree without `.env.<project>`, first restore or verify the project's existing deploy-time keys (especially `SUPER_ADMIN_UID`) before appending `BACKUP_*` settings.
 
 ## 4. Required Google Cloud permissions (least privilege)
 
-Project number for staging: `978195258114`. Replace for other projects.
+Project number for staging: `978195258114`. Replace for other projects. Keep the two service identities strictly separated:
 
 | Principal | Role | Scope | Why |
 |---|---|---|---|
-| Firestore service agent `service-<PROJECT_NUMBER>@gcp-sa-firestore.iam.gserviceaccount.com` | `roles/storage.admin` | **bucket only** | Google's documented requirement for export/import to write objects. |
-| Functions runtime service account (recommended: a dedicated SA, not the default compute SA) | `roles/datastore.importExportAdmin` | project | Start exports and read operation status. |
-| Same Functions SA | `roles/storage.objectViewer` | **bucket only** | Verify the `overall_export_metadata` object exists. Nothing more. |
-| Humans | none by default | — | Break-glass access through a documented, audited grant only. |
+| Firestore service agent `service-<PROJECT_NUMBER>@gcp-sa-firestore.iam.gserviceaccount.com` | `roles/storage.admin` | **bucket only** (`gs://$BUCKET`) | Google's documented requirement for Firestore managed export/import to write export objects. Do **not** grant this to the Functions runtime SA. |
+| Dedicated backup Functions runtime SA `firestore-backup@<project>.iam.gserviceaccount.com` | `roles/datastore.importExportAdmin` | project | Start Firestore exports and poll/list export operations. |
+| Same dedicated backup Functions SA | `roles/datastore.user` | project | Read `users`/`system_config` for `requireSuperAdmin` and read/write `backup_jobs` and `admin_audit_logs`. |
+| Same dedicated backup Functions SA | `roles/firebaseauth.viewer` | project | Read Auth disabled/emailVerified state in `requireStaff`. |
+| Same dedicated backup Functions SA | `roles/storage.objectViewer` | **bucket only** (`gs://$BUCKET`) | Verify `<prefix>/<name>.overall_export_metadata` exists. Nothing more. |
+| Same dedicated backup Functions SA | `roles/run.invoker` | service (`scheduledFirestoreBackup`) | Allow Cloud Scheduler OIDC invocation as `firestore-backup@<project>.iam.gserviceaccount.com`. |
+| Deployer identity (human/CI running `firebase deploy`) | `roles/iam.serviceAccountUser` | SA (`firestore-backup@<project>.iam.gserviceaccount.com`) | Required `iam.serviceAccounts.actAs` to attach the dedicated SA to the three backup Functions and Cloud Scheduler job. |
+| Unrelated MindMate Functions | unchanged | — | All other ~118 Functions continue using their existing runtime SA configuration and do not receive `BACKUP_SERVICE_ACCOUNT`. |
+| Humans | none on bucket by default | — | Break-glass access through a documented, audited grant only. |
 
-Finding (2026-11-15): the staging runtime SA `978195258114-compute@developer.gserviceaccount.com` currently holds `roles/editor`. That already includes export rights but is far broader than needed. Recommended follow-up (separate authorization): create `firestore-backup@<project>.iam.gserviceaccount.com`, bind the two roles above, and deploy the three backup Functions with `serviceAccount` set to it.
+Finding (2026-11-15): `mindmate-staging` currently has default App Engine (`mindmate-staging@appspot.gserviceaccount.com`), default Compute Engine (`978195258114-compute@developer.gserviceaccount.com`, holding broad `roles/editor`), and Firebase Admin SDK service accounts; the dedicated `firestore-backup@mindmate-staging.iam.gserviceaccount.com` SA and backup bucket do not yet exist. `functions/src/backup_management.ts` wires `BACKUP_SERVICE_ACCOUNT` only onto `requestFirestoreBackup`, `refreshFirestoreBackupStatus`, and `scheduledFirestoreBackup`.
 
-## 5. Bucket creation (requires authorization; not done)
+## 5. Service account & bucket creation (requires authorization; not done)
 
 ```bash
 PROJECT=mindmate-staging
+PROJECT_NUMBER=978195258114
 BUCKET=${PROJECT}-firestore-backups
+BACKUP_SA_ID=firestore-backup
+BACKUP_SA=${BACKUP_SA_ID}@${PROJECT}.iam.gserviceaccount.com
+DEPLOYER=<deployer-email-or-service-account>
+
+# 1. Create dedicated backup runtime SA (only for the 3 backup Functions)
+gcloud iam service-accounts create $BACKUP_SA_ID --project=$PROJECT \
+  --display-name="MindMate Firestore Backup Functions"
+
+# 2. Grant least-privilege runtime roles to the backup SA
+gcloud projects add-iam-policy-binding $PROJECT \
+  --member=serviceAccount:$BACKUP_SA --role=roles/datastore.importExportAdmin
+gcloud projects add-iam-policy-binding $PROJECT \
+  --member=serviceAccount:$BACKUP_SA --role=roles/datastore.user
+gcloud projects add-iam-policy-binding $PROJECT \
+  --member=serviceAccount:$BACKUP_SA --role=roles/firebaseauth.viewer
+
+# 3. Allow the deployer to attach the dedicated SA during firebase deploy
+gcloud iam service-accounts add-iam-policy-binding $BACKUP_SA --project=$PROJECT \
+  --member=user:$DEPLOYER --role=roles/iam.serviceAccountUser
+
+# 4. Create the private same-region backup bucket with retention + lifecycle
 gcloud storage buckets create gs://$BUCKET --project=$PROJECT --location=asia-east1 \
   --uniform-bucket-level-access --public-access-prevention
 # Objects cannot be deleted or overwritten before the retention period.
@@ -61,13 +92,13 @@ cat > lifecycle.json <<'EOF'
 {"rule":[{"action":{"type":"Delete"},"condition":{"age":30}}]}
 EOF
 gcloud storage buckets update gs://$BUCKET --lifecycle-file=lifecycle.json
-# IAM (bucket-scoped)
+
+# 5. Grant bucket-scoped IAM (separated by service identity)
 gcloud storage buckets add-iam-policy-binding gs://$BUCKET \
-  --member=serviceAccount:service-978195258114@gcp-sa-firestore.iam.gserviceaccount.com --role=roles/storage.admin
+  --member=serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-firestore.iam.gserviceaccount.com \
+  --role=roles/storage.admin
 gcloud storage buckets add-iam-policy-binding gs://$BUCKET \
-  --member=serviceAccount:<functions-sa> --role=roles/storage.objectViewer
-gcloud projects add-iam-policy-binding $PROJECT \
-  --member=serviceAccount:<functions-sa> --role=roles/datastore.importExportAdmin
+  --member=serviceAccount:$BACKUP_SA --role=roles/storage.objectViewer
 ```
 
 Encryption: Google-managed encryption at rest is on by default. For CMEK, create a Cloud KMS key in `asia-east1`, grant the Storage service agent `roles/cloudkms.cryptoKeyEncrypterDecrypter`, and pass `--default-encryption-key` at bucket creation. Firestore exports inherit the bucket default.
@@ -76,14 +107,30 @@ Location rule: the bucket must be in the same location as the database (`asia-ea
 
 ## 6. Deploying (requires authorization; not done)
 
-Deploy by name, never `--force`, never a blanket deploy (see memory note on staging deploy traps):
+Pre-flight checks before deploying:
+
+1. Verify `functions/.env.$PROJECT` retains `SUPER_ADMIN_UID` and all non-backup params for `$PROJECT`, sets `BACKUP_BUCKET=$BUCKET`, `BACKUP_SERVICE_ACCOUNT=$BACKUP_SA`, `BACKUP_RETENTION_DAYS=30`, `BACKUP_MANUAL_DAILY_LIMIT=3`, and keeps `BACKUP_SCHEDULE_ENABLED=false`.
+2. Deploy by exact target name — never `--force`, never a blanket deploy:
 
 ```bash
 firebase deploy --project mindmate-staging --only firestore:rules
 firebase deploy --project mindmate-staging --only functions:requestFirestoreBackup,functions:refreshFirestoreBackupStatus,functions:scheduledFirestoreBackup
 ```
 
+3. Verify only the three backup Functions bound `$BACKUP_SA` (Cloud Functions v2 `serviceConfig.serviceAccountEmail` and Cloud Scheduler `httpTarget.oidcToken.serviceAccountEmail`), and confirm `scheduledFirestoreBackup` grants `roles/run.invoker` to `$BACKUP_SA`:
+
+```bash
+for fn in requestFirestoreBackup refreshFirestoreBackupStatus; do
+  gcloud functions describe $fn --gen2 --region=us-central1 --project=mindmate-staging \
+    --format="value(serviceConfig.serviceAccountEmail)"
+done
+gcloud functions describe scheduledFirestoreBackup --gen2 --region=asia-east1 --project=mindmate-staging \
+  --format="value(serviceConfig.serviceAccountEmail)"
+```
+
 Enable the schedule only after one successful manual job and one restore drill: set `BACKUP_SCHEDULE_ENABLED=true` in `functions/.env.<project>` and redeploy `functions:scheduledFirestoreBackup`.
+
+Rollback (safe pause without deleting history): set `BACKUP_SCHEDULE_ENABLED=false` and unset `BACKUP_BUCKET=` in `functions/.env.<project>`, then redeploy only `functions:requestFirestoreBackup,functions:refreshFirestoreBackupStatus,functions:scheduledFirestoreBackup`.
 
 ## 7. Cost estimate (verify against the current pricing page before enabling)
 

@@ -8,6 +8,7 @@ import {
   BackupJobRecord,
   exportPrefixFor,
   resolveBackupConfig,
+  resolveBackupServiceAccount,
   isDefinitiveExportRejection,
   sanitizeError,
   StartBlockedError,
@@ -101,4 +102,49 @@ test("summarizeJobs reports last verified completion and running count", () => {
   ];
   assert.deepEqual(summarizeJobs(jobs), {lastVerifiedAt: verifiedAt, runningCount: 1, lastStatus: "running"});
   assert.deepEqual(summarizeJobs([]), {lastVerifiedAt: null, runningCount: 0, lastStatus: null});
+});
+
+test("resolveBackupServiceAccount validates project-scoped SA and leaves unset clean", () => {
+  assert.equal(resolveBackupServiceAccount({}, "mindmate-staging"), undefined);
+  assert.equal(resolveBackupServiceAccount({BACKUP_SERVICE_ACCOUNT: "   "}, "mindmate-staging"), undefined);
+  assert.equal(
+    resolveBackupServiceAccount(
+      {BACKUP_SERVICE_ACCOUNT: " firestore-backup@mindmate-staging.iam.gserviceaccount.com "},
+      "mindmate-staging",
+    ),
+    "firestore-backup@mindmate-staging.iam.gserviceaccount.com",
+  );
+  assert.equal(
+    resolveBackupServiceAccount({BACKUP_SERVICE_ACCOUNT: "firestore-backup@"}, "mindmate-staging"),
+    "firestore-backup@mindmate-staging.iam.gserviceaccount.com",
+  );
+  assert.equal(
+    resolveBackupServiceAccount({BACKUP_SERVICE_ACCOUNT: "firestore-backup@"}, "mind-mates-cd2cf"),
+    "firestore-backup@mind-mates-cd2cf.iam.gserviceaccount.com",
+  );
+  assert.equal(resolveBackupServiceAccount({BACKUP_SERVICE_ACCOUNT: "firestore-backup@"}), "firestore-backup@");
+
+  for (const bad of [
+    "serviceAccount:firestore-backup@mindmate-staging.iam.gserviceaccount.com",
+    "mindmate-staging@appspot.gserviceaccount.com",
+    "978195258114-compute@developer.gserviceaccount.com",
+    "firestore-backup@mindmate-staging.iam.gserviceaccount.com extra",
+    "ab@",
+    "BadUpper@mindmate-staging.iam.gserviceaccount.com",
+  ]) {
+    assert.throws(
+      () => resolveBackupServiceAccount({BACKUP_SERVICE_ACCOUNT: bad}, "mindmate-staging"),
+      (e: unknown) => e instanceof BackupConfigError && e.code === "service-account-invalid",
+      bad,
+    );
+  }
+
+  assert.throws(
+    () =>
+      resolveBackupServiceAccount(
+        {BACKUP_SERVICE_ACCOUNT: "firestore-backup@mindmate-staging.iam.gserviceaccount.com"},
+        "mind-mates-cd2cf",
+      ),
+    (e: unknown) => e instanceof BackupConfigError && e.code === "service-account-invalid",
+  );
 });

@@ -26,6 +26,7 @@ import {
   isDefinitiveExportRejection,
   OperationState,
   resolveBackupConfig,
+  resolveBackupServiceAccount,
   sanitizeError,
   StartBlockedError,
   verificationFor,
@@ -73,6 +74,25 @@ function resolveProjectId(env: Record<string, string | undefined> = process.env)
   } catch {
     return "";
   }
+}
+
+export function backupRuntimeOptions(
+  env: Record<string, string | undefined> = process.env,
+): {serviceAccount?: string} {
+  const serviceAccount = resolveBackupServiceAccount(env, resolveProjectId(env));
+  return serviceAccount ? {serviceAccount} : {};
+}
+
+export function backupScheduledOptions(
+  env: Record<string, string | undefined> = process.env,
+) {
+  return {
+    schedule: "every day 02:30",
+    timeZone: "Asia/Manila",
+    region: "asia-east1",
+    timeoutSeconds: 300,
+    ...backupRuntimeOptions(env),
+  };
 }
 
 export function defaultDeps(): BackupDeps {
@@ -442,20 +462,26 @@ async function callableActor(request: {auth?: {uid: string} | null}): Promise<Ba
   return {uid, name: actorName(admin), role: String(admin.accessRole)};
 }
 
-export const requestFirestoreBackup = onCall(async (request) => {
-  const actor = await callableActor(request);
-  return startBackup(defaultDeps(), actor, "manual");
-});
+export const requestFirestoreBackup = onCall(
+  backupRuntimeOptions(),
+  async (request) => {
+    const actor = await callableActor(request);
+    return startBackup(defaultDeps(), actor, "manual");
+  },
+);
 
-export const refreshFirestoreBackupStatus = onCall(async (request) => {
-  const actor = await callableActor(request);
-  const jobId = typeof request.data?.jobId === "string" ? request.data.jobId.trim() : "";
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(jobId)) throw new HttpsError("invalid-argument", "A backup job ID is required.");
-  return refreshBackup(defaultDeps(), actor, jobId);
-});
+export const refreshFirestoreBackupStatus = onCall(
+  backupRuntimeOptions(),
+  async (request) => {
+    const actor = await callableActor(request);
+    const jobId = typeof request.data?.jobId === "string" ? request.data.jobId.trim() : "";
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(jobId)) throw new HttpsError("invalid-argument", "A backup job ID is required.");
+    return refreshBackup(defaultDeps(), actor, jobId);
+  },
+);
 
 export const scheduledFirestoreBackup = onSchedule(
-  {schedule: "every day 02:30", timeZone: "Asia/Manila", region: "asia-east1", timeoutSeconds: 300},
+  backupScheduledOptions(),
   async () => {
     await runScheduledBackup(defaultDeps());
   },
