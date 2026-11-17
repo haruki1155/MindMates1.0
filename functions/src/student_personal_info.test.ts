@@ -8,6 +8,7 @@ import {
   getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
   reviewStudentCorrection, saveStudentPersonalInfo,
 } from "./index";
+import {ensureAuthUser} from "./test_auth_helper";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
 
@@ -98,6 +99,7 @@ let adminCreated = false;
 
 before(async () => {
   assert.ok(adminUid, "SUPER_ADMIN_UID is required");
+  await ensureAuthUser(adminUid, true);
   const adminRef = db.doc(`users/${adminUid}`);
   adminCreated = !(await adminRef.get()).exists;
   await adminRef.set({id: adminUid, accessRole: "admin", role: "admin", name: "Test Admin", email: "a@example.com"},
@@ -111,6 +113,7 @@ before(async () => {
   await put(`users/${unverifiedCounselorUid}`, {id: unverifiedCounselorUid, accessRole: "counselor", role: "counselor",
     name: "Unverified Counselor", staffAccountStatus: "approved", accountStatus: "active",
     email: `${unverifiedCounselorUid}@example.com`.toLowerCase()});
+  await putAuthUser(staffUid, true);
   await put(`users/${staffUid}`, {id: staffUid, accessRole: "portalStaff", role: "portalStaff", name: "Test Staff"});
   await put(`colleges/${collegeA}`, {name: "College of Testing", code: "COT", active: true});
   await put(`colleges/${collegeB}`, {name: "College of Other", code: "COO", active: true});

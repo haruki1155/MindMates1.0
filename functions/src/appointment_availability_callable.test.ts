@@ -3,6 +3,7 @@ import {after, before, beforeEach, test} from "node:test";
 import {getFirestore} from "firebase-admin/firestore";
 
 import {getAvailableAppointmentSlots, savePaccAvailability} from "./index";
+import {ensureAuthUser} from "./test_auth_helper";
 
 type Callable = {run: (request: {auth?: {uid: string}; data?: Record<string, unknown>}) => Promise<unknown>};
 const db = getFirestore();
@@ -26,6 +27,8 @@ async function rejects(promise: Promise<unknown>, code: string) { await assert.r
 before(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("FIRESTORE_EMULATOR_HOST is required for availability callable tests.");
   await Promise.all([
+    ensureAuthUser(adminId, true),
+    ensureAuthUser(counselorId, true),
     db.collection("users").doc(adminId).set({accessRole: "admin", name: "Availability Test Admin"}),
     db.collection("users").doc(counselorId).set({accessRole: "counselor", name: "Availability Test Counselor"}),
     db.collection("users").doc(staffId).set({accessRole: "staff", name: "Availability Test Staff"}),

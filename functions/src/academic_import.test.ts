@@ -6,6 +6,7 @@ import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import {importAcademicCatalog, previewAcademicCatalogImport} from "./index";
 import {academicImportTestHooks} from "./academic_import";
 import {deriveCode} from "./academic_import_domain";
+import {ensureAuthUser} from "./test_auth_helper";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
 
@@ -45,6 +46,7 @@ function name(label: string): string {
 before(async () => {
   suiteStart = Timestamp.fromMillis(Date.now() - 1000);
   assert.ok(process.env.FIRESTORE_EMULATOR_HOST && adminUid, "emulator + SUPER_ADMIN_UID required");
+  await ensureAuthUser(adminUid, true);
   const admin = db.collection("users").doc(adminUid);
   if (!(await admin.get()).exists) {
     adminCreated = true;
