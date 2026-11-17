@@ -70,6 +70,16 @@ export function revisionOfAcademicYear(data: {revision?: unknown} | null | undef
   return typeof rev === "number" && Number.isSafeInteger(rev) && rev >= 0 ? rev : 0;
 }
 
+export function parseOptionalExpectedRevision(value: unknown): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new AcademicYearError("invalid-argument", "expectedRevision must be a non-negative integer.");
+  }
+  return value;
+}
+
 /** Validates a YYYY-MM-DD calendar date without JS Date overflow (e.g. Feb 31). */
 export function isValidIsoDate(value: string): boolean {
   const match = DATE_PATTERN.exec(value);
@@ -167,8 +177,10 @@ export function decideAcademicYearCreate(input: {
   todayManila: string;
   extendedLifecycleEnabled: boolean;
   maxPlanningAheadYears?: number;
+  expectedRevision?: unknown;
 }): CreateAcademicYearDecision {
   const {candidate, existing, todayManila, extendedLifecycleEnabled} = input;
+  const parsedExpectedRevision = parseOptionalExpectedRevision(input.expectedRevision);
   const maxAhead = input.maxPlanningAheadYears ?? MAX_PLANNING_AHEAD_YEARS;
   const {startYear} = parseSchoolYear(candidate.schoolYear);
   const currentStartYear = manilaCurrentSchoolStartYear(todayManila);
@@ -188,6 +200,11 @@ export function decideAcademicYearCreate(input: {
   const sameYear = existing.find((item) => item.schoolYear === candidate.schoolYear);
   if (sameYear && sameYear.status !== "voided") {
     throw new AcademicYearError("already-exists", "That academic year already exists.");
+  }
+  if (sameYear && sameYear.status === "voided" &&
+      parsedExpectedRevision !== undefined &&
+      parsedExpectedRevision !== revisionOfAcademicYear(sameYear)) {
+    throw new AcademicYearError("aborted", "This academic year changed concurrently. Reload and verify its state.");
   }
 
   const overlapping = existing.find(
@@ -260,10 +277,9 @@ export function validateAcademicYearActivation(input: {
     );
   }
   const currentRevision = revisionOfAcademicYear(target);
-  if (expectedRevision !== undefined) {
-    if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== currentRevision) {
-      throw new AcademicYearError("aborted", "This academic year changed concurrently. Reload and try again.");
-    }
+  const parsedExpectedRevision = parseOptionalExpectedRevision(expectedRevision);
+  if (parsedExpectedRevision !== undefined && parsedExpectedRevision !== currentRevision) {
+    throw new AcademicYearError("aborted", "This academic year changed concurrently. Reload and try again.");
   }
   const otherActive = existing.find((item) => item.schoolYear !== target.schoolYear && item.status === "current");
   if (otherActive) {
@@ -289,7 +305,7 @@ export function validateAcademicYearActivation(input: {
 
 export function validateAcademicYearClose(
   existing: {status?: unknown; revision?: unknown} | null,
-  expectedRevision?: number,
+  expectedRevision?: unknown,
 ): {nextRevision: number} {
   if (!existing) {
     throw new AcademicYearError("not-found", "Academic year not found.");
@@ -298,17 +314,19 @@ export function validateAcademicYearClose(
   if (status === "closed") {
     throw new AcademicYearError("failed-precondition", "This academic year is already closed.");
   }
+  if (status === "planned") {
+    throw new AcademicYearError("failed-precondition", "Planned academic years cannot be closed; void the year instead.");
+  }
   if (status === "voided") {
     throw new AcademicYearError("failed-precondition", "Voided academic years cannot be closed.");
   }
-  if (status === "unknown") {
+  if (status !== "current") {
     throw new AcademicYearError("failed-precondition", "Academic year has an unrecognized status and cannot be closed.");
   }
   const currentRevision = revisionOfAcademicYear(existing);
-  if (expectedRevision !== undefined) {
-    if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== currentRevision) {
-      throw new AcademicYearError("aborted", "This academic year changed concurrently. Reload and try again.");
-    }
+  const parsedExpectedRevision = parseOptionalExpectedRevision(expectedRevision);
+  if (parsedExpectedRevision !== undefined && parsedExpectedRevision !== currentRevision) {
+    throw new AcademicYearError("aborted", "This academic year changed concurrently. Reload and try again.");
   }
   return {nextRevision: currentRevision + 1};
 }
@@ -332,6 +350,9 @@ export function validateAcademicYearVoid(input: {
   if (target.status === "closed") {
     throw new AcademicYearError("failed-precondition", "Closed academic years are immutable historical records and cannot be voided.");
   }
+  if (target.status !== "planned" && target.status !== "current") {
+    throw new AcademicYearError("failed-precondition", "Academic year has an unrecognized status and cannot be voided.");
+  }
   const expectedConfirmation = `VOID ${target.schoolYear}`;
   if (text(input.confirmation) !== expectedConfirmation) {
     throw new AcademicYearError("invalid-argument", `Type "${expectedConfirmation}" to confirm voiding.`);
@@ -344,9 +365,8 @@ export function validateAcademicYearVoid(input: {
     );
   }
   const currentRevision = revisionOfAcademicYear(target);
-  if (typeof input.expectedRevision !== "number" ||
-      !Number.isSafeInteger(input.expectedRevision) ||
-      input.expectedRevision !== currentRevision) {
+  const parsedExpectedRevision = parseOptionalExpectedRevision(input.expectedRevision);
+  if (parsedExpectedRevision === undefined || parsedExpectedRevision !== currentRevision) {
     throw new AcademicYearError("aborted", "This academic year changed concurrently. Reload and verify its state.");
   }
   const pops = target.populations;

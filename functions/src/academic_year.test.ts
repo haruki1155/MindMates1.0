@@ -90,9 +90,16 @@ test("validateAcademicYearAgainstExisting rejects duplicates, active-year duplic
   );
 });
 
-test("validateAcademicYearClose rejects missing or already-closed years", () => {
+test("validateAcademicYearClose rejects missing or non-current years and malformed revisions", () => {
   rejects(() => validateAcademicYearClose(null), "not-found");
   rejects(() => validateAcademicYearClose({status: "closed"}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({status: "planned"}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({status: "voided"}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({status: "unknown"}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({status: "legacy_corrupted"}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({status: "current"}, "0" as unknown as number), "invalid-argument");
+  rejects(() => validateAcademicYearClose({status: "current"}, -1), "invalid-argument");
+  rejects(() => validateAcademicYearClose({status: "current"}, 1.5), "invalid-argument");
   validateAcademicYearClose({status: "current"});
 });
 
@@ -242,8 +249,11 @@ test("validateAcademicYearVoid enforces confirmation, reason, revision, empty po
   rejects(() => validateAcademicYearVoid({...validInput, target: null}), "not-found");
   rejects(() => validateAcademicYearVoid({...validInput, target: {...baseTarget, status: "closed"}}), "failed-precondition");
   rejects(() => validateAcademicYearVoid({...validInput, target: {...baseTarget, status: "voided"}}), "failed-precondition");
+  rejects(() => validateAcademicYearVoid({...validInput, target: {...baseTarget, status: "unknown"}}), "failed-precondition");
   rejects(() => validateAcademicYearVoid({...validInput, confirmation: "void 2028-2029"}), "invalid-argument");
   rejects(() => validateAcademicYearVoid({...validInput, reason: "too short"}), "invalid-argument");
+  rejects(() => validateAcademicYearVoid({...validInput, expectedRevision: "0"}), "invalid-argument");
+  rejects(() => validateAcademicYearVoid({...validInput, expectedRevision: -1}), "invalid-argument");
   rejects(() => validateAcademicYearVoid({...validInput, expectedRevision: 2}), "aborted");
   rejects(() => validateAcademicYearVoid({...validInput, target: {...baseTarget, populations: {CITE: 10}}}), "failed-precondition");
   rejects(() => validateAcademicYearVoid({...validInput, appointmentRefCount: 1}), "failed-precondition");

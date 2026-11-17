@@ -238,10 +238,41 @@ void main() {
       expect(calls[2].$2, {
         'schoolYear': '2028-2029',
         'reason': 'Accidental future year',
-        'confirmationText': 'VOID 2028-2029',
+        'confirmation': 'VOID 2028-2029',
         'expectedRevision': 1,
       });
+      expect(calls[2].$2.containsKey('confirmationText'), isFalse);
       expect(calls.length, 3);
+    },
+  );
+
+  test(
+    'createAcademicYear forwards expectedRevision and reinstateReason and fetchAcademicYears tracks extendedLifecycleEnabled',
+    () async {
+      final calls = <(String, Map<String, Object?>)>[];
+      final repo = _RoleAwareTestRepository(
+        role: AccessRole.admin,
+        superAdmin: true,
+        callableInvoker: (name, data) async {
+          calls.add((name, data));
+          return _m({
+            'extendedLifecycleEnabled': false,
+            'years': <Object?>[],
+          });
+        },
+      );
+
+      await repo.fetchAcademicYears(includeVoided: true);
+      expect(repo.isExtendedAcademicYearLifecycleEnabled, isFalse);
+
+      await repo.createAcademicYear(
+        schoolYear: '2028-2029',
+        expectedRevision: 1,
+        reinstateReason: 'Confirmed 2028 enrollment dates',
+      );
+      expect(calls[1].$1, 'createAcademicYear');
+      expect(calls[1].$2['expectedRevision'], 1);
+      expect(calls[1].$2['reinstateReason'], 'Confirmed 2028 enrollment dates');
     },
   );
 }

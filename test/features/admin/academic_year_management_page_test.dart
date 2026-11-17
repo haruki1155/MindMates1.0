@@ -15,6 +15,7 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
   _AcademicYearFakeRepository({
     this.role = AccessRole.admin,
     this.superAdmin = false,
+    this.extendedLifecycleEnabled = true,
     List<AcademicYearRecord>? initialYears,
   }) : years = List<AcademicYearRecord>.of(
          initialYears ??
@@ -42,6 +43,7 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
 
   final AccessRole role;
   final bool superAdmin;
+  final bool extendedLifecycleEnabled;
   List<AcademicYearRecord> years;
   Object? fetchError;
   Object? createError;
@@ -60,6 +62,9 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
 
   @override
   bool get isSuperAdmin => superAdmin;
+
+  @override
+  bool get isExtendedAcademicYearLifecycleEnabled => extendedLifecycleEnabled;
 
   @override
   Future<List<AcademicYearRecord>> fetchAcademicYears({
@@ -81,6 +86,7 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
     String? copyFrom,
     bool copyPopulation = false,
     String? reinstateReason,
+    int? expectedRevision,
   }) async {
     createCalls.add({
       'schoolYear': schoolYear,
@@ -89,6 +95,7 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
       'copyFrom': copyFrom,
       'copyPopulation': copyPopulation,
       'reinstateReason': reinstateReason,
+      'expectedRevision': expectedRevision,
     });
     if (createError != null) throw createError!;
     final hasCurrent = years.any((y) => y.isCurrent);
@@ -158,7 +165,7 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
     voidCalls.add({
       'schoolYear': schoolYear,
       'reason': reason,
-      'confirmationText': confirmationText,
+      'confirmation': confirmationText,
       'expectedRevision': expectedRevision,
     });
     if (voidError != null) throw voidError!;
@@ -741,6 +748,126 @@ void main() {
       expect(
         superRepo.createCalls.single['reinstateReason'],
         'Confirmed next school year schedule',
+      );
+      expect(superRepo.createCalls.single['expectedRevision'], 3);
+    },
+  );
+
+  testWidgets(
+    'when extended lifecycle is disabled on server, disables Activate/Void and explains future Create limits',
+    (tester) async {
+      final repo = _AcademicYearFakeRepository(
+        superAdmin: true,
+        extendedLifecycleEnabled: false,
+        initialYears: const [
+          AcademicYearRecord(
+            schoolYear: '2026-2027',
+            startDate: '2026-06-01',
+            endDate: '2027-05-31',
+            status: 'current',
+            revision: 1,
+          ),
+          AcademicYearRecord(
+            schoolYear: '2027-2028',
+            startDate: '2027-06-01',
+            endDate: '2028-05-31',
+            status: 'planned',
+            revision: 1,
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: AcademicYearManagementPage(
+              repository: repo,
+              nowProvider: () => DateTime.utc(2026, 11, 17),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining(
+          'Extended lifecycle transitions (Planned future years',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Activate year'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, 'Void year').first,
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        find.textContaining('disabled until updated report analytics'),
+        findsWidgets,
+      );
+    },
+  );
+
+  testWidgets(
+    'reinstating a previously voided year on or after startDate announces Current state accurately',
+    (tester) async {
+      final repo = _AcademicYearFakeRepository(
+        superAdmin: true,
+        initialYears: const [
+          AcademicYearRecord(
+            schoolYear: '2026-2027',
+            startDate: '2026-06-01',
+            endDate: '2027-05-31',
+            status: 'closed',
+            revision: 2,
+          ),
+          AcademicYearRecord(
+            schoolYear: '2028-2029',
+            startDate: '2028-06-01',
+            endDate: '2029-05-31',
+            status: 'voided',
+            revision: 1,
+            voidReason: 'Created prematurely',
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: AcademicYearManagementPage(
+              repository: repo,
+              nowProvider: () => DateTime.utc(2028, 6, 5),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Create academic year'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'School year'),
+        '2028-2029',
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('activates it as Current'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Reinstate'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Academic year 2028-2029 reinstated as current.'),
+        findsOneWidget,
       );
     },
   );

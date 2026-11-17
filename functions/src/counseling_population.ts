@@ -9,9 +9,11 @@ import {
   AcademicYearError,
   AcademicYearSummary,
   decideAcademicYearCreate,
+  isValidIsoDate,
   manilaCurrentSchoolStartYear,
   manilaTodayIso,
   parseAcademicYearInput,
+  parseOptionalExpectedRevision,
   parseSchoolYear,
   parseStoredAcademicYearStatus,
   revisionOfAcademicYear,
@@ -150,7 +152,24 @@ function resolveRuntimeOptions(options?: AcademicYearRuntimeOptions) {
   };
 }
 
+function sanitizePopulationsMap(raw: unknown): Record<string, number> {
+  const populations: Record<string, number> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return populations;
+  }
+  for (const department of REPORT_DEPARTMENTS) {
+    const value = (raw as Record<string, unknown>)[department];
+    if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 1000000) {
+      populations[department] = value;
+    }
+  }
+  return populations;
+}
+
 function manilaBounds(startDate: string, endDate: string): {start: Timestamp; endExclusive: Timestamp} {
+  if (!isValidIsoDate(startDate) || !isValidIsoDate(endDate) || startDate > endDate) {
+    throw new AcademicYearError("failed-precondition", "Stored academic year dates are invalid.");
+  }
   const startMs = new Date(`${startDate}T00:00:00+08:00`).getTime();
   const endMs = new Date(`${endDate}T00:00:00+08:00`).getTime() + 86_400_000;
   return {
@@ -174,8 +193,28 @@ export const getAcademicYears = onCall(async (request) => {
   const uid = requireUid(request);
   await requireActiveAdmin(uid);
   const includeVoided = request.data?.includeVoided === true;
-  return {years: await listAcademicYears({includeVoided})};
+  return {
+    years: await listAcademicYears({includeVoided}),
+    extendedLifecycleEnabled: resolveRuntimeOptions().extendedLifecycleEnabled,
+  };
 });
+
+function parseOptionalReinstateReason(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    throw new AcademicYearError("invalid-argument", "reinstateReason must be a string.");
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.length > 500) {
+    throw new AcademicYearError("invalid-argument", "Reinstatement reason must be 500 characters or fewer.");
+  }
+  return trimmed;
+}
 
 export async function createAcademicYearForActor(
   uid: string,
@@ -190,8 +229,13 @@ export async function createAcademicYearForActor(
     startDate: data.startDate,
     endDate: data.endDate,
   });
-  const sourceYear = text(data.copyFrom);
+  const expectedRevision = parseOptionalExpectedRevision(data.expectedRevision);
+  const reinstateReason = parseOptionalReinstateReason(data.reinstateReason);
+  const sourceYearRaw = text(data.copyFrom);
   const copyPopulation = data.copyPopulation === true;
+  const sourceYear = copyPopulation
+    ? parseSchoolYear(sourceYearRaw).schoolYear
+    : "";
   await db.runTransaction(async (tx) => {
     const snapshot = await tx.get(db.collection("counseling_population"));
     const existing = snapshot.docs.map((doc) => toAcademicYearRecord(doc.id, doc.data()));
@@ -200,35 +244,49 @@ export async function createAcademicYearForActor(
       existing,
       todayManila,
       extendedLifecycleEnabled,
+      expectedRevision,
     });
-    const sourceSnap = sourceYear ? snapshot.docs.find((doc) => doc.id === sourceYear) : undefined;
-    const sourceDoc = sourceSnap && parseStoredAcademicYearStatus(sourceSnap.data().status) !== "voided"
-      ? sourceSnap.data()
-      : undefined;
+    let copiedPopulations: Record<string, number> = {};
+    if (copyPopulation) {
+      const sourceSnap = snapshot.docs.find((doc) => doc.id === sourceYear);
+      if (!sourceSnap) {
+        throw new AcademicYearError("not-found", `Source academic year ${sourceYear} was not found.`);
+      }
+      const sourceStatus = parseStoredAcademicYearStatus(sourceSnap.data().status);
+      if (sourceStatus === "voided" || sourceStatus === "unknown") {
+        throw new AcademicYearError(
+          "failed-precondition",
+          `Cannot copy populations from academic year ${sourceYear} (${sourceStatus}).`,
+        );
+      }
+      copiedPopulations = sanitizePopulationsMap(sourceSnap.data().populations);
+    }
     const targetRef = config(candidate.schoolYear);
     if (decision.kind === "reinstate") {
       const priorSnap = snapshot.docs.find((doc) => doc.id === candidate.schoolYear);
       const priorData = priorSnap?.data() ?? {};
       const voidRev = decision.previousVoidRevision ?? 0;
-      tx.set(targetRef.collection("void_history").doc(`rev_${voidRev}`), {
+      // Append-only reinstatement record; never overwrite prior void_history/rev_<N> snapshots.
+      tx.set(targetRef.collection("reinstate_history").doc(`rev_${decision.nextRevision}`), {
         schoolYear: candidate.schoolYear,
-        voidRevision: voidRev,
-        status: priorData.status ?? "voided",
-        voidedAt: priorData.voidedAt ?? null,
-        voidedBy: priorData.voidedBy ?? null,
-        voidReason: priorData.voidReason ?? null,
-        voidedSnapshot: priorData.voidedSnapshot ?? null,
-        archivedBeforeReinstateAt: FieldValue.serverTimestamp(),
-        archivedBeforeReinstateBy: uid,
+        reinstateRevision: decision.nextRevision,
+        priorVoidRevision: voidRev,
+        reinstateReason,
+        priorVoidReason: priorData.voidReason ?? null,
+        priorVoidedAt: priorData.voidedAt ?? null,
+        priorVoidedBy: priorData.voidedBy ?? null,
+        reinstatedAt: FieldValue.serverTimestamp(),
+        reinstatedBy: uid,
       });
       tx.update(targetRef, {
         schoolYear: candidate.schoolYear,
         startDate: candidate.startDate,
         endDate: candidate.endDate,
         status: decision.initialStatus,
-        populations: copyPopulation && sourceDoc?.populations ? sourceDoc.populations : {},
+        populations: copiedPopulations,
         revision: decision.nextRevision,
         reinstatedFromVoidRevision: voidRev,
+        lastReinstateReason: reinstateReason ?? FieldValue.delete(),
         reinstatedAt: FieldValue.serverTimestamp(),
         reinstatedBy: uid,
         voidedAt: FieldValue.delete(),
@@ -252,8 +310,9 @@ export async function createAcademicYearForActor(
           startDate: candidate.startDate,
           endDate: candidate.endDate,
           reinstatedFromVoidRevision: voidRev,
+          reinstateReason,
           revision: decision.nextRevision,
-          copiedFrom: copyPopulation && sourceDoc ? sourceYear : null,
+          copiedFrom: copyPopulation ? sourceYear : null,
         },
       });
       return;
@@ -264,7 +323,7 @@ export async function createAcademicYearForActor(
       startDate: candidate.startDate,
       endDate: candidate.endDate,
       status: decision.initialStatus,
-      populations: copyPopulation && sourceDoc?.populations ? sourceDoc.populations : {},
+      populations: copiedPopulations,
       revision: decision.nextRevision,
       createdAt: FieldValue.serverTimestamp(),
       createdBy: uid,
@@ -283,7 +342,7 @@ export async function createAcademicYearForActor(
         startDate: candidate.startDate,
         endDate: candidate.endDate,
         revision: decision.nextRevision,
-        copiedFrom: copyPopulation && sourceDoc ? sourceYear : null,
+        copiedFrom: copyPopulation ? sourceYear : null,
       },
     });
   });
@@ -314,7 +373,7 @@ export async function activateAcademicYearForActor(
     );
   }
   const {schoolYear} = parseSchoolYear(data.schoolYear);
-  const expectedRevision = typeof data.expectedRevision === "number" ? data.expectedRevision : undefined;
+  const expectedRevision = parseOptionalExpectedRevision(data.expectedRevision);
   const todayManila = manilaTodayIso(now);
   await db.runTransaction(async (tx) => {
     const snapshot = await tx.get(db.collection("counseling_population"));
@@ -363,9 +422,7 @@ export const closeAcademicYear = onCall(async (request) => {
   const actor = await requireActiveAdmin(uid);
   try {
     const {schoolYear} = parseSchoolYear(request.data?.schoolYear);
-    const expectedRevision = typeof request.data?.expectedRevision === "number"
-      ? request.data.expectedRevision
-      : undefined;
+    const expectedRevision = parseOptionalExpectedRevision(request.data?.expectedRevision);
     const reference = config(schoolYear);
     await db.runTransaction(async (tx) => {
       const [snapshot, taggedAppointments] = await Promise.all([

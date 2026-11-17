@@ -216,6 +216,25 @@ test("full lifecycle: Manila horizon, planned -> active -> closed, and closed im
   const item27 = res27.years.find((y) => y.schoolYear === "2027-2028");
   assert.equal(item27?.status, "planned");
 
+  // Direct callable bypass attempt: admin CANNOT close a "planned" year directly.
+  await rejects(as(closeYear, "admin", {schoolYear: "2027-2028"}), "failed-precondition");
+  const listAfterBypassAttempt = await as(listYears, "admin");
+  assert.equal(listAfterBypassAttempt.years.find((y) => y.schoolYear === "2027-2028")?.status, "planned");
+
+  // Updated reporting excludes "planned" and "unknown" from trends and comparison!
+  await db.doc("counseling_population/2025-2026").set({
+    schoolYear: "2025-2026",
+    startDate: "2025-06-01",
+    endDate: "2026-05-31",
+    status: "legacy_corrupted",
+    populations: {},
+  });
+  const preActivationReport = await as(fetchReport, "counselor", {schoolYear: "2026-2027"});
+  assert.equal(preActivationReport.report.trends.some((t) => t.schoolYear === "2027-2028"), false);
+  assert.equal(preActivationReport.report.trends.some((t) => t.schoolYear === "2025-2026"), false);
+  assert.equal(preActivationReport.report.comparison, null);
+  await db.doc("counseling_population/2025-2026").delete();
+
   // Cannot activate 2027-2028 before startDate OR while 2026-2027 is open.
   await rejects(
     activateAcademicYearForActor(uid("admin"), accounts.admin.profile, {schoolYear: "2027-2028"}, {now: nov2026, extendedLifecycleEnabled: true}),
@@ -318,6 +337,17 @@ test("voidAcademicYear preserves audit & snapshot, blocks dependency refs, hides
   );
   await blockerReport.delete();
 
+  // Legacy wire key confirmationText MUST NOT be accepted; only canonical "confirmation".
+  await rejects(
+    voidAcademicYearForActor(uid("super-admin"), accounts["super-admin"].profile, {
+      schoolYear: "2028-2029",
+      confirmationText: "VOID 2028-2029",
+      reason: "Erroneous premature future academic year.",
+      expectedRevision: 0,
+    }, {extendedLifecycleEnabled: true}),
+    "invalid-argument",
+  );
+
   // Succeeds once zero operational/population dependencies exist.
   const afterVoid = await voidAcademicYearForActor(uid("super-admin"), accounts["super-admin"].profile, {
     schoolYear: "2028-2029",
@@ -335,7 +365,12 @@ test("voidAcademicYear preserves audit & snapshot, blocks dependency refs, hides
   assert.equal(voidDoc.data()?.voidedSnapshot?.status, "current");
   const voidHistSnap = await db.collection("counseling_population/2028-2029/void_history").get();
   assert.equal(voidHistSnap.size, 1);
+  const rev1Before = (await db.doc("counseling_population/2028-2029/void_history/rev_1").get()).data();
+  assert.ok(rev1Before);
   assert.equal((await viewAuditRef.get()).exists, true);
+  const voidAuditsBefore = await db.collection("admin_audit_logs").where("action", "==", "ACADEMIC_YEAR_VOIDED").where("targetId", "==", "2028-2029").get();
+  assert.equal(voidAuditsBefore.size, 1);
+  const voidAuditDataBefore = voidAuditsBefore.docs[0].data();
 
   // Voided 2028-2029 excluded from default list, comparison, trends, and direct reporting!
   const defaultList = await as(listYears, "admin");
@@ -345,24 +380,184 @@ test("voidAcademicYear preserves audit & snapshot, blocks dependency refs, hides
   assert.equal(report26.report.population.years.some((y) => y.schoolYear === "2028-2029"), false);
   assert.equal(report26.report.trends.some((t) => t.schoolYear === "2028-2029"), false);
 
-  // Future reuse: when 2028 arrives (and 2026-2027 is closed), 2028-2029 can be cleanly reinstated
-  // WITHOUT deleting void_history or historical void audit records!
+  // Future reuse: rejects stale or malformed revision and oversized reinstateReason; succeeds with valid inputs.
   await as(closeYear, "admin", {schoolYear: "2026-2027"});
+  await rejects(
+    createAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+      schoolYear: "2028-2029",
+      expectedRevision: "1",
+    }, {now: new Date("2028-06-05T03:00:00Z"), extendedLifecycleEnabled: true}),
+    "invalid-argument",
+  );
+  await rejects(
+    createAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+      schoolYear: "2028-2029",
+      expectedRevision: 0,
+    }, {now: new Date("2028-06-05T03:00:00Z"), extendedLifecycleEnabled: true}),
+    "aborted",
+  );
+  await rejects(
+    createAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+      schoolYear: "2028-2029",
+      reinstateReason: "x".repeat(501),
+    }, {now: new Date("2028-06-05T03:00:00Z"), extendedLifecycleEnabled: true}),
+    "invalid-argument",
+  );
   const reinstated = await createAcademicYearForActor(uid("admin"), accounts.admin.profile, {
     schoolYear: "2028-2029",
     startDate: "2028-06-01",
     endDate: "2029-05-31",
+    expectedRevision: 1,
+    reinstateReason: "Confirmed SY 2028-2029 enrollment schedule",
   }, {now: new Date("2028-06-05T03:00:00Z"), extendedLifecycleEnabled: true});
   const active28 = reinstated.years.find((y) => y.schoolYear === "2028-2029");
   assert.equal(active28?.status, "current");
   assert.equal(active28?.revision, 2);
 
-  // Both historical void audit + void_history subcollection AND reinstate audit exist intact!
-  const voidAudits = await db.collection("admin_audit_logs").where("action", "==", "ACADEMIC_YEAR_VOIDED").where("targetId", "==", "2028-2029").get();
+  // Original void_history/rev_1 AND original ACADEMIC_YEAR_VOIDED audit doc remain COMPLETELY UNCHANGED!
+  const rev1After = (await db.doc("counseling_population/2028-2029/void_history/rev_1").get()).data();
+  assert.deepEqual(rev1After, rev1Before);
+  const voidAuditsAfter = await db.collection("admin_audit_logs").where("action", "==", "ACADEMIC_YEAR_VOIDED").where("targetId", "==", "2028-2029").get();
+  assert.equal(voidAuditsAfter.size, 1);
+  assert.deepEqual(voidAuditsAfter.docs[0].data(), voidAuditDataBefore);
+
+  // Separate append-only reinstate_history + audit metadata record reinstateReason.
+  const reinstateHist = await db.doc("counseling_population/2028-2029/reinstate_history/rev_2").get();
+  assert.equal(reinstateHist.exists, true);
+  assert.equal(reinstateHist.data()?.reinstateReason, "Confirmed SY 2028-2029 enrollment schedule");
   const reinstateAudits = await db.collection("admin_audit_logs").where("action", "==", "ACADEMIC_YEAR_REINSTATED").where("targetId", "==", "2028-2029").get();
-  assert.equal(voidAudits.size >= 1, true);
-  assert.equal(reinstateAudits.size >= 1, true);
-  assert.equal((await db.collection("counseling_population/2028-2029/void_history").get()).size >= 1, true);
+  assert.equal(reinstateAudits.size, 1);
+  assert.equal(reinstateAudits.docs[0].data()?.metadata?.reinstateReason, "Confirmed SY 2028-2029 enrollment schedule");
+
+  // Second void -> reinstate cycle preserves rev_1, creates rev_3 and reinstate_history/rev_4!
+  await voidAcademicYearForActor(uid("super-admin"), accounts["super-admin"].profile, {
+    schoolYear: "2028-2029",
+    confirmation: "VOID 2028-2029",
+    reason: "Second void test for history preservation",
+    expectedRevision: 2,
+  }, {extendedLifecycleEnabled: true});
+  await createAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+    schoolYear: "2028-2029",
+    expectedRevision: 3,
+    reinstateReason: "Second reinstatement",
+  }, {now: new Date("2028-06-06T03:00:00Z"), extendedLifecycleEnabled: true});
+  assert.deepEqual((await db.doc("counseling_population/2028-2029/void_history/rev_1").get()).data(), rev1Before);
+  assert.equal((await db.doc("counseling_population/2028-2029/void_history/rev_3").get()).exists, true);
+  assert.equal((await db.doc("counseling_population/2028-2029/reinstate_history/rev_2").get()).exists, true);
+  assert.equal((await db.doc("counseling_population/2028-2029/reinstate_history/rev_4").get()).exists, true);
+});
+
+test("defensive validation blocks malformed stored dates, malformed revisions, invalid copy sources, and concurrent activations", {skip: !emulated}, async () => {
+  // getAcademicYears surfaces extendedLifecycleEnabled=false cleanly by default.
+  const meta = await listYears.run({auth: {uid: uid("admin")}, data: {}}) as unknown as {
+    years: YearItem[];
+    extendedLifecycleEnabled?: boolean;
+  };
+  assert.equal(meta.extendedLifecycleEnabled, false);
+
+  // Corrupted stored dates fail cleanly instead of throwing Timestamp NaN error.
+  await db.doc("counseling_population/2028-2029").set({
+    schoolYear: "2028-2029",
+    startDate: "2028-02-31",
+    endDate: "2029-05-31",
+    status: "current",
+    populations: {},
+  });
+  await rejects(
+    voidAcademicYearForActor(uid("super-admin"), accounts["super-admin"].profile, {
+      schoolYear: "2028-2029",
+      confirmation: "VOID 2028-2029",
+      reason: "Cleanup corrupted dates",
+      expectedRevision: 0,
+    }, {extendedLifecycleEnabled: true}),
+    "failed-precondition",
+  );
+
+  // Unknown stored status fails closed in void, close, activate, and listAcademicYears.
+  await db.doc("counseling_population/2027-2028").set({
+    schoolYear: "2027-2028",
+    startDate: "2027-06-01",
+    endDate: "2028-05-31",
+    status: "unknown_state",
+    populations: {},
+  });
+  await rejects(
+    voidAcademicYearForActor(uid("super-admin"), accounts["super-admin"].profile, {
+      schoolYear: "2027-2028",
+      confirmation: "VOID 2027-2028",
+      reason: "Trying to void unknown state",
+      expectedRevision: 0,
+    }, {extendedLifecycleEnabled: true}),
+    "failed-precondition",
+  );
+  await rejects(as(closeYear, "admin", {schoolYear: "2027-2028"}), "failed-precondition");
+  assert.equal((await listAcademicYears({includeUnknown: false})).some((y) => y.schoolYear === "2027-2028"), false);
+
+  // Invalid copyPopulation sources (missing, unknown, voided) rejected; valid source filters non-department keys.
+  await db.doc("counseling_population/2026-2027").set({
+    schoolYear: "2026-2027",
+    startDate: "2026-06-01",
+    endDate: "2027-05-31",
+    status: "current",
+    populations: {...fullPopulations, UNKNOWN_DEPT: 999},
+  });
+  await db.doc("counseling_population/2028-2029").set({
+    schoolYear: "2028-2029",
+    startDate: "2028-06-01",
+    endDate: "2029-05-31",
+    status: "voided",
+    populations: {},
+  });
+  await db.doc("counseling_population/2027-2028").delete();
+
+  await rejects(
+    createAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+      schoolYear: "2027-2028",
+      copyFrom: "2025-2026",
+      copyPopulation: true,
+    }, {now: new Date("2026-11-17T03:00:00Z"), extendedLifecycleEnabled: true}),
+    "not-found",
+  );
+  await rejects(
+    createAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+      schoolYear: "2027-2028",
+      copyFrom: "2028-2029",
+      copyPopulation: true,
+    }, {now: new Date("2026-11-17T03:00:00Z"), extendedLifecycleEnabled: true}),
+    "failed-precondition",
+  );
+  await createAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+    schoolYear: "2027-2028",
+    copyFrom: "2026-2027",
+    copyPopulation: true,
+  }, {now: new Date("2026-11-17T03:00:00Z"), extendedLifecycleEnabled: true});
+  const copiedDoc = (await db.doc("counseling_population/2027-2028").get()).data();
+  assert.equal("UNKNOWN_DEPT" in (copiedDoc?.populations ?? {}), false);
+
+  // Malformed expectedRevision rejected on close & activate rather than ignored.
+  await rejects(as(closeYear, "admin", {schoolYear: "2026-2027", expectedRevision: "0"}), "invalid-argument");
+  await as(closeYear, "admin", {schoolYear: "2026-2027"});
+  await rejects(
+    activateAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+      schoolYear: "2027-2028",
+      expectedRevision: -1,
+    }, {now: new Date("2027-06-01T03:00:00Z"), extendedLifecycleEnabled: true}),
+    "invalid-argument",
+  );
+
+  // Concurrent activations succeed at most once when expectedRevision is enforced.
+  const rev27 = (await db.doc("counseling_population/2027-2028").get()).data()?.revision ?? 1;
+  const race = await Promise.allSettled([
+    activateAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+      schoolYear: "2027-2028",
+      expectedRevision: rev27,
+    }, {now: new Date("2027-06-01T03:00:00Z"), extendedLifecycleEnabled: true}),
+    activateAcademicYearForActor(uid("admin"), accounts.admin.profile, {
+      schoolYear: "2027-2028",
+      expectedRevision: rev27,
+    }, {now: new Date("2027-06-01T03:00:00Z"), extendedLifecycleEnabled: true}),
+  ]);
+  assert.equal(race.filter((r) => r.status === "fulfilled").length, 1);
 });
 
 test("concurrent createAcademicYear calls allow at most one active year", {skip: !emulated}, async () => {

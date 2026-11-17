@@ -1486,16 +1486,17 @@ class _AcademicYearField extends StatelessWidget {
     final visibleYears = years
         .where((item) => !item.isVoided && !item.isUnknown)
         .toList(growable: false);
-    final options = visibleYears.isEmpty
-        ? [
+    final hasSelectableYears = visibleYears.isNotEmpty;
+    final options = hasSelectableYears
+        ? visibleYears
+        : [
             AcademicYearRecord(
               schoolYear: schoolYear,
               startDate: '',
               endDate: '',
-              status: 'current',
+              status: 'unknown',
             ),
-          ]
-        : visibleYears;
+          ];
     final activeYear = options.any((item) => item.schoolYear == schoolYear)
         ? schoolYear
         : options.first.schoolYear;
@@ -1517,20 +1518,26 @@ class _AcademicYearField extends StatelessWidget {
                   children: [
                     Flexible(
                       child: Text(
-                        item.schoolYear,
+                        hasSelectableYears
+                            ? item.schoolYear
+                            : 'No reportable years',
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     const SizedBox(width: 8),
-                    _AcademicYearStateBadge(state: item.periodState()),
+                    hasSelectableYears
+                        ? _AcademicYearStateBadge(state: item.periodState())
+                        : const _UnavailableYearBadge(),
                   ],
                 ),
               ),
             )
             .toList(),
-        onChanged: (value) {
-          if (value != null) onChanged(value);
-        },
+        onChanged: hasSelectableYears
+            ? (value) {
+                if (value != null) onChanged(value);
+              }
+            : null,
       ),
     );
   }
@@ -1935,6 +1942,26 @@ class _CurrentBadge extends StatelessWidget {
     child: const Text(
       'Current',
       style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800),
+    ),
+  );
+}
+
+class _UnavailableYearBadge extends StatelessWidget {
+  const _UnavailableYearBadge();
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: AdminColors.surfaceMuted,
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: const Text(
+      'Unavailable',
+      style: TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w800,
+        color: AdminColors.muted,
+      ),
     ),
   );
 }

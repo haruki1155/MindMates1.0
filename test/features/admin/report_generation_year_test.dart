@@ -381,4 +381,41 @@ void main() {
       expect(tester.widget<TextField>(popField).readOnly, isTrue);
     });
   }
+
+  testWidgets(
+    'academic year dropdown does not fabricate Current badge when no valid reporting years exist',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = _ReportRepository(
+        customYears: const [
+          {
+            'schoolYear': '2028-2029',
+            'startDate': '2028-06-01',
+            'endDate': '2029-05-31',
+            'status': 'voided',
+          },
+          {
+            'schoolYear': '2099-2100',
+            'startDate': '2099-06-01',
+            'endDate': '2100-05-31',
+            'status': 'corrupted',
+          },
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ReportGenerationPage(repository: repo)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Counseling appointments'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Unavailable'), findsWidgets);
+      expect(find.text('Current'), findsNothing);
+    },
+  );
 }

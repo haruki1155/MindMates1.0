@@ -1146,6 +1146,11 @@ class AdminPortalRepository {
     return CounselingPopulationConfig.fromJson(result.data);
   }
 
+  bool? _extendedAcademicYearLifecycleEnabled;
+
+  bool get isExtendedAcademicYearLifecycleEnabled =>
+      _extendedAcademicYearLifecycleEnabled ?? true;
+
   Future<List<AcademicYearRecord>> _callAcademicYearAction(
     String callable,
     Map<String, dynamic> payload,
@@ -1154,9 +1159,12 @@ class AdminPortalRepository {
       throw StateError('Administrator access is required.');
     }
     final data = await _callCallable(callable, payload);
-    return _academicYears(
-      data is Map ? Map<String, dynamic>.from(data) : const {},
-    );
+    final map = data is Map ? Map<String, dynamic>.from(data) : const <String, dynamic>{};
+    if (map['extendedLifecycleEnabled'] is bool) {
+      _extendedAcademicYearLifecycleEnabled =
+          map['extendedLifecycleEnabled'] as bool;
+    }
+    return _academicYears(map);
   }
 
   Future<List<AcademicYearRecord>> fetchAcademicYears({
@@ -1173,6 +1181,7 @@ class AdminPortalRepository {
     String? copyFrom,
     bool copyPopulation = false,
     String? reinstateReason,
+    int? expectedRevision,
   }) => _callAcademicYearAction('createAcademicYear', {
     'schoolYear': schoolYear,
     'startDate': ?startDate,
@@ -1180,6 +1189,7 @@ class AdminPortalRepository {
     'copyFrom': ?copyFrom,
     'copyPopulation': copyPopulation,
     'reinstateReason': ?reinstateReason,
+    'expectedRevision': ?expectedRevision,
   });
 
   Future<List<AcademicYearRecord>> activateAcademicYear(
@@ -1210,7 +1220,7 @@ class AdminPortalRepository {
     return _callAcademicYearAction('voidAcademicYear', {
       'schoolYear': schoolYear,
       'reason': reason,
-      'confirmationText': confirmationText,
+      'confirmation': confirmationText,
       'expectedRevision': ?expectedRevision,
     });
   }
