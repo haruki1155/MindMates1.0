@@ -64,9 +64,26 @@ test("reminder A to B to A uses revision identities and legacy remains compatibl
   await run.run({});
   await ref.update({scheduleRevision: 2, reminders: {}, scheduledAt: time, studentScheduleRequestId: "g2-edit-2"});
   await Promise.all([run.run({}), run.run({})]);
-  const notes = await db.collection("notifications").where("appointmentId", "==", ref.id).get();
-  assert.equal(notes.size, 3);
-  assert.equal(notes.docs.filter((n) => n.data().scheduleRevision === 2).length, 1);
+  const reminders = await db.collection("notifications")
+    .where("appointmentId", "==", ref.id)
+    .where("type", "==", "appointment_reminder")
+    .get();
+  assert.equal(reminders.size, 3);
+  assert.deepEqual(
+    reminders.docs.map((doc) => doc.id).sort(),
+    [
+      `appointment_reminder_oneHour_${ref.id}`,
+      `appointment_reminder_oneHour_${ref.id}_revision_1`,
+      `appointment_reminder_oneHour_${ref.id}_revision_2`,
+    ].sort(),
+  );
+  for (const doc of reminders.docs) {
+    assert.equal(doc.data().type, "appointment_reminder");
+    assert.equal(doc.data().reminderStage, "oneHour");
+  }
+  assert.equal(reminders.docs.filter((n) => (n.data().scheduleRevision ?? null) === null).length, 1);
+  assert.equal(reminders.docs.filter((n) => n.data().scheduleRevision === 1).length, 1);
+  assert.equal(reminders.docs.filter((n) => n.data().scheduleRevision === 2).length, 1);
 });
 
 test("push dispatcher rejects an obsolete reminder immediately before delivery", async () => {
