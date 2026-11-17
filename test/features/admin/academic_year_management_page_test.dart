@@ -55,6 +55,7 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
   final createCalls = <Map<String, Object?>>[];
   final activateCalls = <String>[];
   final closeCalls = <String>[];
+  final closeCallPayloads = <Map<String, Object?>>[];
   final voidCalls = <Map<String, Object?>>[];
 
   @override
@@ -136,8 +137,14 @@ class _AcademicYearFakeRepository extends AdminPortalRepository {
   Future<List<AcademicYearRecord>> closeAcademicYear(
     String schoolYear, {
     int? expectedRevision,
+    String? confirmation,
   }) async {
     closeCalls.add(schoolYear);
+    closeCallPayloads.add({
+      'schoolYear': schoolYear,
+      'expectedRevision': expectedRevision,
+      'confirmation': confirmation,
+    });
     if (closeError != null) throw closeError!;
     years = years
         .map(
@@ -444,7 +451,7 @@ void main() {
     expect(find.textContaining('Close active academic year'), findsOneWidget);
   });
 
-  testWidgets('admin closes an active academic year with confirmation', (
+  testWidgets('admin closes an active academic year only after endDate with confirmation', (
     tester,
   ) async {
     final repo = _AcademicYearFakeRepository(
@@ -454,6 +461,7 @@ void main() {
           startDate: '2026-06-01',
           endDate: '2027-05-31',
           status: 'current',
+          revision: 2,
         ),
       ],
     );
@@ -462,8 +470,35 @@ void main() {
         theme: AdminTheme.data,
         home: Scaffold(
           body: AcademicYearManagementPage(
+            key: const ValueKey('early-close-check'),
             repository: repo,
-            nowProvider: () => DateTime(2026, 11, 16),
+            nowProvider: () => DateTime.utc(2026, 11, 16),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Before 2027-05-31 endDate, Close year is disabled with explanation.
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.widgetWithText(OutlinedButton, 'Close year'),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(find.textContaining('Closure opens after 2027-05-31'), findsOneWidget);
+
+    // After endDate (June 1, 2027 Manila), Close year enables and sends confirmation + expectedRevision.
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AdminTheme.data,
+        home: Scaffold(
+          body: AcademicYearManagementPage(
+            key: const ValueKey('after-end-close-check'),
+            repository: repo,
+            nowProvider: () => DateTime.utc(2027, 6, 1),
           ),
         ),
       ),
@@ -485,6 +520,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repo.closeCalls, ['2026-2027']);
+    expect(repo.closeCallPayloads.single['confirmation'], 'CLOSE 2026-2027');
+    expect(repo.closeCallPayloads.single['expectedRevision'], 2);
     expect(find.text('Locked · read-only'), findsOneWidget);
     expect(find.text('Close year'), findsNothing);
   });
@@ -554,7 +591,7 @@ void main() {
           ),
           AcademicYearRecord(
             schoolYear: '2027-2028',
-            startDate: '2027-06-01',
+            startDate: '2027-07-01',
             endDate: '2028-05-31',
             status: 'planned',
             revision: 1,
@@ -601,7 +638,19 @@ void main() {
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
-      // Close 2026-2027 -> Planned 2027-2028 remains disabled with start-date explanation on 2026-11-17.
+      // After 2027-05-31 endDate (on 2027-06-01 Manila), close 2026-2027 -> Planned 2027-2028 shows start-date explanation until 2027-07-01.
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: AcademicYearManagementPage(
+              repository: repo,
+              nowProvider: () => DateTime.utc(2027, 6, 1),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Close year'));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -611,16 +660,16 @@ void main() {
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, 'Lock year'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Activation opens on 2027-06-01'), findsOneWidget);
+      expect(find.textContaining('Activation opens on 2027-07-01'), findsOneWidget);
 
-      // On June 1, 2027 Manila time, Activate year enables and confirms cleanly.
+      // On July 1, 2027 Manila time, Activate year enables and confirms cleanly.
       await tester.pumpWidget(
         MaterialApp(
           theme: AdminTheme.data,
           home: Scaffold(
             body: AcademicYearManagementPage(
               repository: repo,
-              nowProvider: () => DateTime.utc(2027, 6, 1),
+              nowProvider: () => DateTime.utc(2027, 7, 1),
             ),
           ),
         ),
@@ -871,4 +920,86 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'legacy Batch B1 getAcademicYears without extendedLifecycleEnabled loads years and hides extended mutations',
+    (tester) async {
+      final repo = _LegacyBatchB1RealRepository(
+        callableInvoker: (name, _) async {
+          expect(name, 'getAcademicYears');
+          // Batch B1 shape: omits extendedLifecycleEnabled completely.
+          return <Object?, Object?>{
+            'years': <Object?>[
+              <Object?, Object?>{
+                'schoolYear': '2026-2027',
+                'startDate': '2026-06-01',
+                'endDate': '2027-05-31',
+                'status': 'current',
+              },
+              <Object?, Object?>{
+                'schoolYear': '2025-2026',
+                'startDate': '2025-06-01',
+                'endDate': '2026-05-31',
+                'status': 'closed',
+              },
+              <Object?, Object?>{
+                'schoolYear': '2027-2028',
+                'startDate': '2027-06-01',
+                'endDate': '2028-05-31',
+                'status': 'planned',
+              },
+            ],
+          };
+        },
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: AcademicYearManagementPage(
+              repository: repo,
+              nowProvider: () => DateTime.utc(2026, 11, 17),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(repo.isExtendedAcademicYearLifecycleEnabled, isFalse);
+      expect(find.text('2026-2027'), findsOneWidget);
+      expect(find.text('2025-2026'), findsOneWidget);
+      expect(
+        find.textContaining('Extended lifecycle transitions (Planned future years'),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Activate year'),
+            )
+            .onPressed,
+        isNull,
+      );
+      final voidButtons = tester
+          .widgetList<OutlinedButton>(
+            find.widgetWithText(OutlinedButton, 'Void year'),
+          )
+          .toList();
+      expect(voidButtons, hasLength(2));
+      for (final button in voidButtons) {
+        expect(button.onPressed, isNull);
+      }
+    },
+  );
+}
+
+class _LegacyBatchB1RealRepository extends AdminPortalRepository {
+  _LegacyBatchB1RealRepository({super.callableInvoker});
+
+  @override
+  AccessRole get currentAccessRole => AccessRole.admin;
+
+  @override
+  bool get isSuperAdmin => true;
 }

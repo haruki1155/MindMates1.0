@@ -10,6 +10,7 @@ import {
   activateAcademicYear,
   activateAcademicYearForActor,
   closeAcademicYear,
+  closeAcademicYearForActor,
   createAcademicYear,
   createAcademicYearForActor,
   getAcademicYears,
@@ -221,7 +222,10 @@ test("full lifecycle: Manila horizon, planned -> active -> closed, and closed im
   const listAfterBypassAttempt = await as(listYears, "admin");
   assert.equal(listAfterBypassAttempt.years.find((y) => y.schoolYear === "2027-2028")?.status, "planned");
 
-  // Updated reporting excludes "planned" and "unknown" from trends and comparison!
+  // Updated reporting:
+  // - Rejects planned, voided, and corrupted stored unknown directly;
+  // - Safe empty/no_data on uncreated missing year even with orphan appointments;
+  // - Excludes planned, voided, and unknown from trends and comparison!
   await db.doc("counseling_population/2025-2026").set({
     schoolYear: "2025-2026",
     startDate: "2025-06-01",
@@ -229,11 +233,28 @@ test("full lifecycle: Manila horizon, planned -> active -> closed, and closed im
     status: "legacy_corrupted",
     populations: {},
   });
+  const orphanApptRef = db.doc(`appointments/${prefix}-orphan-2099`);
+  await orphanApptRef.set({
+    userId: uid("student"),
+    collegeId: "cite",
+    academicYearId: "2099-2100",
+    status: "completed",
+    scheduledAt: Timestamp.fromDate(new Date("2099-09-15T01:00:00Z")),
+  });
+  await rejects(as(fetchReport, "counselor", {schoolYear: "2027-2028"}), "failed-precondition");
+  await rejects(as(fetchReport, "counselor", {schoolYear: "2025-2026"}), "failed-precondition");
+  const missingReport = await as(fetchReport, "counselor", {schoolYear: "2099-2100"});
+  assert.equal(missingReport.report.population.status, "unknown");
+  assert.equal(missingReport.report.appointments.totalAppointments, 0);
+  assert.equal(missingReport.report.trends.some((t) => t.schoolYear === "2027-2028"), false);
+  assert.equal(missingReport.report.trends.some((t) => t.schoolYear === "2025-2026"), false);
+
   const preActivationReport = await as(fetchReport, "counselor", {schoolYear: "2026-2027"});
   assert.equal(preActivationReport.report.trends.some((t) => t.schoolYear === "2027-2028"), false);
   assert.equal(preActivationReport.report.trends.some((t) => t.schoolYear === "2025-2026"), false);
   assert.equal(preActivationReport.report.comparison, null);
   await db.doc("counseling_population/2025-2026").delete();
+  await orphanApptRef.delete();
 
   // Cannot activate 2027-2028 before startDate OR while 2026-2027 is open.
   await rejects(
@@ -255,11 +276,50 @@ test("full lifecycle: Manila horizon, planned -> active -> closed, and closed im
     scheduledAt: Timestamp.fromDate(new Date("2026-09-15T01:00:00Z")),
   });
 
-  // Close 2026-2027 cleanly; verify closed immutability & historical preservation.
-  const closed = await as(closeYear, "admin", {schoolYear: "2026-2027"});
+  // Cannot close 2026-2027 early (before or on 2027-05-31 Manila)!
+  const rev26 = (await db.doc("counseling_population/2026-2027").get()).data()?.revision ?? 1;
+  await rejects(
+    as(closeYear, "admin", {schoolYear: "2026-2027", confirmation: "CLOSE 2026-2027", expectedRevision: rev26}),
+    "failed-precondition",
+  );
+  await rejects(
+    closeAcademicYearForActor(
+      uid("admin"),
+      accounts.admin.profile,
+      {schoolYear: "2026-2027", confirmation: "CLOSE 2026-2027", expectedRevision: rev26},
+      {now: new Date("2027-05-31T15:59:00Z")},
+    ),
+    "failed-precondition",
+  );
+  await rejects(
+    closeAcademicYearForActor(
+      uid("admin"),
+      accounts.admin.profile,
+      {schoolYear: "2026-2027", confirmation: "wrong", expectedRevision: rev26},
+      {now: new Date("2027-05-31T16:00:00Z")},
+    ),
+    "invalid-argument",
+  );
+  await rejects(
+    closeAcademicYearForActor(
+      uid("admin"),
+      accounts.admin.profile,
+      {schoolYear: "2026-2027", confirmation: "CLOSE 2026-2027", expectedRevision: rev26 + 99},
+      {now: new Date("2027-05-31T16:00:00Z")},
+    ),
+    "aborted",
+  );
+
+  // Closes cleanly on 2027-06-01 00:00 Manila (2027-05-31 16:00 UTC) and preserves closed immutability.
+  const closed = await closeAcademicYearForActor(
+    uid("admin"),
+    accounts.admin.profile,
+    {schoolYear: "2026-2027", confirmation: "CLOSE 2026-2027", expectedRevision: rev26},
+    {now: new Date("2027-05-31T16:00:00Z")},
+  );
   assert.equal(closed.years.find((y) => y.schoolYear === "2026-2027")?.status, "closed");
   await rejects(as(savePop, "admin", {schoolYear: "2026-2027", populations: fullPopulations}), "failed-precondition");
-  await rejects(as(closeYear, "admin", {schoolYear: "2026-2027"}), "failed-precondition");
+  await rejects(as(closeYear, "admin", {schoolYear: "2026-2027", confirmation: "CLOSE 2026-2027", expectedRevision: rev26 + 1}), "failed-precondition");
 
   // Cannot activate 2027-2028 one day early (May 31 23:59 Manila = 15:59 UTC).
   await rejects(
@@ -381,7 +441,13 @@ test("voidAcademicYear preserves audit & snapshot, blocks dependency refs, hides
   assert.equal(report26.report.trends.some((t) => t.schoolYear === "2028-2029"), false);
 
   // Future reuse: rejects stale or malformed revision and oversized reinstateReason; succeeds with valid inputs.
-  await as(closeYear, "admin", {schoolYear: "2026-2027"});
+  const rev26VoidTest = (await db.doc("counseling_population/2026-2027").get()).data()?.revision ?? 1;
+  await closeAcademicYearForActor(
+    uid("admin"),
+    accounts.admin.profile,
+    {schoolYear: "2026-2027", confirmation: "CLOSE 2026-2027", expectedRevision: rev26VoidTest},
+    {now: new Date("2027-06-05T03:00:00Z")},
+  );
   await rejects(
     createAcademicYearForActor(uid("admin"), accounts.admin.profile, {
       schoolYear: "2028-2029",
@@ -535,8 +601,26 @@ test("defensive validation blocks malformed stored dates, malformed revisions, i
   assert.equal("UNKNOWN_DEPT" in (copiedDoc?.populations ?? {}), false);
 
   // Malformed expectedRevision rejected on close & activate rather than ignored.
-  await rejects(as(closeYear, "admin", {schoolYear: "2026-2027", expectedRevision: "0"}), "invalid-argument");
-  await as(closeYear, "admin", {schoolYear: "2026-2027"});
+  await rejects(
+    as(closeYear, "admin", {schoolYear: "2026-2027", confirmation: "CLOSE 2026-2027", expectedRevision: "0"}),
+    "invalid-argument",
+  );
+  const closeRace = await Promise.allSettled([
+    closeAcademicYearForActor(
+      uid("admin"),
+      accounts.admin.profile,
+      {schoolYear: "2026-2027", confirmation: "CLOSE 2026-2027", expectedRevision: 0},
+      {now: new Date("2027-06-01T03:00:00Z")},
+    ),
+    closeAcademicYearForActor(
+      uid("admin"),
+      accounts.admin.profile,
+      {schoolYear: "2026-2027", confirmation: "CLOSE 2026-2027", expectedRevision: 0},
+      {now: new Date("2027-06-01T03:00:00Z")},
+    ),
+  ]);
+  assert.equal(closeRace.filter((r) => r.status === "fulfilled").length, 1);
+  assert.equal(closeRace.filter((r) => r.status === "rejected").length, 1);
   await rejects(
     activateAcademicYearForActor(uid("admin"), accounts.admin.profile, {
       schoolYear: "2027-2028",

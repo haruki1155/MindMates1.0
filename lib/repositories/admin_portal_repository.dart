@@ -1149,7 +1149,7 @@ class AdminPortalRepository {
   bool? _extendedAcademicYearLifecycleEnabled;
 
   bool get isExtendedAcademicYearLifecycleEnabled =>
-      _extendedAcademicYearLifecycleEnabled ?? true;
+      _extendedAcademicYearLifecycleEnabled ?? false;
 
   Future<List<AcademicYearRecord>> _callAcademicYearAction(
     String callable,
@@ -1159,10 +1159,14 @@ class AdminPortalRepository {
       throw StateError('Administrator access is required.');
     }
     final data = await _callCallable(callable, payload);
-    final map = data is Map ? Map<String, dynamic>.from(data) : const <String, dynamic>{};
+    final map = data is Map
+        ? Map<String, dynamic>.from(data)
+        : const <String, dynamic>{};
     if (map['extendedLifecycleEnabled'] is bool) {
       _extendedAcademicYearLifecycleEnabled =
           map['extendedLifecycleEnabled'] as bool;
+    } else if (callable == 'getAcademicYears') {
+      _extendedAcademicYearLifecycleEnabled = false;
     }
     return _academicYears(map);
   }
@@ -1203,9 +1207,11 @@ class AdminPortalRepository {
   Future<List<AcademicYearRecord>> closeAcademicYear(
     String schoolYear, {
     int? expectedRevision,
+    String? confirmation,
   }) => _callAcademicYearAction('closeAcademicYear', {
     'schoolYear': schoolYear,
     'expectedRevision': ?expectedRevision,
+    'confirmation': ?confirmation,
   });
 
   Future<List<AcademicYearRecord>> voidAcademicYear({

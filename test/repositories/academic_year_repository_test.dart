@@ -84,7 +84,11 @@ void main() {
         copyPopulation: true,
       );
 
-      await repo.closeAcademicYear('2026-2027');
+      await repo.closeAcademicYear(
+        '2026-2027',
+        expectedRevision: 0,
+        confirmation: 'CLOSE 2026-2027',
+      );
 
       expect(calls[0].$1, 'getAcademicYears');
       expect(calls[0].$2, isEmpty);
@@ -97,7 +101,11 @@ void main() {
         'copyPopulation': true,
       });
       expect(calls[2].$1, 'closeAcademicYear');
-      expect(calls[2].$2, {'schoolYear': '2026-2027'});
+      expect(calls[2].$2, {
+        'schoolYear': '2026-2027',
+        'expectedRevision': 0,
+        'confirmation': 'CLOSE 2026-2027',
+      });
     },
   );
 
@@ -247,22 +255,45 @@ void main() {
   );
 
   test(
-    'createAcademicYear forwards expectedRevision and reinstateReason and fetchAcademicYears tracks extendedLifecycleEnabled',
+    'absent extendedLifecycleEnabled defaults and resets to false for Batch B1 compatibility',
     () async {
       final calls = <(String, Map<String, Object?>)>[];
+      var serverFlagResponse = <Object?, Object?>{};
       final repo = _RoleAwareTestRepository(
         role: AccessRole.admin,
         superAdmin: true,
         callableInvoker: (name, data) async {
           calls.add((name, data));
           return _m({
-            'extendedLifecycleEnabled': false,
+            ...serverFlagResponse,
             'years': <Object?>[],
           });
         },
       );
 
+      // Before any server call, extended lifecycle MUST default to false.
+      expect(repo.isExtendedAcademicYearLifecycleEnabled, isFalse);
+
+      // Legacy Batch B1 getAcademicYears response omits extendedLifecycleEnabled -> stays false.
       await repo.fetchAcademicYears(includeVoided: true);
+      expect(repo.isExtendedAcademicYearLifecycleEnabled, isFalse);
+
+      // Explicit true enables it.
+      serverFlagResponse = {'extendedLifecycleEnabled': true};
+      await repo.fetchAcademicYears(includeVoided: true);
+      expect(repo.isExtendedAcademicYearLifecycleEnabled, isTrue);
+
+      // Explicit false disables it.
+      serverFlagResponse = {'extendedLifecycleEnabled': false};
+      await repo.fetchAcademicYears(includeVoided: true);
+      expect(repo.isExtendedAcademicYearLifecycleEnabled, isFalse);
+
+      // Transition from true back to legacy absent response fails closed to false.
+      serverFlagResponse = {'extendedLifecycleEnabled': true};
+      await repo.fetchAcademicYears();
+      expect(repo.isExtendedAcademicYearLifecycleEnabled, isTrue);
+      serverFlagResponse = {};
+      await repo.fetchAcademicYears();
       expect(repo.isExtendedAcademicYearLifecycleEnabled, isFalse);
 
       await repo.createAcademicYear(
@@ -270,9 +301,12 @@ void main() {
         expectedRevision: 1,
         reinstateReason: 'Confirmed 2028 enrollment dates',
       );
-      expect(calls[1].$1, 'createAcademicYear');
-      expect(calls[1].$2['expectedRevision'], 1);
-      expect(calls[1].$2['reinstateReason'], 'Confirmed 2028 enrollment dates');
+      expect(calls.last.$1, 'createAcademicYear');
+      expect(calls.last.$2['expectedRevision'], 1);
+      expect(
+        calls.last.$2['reinstateReason'],
+        'Confirmed 2028 enrollment dates',
+      );
     },
   );
 }

@@ -739,6 +739,12 @@ export const getReportAnalytics = onCall(async (request) => {
   if (population.status === "voided") {
     throw new HttpsError("failed-precondition", "Voided academic years cannot be used in reporting.");
   }
+  if (population.status === "planned") {
+    throw new HttpsError("failed-precondition", "Planned academic years cannot generate official reports.");
+  }
+  if (population.exists && population.status === "unknown") {
+    throw new HttpsError("failed-precondition", "Academic year has an unrecognized status and cannot generate official reports.");
+  }
 
   const collegeNameById = new Map<string, string>();
   const collegeCodeById = new Map<string, string>();
@@ -917,9 +923,11 @@ export const getReportAnalytics = onCall(async (request) => {
   const moods = moodsSnapshot.docs.map((document) => document.data() as RecordData);
   const assessments = assessmentsSnapshot.docs.map((document) => document.data() as RecordData);
 
+  const hasReportableStatus =
+    population.status === "current" || population.status === "closed";
   const result = buildReportAnalytics(
-    scopedUsers,
-    scopedAppointments,
+    hasReportableStatus ? scopedUsers : [],
+    hasReportableStatus ? scopedAppointments : [],
     new Date(),
     {
       userCategory,
@@ -932,9 +940,9 @@ export const getReportAnalytics = onCall(async (request) => {
     },
     populationWithYears,
     {
-      moodEntries,
-      moods,
-      assessments,
+      moodEntries: hasReportableStatus ? moodEntries : [],
+      moods: hasReportableStatus ? moods : [],
+      assessments: hasReportableStatus ? assessments : [],
       collegeNameById,
       courseNameById,
       emotionalDepartmentOptions,

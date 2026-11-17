@@ -278,12 +278,13 @@ class _AcademicYearManagementPageState
       barrierDismissible: false,
       builder: (_) => _CloseAcademicYearDialog(
         schoolYear: year.schoolYear,
-        onConfirm: () async {
+        onConfirm: (confirmation) async {
           setState(() => _submitting = true);
           try {
             return await widget.repository.closeAcademicYear(
               year.schoolYear,
               expectedRevision: year.revision,
+              confirmation: confirmation,
             );
           } finally {
             if (mounted) {
@@ -943,7 +944,8 @@ class _CloseAcademicYearDialog extends StatefulWidget {
   });
 
   final String schoolYear;
-  final Future<List<AcademicYearRecord>> Function() onConfirm;
+  final Future<List<AcademicYearRecord>> Function(String confirmation)
+  onConfirm;
 
   @override
   State<_CloseAcademicYearDialog> createState() =>
@@ -964,13 +966,14 @@ class _CloseAcademicYearDialogState extends State<_CloseAcademicYearDialog> {
   }
 
   Future<void> _submit() async {
-    if (_confirmController.text.trim() != _expectedPhrase) return;
+    final confirmation = _confirmController.text.trim();
+    if (confirmation != _expectedPhrase) return;
     setState(() {
       _closing = true;
       _error = null;
     });
     try {
-      final updated = await widget.onConfirm();
+      final updated = await widget.onConfirm(confirmation);
       if (!mounted) return;
       Navigator.of(context).pop(updated);
     } catch (error) {
@@ -1491,6 +1494,10 @@ class _AcademicYearRowCard extends StatelessWidget {
         ],
       );
     }
+    final closeDisabledReason =
+        year.endDate.isNotEmpty && todayManila.compareTo(year.endDate) <= 0
+        ? 'Closure opens after ${year.endDate} (Asia/Manila: $todayManila).'
+        : null;
     return Column(
       crossAxisAlignment:
           compact ? CrossAxisAlignment.start : CrossAxisAlignment.end,
@@ -1501,13 +1508,24 @@ class _AcademicYearRowCard extends StatelessWidget {
           runSpacing: 8,
           children: [
             OutlinedButton.icon(
-              onPressed: busy ? null : onClose,
+              onPressed: busy || closeDisabledReason != null ? null : onClose,
               icon: const Icon(Icons.lock_outline, size: 16),
               label: const Text('Close year'),
             ),
             ?voidButton,
           ],
         ),
+        if (closeDisabledReason != null) ...[
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Text(
+              closeDisabledReason,
+              textAlign: compact ? TextAlign.left : TextAlign.right,
+              style: const TextStyle(fontSize: 12, color: AdminColors.muted),
+            ),
+          ),
+        ],
         ?voidDisabledNote,
       ],
     );

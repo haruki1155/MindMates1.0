@@ -123,6 +123,7 @@ export async function readPopulationConfig(schoolYear: string) {
     schoolYear,
     startDate: text(data?.startDate) || `${schoolYear.slice(0, 4)}-06-01`,
     endDate: text(data?.endDate) || `${Number(schoolYear.slice(5, 9))}-05-31`,
+    exists: snapshot.exists,
     status: snapshot.exists ? parseStoredAcademicYearStatus(data?.status) : ("unknown" as const),
     revision: snapshot.exists ? revisionOfAcademicYear(data) : 0,
     departments: [...REPORT_DEPARTMENTS],
@@ -346,7 +347,10 @@ export async function createAcademicYearForActor(
       },
     });
   });
-  return {years: await listAcademicYears({includeVoided: data.includeVoided === true})};
+  return {
+    years: await listAcademicYears({includeVoided: data.includeVoided === true}),
+    extendedLifecycleEnabled,
+  };
 }
 
 export const createAcademicYear = onCall(async (request) => {
@@ -404,7 +408,10 @@ export async function activateAcademicYearForActor(
       metadata: {academicYearId: schoolYear, revision: nextRevision, activatedOnManila: todayManila},
     });
   });
-  return {years: await listAcademicYears({includeVoided: data.includeVoided === true})};
+  return {
+    years: await listAcademicYears({includeVoided: data.includeVoided === true}),
+    extendedLifecycleEnabled,
+  };
 }
 
 export const activateAcademicYear = onCall(async (request) => {
@@ -417,46 +424,66 @@ export const activateAcademicYear = onCall(async (request) => {
   }
 });
 
+export async function closeAcademicYearForActor(
+  uid: string,
+  actor: FirebaseFirestore.DocumentData,
+  data: Record<string, unknown>,
+  options?: AcademicYearRuntimeOptions,
+) {
+  const {now, extendedLifecycleEnabled} = resolveRuntimeOptions(options);
+  const {schoolYear} = parseSchoolYear(data.schoolYear);
+  const todayManila = manilaTodayIso(now);
+  const reference = config(schoolYear);
+  await db.runTransaction(async (tx) => {
+    const [snapshot, taggedAppointments] = await Promise.all([
+      tx.get(reference),
+      tx.get(db.collection("appointments").where("academicYearId", "==", schoolYear).limit(500)),
+    ]);
+    const raw = snapshot.exists ? snapshot.data() ?? {} : null;
+    const record = raw ? toAcademicYearRecord(snapshot.id, raw) : null;
+    const {nextRevision} = validateAcademicYearClose({
+      target: record,
+      todayManila,
+      confirmation: data.confirmation,
+      expectedRevision: data.expectedRevision,
+    });
+    const popMap = raw?.populations && typeof raw.populations === "object" ? raw.populations : {};
+    tx.update(reference, {
+      status: "closed",
+      closedAt: FieldValue.serverTimestamp(),
+      closedBy: uid,
+      revision: nextRevision,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: uid,
+    });
+    writeAudit(tx, db, {
+      actorId: uid,
+      actorNameSnapshot: actorName(actor),
+      actorRoleSnapshot: roleOf(actor),
+      action: "ACADEMIC_YEAR_CLOSED",
+      category: AUDIT_CATEGORIES.system,
+      targetType: "academic_year",
+      targetId: schoolYear,
+      metadata: {
+        academicYearId: schoolYear,
+        revision: nextRevision,
+        closedOnManila: todayManila,
+        historicalAppointmentsCount: taggedAppointments.size,
+        populationDepartmentsConfigured: Object.keys(popMap).length,
+      },
+    });
+  });
+  return {
+    years: await listAcademicYears({includeVoided: data.includeVoided === true}),
+    extendedLifecycleEnabled,
+  };
+}
+
 export const closeAcademicYear = onCall(async (request) => {
   const uid = requireUid(request);
   const actor = await requireActiveAdmin(uid);
   try {
-    const {schoolYear} = parseSchoolYear(request.data?.schoolYear);
-    const expectedRevision = parseOptionalExpectedRevision(request.data?.expectedRevision);
-    const reference = config(schoolYear);
-    await db.runTransaction(async (tx) => {
-      const [snapshot, taggedAppointments] = await Promise.all([
-        tx.get(reference),
-        tx.get(db.collection("appointments").where("academicYearId", "==", schoolYear).limit(500)),
-      ]);
-      const data = snapshot.exists ? snapshot.data() ?? {} : null;
-      const {nextRevision} = validateAcademicYearClose(data, expectedRevision);
-      const popMap = data?.populations && typeof data.populations === "object" ? data.populations : {};
-      tx.update(reference, {
-        status: "closed",
-        closedAt: FieldValue.serverTimestamp(),
-        closedBy: uid,
-        revision: nextRevision,
-        updatedAt: FieldValue.serverTimestamp(),
-        updatedBy: uid,
-      });
-      writeAudit(tx, db, {
-        actorId: uid,
-        actorNameSnapshot: actorName(actor),
-        actorRoleSnapshot: roleOf(actor),
-        action: "ACADEMIC_YEAR_CLOSED",
-        category: AUDIT_CATEGORIES.system,
-        targetType: "academic_year",
-        targetId: schoolYear,
-        metadata: {
-          academicYearId: schoolYear,
-          revision: nextRevision,
-          historicalAppointmentsCount: taggedAppointments.size,
-          populationDepartmentsConfigured: Object.keys(popMap).length,
-        },
-      });
-    });
-    return {years: await listAcademicYears({includeVoided: request.data?.includeVoided === true})};
+    return await closeAcademicYearForActor(uid, actor, (request.data ?? {}) as Record<string, unknown>);
   } catch (error) {
     rethrowAcademicYearError(error);
   }
@@ -566,7 +593,10 @@ export async function voidAcademicYearForActor(
       },
     });
   });
-  return {years: await listAcademicYears({includeVoided: data.includeVoided === true})};
+  return {
+    years: await listAcademicYears({includeVoided: data.includeVoided === true}),
+    extendedLifecycleEnabled,
+  };
 }
 
 export const voidAcademicYear = onCall(async (request) => {

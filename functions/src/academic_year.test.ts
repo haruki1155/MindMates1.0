@@ -90,17 +90,43 @@ test("validateAcademicYearAgainstExisting rejects duplicates, active-year duplic
   );
 });
 
-test("validateAcademicYearClose rejects missing or non-current years and malformed revisions", () => {
-  rejects(() => validateAcademicYearClose(null), "not-found");
-  rejects(() => validateAcademicYearClose({status: "closed"}), "failed-precondition");
-  rejects(() => validateAcademicYearClose({status: "planned"}), "failed-precondition");
-  rejects(() => validateAcademicYearClose({status: "voided"}), "failed-precondition");
-  rejects(() => validateAcademicYearClose({status: "unknown"}), "failed-precondition");
-  rejects(() => validateAcademicYearClose({status: "legacy_corrupted"}), "failed-precondition");
-  rejects(() => validateAcademicYearClose({status: "current"}, "0" as unknown as number), "invalid-argument");
-  rejects(() => validateAcademicYearClose({status: "current"}, -1), "invalid-argument");
-  rejects(() => validateAcademicYearClose({status: "current"}, 1.5), "invalid-argument");
-  validateAcademicYearClose({status: "current"});
+test("validateAcademicYearClose enforces end-date Manila boundary, confirmation, revision, and current status", () => {
+  const currentTarget = {
+    schoolYear: "2026-2027",
+    startDate: "2026-06-01",
+    endDate: "2027-05-31",
+    status: "current",
+    revision: 2,
+  };
+  const baseValid = {
+    target: currentTarget,
+    todayManila: "2027-06-01",
+    confirmation: "CLOSE 2026-2027",
+    expectedRevision: 2,
+  };
+
+  rejects(() => validateAcademicYearClose({...baseValid, target: null}), "not-found");
+  rejects(() => validateAcademicYearClose({...baseValid, target: {...currentTarget, status: "closed"}}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({...baseValid, target: {...currentTarget, status: "planned"}}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({...baseValid, target: {...currentTarget, status: "voided"}}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({...baseValid, target: {...currentTarget, status: "unknown"}}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({...baseValid, target: {...currentTarget, status: "legacy_corrupted"}}), "failed-precondition");
+
+  // Cannot close before or on the approved end date (Manila UTC+8).
+  rejects(() => validateAcademicYearClose({...baseValid, todayManila: "2026-11-17"}), "failed-precondition");
+  rejects(() => validateAcademicYearClose({...baseValid, todayManila: "2027-05-31"}), "failed-precondition");
+
+  // Confirmation & revision checks.
+  rejects(() => validateAcademicYearClose({...baseValid, confirmation: "close 2026-2027"}), "invalid-argument");
+  rejects(() => validateAcademicYearClose({...baseValid, confirmation: ""}), "invalid-argument");
+  rejects(() => validateAcademicYearClose({...baseValid, expectedRevision: "2"}), "invalid-argument");
+  rejects(() => validateAcademicYearClose({...baseValid, expectedRevision: -1}), "invalid-argument");
+  rejects(() => validateAcademicYearClose({...baseValid, expectedRevision: 1.5}), "invalid-argument");
+  rejects(() => validateAcademicYearClose({...baseValid, expectedRevision: 1}), "aborted");
+  rejects(() => validateAcademicYearClose({...baseValid, expectedRevision: undefined}), "aborted");
+
+  const ok = validateAcademicYearClose(baseValid);
+  assert.equal(ok.nextRevision, 3);
 });
 
 test("academicYearPeriodState distinguishes planned, current, upcoming, closed, voided and unknown", () => {

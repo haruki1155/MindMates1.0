@@ -303,14 +303,21 @@ export function validateAcademicYearActivation(input: {
   return {nextRevision: currentRevision + 1};
 }
 
-export function validateAcademicYearClose(
-  existing: {status?: unknown; revision?: unknown} | null,
-  expectedRevision?: unknown,
-): {nextRevision: number} {
-  if (!existing) {
+export function validateAcademicYearClose(input: {
+  target: (Omit<AcademicYearSummary, "endDate" | "status" | "revision"> & {
+    endDate?: unknown;
+    status?: unknown;
+    revision?: unknown;
+  }) | null;
+  todayManila: string;
+  confirmation: unknown;
+  expectedRevision?: unknown;
+}): {nextRevision: number} {
+  const {target, todayManila, confirmation} = input;
+  if (!target) {
     throw new AcademicYearError("not-found", "Academic year not found.");
   }
-  const status = parseStoredAcademicYearStatus(existing.status);
+  const status = parseStoredAcademicYearStatus(target.status);
   if (status === "closed") {
     throw new AcademicYearError("failed-precondition", "This academic year is already closed.");
   }
@@ -323,9 +330,23 @@ export function validateAcademicYearClose(
   if (status !== "current") {
     throw new AcademicYearError("failed-precondition", "Academic year has an unrecognized status and cannot be closed.");
   }
-  const currentRevision = revisionOfAcademicYear(existing);
-  const parsedExpectedRevision = parseOptionalExpectedRevision(expectedRevision);
-  if (parsedExpectedRevision !== undefined && parsedExpectedRevision !== currentRevision) {
+  const parsedExpectedRevision = parseOptionalExpectedRevision(input.expectedRevision);
+  const endDate = text(target.endDate);
+  if (!isValidIsoDate(endDate)) {
+    throw new AcademicYearError("failed-precondition", "Stored academic year end date is invalid.");
+  }
+  if (todayManila <= endDate) {
+    throw new AcademicYearError(
+      "failed-precondition",
+      `Cannot close current academic year ${target.schoolYear} until after its approved end date (${endDate} Asia/Manila; today is ${todayManila} Asia/Manila).`,
+    );
+  }
+  const expectedConfirmation = `CLOSE ${target.schoolYear}`;
+  if (text(confirmation) !== expectedConfirmation) {
+    throw new AcademicYearError("invalid-argument", `Type "${expectedConfirmation}" to confirm closing.`);
+  }
+  const currentRevision = revisionOfAcademicYear(target);
+  if (parsedExpectedRevision === undefined || parsedExpectedRevision !== currentRevision) {
     throw new AcademicYearError("aborted", "This academic year changed concurrently. Reload and try again.");
   }
   return {nextRevision: currentRevision + 1};
