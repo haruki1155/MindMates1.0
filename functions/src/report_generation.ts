@@ -949,9 +949,9 @@ export const getReportAnalytics = onCall(async (request) => {
       programOptionsByCollege,
     },
   );
-  const reportableYears = years.filter(
-    (year) => year.status === "current" || year.status === "closed",
-  );
+  const reportableYears = hasReportableStatus
+    ? years.filter((year) => year.status === "current" || year.status === "closed")
+    : [];
   const previousYear = reportableYears
     .filter((year) => year.schoolYear < schoolYear)
     .sort((a, b) => b.schoolYear.localeCompare(a.schoolYear))[0];

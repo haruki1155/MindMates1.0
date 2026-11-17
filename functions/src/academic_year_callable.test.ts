@@ -246,8 +246,8 @@ test("full lifecycle: Manila horizon, planned -> active -> closed, and closed im
   const missingReport = await as(fetchReport, "counselor", {schoolYear: "2099-2100"});
   assert.equal(missingReport.report.population.status, "unknown");
   assert.equal(missingReport.report.appointments.totalAppointments, 0);
-  assert.equal(missingReport.report.trends.some((t) => t.schoolYear === "2027-2028"), false);
-  assert.equal(missingReport.report.trends.some((t) => t.schoolYear === "2025-2026"), false);
+  assert.equal(missingReport.report.comparison, null);
+  assert.equal(missingReport.report.trends.length, 0);
 
   const preActivationReport = await as(fetchReport, "counselor", {schoolYear: "2026-2027"});
   assert.equal(preActivationReport.report.trends.some((t) => t.schoolYear === "2027-2028"), false);
