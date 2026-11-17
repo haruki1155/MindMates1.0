@@ -109,7 +109,7 @@ jobs:
           GCLOUD_PROJECT: demo-mindmate-mood-v2
         run: |
           FIREBASE_BIN="$RUNNER_TEMP/fn-firebase-tools/node_modules/.bin/firebase"
-          "$FIREBASE_BIN" emulators:exec --config firebase.mood-v2.emulators.json --project demo-mindmate-mood-v2 --only auth,firestore,functions "cd functions && npm test"
+          "$FIREBASE_BIN" emulators:exec --config firebase.mood-v2.emulators.json --project demo-mindmate-mood-v2 --only auth,firestore,functions,storage "cd functions && npm test"
 
   production-release:
     if: github.event_name == 'workflow_dispatch' && inputs.build_production_release

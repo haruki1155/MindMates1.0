@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import * as functions from "./index";
+import {ensureAuthUser} from "./test_auth_helper";
 
 type Input = Record<string, unknown>;
 const db = getFirestore();
@@ -19,6 +20,7 @@ async function seed(id: string, status = "confirmed") {
   const a = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 1);
   const b = a + 3600000;
   const c = a + 7200000;
+  await ensureAuthUser(staff, true);
   await db.doc(`users/${staff}`).set({accessRole: "admin"});
   await db.doc("pacc_availability/current").set({openDays: [1,2,3,4,5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, blackoutDates: []});
   await db.doc(`appointments/${id}`).set({userId: student, status, scheduledAt: Timestamp.fromMillis(a), scheduledTime: "09:00 AM", scheduleRevision: 0, concern: "PRIVATE CONCERN"});

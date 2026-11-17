@@ -64,11 +64,11 @@ test("counselors cannot edit administrator-curated insight configuration", async
     await setDoc(doc(context.firestore(), "users/admin"), profile("admin", "admin"));
   });
   await assertFails(setDoc(
-    doc(environment.authenticatedContext("counselor").firestore(), "insight_categories/cat-1"),
+    doc(environment.authenticatedContext("counselor", {email_verified: true}).firestore(), "insight_categories/cat-1"),
     {name: "Private category"},
   ));
   await assertSucceeds(setDoc(
-    doc(environment.authenticatedContext("admin").firestore(), "insight_categories/cat-1"),
+    doc(environment.authenticatedContext("admin", {email_verified: true}).firestore(), "insight_categories/cat-1"),
     {name: "Curated category"},
   ));
 });

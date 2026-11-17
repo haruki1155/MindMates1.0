@@ -3,6 +3,7 @@ import {after, before, test} from "node:test";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {respondToAppointment, reviewAppointment} from "./index";
+import {ensureAuthUser} from "./test_auth_helper";
 
 type Callable = {run: (request: {auth?: {uid: string}; data?: Record<string, unknown>}) => Promise<unknown>};
 const db = getFirestore();
@@ -61,6 +62,10 @@ async function setOpenSchedule(): Promise<void> {
 before(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("FIRESTORE_EMULATOR_HOST is required for appointment callable tests.");
   await Promise.all([
+    ensureAuthUser(adminId, true),
+    ensureAuthUser(counselorId, true),
+    ensureAuthUser(otherCounselorId, true),
+    ensureAuthUser(portalStaffId, true),
     db.collection("users").doc(studentId).set({accessRole: "appUser"}), db.collection("users").doc(adminId).set({accessRole: "admin", name: "Test Admin"}),
     db.collection("users").doc(counselorId).set({accessRole: "counselor", name: "Assigned Counselor"}), db.collection("users").doc(otherCounselorId).set({accessRole: "counselor", name: "Other Counselor"}),
     db.collection("users").doc(portalStaffId).set({accessRole: "portalStaff", name: "Portal Staff"}), setOpenSchedule(),

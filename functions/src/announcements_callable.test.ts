@@ -28,7 +28,7 @@ test("transaction persists publication and audit atomically and checks current r
 test("HTTP wrapper denies missing/unverified/ineligible identities and publishes with audit", {skip: !process.env.FIRESTORE_EMULATOR_HOST}, async () => {
   // Unsigned synthetic tokens are accepted only by Firebase Admin's explicit Auth-emulator mode.
   const previousAuthHost = process.env.FIREBASE_AUTH_EMULATOR_HOST;
-  process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:19099";
+  process.env.FIREBASE_AUTH_EMULATOR_HOST = previousAuthHost ?? "127.0.0.1:9099";
   const app = initializeApp({projectId:"demo-announcements"});
   const db = getFirestore(app);
   const httpApp = express();
