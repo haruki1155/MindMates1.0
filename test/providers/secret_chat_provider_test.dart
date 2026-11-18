@@ -23,6 +23,18 @@ void main() {
     expect(provider.errorMessage, contains('mental health'));
   });
 
+  test('a rejected read receipt does not surface as an error', () async {
+    final repository = _FakeSecretChatRepository()
+      ..readReceiptError = Exception('permission-denied');
+    final provider = SecretChatProvider(repository);
+    await provider.loadPosts();
+
+    await provider.recordUniqueRead('post_1');
+
+    expect(provider.errorMessage, isNull);
+    expect(provider.posts, hasLength(1));
+  });
+
   test('allowed post is added to Mine', () async {
     final repository = _FakeSecretChatRepository();
     final provider = SecretChatProvider(repository);
@@ -277,6 +289,7 @@ class _FakeSecretChatRepository extends SecretChatRepository {
   final SecretChatProfileStats stats;
   List<SecretChatModel> recentPosts;
   final Object? deleteError;
+  Object? readReceiptError;
   int activityLoads = 0;
   final deletedPostIds = <String>[];
   final createdMessages = <String>[];
@@ -320,6 +333,12 @@ class _FakeSecretChatRepository extends SecretChatRepository {
   Future<void> deletePost(SecretChatModel post) async {
     if (deleteError != null) throw deleteError!;
     deletedPostIds.add(post.id);
+  }
+
+  @override
+  Future<SecretChatModel> recordUniqueRead(SecretChatModel post) async {
+    if (readReceiptError != null) throw readReceiptError!;
+    return post;
   }
 
   @override
