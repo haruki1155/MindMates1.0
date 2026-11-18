@@ -3,7 +3,11 @@ export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callabl
 export {acknowledgeInquiry, escalateInquiry, reassignInquiry, routeExistingInquiries, setInquiryStatus} from "./inquiry_routing_service";
 import {routeInquiry, syncInquiryStatusProjection} from "./inquiry_routing_service";
 export {replyToInquiry, setInquirySla, takeOverInquiry} from "./inquiry_sla_service";
-export {getAppointmentForApproval, listAppointmentApprovals} from "./appointment_approval_service";
+export {
+  backfillAppointmentCollegeScope,
+  getAppointmentForApproval,
+  listAppointmentApprovals,
+} from "./appointment_approval_service";
 import {
   appointmentPortalRecipients,
   approvalHistoryFields,

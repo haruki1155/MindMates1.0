@@ -4,6 +4,10 @@ import {getAuth} from "firebase-admin/auth";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {
+  backfillAppointmentCollegeScopeBatch,
+} from "./appointment_approval_service";
+import {
+  backfillAppointmentCollegeScope,
   createAppointmentRequest,
   getAppointmentForApproval,
   listAppointmentApprovals,
@@ -147,4 +151,113 @@ test("createAppointmentRequest stores authoritative collegeId and studentVerific
   const afterSync = (await db.doc(`appointments/${apptId}`).get()).data()!;
   assert.equal(afterSync.collegeId, cas);
   assert.equal(afterSync.studentVerificationStatus, "verified");
+  await db.doc(`appointments/${apptId}`).delete().catch(() => undefined);
+});
+
+test("backfillAppointmentCollegeScope populates legacy records boundedly, idempotently, and super-admin-only", {skip: !emulated}, async () => {
+  const nonSuperAdminId = uid("non-super-admin");
+  await getAuth().createUser({uid: nonSuperAdminId, email: `${nonSuperAdminId}@example.invalid`, emailVerified: true});
+  await db.doc(`users/${nonSuperAdminId}`).set({accessRole: "admin", accountStatus: "active", name: "Other Admin"});
+  const verifiedStudentId = uid("legacy-verified-student");
+  await db.doc(`users/${verifiedStudentId}`).set({
+    accessRole: "appUser", role: "student", collegeId: cite, verificationStatus: "verified",
+  });
+
+  const legacyCiteAppt = `${prefix}-legacy-cite`;
+  const legacyUnverifiedAppt = `${prefix}-legacy-unverified`;
+  const legacyWalkInAppt = `${prefix}-legacy-walkin`;
+  await Promise.all([
+    db.doc(`appointments/${legacyCiteAppt}`).set({
+      userId: verifiedStudentId,
+      fullName: "Legacy Verified CITE",
+      status: "completed",
+      scheduledAt: Timestamp.fromMillis(Date.now() - 86_400_000),
+    }),
+    db.doc(`appointments/${legacyUnverifiedAppt}`).set({
+      userId: uid("studentUnverified"),
+      fullName: "Legacy Unverified",
+      status: "requested",
+      scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+    }),
+    db.doc(`appointments/${legacyWalkInAppt}`).set({
+      userId: "",
+      fullName: "Legacy Walk-In",
+      collegeId: cite,
+      source: "walk_in_import",
+      status: "completed",
+      scheduledAt: Timestamp.fromMillis(Date.now() - 86_400_000),
+    }),
+  ]);
+
+  try {
+    // Non-super admin, counselor, and student are denied.
+    for (const actorUid of [nonSuperAdminId, uid("counselor"), uid("studentVerified")]) {
+      await assert.rejects(
+        (backfillAppointmentCollegeScope as unknown as Callable).run({auth: {uid: actorUid}, data: {}}),
+        {code: "permission-denied"},
+      );
+    }
+
+    // Before backfill: legacy CITE appointment is missing scoping fields.
+    const preQuery = await db.collection("appointments")
+      .where("studentVerificationStatus", "==", "verified")
+      .where("collegeId", "in", [cite])
+      .get();
+    assert.ok(!preQuery.docs.some((d) => d.id === legacyCiteAppt));
+
+    // Paginated backfill (limit 1, pageSize 2) processes across multiple pages cleanly.
+    const updates: number[] = [];
+    let cursor: string | null = null;
+    let guard = 0;
+    do {
+      const page = await backfillAppointmentCollegeScopeBatch(uid("admin"), {
+        limit: 1,
+        pageSize: 2,
+        maxPages: 2,
+        cursor,
+      });
+      updates.push(page.updated);
+      cursor = page.nextCursor;
+      guard += 1;
+    } while (cursor && guard < 20);
+    assert.ok(updates.reduce((a, b) => a + b, 0) >= 3);
+
+    const citeAfter = (await db.doc(`appointments/${legacyCiteAppt}`).get()).data()!;
+    assert.equal(citeAfter.collegeId, cite);
+    assert.equal(citeAfter.studentVerificationStatus, "verified");
+
+    const unvAfter = (await db.doc(`appointments/${legacyUnverifiedAppt}`).get()).data()!;
+    assert.equal(unvAfter.collegeId, cite);
+    assert.equal(unvAfter.studentVerificationStatus, "needsReview");
+
+    const walkInAfter = (await db.doc(`appointments/${legacyWalkInAppt}`).get()).data()!;
+    assert.equal(walkInAfter.collegeId, cite);
+    assert.equal(walkInAfter.studentVerificationStatus, "");
+
+    // After backfill: counselor college query includes the historical CITE appointment,
+    // while excluding unverified students and walk-in rows.
+    const postQuery = await db.collection("appointments")
+      .where("studentVerificationStatus", "==", "verified")
+      .where("collegeId", "in", [cite])
+      .get();
+    assert.ok(postQuery.docs.some((d) => d.id === legacyCiteAppt));
+    assert.ok(!postQuery.docs.some((d) => d.id === legacyUnverifiedAppt));
+    assert.ok(!postQuery.docs.some((d) => d.id === legacyWalkInAppt));
+
+    // Re-running backfill is idempotent (0 updates).
+    const rerun = await (backfillAppointmentCollegeScope as unknown as Callable).run({
+      auth: {uid: uid("admin")},
+      data: {limit: 200},
+    });
+    assert.equal(rerun.updated, 0);
+  } finally {
+    await getAuth().deleteUser(nonSuperAdminId).catch(() => undefined);
+    await db.doc(`users/${nonSuperAdminId}`).delete().catch(() => undefined);
+    await db.doc(`users/${verifiedStudentId}`).delete().catch(() => undefined);
+    await Promise.all([
+      db.doc(`appointments/${legacyCiteAppt}`).delete().catch(() => undefined),
+      db.doc(`appointments/${legacyUnverifiedAppt}`).delete().catch(() => undefined),
+      db.doc(`appointments/${legacyWalkInAppt}`).delete().catch(() => undefined),
+    ]);
+  }
 });

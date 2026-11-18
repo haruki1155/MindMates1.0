@@ -2,7 +2,7 @@ import {getAuth} from "firebase-admin/auth";
 import {FieldPath, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 
-import {configuredSuperAdminUid, requireStaff, requireUid} from "./access";
+import {configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid} from "./access";
 import {AUDIT_CATEGORIES, actorName, writeAuditBatch} from "./audit";
 import {
   ApprovalAuthority,
@@ -552,6 +552,181 @@ export async function syncStudentAppointmentsCollegeScope(
   }
   return stale.length;
 }
+
+export type BackfillAppointmentCollegeScopeOptions = {
+  limit?: number;
+  cursor?: string | null;
+  pageSize?: number;
+  maxPages?: number;
+};
+
+export type BackfillAppointmentCollegeScopeResult = {
+  ok: true;
+  scanned: number;
+  updated: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+  done: boolean;
+  truncated: boolean;
+};
+
+/**
+ * Bounded, resumable, idempotent backfill that populates `collegeId` and
+ * `studentVerificationStatus` on legacy appointment records from the owning
+ * student's authoritative user profile. Restricted to the configured
+ * super-administrator and audited in `admin_audit_logs`.
+ */
+export async function backfillAppointmentCollegeScopeBatch(
+  uid: string,
+  options: BackfillAppointmentCollegeScopeOptions = {},
+): Promise<BackfillAppointmentCollegeScopeResult> {
+  const actor = await requireSuperAdmin(uid);
+  const role = String(actor.accessRole ?? "admin");
+  let cursor = options.cursor ?? null;
+  if (cursor !== null && !ID.test(cursor)) {
+    throw new HttpsError("invalid-argument", "Invalid continuation cursor.");
+  }
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 100), 1), 200);
+  const pageSize = Math.min(Math.max(Math.trunc(options.pageSize ?? 200), 1), 500);
+  const maxPages = Math.min(Math.max(Math.trunc(options.maxPages ?? 5), 1), 10);
+
+  const studentScopeCache = new Map<string, Promise<{collegeId: string; verificationStatus: string}>>();
+  const loadStudentScope = (studentId: string) => {
+    if (!studentScopeCache.has(studentId)) {
+      studentScopeCache.set(studentId, (async () => {
+        const snap = await db().collection("users").doc(studentId).get();
+        const userData = snap.exists ? snap.data() ?? {} : {};
+        return {
+          collegeId: typeof userData.collegeId === "string" ? userData.collegeId.trim() : "",
+          verificationStatus: typeof userData.verificationStatus === "string"
+            ? userData.verificationStatus.trim()
+            : "",
+        };
+      })());
+    }
+    return studentScopeCache.get(studentId)!;
+  };
+
+  const pendingUpdates: Array<{
+    ref: FirebaseFirestore.DocumentReference;
+    collegeId: string;
+    studentVerificationStatus: string;
+  }> = [];
+  let scanned = 0;
+
+  const commitAndAudit = async (
+    nextCursor: string | null,
+    hasMore: boolean,
+  ): Promise<BackfillAppointmentCollegeScopeResult> => {
+    for (let i = 0; i < pendingUpdates.length; i += 400) {
+      const batch = db().batch();
+      for (const item of pendingUpdates.slice(i, i + 400)) {
+        batch.update(item.ref, {
+          collegeId: item.collegeId,
+          studentVerificationStatus: item.studentVerificationStatus,
+        });
+      }
+      await batch.commit();
+    }
+    const auditBatch = db().batch();
+    writeAuditBatch(auditBatch, db(), {
+      actorId: uid,
+      actorNameSnapshot: actorName(actor),
+      actorRoleSnapshot: role,
+      action: "APPOINTMENT_COLLEGE_SCOPE_BACKFILLED",
+      category: AUDIT_CATEGORIES.security,
+      targetType: "appointment",
+      targetId: "college_scope_backfill",
+      metadata: {
+        scanned,
+        updated: pendingUpdates.length,
+        hasMore,
+        done: !hasMore,
+        page: options.cursor ? "next" : "first",
+      },
+    });
+    await auditBatch.commit();
+    return {
+      ok: true,
+      scanned,
+      updated: pendingUpdates.length,
+      nextCursor,
+      hasMore,
+      done: !hasMore,
+      truncated: hasMore,
+    };
+  };
+
+  for (let page = 0; page < maxPages; page++) {
+    let query = db()
+      .collection("appointments")
+      .orderBy(FieldPath.documentId())
+      .limit(pageSize);
+    if (cursor) query = query.startAfter(cursor);
+    const snapshot = await query.get();
+    if (snapshot.empty) {
+      return commitAndAudit(null, false);
+    }
+    for (let i = 0; i < snapshot.docs.length; i++) {
+      const doc = snapshot.docs[i];
+      scanned += 1;
+      cursor = doc.id;
+      const data = doc.data();
+      const studentId = typeof data.userId === "string" ? data.userId.trim() : "";
+      let nextCollegeId = "";
+      let nextVerificationStatus = "";
+      if (ID.test(studentId)) {
+        const resolved = await loadStudentScope(studentId);
+        nextCollegeId = resolved.collegeId;
+        nextVerificationStatus = resolved.verificationStatus;
+      } else {
+        // Walk-in or ownerless appointments retain any existing collegeId but
+        // are never promoted to a verified student status.
+        nextCollegeId = typeof data.collegeId === "string" ? data.collegeId.trim() : "";
+        nextVerificationStatus = "";
+      }
+      if (data.collegeId !== nextCollegeId || data.studentVerificationStatus !== nextVerificationStatus) {
+        pendingUpdates.push({
+          ref: doc.ref,
+          collegeId: nextCollegeId,
+          studentVerificationStatus: nextVerificationStatus,
+        });
+      }
+      if (pendingUpdates.length >= limit) {
+        const hasMore = i < snapshot.docs.length - 1 || snapshot.docs.length === pageSize;
+        return commitAndAudit(hasMore ? cursor : null, hasMore);
+      }
+    }
+    if (snapshot.docs.length < pageSize) {
+      return commitAndAudit(null, false);
+    }
+  }
+  return commitAndAudit(cursor, true);
+}
+
+export const backfillAppointmentCollegeScope = onCall(async (request) => {
+  const uid = requireUid(request);
+  const rawData = request.data;
+  if (rawData != null && (typeof rawData !== "object" || Array.isArray(rawData))) {
+    throw new HttpsError("invalid-argument", "Invalid backfill request.");
+  }
+  const input = (rawData ?? {}) as {limit?: unknown; cursor?: unknown};
+  let cursor: string | null = null;
+  if (input.cursor != null && input.cursor !== "") {
+    if (typeof input.cursor !== "string" || !ID.test(input.cursor.trim())) {
+      throw new HttpsError("invalid-argument", "Invalid continuation cursor.");
+    }
+    cursor = input.cursor.trim();
+  }
+  let limit = 100;
+  if (input.limit !== undefined && input.limit !== null) {
+    if (typeof input.limit !== "number" || !Number.isInteger(input.limit) || input.limit < 1 || input.limit > 200) {
+      throw new HttpsError("invalid-argument", "Limit must be an integer between 1 and 200.");
+    }
+    limit = input.limit;
+  }
+  return backfillAppointmentCollegeScopeBatch(uid, {limit, cursor});
+});
 
 /**
  * Retrieves an authorized single pending appointment for review when it is not

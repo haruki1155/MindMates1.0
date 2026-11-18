@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {after, before, beforeEach, test} from "node:test";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
@@ -239,6 +240,30 @@ test("super-admin accesses appointments within administrative scope including un
   await assertFails(getDoc(doc(counselor, "appointments/appointment-unverified")));
   await assertFails(getDoc(doc(counselor, "appointments/appointment-unverified/history/terminal")));
   await assertFails(getDoc(doc(counselor, "appointments/appointment-unverified/clinical_notes/session")));
+
+  // Legacy verified-student appointment missing projection fields: readable via direct get
+  // (live student profile), excluded from list until backfilled with scoping fields.
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "appointments/appointment-legacy"), {
+      userId: "student",
+      status: "completed",
+      concern: "Legacy record",
+    });
+  });
+  await assertSucceeds(getDoc(doc(counselor, "appointments/appointment-legacy")));
+  await assertFails(getDocs(query(collection(counselor, "appointments"), where("userId", "==", "student"))));
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "appointments/appointment-legacy"), {
+      collegeId: "cite",
+      studentVerificationStatus: "verified",
+    }, {merge: true});
+  });
+  const backfilledList = await assertSucceeds(getDocs(query(
+    collection(counselor, "appointments"),
+    where("studentVerificationStatus", "==", "verified"),
+    where("collegeId", "in", ["cite"]),
+  )));
+  assert.ok(backfilledList.docs.some((d) => d.id === "appointment-legacy"));
 });
 
 test("direct appointment revision, schedule, and reservation mutations are denied", async () => {
