@@ -3,6 +3,11 @@
 
 name: Deploy staging Firebase Hosting preview on PR
 on: pull_request
+
+# Cancel redundant deployments for the same PR without affecting other PRs.
+concurrency:
+  group: firebase-hosting-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 permissions:
   checks: write
   contents: read
@@ -48,3 +53,6 @@ jobs:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING }}
           projectId: mindmate-staging
+          # Temporary previews expire sooner to reduce retained channels.
+          # This cannot resolve an already-exhausted Firebase quota immediately.
+          expires: 1d
