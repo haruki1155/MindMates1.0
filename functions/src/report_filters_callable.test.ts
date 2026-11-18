@@ -54,7 +54,8 @@ const progA2 = `${prefix} BS Computer Science`;
 const progB1 = `${prefix} BS Civil Engineering`;
 
 const accounts: Record<string, {verified: boolean; profile: Record<string, unknown>}> = {
-  admin: {verified: true, profile: {accessRole: "admin", accountStatus: "active"}},
+  "super-admin": {verified: true, profile: {accessRole: "admin", accountStatus: "active", name: "Super Admin"}},
+  admin: {verified: true, profile: {accessRole: "admin", accountStatus: "active", name: "Regular Admin"}},
   "counselor-a": {
     verified: true,
     profile: {
@@ -82,8 +83,12 @@ async function rejects(promise: Promise<unknown>, code: string) {
   await assert.rejects(promise, (e: unknown) => e instanceof HttpsError && e.code === code);
 }
 
+let previousSuperAdmin: string | undefined;
+
 before(async () => {
   if (!emulated) return;
+  previousSuperAdmin = process.env.SUPER_ADMIN_UID;
+  process.env.SUPER_ADMIN_UID = uid("super-admin");
   await Promise.all([
     db.doc(`colleges/${collegeAId}`).set({name: collegeAName, code: "CCS", active: true}),
     db.doc(`colleges/${collegeBId}`).set({name: collegeBName, code: "COE", active: true}),
@@ -132,6 +137,7 @@ before(async () => {
     await db.doc(`users/${id}`).set({
       accessRole: "appUser",
       populationRole: "student",
+      verificationStatus: "verified",
       collegeId: collegeAId,
       department: collegeAName,
       course: progA1,
@@ -162,6 +168,7 @@ before(async () => {
     await db.doc(`users/${id}`).set({
       accessRole: "appUser",
       populationRole: "student",
+      verificationStatus: "verified",
       collegeId: collegeAId,
       department: collegeAName,
       course: progA2,
@@ -199,6 +206,7 @@ before(async () => {
     await db.doc(`users/${id}`).set({
       accessRole: "appUser",
       populationRole: "student",
+      verificationStatus: "verified",
       collegeId: collegeBId,
       department: collegeBName,
       course: progB1,
@@ -212,10 +220,50 @@ before(async () => {
       scheduledAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
     });
   }
+
+  // Unverified College A student and moved student (now in College B, old appointment still lists College A).
+  await db.doc(`users/${uid("unverified-a")}`).set({
+    accessRole: "appUser",
+    populationRole: "student",
+    verificationStatus: "needsReview",
+    collegeId: collegeAId,
+    department: collegeAName,
+    course: progA1,
+    lastActiveAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
+  });
+  await db.doc(`appointments/${prefix}-ap-unverified-a`).set({
+    userId: uid("unverified-a"),
+    collegeId: collegeAId,
+    department: collegeAName,
+    course: progA1,
+    status: "completed",
+    academicYearId: "2037-2038",
+    scheduledAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
+  });
+  await db.doc(`users/${uid("moved-to-b")}`).set({
+    accessRole: "appUser",
+    populationRole: "student",
+    verificationStatus: "verified",
+    collegeId: collegeBId,
+    department: collegeBName,
+    course: progB1,
+    lastActiveAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
+  });
+  await db.doc(`appointments/${prefix}-ap-moved-b`).set({
+    userId: uid("moved-to-b"),
+    collegeId: collegeAId,
+    department: collegeAName,
+    course: progA1,
+    status: "completed",
+    academicYearId: "2037-2038",
+    scheduledAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
+  });
 });
 
 after(async () => {
   if (!emulated) return;
+  if (previousSuperAdmin === undefined) delete process.env.SUPER_ADMIN_UID;
+  else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
   await Promise.all(
     Object.keys(accounts).map((name) =>
       getAuth().deleteUser(uid(name)).catch(() => undefined),
@@ -227,16 +275,20 @@ test(
   "combines college, program, category, year and date filters while enforcing permissions",
   {skip: !emulated},
   async () => {
-    // Portal staff denied.
+    // Portal staff and non-super admins are denied.
     await rejects(
       fetchReport.run({auth: {uid: uid("staff")}, data: {schoolYear: "2037-2038"}}),
+      "permission-denied",
+    );
+    await rejects(
+      fetchReport.run({auth: {uid: uid("admin")}, data: {schoolYear: "2037-2038"}}),
       "permission-denied",
     );
 
     // Invalid date bounds rejected.
     await rejects(
       fetchReport.run({
-        auth: {uid: uid("admin")},
+        auth: {uid: uid("super-admin")},
         data: {
           schoolYear: "2037-2038",
           startDate: "2037-10-01T00:00:00Z",
@@ -249,7 +301,7 @@ test(
     // Mismatched College A + College B program rejected.
     await rejects(
       fetchReport.run({
-        auth: {uid: uid("admin")},
+        auth: {uid: uid("super-admin")},
         data: {
           schoolYear: "2037-2038",
           appointmentDepartment: collegeAName,
@@ -301,7 +353,7 @@ test(
 
     // Empty date window yields clean empty sets & no_data.
     const emptyRes = await fetchReport.run({
-      auth: {uid: uid("admin")},
+      auth: {uid: uid("super-admin")},
       data: {
         schoolYear: "2037-2038",
         appointmentDepartment: collegeAName,
@@ -323,13 +375,24 @@ test(
       "permission-denied",
     );
 
+    // Revoking counselor-a's assignment immediately denies subsequent report reads.
+    await db.doc(`users/${uid("counselor-a")}`).update({assignedCollegeIds: []});
+    await rejects(
+      fetchReport.run({
+        auth: {uid: uid("counselor-a")},
+        data: {schoolYear: "2037-2038", appointmentDepartment: collegeAName},
+      }),
+      "permission-denied",
+    );
+    await db.doc(`users/${uid("counselor-a")}`).update({assignedCollegeIds: [collegeAId]});
+
     // Distinct academic years remain isolated: 2038-2039 does not mirror 2037-2038.
     const wholeYear3738 = await fetchReport.run({
-      auth: {uid: uid("admin")},
+      auth: {uid: uid("super-admin")},
       data: {schoolYear: "2037-2038"},
     });
     const wholeYear3839 = await fetchReport.run({
-      auth: {uid: uid("admin")},
+      auth: {uid: uid("super-admin")},
       data: {schoolYear: "2038-2039"},
     });
     assert.ok(wholeYear3738.report.users.overallActivePercentage > 0);
