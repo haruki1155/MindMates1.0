@@ -17,7 +17,7 @@ import {
   authorizeAppointmentApprovalInTransaction,
   readStudentAppointmentsForScopeSyncInTransaction,
   resolveApprovalScope,
-  syncStudentAppointmentsCollegeScope,
+  syncStudentAppointmentsCollegeScopeFromUserProfile,
 } from "./appointment_approval_service";
 export {requestFirestoreBackup, refreshFirestoreBackupStatus, scheduledFirestoreBackup} from "./backup_management";
 export {
@@ -1516,8 +1516,9 @@ export const syncPortalAppointmentQueue = onDocumentWritten(
 
 // Eventual-consistency fallback for authorized out-of-band `users/{userId}` edits.
 // Callable-driven profile/roster updates sync appointment projections atomically
-// inside the same transaction; this async trigger alone cannot guarantee zero
-// synchronization delay for Firestore `allow list` queries.
+// inside the same transaction; this async trigger reconciles from the live
+// `users/{userId}` document inside a transaction so delayed or out-of-order
+// events can never overwrite newer profile or revocation state.
 export const syncStudentAppointmentCollegeScope = onDocumentWritten(
   {document: "users/{userId}", retry: true},
   async (event) => {
@@ -1529,7 +1530,7 @@ export const syncStudentAppointmentCollegeScope = onDocumentWritten(
     const beforeStatus = typeof before?.verificationStatus === "string" ? before.verificationStatus.trim() : "";
     const afterStatus = typeof after.verificationStatus === "string" ? after.verificationStatus.trim() : "";
     if (before && beforeCollege === afterCollege && beforeStatus === afterStatus) return;
-    await syncStudentAppointmentsCollegeScope(event.params.userId, afterCollege, afterStatus);
+    await syncStudentAppointmentsCollegeScopeFromUserProfile(event.params.userId);
   },
 );
 

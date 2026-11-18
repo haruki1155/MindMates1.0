@@ -629,6 +629,55 @@ export async function syncStudentAppointmentsCollegeScope(
   return stale.length;
 }
 
+/**
+ * Reconciles a student's appointment projections against their current live
+ * `users/{userId}` document inside Firestore transactions so delayed or
+ * out-of-order `onDocumentWritten` events can never overwrite newer atomic state.
+ */
+export async function syncStudentAppointmentsCollegeScopeFromUserProfile(
+  userId: string,
+): Promise<number> {
+  if (!ID.test(userId)) return 0;
+  let totalUpdated = 0;
+  const maxChunkPasses = 25;
+  for (let pass = 0; pass < maxChunkPasses; pass++) {
+    const result = await db().runTransaction(async (tx) => {
+      const [userSnap, apptsSnap] = await Promise.all([
+        tx.get(db().collection("users").doc(userId)),
+        tx.get(db().collection("appointments").where("userId", "==", userId)),
+      ]);
+      if (!userSnap.exists || apptsSnap.empty) {
+        return {updated: 0, remaining: false};
+      }
+      const userData = userSnap.data() ?? {};
+      const {collegeId: nextCollegeId, verificationStatus: nextVerificationStatus} =
+        normalizedScopePair(userData.collegeId, userData.verificationStatus);
+      const stale = staleAppointmentScopeDocs(
+        apptsSnap.docs,
+        nextCollegeId,
+        nextVerificationStatus,
+      );
+      if (stale.length === 0) {
+        return {updated: 0, remaining: false};
+      }
+      const chunk = stale.slice(0, MAX_ATOMIC_APPOINTMENT_SCOPE_UPDATES);
+      for (const doc of chunk) {
+        tx.update(doc.ref, {
+          collegeId: nextCollegeId,
+          studentVerificationStatus: nextVerificationStatus,
+        });
+      }
+      return {
+        updated: chunk.length,
+        remaining: stale.length > chunk.length,
+      };
+    });
+    totalUpdated += result.updated;
+    if (!result.remaining) break;
+  }
+  return totalUpdated;
+}
+
 export type BackfillAppointmentCollegeScopeOptions = {
   limit?: number;
   cursor?: string | null;

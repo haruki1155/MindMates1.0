@@ -21,6 +21,7 @@ import {
   reviewProfileVerification,
   reviewStudentCorrection,
   setStaffCollegeAssignments,
+  syncStudentAppointmentCollegeScope,
   updateStudentRosterRecord,
 } from "./index";
 
@@ -441,5 +442,109 @@ test(
     // Cleanup lock/slot created by concurrent booking.
     await db.doc(`appointment_user_locks/${uid("student")}`).delete().catch(() => undefined);
     await db.doc(`appointment_slots/pacc_${slotMillis}`).delete().catch(() => undefined);
+  },
+);
+
+test(
+  "delayed or out-of-order syncStudentAppointmentCollegeScope events never revert revocation or college transfer",
+  {skip: !emulated},
+  async () => {
+    const delayedApptId = `${prefix}-appt-delayed-trigger`;
+    createdAppointmentIds.push(delayedApptId);
+    await db.doc(`users/${uid("student")}`).update({collegeId: collegeA, verificationStatus: "verified"});
+    await db.doc(`student_roster/${studentKey}`).update({
+      collegeId: collegeA, college: "College A", courseId: courseA, course: "BS Course A",
+      departmentId: deptA, department: "Dept A",
+    });
+    const revA = Number((await db.doc(`users/${uid("counselorA")}`).get()).data()?.collegeAssignmentRevision ?? 0);
+    await call(setStaffCollegeAssignments, "admin", {
+      userId: uid("counselorA"),
+      collegeIds: [collegeA],
+      expectedRevision: revA,
+      reason: "Ensure Counselor A covers College A",
+    });
+    const revB = Number((await db.doc(`users/${uid("counselorB")}`).get()).data()?.collegeAssignmentRevision ?? 0);
+    await call(setStaffCollegeAssignments, "admin", {
+      userId: uid("counselorB"),
+      collegeIds: [collegeB],
+      expectedRevision: revB,
+      reason: "Ensure Counselor B covers College B",
+    });
+    await db.doc(`appointments/${delayedApptId}`).set({
+      userId: uid("student"),
+      fullName: "Test Student",
+      status: "completed",
+      collegeId: collegeA,
+      studentVerificationStatus: "verified",
+      scheduledAt: Timestamp.fromMillis(Date.now() - 86_400_000),
+    });
+
+    const clientA = await asClientFirestore("counselorA");
+    const clientB = await asClientFirestore("counselorB");
+    const trigger = syncStudentAppointmentCollegeScope as unknown as {run: (event: unknown) => Promise<void>};
+    try {
+      const beforeTransferSnap = await db.doc(`users/${uid("student")}`).get();
+      await call(updateStudentRosterRecord, "admin", {
+        studentNo,
+        fields: {college: "College B", course: "BS Course B"},
+      });
+      const afterTransferSnap = await db.doc(`users/${uid("student")}`).get();
+
+      await call(reviewProfileVerification, "admin", {
+        userId: uid("student"),
+        decision: "needsReview",
+        reason: "Revoke before delayed E1 trigger arrives",
+      });
+
+      // Simulate stale E1 trigger (collegeA -> collegeB, verified) arriving AFTER revocation commit.
+      await trigger.run({
+        params: {userId: uid("student")},
+        data: {before: beforeTransferSnap, after: afterTransferSnap},
+      });
+      const bAfterDelayedE1 = await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, uid("student"));
+      assert.deepEqual(bAfterDelayedE1.filter((d) => d.id === delayedApptId), []);
+
+      // Re-verify in College B, capture E3 snapshot (needsReview -> verified in College B), then transfer to College A.
+      const beforeReverifySnap = await db.doc(`users/${uid("student")}`).get();
+      await call(reviewProfileVerification, "admin", {
+        userId: uid("student"),
+        decision: "verified",
+        reason: "Re-verify in College B",
+      });
+      const afterReverifySnap = await db.doc(`users/${uid("student")}`).get();
+
+      const reqRef = db.collection("student_correction_requests").doc(`${prefix}-corr-delayed`);
+      await reqRef.set({
+        userId: uid("student"),
+        studentKey,
+        field: "college",
+        requestedValue: collegeA,
+        status: "pending",
+      });
+      await db.doc(`student_roster/${studentKey}`).update({courseId: courseA, course: "BS Course A"});
+      try {
+        await call(reviewStudentCorrection, "admin", {
+          requestId: reqRef.id,
+          decision: "approve",
+          reason: "Transfer back to College A before delayed E3 arrives",
+        });
+
+        // Simulate stale E3 trigger (needsReview -> verified in College B) arriving AFTER transfer to College A.
+        await trigger.run({
+          params: {userId: uid("student")},
+          data: {before: beforeReverifySnap, after: afterReverifySnap},
+        });
+        const bAfterDelayedE3 = await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, uid("student"));
+        assert.deepEqual(bAfterDelayedE3.filter((d) => d.id === delayedApptId), []);
+        const aAfterDelayedE3 = await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, uid("student"));
+        assert.ok(aAfterDelayedE3.some((d) => d.id === delayedApptId));
+      } finally {
+        await reqRef.delete().catch(() => undefined);
+      }
+    } finally {
+      await db.doc(`appointments/${delayedApptId}`).delete().catch(() => undefined);
+      await clientA.close();
+      await clientB.close();
+    }
   },
 );
