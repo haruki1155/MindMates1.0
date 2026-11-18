@@ -5,6 +5,7 @@ import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {requireAdmin, requireUid, roleOf} from "./access";
 import {canonicalLoginId} from "./account_recovery";
+import {syncStudentAppointmentsCollegeScope} from "./appointment_approval_service";
 import {AUDIT_CATEGORIES, actorName, writeAudit, writeAuditBatch} from "./audit";
 import {
   AcademicIndex, OfficialFields, RosterRowInput, StoredActivationCode, generateActivationCode, hashActivationCode,
@@ -585,7 +586,7 @@ export const updateStudentRosterRecord = onCall(async (request) => {
   const rosterRef = db.collection("student_roster").doc(key);
   const index = await loadAcademicIndex();
 
-  await db.runTransaction(async (transaction) => {
+  const updatedScope = await db.runTransaction(async (transaction) => {
     const snap = await transaction.get(rosterRef);
     if (!snap.exists) throw new HttpsError("not-found", "That Student No. is not in the roster.");
     const live = snap.data() as Doc;
@@ -607,7 +608,11 @@ export const updateStudentRosterRecord = onCall(async (request) => {
       actorId, ...adminMeta(actor), action: "STUDENT_ROSTER_RECORD_UPDATED", category: AUDIT_CATEGORIES.userManagement,
       targetType: "student_roster", targetId: key, metadata: {studentNo: v.studentNo, userId: uid || null, changes},
     });
+    return userRef && user?.exists ? {uid, collegeId: v.collegeId, verificationStatus: user.data()?.verificationStatus} : null;
   });
+  if (updatedScope) {
+    await syncStudentAppointmentsCollegeScope(updatedScope.uid, updatedScope.collegeId, updatedScope.verificationStatus);
+  }
   return {ok: true};
 });
 
