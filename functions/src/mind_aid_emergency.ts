@@ -1,8 +1,11 @@
 import {createHash} from "node:crypto";
 
 import {getApps, initializeApp} from "firebase-admin/app";
+import {getAuth} from "firebase-admin/auth";
 import {FieldValue, getFirestore} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
+
+import {requireClinical as requireSharedClinical, requireUid} from "./access";
 
 if (!getApps().length) initializeApp();
 
@@ -22,15 +25,31 @@ function publicUserId(uid: string, value: unknown): string {
 function isActiveClinicalAccount(data: FirebaseFirestore.DocumentData): boolean {
   const role = String(data.accessRole ?? data.role ?? "").toLowerCase();
   if (role !== "counselor" && role !== "admin") return false;
-  return data.staffAccountStatus == null ||
-    (data.staffAccountStatus === "approved" && data.accountStatus === "active");
+  const accountStatus = data.accountStatus == null ? "active" : String(data.accountStatus);
+  if (accountStatus !== "active") return false;
+  return role === "admin" || data.staffAccountStatus == null || data.staffAccountStatus === "approved";
+}
+
+async function authEligibilityMap(uids: string[]): Promise<Map<string, boolean>> {
+  const unique = [...new Set(uids.filter(Boolean))];
+  const eligibleByUid = new Map<string, boolean>();
+  for (let i = 0; i < unique.length; i += 100) {
+    const result = await getAuth().getUsers(unique.slice(i, i + 100).map((uid) => ({uid})));
+    for (const user of result.users) {
+      eligibleByUid.set(user.uid, !user.disabled && user.emailVerified);
+    }
+  }
+  return eligibleByUid;
 }
 
 async function notificationRecipients(): Promise<FirebaseFirestore.QueryDocumentSnapshot[]> {
   const people = await db.collection("users")
     .where("accessRole", "in", ["counselor", "admin"])
     .get();
-  const eligible = people.docs.filter((document) => isActiveClinicalAccount(document.data()));
+  const activeProfiles = people.docs.filter((document) => isActiveClinicalAccount(document.data()));
+  if (!activeProfiles.length) return [];
+  const authEligible = await authEligibilityMap(activeProfiles.map((document) => document.id));
+  const eligible = activeProfiles.filter((document) => authEligible.get(document.id) === true);
   const counselors = eligible.filter((document) => String(document.data().accessRole).toLowerCase() === "counselor");
   // Counselors receive the immediate alert. Administrators retain clinical
   // record access and are notified only if no active counselor exists.
@@ -119,12 +138,18 @@ export async function createOrUpdateMindAidEmergencyAlert({
 }
 
 async function requireClinical(uid: string): Promise<FirebaseFirestore.DocumentData> {
-  const user = await db.collection("users").doc(uid).get();
-  const data = user.data() ?? {};
-  if (!isActiveClinicalAccount(data)) {
+  try {
+    return await requireSharedClinical(uid);
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    const code =
+      (error as {code?: unknown; errorInfo?: {code?: unknown}})?.errorInfo?.code ??
+      (error as {code?: unknown})?.code;
+    if (code === "auth/user-not-found") {
+      throw new HttpsError("permission-denied", "Your PACC portal access is not active.");
+    }
     throw new HttpsError("permission-denied", "Counselor or administrator access is required.");
   }
-  return data;
 }
 
 function alertIdFrom(request: CallableRequest): string {
@@ -136,8 +161,7 @@ function alertIdFrom(request: CallableRequest): string {
 }
 
 export async function acknowledgeMindAidEmergencyAlertHandler(request: CallableRequest) {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
+  const uid = requireUid(request);
   const actor = await requireClinical(uid);
   const alert = db.collection(ALERTS).doc(alertIdFrom(request));
   await db.runTransaction(async (transaction) => {
@@ -157,8 +181,7 @@ export async function acknowledgeMindAidEmergencyAlertHandler(request: CallableR
 export const acknowledgeMindAidEmergencyAlert = onCall({region: REGION}, acknowledgeMindAidEmergencyAlertHandler);
 
 export async function resolveMindAidEmergencyAlertHandler(request: CallableRequest) {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
+  const uid = requireUid(request);
   const actor = await requireClinical(uid);
   const disposition = String(request.data?.resolutionDisposition ?? "").trim();
   const allowed = new Set(["contacted_user", "referred_immediate_support", "emergency_services_contacted", "false_positive", "other"]);
