@@ -67,34 +67,49 @@ test("super-admin exception approval list and lookup are audited in admin_audit_
     createdAt: Timestamp.now(),
   });
 
-  const beforeList = (await db.collection("admin_audit_logs")
-    .where("actorId", "==", uid("admin"))
-    .where("action", "==", "APPOINTMENT_APPROVALS_LISTED")
-    .get()).size;
-  const listRes = await call(listAppointmentApprovals, "admin", {limit: 10});
-  assert.ok(listRes.items.some((item: {appointmentId: string}) => item.appointmentId === apptId));
-  const afterList = (await db.collection("admin_audit_logs")
-    .where("actorId", "==", uid("admin"))
-    .where("action", "==", "APPOINTMENT_APPROVALS_LISTED")
-    .get()).size;
-  assert.equal(afterList, beforeList + 1);
+  try {
+    const beforeList = (await db.collection("admin_audit_logs")
+      .where("actorId", "==", uid("admin"))
+      .where("action", "==", "APPOINTMENT_APPROVALS_LISTED")
+      .get()).size;
+    let found = false;
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const listRes = await call(listAppointmentApprovals, "admin", {limit: 100, ...(cursor ? {cursor} : {})});
+      pages += 1;
+      if (listRes.items.some((item: {appointmentId: string}) => item.appointmentId === apptId)) {
+        found = true;
+        break;
+      }
+      cursor = listRes.nextCursor as string | null;
+    } while (cursor && pages < 10);
+    assert.ok(found, "expected unverified appointment in super-admin approvals list");
+    const afterList = (await db.collection("admin_audit_logs")
+      .where("actorId", "==", uid("admin"))
+      .where("action", "==", "APPOINTMENT_APPROVALS_LISTED")
+      .get()).size;
+    assert.equal(afterList, beforeList + pages);
 
-  const beforeView = (await db.collection("admin_audit_logs")
-    .where("actorId", "==", uid("admin"))
-    .where("action", "==", "APPOINTMENT_EXCEPTION_VIEWED")
-    .where("targetId", "==", apptId)
-    .get()).size;
-  const viewRes = await call(getAppointmentForApproval, "admin", {appointmentId: apptId});
-  assert.equal(viewRes.available, true);
-  const afterView = (await db.collection("admin_audit_logs")
-    .where("actorId", "==", uid("admin"))
-    .where("action", "==", "APPOINTMENT_EXCEPTION_VIEWED")
-    .where("targetId", "==", apptId)
-    .get()).size;
-  assert.equal(afterView, beforeView + 1);
+    const beforeView = (await db.collection("admin_audit_logs")
+      .where("actorId", "==", uid("admin"))
+      .where("action", "==", "APPOINTMENT_EXCEPTION_VIEWED")
+      .where("targetId", "==", apptId)
+      .get()).size;
+    const viewRes = await call(getAppointmentForApproval, "admin", {appointmentId: apptId});
+    assert.equal(viewRes.available, true);
+    const afterView = (await db.collection("admin_audit_logs")
+      .where("actorId", "==", uid("admin"))
+      .where("action", "==", "APPOINTMENT_EXCEPTION_VIEWED")
+      .where("targetId", "==", apptId)
+      .get()).size;
+    assert.equal(afterView, beforeView + 1);
 
-  // Denied counselor lookup writes no exception-viewed audit.
-  await assert.rejects(call(getAppointmentForApproval, "counselor", {appointmentId: apptId}), {code: "permission-denied"});
+    // Denied counselor lookup writes no exception-viewed audit.
+    await assert.rejects(call(getAppointmentForApproval, "counselor", {appointmentId: apptId}), {code: "permission-denied"});
+  } finally {
+    await db.doc(`appointments/${apptId}`).delete().catch(() => undefined);
+  }
 });
 
 test("createAppointmentRequest stores authoritative collegeId and studentVerificationStatus, and profile updates sync them", {skip: !emulated}, async () => {
