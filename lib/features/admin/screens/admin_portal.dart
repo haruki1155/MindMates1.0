@@ -5361,6 +5361,31 @@ class _InquiriesPage extends StatefulWidget {
 class _InquiriesPageState extends State<_InquiriesPage> {
   String status = 'All Status';
   String category = 'All Categories';
+  int _streamEpoch = 0;
+
+  bool get _isOperationalStaff =>
+      !widget.repository.isSuperAdmin &&
+      widget.repository.currentAccessRole == AccessRole.portalStaff;
+
+  Stream<List<AdminInquiryModel>> _watchForRole() {
+    if (widget.repository.isSuperAdmin ||
+        widget.repository.currentAccessRole == AccessRole.counselor) {
+      return widget.repository.watchInquiries();
+    }
+    if (widget.repository.currentAccessRole == AccessRole.portalStaff) {
+      return widget.repository.watchInquiryStatuses();
+    }
+    return Stream.error(
+      StateError('Inquiry access is limited to authorized PACC staff.'),
+    );
+  }
+
+  static bool _isUnauthorizedError(Object? error) {
+    if (error == null) return false;
+    if (error is StateError) return true;
+    final code = FirebaseErrorMessage.codeOf(error);
+    return code == 'permission-denied' || code == 'unauthenticated';
+  }
 
   void _openInquiry(AdminInquiryModel inquiry) {
     Navigator.of(context).push(
@@ -5381,6 +5406,8 @@ class _InquiriesPageState extends State<_InquiriesPage> {
           widget.repository.currentAccessRole,
         )
         ? 'Student messages and other PACC service inquiries.'
+        : _isOperationalStaff
+        ? 'Monitor assigned operational inquiry status and escalate items when needed.'
         : 'Review, acknowledge, and resolve submitted inquiries.',
     child:
         canShowCounselorMessagingInInquiries(
@@ -5394,87 +5421,116 @@ class _InquiriesPageState extends State<_InquiriesPage> {
         : _buildServiceInquiries(),
   );
 
-  Widget _buildServiceInquiries() => StreamBuilder<List<AdminInquiryModel>>(
-    stream: widget.repository.watchInquiries(),
-    builder: (context, snapshot) {
-      if (snapshot.hasError) return const _AccessPanel();
-      final all = snapshot.data ?? const <AdminInquiryModel>[];
-      final categories = [
-        'All Categories',
-        ...{for (final item in all) item.category},
-      ];
-      final items = all
-          .where(
-            (i) =>
-                (status == 'All Status' || i.status.label == status) &&
-                (category == 'All Categories' || i.category == category),
-          )
-          .toList();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InquiryBackfillButton(repository: widget.repository),
-          const SizedBox(height: 10),
-          _CompactSummaryStrip(
-            values: {
-              'Total': all.length,
-              'Pending': all
-                  .where((item) => item.status == InquiryStatus.pending)
-                  .length,
-              'In progress': all
-                  .where((item) => item.status == InquiryStatus.inProgress)
-                  .length,
-              'Resolved': all
-                  .where((item) => item.status == InquiryStatus.resolved)
-                  .length,
-            },
-          ),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: _box,
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.end,
-              children: [
-                _FilterField(
-                  label: 'Status',
-                  value: status,
-                  values: const [
-                    'All Status',
-                    'Pending',
-                    'In Progress',
-                    'Resolved',
-                  ],
-                  onChanged: (value) => setState(() => status = value!),
-                ),
-                _FilterField(
-                  label: 'Category',
-                  value: category,
-                  values: categories,
-                  onChanged: (value) => setState(() => category = value!),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    '${items.length} ${items.length == 1 ? 'inquiry' : 'inquiries'} shown',
-                    style: const TextStyle(
-                      color: AdminColors.muted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+  Widget _buildServiceInquiries() => KeyedSubtree(
+    key: ValueKey(_streamEpoch),
+    child: StreamBuilder<List<AdminInquiryModel>>(
+      stream: _watchForRole(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          if (_isUnauthorizedError(snapshot.error)) {
+            return const _AccessPanel();
+          }
+          return _InquiryUnavailablePanel(
+            title: 'Inquiries could not be loaded',
+            message: FirebaseErrorMessage.describe(
+              snapshot.error!,
+              fallback: 'Unable to load inquiry statuses right now.',
+            ),
+            onRetry: () => setState(() => _streamEpoch++),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+        final all = snapshot.data ?? const <AdminInquiryModel>[];
+        final categories = [
+          'All Categories',
+          ...{for (final item in all) item.category},
+        ];
+        final items = all
+            .where(
+              (i) =>
+                  (status == 'All Status' || i.status.label == status) &&
+                  (category == 'All Categories' || i.category == category),
+            )
+            .toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InquiryBackfillButton(repository: widget.repository),
+            const SizedBox(height: 10),
+            _CompactSummaryStrip(
+              values: {
+                'Total': all.length,
+                'Pending': all
+                    .where((item) => item.status == InquiryStatus.pending)
+                    .length,
+                'In progress': all
+                    .where((item) => item.status == InquiryStatus.inProgress)
+                    .length,
+                'Resolved': all
+                    .where((item) => item.status == InquiryStatus.resolved)
+                    .length,
+              },
+            ),
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: _box,
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.end,
+                children: [
+                  _FilterField(
+                    label: 'Status',
+                    value: status,
+                    values: const [
+                      'All Status',
+                      'Pending',
+                      'In Progress',
+                      'Resolved',
+                    ],
+                    onChanged: (value) => setState(() => status = value!),
+                  ),
+                  _FilterField(
+                    label: 'Category',
+                    value: category,
+                    values: categories,
+                    onChanged: (value) => setState(() => category = value!),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      '${items.length} ${items.length == 1 ? 'inquiry' : 'inquiries'} shown',
+                      style: const TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-          _InquiryList(items: items, selected: null, onSelect: _openInquiry),
-        ],
-      );
-    },
+            const SizedBox(height: 14),
+            _InquiryList(
+              items: items,
+              selected: null,
+              onSelect: _openInquiry,
+              operationalEmpty: _isOperationalStaff && all.isEmpty,
+            ),
+          ],
+        );
+      },
+    ),
   );
 }
 
@@ -5483,16 +5539,20 @@ class _InquiryList extends StatelessWidget {
     required this.items,
     required this.selected,
     required this.onSelect,
+    this.operationalEmpty = false,
   });
   final List<AdminInquiryModel> items;
   final AdminInquiryModel? selected;
   final ValueChanged<AdminInquiryModel> onSelect;
+  final bool operationalEmpty;
 
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) {
-      return const _EmptyPanel(
-        message: 'No inquiries match the selected filters.',
+      return _EmptyPanel(
+        message: operationalEmpty
+            ? 'No inquiry status items are currently assigned to you for monitoring.'
+            : 'No inquiries match the selected filters.',
       );
     }
     return Container(
@@ -5565,7 +5625,11 @@ class _InquiryQueueRow extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            item.subject,
+                            item.isOperationalProjection
+                                ? (item.operationalLabel.isNotEmpty
+                                      ? item.operationalLabel
+                                      : item.typeLabel)
+                                : item.subject,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -5586,7 +5650,11 @@ class _InquiryQueueRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      item.displayName,
+                      item.isOperationalProjection
+                          ? (item.collegeId.isEmpty
+                                ? 'College: Pending triage'
+                                : 'College: ${item.collegeId}')
+                          : item.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -5596,9 +5664,11 @@ class _InquiryQueueRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      item.message.trim().isEmpty
-                          ? 'No message provided.'
-                          : item.message,
+                      item.isOperationalProjection
+                          ? 'Operational status only — student identity, message, and form responses are restricted.'
+                          : (item.message.trim().isEmpty
+                                ? 'No message provided.'
+                                : item.message),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 12, height: 1.4),
@@ -5634,7 +5704,7 @@ class _InquiryQueueRow extends StatelessWidget {
   );
 }
 
-class InquiryDetailScreen extends StatelessWidget {
+class InquiryDetailScreen extends StatefulWidget {
   const InquiryDetailScreen({
     super.key,
     required this.inquiry,
@@ -5644,13 +5714,51 @@ class InquiryDetailScreen extends StatelessWidget {
   final AdminInquiryModel inquiry;
   final AdminPortalRepository repository;
 
+  @override
+  State<InquiryDetailScreen> createState() => _InquiryDetailScreenState();
+}
+
+class _InquiryDetailScreenState extends State<InquiryDetailScreen> {
+  int _streamEpoch = 0;
+
+  bool get _isOperationalStaff =>
+      !widget.repository.isSuperAdmin &&
+      widget.repository.currentAccessRole == AccessRole.portalStaff;
+
+  Stream<List<AdminInquiryModel>> _watchForRole() {
+    if (widget.repository.isSuperAdmin ||
+        widget.repository.currentAccessRole == AccessRole.counselor) {
+      return widget.repository.watchInquiries();
+    }
+    if (widget.repository.currentAccessRole == AccessRole.portalStaff) {
+      return widget.repository.watchInquiryStatuses();
+    }
+    return Stream.error(
+      StateError('Inquiry access is restricted to assigned PACC staff.'),
+    );
+  }
+
+  static bool _isUnauthorizedError(Object? error) {
+    if (error == null) return false;
+    if (error is StateError) return true;
+    final code = FirebaseErrorMessage.codeOf(error);
+    return code == 'permission-denied' || code == 'unauthenticated';
+  }
+
   bool get _hasInitialAccess {
-    if (repository.isSuperAdmin) return true;
-    final role = repository.currentAccessRole;
-    final uid = repository.currentUserId;
-    return (role == AccessRole.portalStaff || role == AccessRole.counselor) &&
-        uid != null &&
-        inquiry.assigneeIds.contains(uid);
+    if (widget.repository.isSuperAdmin) return true;
+    final role = widget.repository.currentAccessRole;
+    final uid = widget.repository.currentUserId;
+    if (uid == null) return false;
+    if (role == AccessRole.counselor) {
+      return !widget.inquiry.isOperationalProjection &&
+          widget.inquiry.assigneeIds.contains(uid);
+    }
+    if (role == AccessRole.portalStaff) {
+      return widget.inquiry.isOperationalProjection &&
+          widget.inquiry.monitoringStaffIds.contains(uid);
+    }
+    return false;
   }
 
   @override
@@ -5658,19 +5766,21 @@ class InquiryDetailScreen extends StatelessWidget {
     backgroundColor: AdminColors.canvas,
     appBar: AppBar(
       toolbarHeight: 68,
-      title: const Column(
+      title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Inquiry details',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            _isOperationalStaff ? 'Operational inquiry status' : 'Inquiry details',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
-          SizedBox(height: 2),
+          const SizedBox(height: 2),
           Text(
-            'Review the submitted message, form responses, and case status.',
+            _isOperationalStaff
+                ? 'Review sanitized operational status, acknowledgment, and escalation actions.'
+                : 'Review the submitted message, form responses, and case status.',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
+            style: const TextStyle(
               color: AdminColors.muted,
               fontSize: 11,
               fontWeight: FontWeight.w500,
@@ -5679,62 +5789,126 @@ class InquiryDetailScreen extends StatelessWidget {
         ],
       ),
     ),
-    body: StreamBuilder<List<AdminInquiryModel>>(
-      stream: repository.watchInquiries(),
-      builder: (context, snapshot) {
-        Widget? body;
-        if (snapshot.hasError) {
-          body = const _InquiryAccessRevokedPanel(
-            title: 'Unable to access this inquiry',
-            message:
-                'You do not have permission to view this inquiry or your session access changed.',
-          );
-        } else if (snapshot.hasData) {
-          AdminInquiryModel? current;
-          for (final item in snapshot.data!) {
-            if (item.id == inquiry.id) {
-              current = item;
-              break;
+    body: KeyedSubtree(
+      key: ValueKey(_streamEpoch),
+      child: StreamBuilder<List<AdminInquiryModel>>(
+        stream: _watchForRole(),
+        builder: (context, snapshot) {
+          Widget? body;
+          if (snapshot.hasError) {
+            if (_isUnauthorizedError(snapshot.error)) {
+              body = const _InquiryAccessRevokedPanel(
+                title: 'Unable to access this inquiry',
+                message:
+                    'You do not have permission to view this inquiry or your session access changed.',
+              );
+            } else {
+              body = _InquiryUnavailablePanel(
+                title: 'Inquiry status unavailable',
+                message: FirebaseErrorMessage.describe(
+                  snapshot.error!,
+                  fallback: 'Unable to load this inquiry right now.',
+                ),
+                onRetry: () => setState(() => _streamEpoch++),
+              );
             }
-          }
-          if (current == null) {
+          } else if (snapshot.hasData) {
+            AdminInquiryModel? current;
+            for (final item in snapshot.data!) {
+              if (item.id == widget.inquiry.id) {
+                current = item;
+                break;
+              }
+            }
+            if (current == null) {
+              body = const _InquiryAccessRevokedPanel(
+                title: 'Inquiry no longer assigned to you',
+                message:
+                    'This inquiry was reassigned or removed from your queue. Details and case actions are hidden.',
+              );
+            } else {
+              body = _InquiryDetails(
+                item: current,
+                repository: widget.repository,
+                onUpdated: () {},
+              );
+            }
+          } else if (!_hasInitialAccess) {
             body = const _InquiryAccessRevokedPanel(
-              title: 'Inquiry no longer assigned to you',
+              title: 'Inquiry access restricted',
               message:
-                  'This inquiry was reassigned or removed from your queue. Details and case actions are hidden.',
+                  'Only assigned PACC staff and the super-administrator may view this inquiry.',
             );
           } else {
             body = _InquiryDetails(
-              item: current,
-              repository: repository,
+              item: widget.inquiry,
+              repository: widget.repository,
               onUpdated: () {},
             );
           }
-        } else if (!_hasInitialAccess) {
-          body = const _InquiryAccessRevokedPanel(
-            title: 'Inquiry access restricted',
-            message:
-                'Only assigned PACC staff and the super-administrator may view this inquiry.',
-          );
-        } else {
-          body = _InquiryDetails(
-            item: inquiry,
-            repository: repository,
-            onUpdated: () {},
-          );
-        }
-        return SingleChildScrollView(
-          padding: EdgeInsets.all(
-            MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1080),
-              child: body,
+          return SingleChildScrollView(
+            padding: EdgeInsets.all(
+              MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
             ),
-          ),
-        );
-      },
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1080),
+                child: body,
+              ),
+            ),
+          );
+        },
+      ),
+    ),
+  );
+}
+
+class _InquiryUnavailablePanel extends StatelessWidget {
+  const _InquiryUnavailablePanel({
+    required this.title,
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String title;
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(24),
+    decoration: _box,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.cloud_off_outlined, color: AdminColors.muted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          message,
+          style: const TextStyle(color: AdminColors.muted, height: 1.45),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Retry'),
+        ),
+      ],
     ),
   );
 }
@@ -5815,6 +5989,13 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
         message: 'Select an inquiry to view its details.',
       );
     }
+    final isOperationalOnly =
+        item.isOperationalProjection ||
+        (!widget.repository.isSuperAdmin &&
+            widget.repository.currentAccessRole == AccessRole.portalStaff);
+    final canUpdateClinicalStatus =
+        widget.repository.isSuperAdmin ||
+        widget.repository.currentAccessRole == AccessRole.counselor;
     return Container(
       padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 18 : 22),
       decoration: _box,
@@ -5843,79 +6024,108 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
           ),
           const SizedBox(height: 16),
           Text(
-            item.subject,
+            isOperationalOnly
+                ? (item.operationalLabel.isNotEmpty
+                      ? item.operationalLabel
+                      : item.typeLabel)
+                : item.subject,
             style: Theme.of(
               context,
             ).textTheme.headlineSmall?.copyWith(fontSize: 20),
           ),
           const SizedBox(height: 16),
-          _InquirySender(item: item),
-          const Divider(height: 34),
-          const _InquirySectionHeading(
-            icon: Icons.chat_bubble_outline,
-            title: 'Message',
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(15),
-            decoration: BoxDecoration(
-              color: AdminColors.canvas,
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(color: AdminColors.border),
-            ),
-            child: SelectableText(
-              item.message.trim().isEmpty
-                  ? 'No message was provided.'
-                  : item.message,
-              style: const TextStyle(fontSize: 14, height: 1.55),
-            ),
-          ),
-          if (item.isFormSubmission) ...[
+          if (isOperationalOnly)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AdminColors.surfaceMuted,
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: AdminColors.border),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.shield_outlined, size: 18, color: AdminColors.muted),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Sanitized operational view. Student identity, submitted message, form responses, escalation notes, and PDF export are restricted to assigned counselors and the super-administrator.',
+                      style: TextStyle(color: AdminColors.muted, fontSize: 12, height: 1.45),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            _InquirySender(item: item),
             const Divider(height: 34),
             const _InquirySectionHeading(
-              icon: Icons.description_outlined,
-              title: 'Form responses',
+              icon: Icons.chat_bubble_outline,
+              title: 'Message',
             ),
-            const SizedBox(height: 12),
-            _InquiryResponseGrid(responses: item.formData),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _previewingPdf || _downloadingPdf
-                      ? null
-                      : _previewPdf,
-                  icon: _previewingPdf
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.preview_outlined),
-                  label: Text(
-                    _previewingPdf ? 'Preparing preview…' : 'PDF preview',
-                  ),
-                ),
-                FilledButton.icon(
-                  onPressed: _previewingPdf || _downloadingPdf
-                      ? null
-                      : _downloadPdf,
-                  icon: _downloadingPdf
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.download_outlined),
-                  label: Text(
-                    _downloadingPdf ? 'Preparing PDF…' : 'Download PDF',
-                  ),
-                ),
-              ],
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(15),
+              decoration: BoxDecoration(
+                color: AdminColors.canvas,
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: AdminColors.border),
+              ),
+              child: SelectableText(
+                item.message.trim().isEmpty
+                    ? 'No message was provided.'
+                    : item.message,
+                style: const TextStyle(fontSize: 14, height: 1.55),
+              ),
             ),
+            if (item.isFormSubmission) ...[
+              const Divider(height: 34),
+              const _InquirySectionHeading(
+                icon: Icons.description_outlined,
+                title: 'Form responses',
+              ),
+              const SizedBox(height: 12),
+              _InquiryResponseGrid(responses: item.formData),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _previewingPdf || _downloadingPdf
+                        ? null
+                        : _previewPdf,
+                    icon: _previewingPdf
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.preview_outlined),
+                    label: Text(
+                      _previewingPdf ? 'Preparing preview…' : 'PDF preview',
+                    ),
+                  ),
+                  FilledButton.icon(
+                    onPressed: _previewingPdf || _downloadingPdf
+                        ? null
+                        : _downloadPdf,
+                    icon: _downloadingPdf
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.download_outlined),
+                    label: Text(
+                      _downloadingPdf ? 'Preparing PDF…' : 'Download PDF',
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
           const Divider(height: 34),
           InquiryRoutingPanel(
@@ -5955,11 +6165,12 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                       : 'Acknowledge receipt',
                 ),
               ),
-              _InquiryStatusMenu(
-                current: item.status,
-                enabled: !_updatingStatus && !_acknowledging,
-                onSelected: (next) => _updateStatus(context, next),
-              ),
+              if (canUpdateClinicalStatus && !isOperationalOnly)
+                _InquiryStatusMenu(
+                  current: item.status,
+                  enabled: !_updatingStatus && !_acknowledging,
+                  onSelected: (next) => _updateStatus(context, next),
+                ),
             ],
           ),
         ],

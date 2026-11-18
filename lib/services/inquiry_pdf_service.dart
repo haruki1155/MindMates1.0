@@ -10,6 +10,9 @@ class InquiryPdfService {
   const InquiryPdfService._();
 
   static Future<Uint8List> build(AdminInquiryModel inquiry) async {
+    if (inquiry.isOperationalProjection) {
+      throw StateError('Operational status projections cannot be exported.');
+    }
     final document = pw.Document(
       title: inquiry.subject,
       author: 'MindMate PACC',

@@ -1,4 +1,5 @@
 import {after, before, beforeEach, test} from "node:test";
+import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 
@@ -34,11 +35,17 @@ beforeEach(async () => {
       setDoc(doc(fs, "users/admin"), {accessRole: "admin", accountStatus: "active"}),
       setDoc(doc(fs, "users/other-admin"), {accessRole: "admin", accountStatus: "active"}),
       setDoc(doc(fs, "users/c1"), {accessRole: "counselor", ...active, assignedCollegeIds: ["cite"]}),
+      setDoc(doc(fs, "users/c1-suspended"), {accessRole: "counselor", staffAccountStatus: "disabled", accountStatus: "suspended", assignedCollegeIds: ["cite"]}),
+      setDoc(doc(fs, "users/s2"), {accessRole: "portalStaff", ...active}),
+      setDoc(doc(fs, "users/s1-suspended"), {accessRole: "portalStaff", staffAccountStatus: "disabled", accountStatus: "suspended"}),
       setDoc(doc(fs, "users/s1"), {accessRole: "portalStaff", ...active, assignedCollegeIds: ["cite"]}),
       setDoc(doc(fs, "users/c2"), {accessRole: "counselor", ...active, assignedCollegeIds: ["cas"]}),
       setDoc(doc(fs, "users/student"), {accessRole: "appUser"}),
       setDoc(doc(fs, "users/other-student"), {accessRole: "appUser"}),
-      setDoc(doc(fs, "inquiries/cite"), {...routed, routingStatus: "routed", collegeId: "cite", assigneeIds: ["c1", "s1"]}),
+      setDoc(doc(fs, "inquiries/cite"), {...routed, routingStatus: "routed", collegeId: "cite", assigneeIds: ["c1", "c1-suspended", "s1"], monitoringStaffIds: ["s1"]}),
+      setDoc(doc(fs, "inquiry_statuses/cite"), {inquiryId: "cite", collegeId: "cite", category: "Service Form", operationalLabel: "Service Form", status: "pending", routingStatus: "routed", routingRevision: 1, assigneeIds: ["c1"], monitoringStaffIds: ["s1", "s1-suspended"]}),
+      setDoc(doc(fs, "inquiry_statuses/cas"), {inquiryId: "cas", collegeId: "cas", category: "Service Form", operationalLabel: "Service Form", status: "pending", routingStatus: "routed", routingRevision: 1, assigneeIds: ["c2"], monitoringStaffIds: []}),
+      setDoc(doc(fs, "inquiry_statuses/triage"), {inquiryId: "triage", collegeId: "", category: "Service Form", operationalLabel: "Service Form", status: "pending", routingStatus: "needs_triage", routingRevision: 1, assigneeIds: [], monitoringStaffIds: []}),
       setDoc(doc(fs, "inquiries/cas"), {...routed, userId: "other-student", routingStatus: "routed", collegeId: "cas", assigneeIds: ["c2"]}),
       setDoc(doc(fs, "inquiries/triage"), {...routed, routingStatus: "needs_triage", routingReason: "missing_college", collegeId: "", assigneeIds: []}),
       setDoc(doc(fs, "inquiries/legacy"), {...routed}),
@@ -50,10 +57,14 @@ after(async () => environment.cleanup());
 
 const ctx = (uid: string) => environment.authenticatedContext(uid, verified).firestore();
 const mine = (uid: string) => query(collection(ctx(uid), "inquiries"), where("assigneeIds", "array-contains", uid));
+const myStatus = (uid: string) => query(collection(ctx(uid), "inquiry_statuses"), where("monitoringStaffIds", "array-contains", uid));
 
 test("assignees read only their college's inquiries, through an assignee-filtered query", async () => {
   await assertSucceeds(getDoc(doc(ctx("c1"), "inquiries/cite")));
-  await assertSucceeds(getDoc(doc(ctx("s1"), "inquiries/cite")));
+  await assertFails(getDoc(doc(ctx("s1"), "inquiries/cite")));
+  await assertFails(getDocs(mine("s1")));
+  await assertFails(getDoc(doc(ctx("c1-suspended"), "inquiries/cite")));
+  await assertFails(getDoc(doc(environment.authenticatedContext("c1", {email_verified: false}).firestore(), "inquiries/cite")));
   await assertSucceeds(getDocs(mine("c1")));
   await assertSucceeds(getDocs(mine("c2")));
   await assertFails(getDoc(doc(ctx("c2"), "inquiries/cite")));
@@ -95,4 +106,48 @@ test("students create inquiries but cannot set routing fields", async () => {
   }
   await assertFails(getDoc(doc(ctx("other-student"), "inquiries/cite")));
   await assertSucceeds(getDoc(doc(ctx("student"), "inquiries/cite")));
+});
+
+test("portal staff cannot read raw inquiry details even when assigned", async () => {
+  // Operational staff should use a sanitized status projection.
+  // Their presence in a legacy assignee list must not expose formData.
+  await assertFails(getDoc(doc(ctx("s1"), "inquiries/cite")));
+});
+
+test("inquiry_statuses enforces explicit monitoring staff scoping, lifecycle gates, and read-only clients", async () => {
+  // Assigned active verified portalStaff reads only their own monitoring rows.
+  await assertSucceeds(getDoc(doc(ctx("s1"), "inquiry_statuses/cite")));
+  await assertSucceeds(getDocs(myStatus("s1")));
+  // Cannot read other-college or unassigned rows or unfiltered collection.
+  await assertFails(getDoc(doc(ctx("s1"), "inquiry_statuses/cas")));
+  await assertFails(getDoc(doc(ctx("s1"), "inquiry_statuses/triage")));
+  await assertFails(getDocs(collection(ctx("s1"), "inquiry_statuses")));
+  await assertFails(getDoc(doc(ctx("s2"), "inquiry_statuses/cite")));
+  const s2Scoped = await assertSucceeds(getDocs(myStatus("s2")));
+  assert.equal(s2Scoped.size, 0);
+  await assertFails(getDocs(query(collection(ctx("s2"), "inquiry_statuses"), where("monitoringStaffIds", "array-contains", "s1"))));
+  // Unverified or suspended portalStaff cannot read even if in monitoringStaffIds.
+  await assertFails(getDoc(doc(environment.authenticatedContext("s1", {email_verified: false}).firestore(), "inquiry_statuses/cite")));
+  await assertFails(getDoc(doc(ctx("s1-suspended"), "inquiry_statuses/cite")));
+  // Counselors can read status projections only for inquiries assigned to them; students never read projections directly.
+  await assertSucceeds(getDoc(doc(ctx("c1"), "inquiry_statuses/cite")));
+  await assertFails(getDoc(doc(ctx("c2"), "inquiry_statuses/cite")));
+  await assertFails(getDoc(doc(ctx("student"), "inquiry_statuses/cite")));
+  await assertSucceeds(getDocs(collection(ctx("admin"), "inquiry_statuses")));
+
+  // Immediate revocation when removed from monitoringStaffIds.
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "inquiry_statuses/cite"), {
+      inquiryId: "cite", collegeId: "cite", category: "Service Form", operationalLabel: "Service Form",
+      status: "pending", routingStatus: "routed", routingRevision: 2, assigneeIds: ["c1"], monitoringStaffIds: [],
+    });
+  });
+  await assertFails(getDoc(doc(ctx("s1"), "inquiry_statuses/cite")));
+
+  // No client may create, update, or delete inquiry_statuses.
+  for (const uid of ["s1", "c1", "admin", "student"]) {
+    await assertFails(setDoc(doc(ctx(uid), "inquiry_statuses/new-doc"), {monitoringStaffIds: [uid]}));
+    await assertFails(updateDoc(doc(ctx(uid), "inquiry_statuses/cite"), {monitoringStaffIds: [uid]}));
+    await assertFails(deleteDoc(doc(ctx(uid), "inquiry_statuses/cite")));
+  }
 });

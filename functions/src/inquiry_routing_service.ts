@@ -1,5 +1,5 @@
 import {getAuth} from "firebase-admin/auth";
-import {FieldPath, FieldValue, getFirestore} from "firebase-admin/firestore";
+import {FieldPath, FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid} from "./access";
@@ -7,24 +7,29 @@ import {actorName, AUDIT_CATEGORIES, writeAudit} from "./audit";
 import {
   assigneeNotificationId,
   AuthState,
+  buildInquiryStatusProjection,
   Candidate,
   decideRouting,
   escalationNotificationId,
   InquiryRoutingError,
   planReassignment,
+  shouldWriteInquiryProjection,
   triageNotificationId,
 } from "./inquiry_routing";
 
-// Server-side routing and workflow for student inquiries. Every transition is
-// a transaction with an audit record; notifications carry no inquiry content
-// and use deterministic IDs so retries never duplicate them.
+// Server-side routing, status projection, and workflow for student inquiries.
+// Every transition updates both the canonical `inquiries/{id}` record and its
+// sanitized `inquiry_statuses/{id}` projection in the same transaction alongside
+// an audit record; notifications carry no inquiry content and use deterministic IDs.
 
 type Actor = {uid: string; name: string; role: string};
 const SYSTEM: Actor = {uid: "system", name: "Inquiry routing", role: "system"};
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const STATUSES = new Set(["pending", "in_progress", "resolved"]);
+export const INQUIRY_STATUSES_COLLECTION = "inquiry_statuses";
 
 const db = () => getFirestore();
+const statusCollection = () => db().collection(INQUIRY_STATUSES_COLLECTION);
 
 function superAdminUid(): string {
   try {
@@ -100,8 +105,10 @@ export async function ensureActiveNotification(id: string, payload: Record<strin
 async function notifyRouting(inquiryId: string, data: FirebaseFirestore.DocumentData): Promise<void> {
   if (String(data.status ?? "") === "resolved") return;
   if (data.routingStatus === "routed") {
-    const assignees = Array.isArray(data.assigneeIds) ? data.assigneeIds as string[] : [];
-    await Promise.all(assignees.map((uid) => createOnce(assigneeNotificationId(inquiryId, uid),
+    const clinical = Array.isArray(data.assigneeIds) ? data.assigneeIds as string[] : [];
+    const monitors = Array.isArray(data.monitoringStaffIds) ? data.monitoringStaffIds as string[] : [];
+    const recipients = [...new Set([...clinical, ...monitors])];
+    await Promise.all(recipients.map((uid) => createOnce(assigneeNotificationId(inquiryId, uid),
       notification(uid, inquiryId, "New inquiry", "A new inquiry for your college is ready for review."))));
     return;
   }
@@ -115,11 +122,40 @@ async function notifyRouting(inquiryId: string, data: FirebaseFirestore.Document
 }
 
 /**
+ * Synchronizes `inquiry_statuses/{inquiryId}` from the live canonical inquiry
+ * inside a transaction. Always re-reads the current `inquiries/{inquiryId}` doc
+ * and rejects regressive `routingRevision` writes so delayed triggers never
+ * restore revoked staff access.
+ */
+export async function syncInquiryStatusProjection(inquiryId: string): Promise<boolean> {
+  if (!ID.test(inquiryId)) return false;
+  const inquiryRef = db().collection("inquiries").doc(inquiryId);
+  const statusRef = statusCollection().doc(inquiryId);
+  return db().runTransaction(async (tx) => {
+    const [inquirySnap, statusSnap] = await Promise.all([tx.get(inquiryRef), tx.get(statusRef)]);
+    if (!inquirySnap.exists) {
+      if (statusSnap.exists) {
+        tx.delete(statusRef);
+        return true;
+      }
+      return false;
+    }
+    const next = buildInquiryStatusProjection(inquiryId, inquirySnap.data() ?? {});
+    if (!shouldWriteInquiryProjection(statusSnap.exists ? statusSnap.data() : null, next)) {
+      return false;
+    }
+    tx.set(statusRef, {...next, projectedAt: FieldValue.serverTimestamp()});
+    return true;
+  });
+}
+
+/**
  * Route one inquiry. Idempotent: routing is written only when absent; every
- * call (re)ensures the notifications for the stored routing.
+ * call ensures both the sanitized projection and notifications are up to date.
  */
 export async function routeInquiry(inquiryId: string, actor: Actor = SYSTEM): Promise<{routingStatus: string; assigneeIds: string[]; alreadyRouted: boolean}> {
   const ref = db().collection("inquiries").doc(inquiryId);
+  const statusRef = statusCollection().doc(inquiryId);
   const snapshot = await ref.get();
   if (!snapshot.exists) return {routingStatus: "missing", assigneeIds: [], alreadyRouted: false};
   let data = snapshot.data() ?? {};
@@ -133,27 +169,48 @@ export async function routeInquiry(inquiryId: string, actor: Actor = SYSTEM): Pr
     const collegeExists = ID.test(collegeId) ? (await db().collection("colleges").doc(collegeId).get()).exists : false;
     let candidates: Candidate[] = [];
     if (collegeExists && studentData?.verificationStatus === "verified") {
+      // Automatic clinical routing uses active, verified counselors assigned
+      // to the college (PR #63). Any legacy portalStaff still carrying
+      // assignedCollegeIds are excluded by decideRouting.
       const assigned = await db().collection("users").where("assignedCollegeIds", "array-contains", collegeId).get();
       const auth = await authStates(assigned.docs.map((d) => d.id));
       candidates = assigned.docs.map((d) => ({uid: d.id, label: label(d.data()), profile: d.data(), auth: auth.get(d.id) ?? null}));
     }
     const decision = decideRouting({student: studentData, collegeExists, candidates});
+    const nowTs = Timestamp.now();
 
     await db().runTransaction(async (tx) => {
-      const current = await tx.get(ref);
+      const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
       const live = current.data() ?? {};
       if (live.routingStatus != null) {
         alreadyRouted = true;
+        const projection = buildInquiryStatusProjection(inquiryId, live);
+        if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, projection)) {
+          tx.set(statusRef, {...projection, projectedAt: FieldValue.serverTimestamp()});
+        }
         return;
       }
-      tx.update(ref, {
+      const updates = {
         ...decision,
         ownerId: null,
         routingMode: "automatic",
         routedAt: FieldValue.serverTimestamp(),
         routingRevision: 1,
         escalation: null,
+      };
+      tx.update(ref, updates);
+      const nextProjection = buildInquiryStatusProjection(inquiryId, {
+        ...live,
+        ...decision,
+        ownerId: null,
+        routingMode: "automatic",
+        routedAt: nowTs,
+        routingRevision: 1,
+        escalation: null,
       });
+      if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, nextProjection)) {
+        tx.set(statusRef, {...nextProjection, projectedAt: FieldValue.serverTimestamp()});
+      }
       writeAudit(tx, db(), {
         actorId: actor.uid, actorNameSnapshot: actor.name, actorRoleSnapshot: actor.role,
         action: "INQUIRY_ROUTED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
@@ -161,12 +218,14 @@ export async function routeInquiry(inquiryId: string, actor: Actor = SYSTEM): Pr
       });
     });
     data = (await ref.get()).data() ?? {};
+  } else {
+    await syncInquiryStatusProjection(inquiryId);
   }
   await notifyRouting(inquiryId, data);
   return {routingStatus: String(data.routingStatus), assigneeIds: (data.assigneeIds as string[] | undefined) ?? [], alreadyRouted};
 }
 
-/** Assignee (staff/counselor) or the configured super-administrator. */
+/** Assignee (clinical counselor or operational monitor) or configured super-administrator. */
 async function inquiryActor(request: {auth?: {uid: string} | null}): Promise<{actor: Actor; isSuperAdmin: boolean; role: string}> {
   const uid = requireUid(request);
   const profile = await requireStaff(uid);
@@ -174,10 +233,18 @@ async function inquiryActor(request: {auth?: {uid: string} | null}): Promise<{ac
   return {actor: {uid, name: actorName(profile), role}, isSuperAdmin: role === "admin" && uid === superAdminUid(), role};
 }
 
-function canHandle(who: {actor: Actor; isSuperAdmin: boolean; role: string}, inquiry: FirebaseFirestore.DocumentData): boolean {
+/** Clinical handling/ownership (`assigneeIds` counselor or super-admin). */
+function canHandleClinical(who: {actor: Actor; isSuperAdmin: boolean; role: string}, inquiry: FirebaseFirestore.DocumentData): boolean {
   if (who.isSuperAdmin) return true;
-  return (who.role === "portalStaff" || who.role === "counselor") &&
+  return who.role === "counselor" &&
     Array.isArray(inquiry.assigneeIds) && inquiry.assigneeIds.includes(who.actor.uid);
+}
+
+/** Operational monitoring + acknowledgment/escalation (`monitoringStaffIds` portalStaff, or clinical handler). */
+function canOperateOnInquiry(who: {actor: Actor; isSuperAdmin: boolean; role: string}, inquiry: FirebaseFirestore.DocumentData): boolean {
+  if (canHandleClinical(who, inquiry)) return true;
+  return who.role === "portalStaff" &&
+    Array.isArray(inquiry.monitoringStaffIds) && inquiry.monitoringStaffIds.includes(who.actor.uid);
 }
 
 function inquiryIdFrom(data: unknown): string {
@@ -198,24 +265,39 @@ export const acknowledgeInquiry = onCall(async (request) => {
   const who = await inquiryActor(request);
   const inquiryId = inquiryIdFrom(request.data);
   const ref = db().collection("inquiries").doc(inquiryId);
+  const statusRef = statusCollection().doc(inquiryId);
+  const nowTs = Timestamp.now();
   await db().runTransaction(async (tx) => {
-    const current = await tx.get(ref);
+    const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
-    if (!canHandle(who, data)) throw new HttpsError("permission-denied", DENIED);
+    if (!canOperateOnInquiry(who, data)) throw new HttpsError("permission-denied", DENIED);
     if (String(data.status ?? "pending").toLowerCase() === "resolved") {
       throw new HttpsError("failed-precondition", "Resolved inquiries cannot be acknowledged.");
     }
     if (data.acknowledgedAt) throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Inquiry has no sender.");
+    // Only clinical counselors or the super-admin claim inquiry `ownerId`;
+    // operational monitors acknowledge receipt without gaining counselor ownership.
+    const nextOwnerId = who.role === "portalStaff" ? (data.ownerId ?? null) : (data.ownerId ?? who.actor.uid);
     tx.update(ref, {
       status: "in_progress",
       acknowledgedAt: FieldValue.serverTimestamp(),
       acknowledgedBy: who.actor.uid,
-      ownerId: data.ownerId ?? who.actor.uid,
+      ownerId: nextOwnerId,
       updatedAt: FieldValue.serverTimestamp(),
     });
+    const projection = buildInquiryStatusProjection(inquiryId, {
+      ...data,
+      status: "in_progress",
+      acknowledgedAt: nowTs,
+      ownerId: nextOwnerId,
+      updatedAt: nowTs,
+    });
+    if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, projection)) {
+      tx.set(statusRef, {...projection, projectedAt: FieldValue.serverTimestamp()});
+    }
     tx.create(db().collection("notifications").doc(), {
       userId, inquiryId, type: "inquiry", title: "Form received",
       body: `PACC received your ${String(data.subject ?? "form")}. Our staff will review it.`,
@@ -224,7 +306,7 @@ export const acknowledgeInquiry = onCall(async (request) => {
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ACKNOWLEDGED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {before: String(data.status ?? "pending"), after: "in_progress", ownerId: data.ownerId ?? who.actor.uid},
+      metadata: {before: String(data.status ?? "pending"), after: "in_progress", ownerId: nextOwnerId},
     });
   });
   return {ok: true};
@@ -236,11 +318,15 @@ export const setInquiryStatus = onCall(async (request) => {
   const status = String((request.data as {status?: unknown})?.status ?? "");
   if (!STATUSES.has(status)) throw new HttpsError("invalid-argument", "Choose pending, in progress or resolved.");
   const ref = db().collection("inquiries").doc(inquiryId);
+  const statusRef = statusCollection().doc(inquiryId);
+  const nowTs = Timestamp.now();
   return db().runTransaction(async (tx) => {
-    const current = await tx.get(ref);
+    const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
-    if (!canHandle(who, data)) throw new HttpsError("permission-denied", DENIED);
+    if (!canHandleClinical(who, data)) {
+      throw new HttpsError("permission-denied", "Only the counselor assigned to this inquiry or the super-administrator can change clinical inquiry status.");
+    }
     const before = String(data.status ?? "pending");
     if (before === status) return {ok: true, changed: false};
     tx.update(ref, {
@@ -249,6 +335,15 @@ export const setInquiryStatus = onCall(async (request) => {
       resolvedAt: status === "resolved" ? FieldValue.serverTimestamp() : null,
       resolvedBy: status === "resolved" ? who.actor.uid : null,
     });
+    const projection = buildInquiryStatusProjection(inquiryId, {
+      ...data,
+      status,
+      updatedAt: nowTs,
+      resolvedAt: status === "resolved" ? nowTs : null,
+    });
+    if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, projection)) {
+      tx.set(statusRef, {...projection, projectedAt: FieldValue.serverTimestamp()});
+    }
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: status === "resolved" ? "INQUIRY_RESOLVED" : "INQUIRY_STATUS_CHANGED",
@@ -264,20 +359,33 @@ export const escalateInquiry = onCall(async (request) => {
   const inquiryId = inquiryIdFrom(request.data);
   const reason = reasonFrom(request.data);
   const ref = db().collection("inquiries").doc(inquiryId);
+  const statusRef = statusCollection().doc(inquiryId);
   const admin = superAdminUid();
   if (!admin) throw new HttpsError("failed-precondition", "No escalation recipient is configured.");
+  const nowTs = Timestamp.now();
   const revision = await db().runTransaction(async (tx) => {
-    const current = await tx.get(ref);
+    const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
-    // Escalation is an assignee's request for administrator review.
-    if (who.isSuperAdmin || !canHandle(who, data)) throw new HttpsError("permission-denied", "Only staff assigned to this inquiry can escalate it.");
+    // Escalation is an assigned handler's or monitoring staff member's request for administrator review.
+    if (who.isSuperAdmin || !canOperateOnInquiry(who, data)) {
+      throw new HttpsError("permission-denied", "Only staff assigned to this inquiry can escalate it.");
+    }
     if (data.status === "resolved") throw new HttpsError("failed-precondition", "Resolved inquiries cannot be escalated.");
     if (data.escalation?.status === "requested") throw new HttpsError("failed-precondition", "This inquiry is already escalated.");
+    const nextEscalation = {status: "requested", reason, requestedBy: who.actor.uid, requestedAt: FieldValue.serverTimestamp()};
     tx.update(ref, {
-      escalation: {status: "requested", reason, requestedBy: who.actor.uid, requestedAt: FieldValue.serverTimestamp()},
+      escalation: nextEscalation,
       updatedAt: FieldValue.serverTimestamp(),
     });
+    const projection = buildInquiryStatusProjection(inquiryId, {
+      ...data,
+      escalation: {status: "requested"},
+      updatedAt: nowTs,
+    });
+    if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, projection)) {
+      tx.set(statusRef, {...projection, projectedAt: FieldValue.serverTimestamp()});
+    }
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ESCALATED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
@@ -296,21 +404,34 @@ export const reassignInquiry = onCall(async (request) => {
   const actor: Actor = {uid, name: actorName(admin), role: String(admin.accessRole)};
   const inquiryId = inquiryIdFrom(request.data);
   const reason = reasonFrom(request.data);
-  const input = request.data as {assigneeIds?: unknown; expectedRevision?: unknown};
-  const requested = Array.isArray(input.assigneeIds) ? input.assigneeIds.filter((id): id is string => typeof id === "string" && ID.test(id)) : [];
-  const unique = [...new Set(requested)].slice(0, 11);
+  const input = request.data as {assigneeIds?: unknown; monitoringStaffIds?: unknown; expectedRevision?: unknown};
+  const requestedClinical = Array.isArray(input.assigneeIds)
+    ? input.assigneeIds.filter((id): id is string => typeof id === "string" && ID.test(id))
+    : [];
+  const requestedMonitors = Array.isArray(input.monitoringStaffIds)
+    ? input.monitoringStaffIds.filter((id): id is string => typeof id === "string" && ID.test(id))
+    : [];
+  const unique = [...new Set([...requestedClinical, ...requestedMonitors])].slice(0, 22);
   const profiles = unique.length > 0 ? await db().getAll(...unique.map((id) => db().collection("users").doc(id))) : [];
   const auth = await authStates(profiles.filter((p) => p.exists).map((p) => p.id));
   const candidates = new Map(profiles.filter((p) => p.exists).map((p) => [p.id, {label: label(p.data() ?? {}), profile: p.data() ?? {}, auth: auth.get(p.id) ?? null}]));
   const ref = db().collection("inquiries").doc(inquiryId);
+  const statusRef = statusCollection().doc(inquiryId);
+  const nowTs = Timestamp.now();
 
   const outcome = await db().runTransaction(async (tx) => {
-    const current = await tx.get(ref);
+    const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
     let plan;
     try {
-      plan = planReassignment({inquiry: data, requested: input.assigneeIds, candidates, expectedRevision: input.expectedRevision});
+      plan = planReassignment({
+        inquiry: data,
+        requested: input.assigneeIds,
+        requestedMonitoring: input.monitoringStaffIds,
+        candidates,
+        expectedRevision: input.expectedRevision,
+      });
     } catch (error) {
       if (error instanceof InquiryRoutingError) {
         throw new HttpsError(error.code === "invalid-assignees" ? "invalid-argument" : "failed-precondition", error.message, {reason: error.code});
@@ -320,23 +441,45 @@ export const reassignInquiry = onCall(async (request) => {
     const escalation = data.escalation?.status === "requested"
       ? {...data.escalation, status: "handled", handledBy: uid, handledAt: FieldValue.serverTimestamp()}
       : data.escalation ?? null;
-    tx.update(ref, {
+    const updates = {
       routingStatus: "routed",
       routingReason: null,
       routingMode: "manual",
       assigneeIds: plan.assigneeIds,
       assigneeLabels: plan.assigneeLabels,
+      monitoringStaffIds: plan.monitoringStaffIds,
+      monitoringStaffLabels: plan.monitoringStaffLabels,
       ownerId: plan.ownerId,
       routingRevision: plan.revision,
       routedAt: FieldValue.serverTimestamp(),
       escalation,
       updatedAt: FieldValue.serverTimestamp(),
+    };
+    tx.update(ref, updates);
+    const projection = buildInquiryStatusProjection(inquiryId, {
+      ...data,
+      ...updates,
+      routedAt: nowTs,
+      updatedAt: nowTs,
     });
+    if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, projection)) {
+      tx.set(statusRef, {...projection, projectedAt: FieldValue.serverTimestamp()});
+    }
     writeAudit(tx, db(), {
       actorId: actor.uid, actorNameSnapshot: actor.name, actorRoleSnapshot: actor.role,
       action: "INQUIRY_REASSIGNED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {before: data.assigneeIds ?? [], after: plan.assigneeIds, added: plan.added, removed: plan.removed,
-        outOfCollege: plan.outOfCollege, collegeId: data.collegeId ?? "", revision: plan.revision, reason},
+      metadata: {
+        before: data.assigneeIds ?? [],
+        after: plan.assigneeIds,
+        beforeMonitors: data.monitoringStaffIds ?? [],
+        afterMonitors: plan.monitoringStaffIds,
+        added: plan.added,
+        removed: plan.removed,
+        outOfCollege: plan.outOfCollege,
+        collegeId: data.collegeId ?? "",
+        revision: plan.revision,
+        reason,
+      },
     });
     return {plan, status: String(data.status ?? "pending")};
   });
@@ -359,14 +502,12 @@ export const reassignInquiry = onCall(async (request) => {
 });
 
 export type BackfillOptions = {limit?: number; cursor?: string | null; pageSize?: number; maxPages?: number};
-export type BackfillResult = {routed: number; needsTriage: number; scanned: number; nextCursor: string | null; done: boolean};
+export type BackfillResult = {routed: number; needsTriage: number; projectionsSynced: number; scanned: number; nextCursor: string | null; done: boolean};
 
 /**
- * Route inquiries that predate college routing, in document-ID order.
- * Bounded per call (at most `maxPages * pageSize` documents read and `limit`
- * inquiries routed) and resumable: pass the returned `nextCursor` until
- * `done`. Routed inquiries are skipped server-side page by page, so records
- * beyond any number of already-routed ones are still reached.
+ * Route inquiries that predate college routing (and backfill any missing
+ * `inquiry_statuses` projections for previously routed inquiries), in
+ * document-ID order. Bounded and resumable via `nextCursor`.
  */
 export async function routeExistingInquiriesBatch(actor: Actor, options: BackfillOptions = {}): Promise<BackfillResult> {
   const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 100);
@@ -375,26 +516,35 @@ export async function routeExistingInquiriesBatch(actor: Actor, options: Backfil
   let cursor = options.cursor ?? null;
   let routed = 0;
   let needsTriage = 0;
+  let projectionsSynced = 0;
   let scanned = 0;
   for (let page = 0; page < maxPages; page++) {
     let query = db().collection("inquiries").orderBy(FieldPath.documentId()).limit(pageSize);
     if (cursor) query = query.startAfter(cursor);
     const snapshot = await query.get();
-    if (snapshot.empty) return {routed, needsTriage, scanned, nextCursor: null, done: true};
+    if (snapshot.empty) return {routed, needsTriage, projectionsSynced, scanned, nextCursor: null, done: true};
+    const projectionRefs = snapshot.docs.map((docSnap) => statusCollection().doc(docSnap.id));
+    const projectionSnaps = projectionRefs.length > 0 ? await db().getAll(...projectionRefs) : [];
+    const hasProjection = new Map(projectionSnaps.map((snap) => [snap.id, snap.exists]));
     for (const inquiry of snapshot.docs) {
       scanned += 1;
       cursor = inquiry.id;
-      if (inquiry.data().routingStatus != null) continue;
+      if (inquiry.data().routingStatus != null) {
+        if (!hasProjection.get(inquiry.id)) {
+          if (await syncInquiryStatusProjection(inquiry.id)) projectionsSynced += 1;
+        }
+        continue;
+      }
       const result = await routeInquiry(inquiry.id, actor);
       if (!result.alreadyRouted) {
         routed += 1;
         if (result.routingStatus === "needs_triage") needsTriage += 1;
       }
-      if (routed >= limit) return {routed, needsTriage, scanned, nextCursor: cursor, done: false};
+      if (routed >= limit) return {routed, needsTriage, projectionsSynced, scanned, nextCursor: cursor, done: false};
     }
-    if (snapshot.size < pageSize) return {routed, needsTriage, scanned, nextCursor: null, done: true};
+    if (snapshot.size < pageSize) return {routed, needsTriage, projectionsSynced, scanned, nextCursor: null, done: true};
   }
-  return {routed, needsTriage, scanned, nextCursor: cursor, done: false};
+  return {routed, needsTriage, projectionsSynced, scanned, nextCursor: cursor, done: false};
 }
 
 export const routeExistingInquiries = onCall(async (request) => {

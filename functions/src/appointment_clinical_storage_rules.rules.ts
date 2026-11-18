@@ -5,7 +5,7 @@ import {assertFails, assertSucceeds, initializeTestEnvironment, RulesTestEnviron
 import {doc, setDoc} from "firebase/firestore";
 import {deleteObject, getMetadata, ref, uploadBytes} from "firebase/storage";
 
-const projectId = "demo-mindmate-clinical-attachments";
+const projectId = process.env.GCLOUD_PROJECT || "demo-mindmate-clinical-attachments";
 const appointmentId = "appointment-1";
 const path = "counseling_session_files/appointment-1/counselor/0123456789abcdef0123456789abcdef.pdf";
 let env: RulesTestEnvironment;

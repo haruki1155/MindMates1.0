@@ -8,12 +8,14 @@ import "./index";
 import {
   acknowledgeInquiry,
   escalateInquiry,
+  INQUIRY_STATUSES_COLLECTION,
   reassignInquiry,
   ensureActiveNotification,
   routeExistingInquiries,
   routeExistingInquiriesBatch,
   routeInquiry,
   setInquiryStatus,
+  syncInquiryStatusProjection,
 } from "./inquiry_routing_service";
 
 // Auth + Firestore emulators. Real callables and the real routing handler.
@@ -87,10 +89,10 @@ after(async () => {
   await Promise.all(all.map((n) => getAuth().deleteUser(uid(n)).catch(() => undefined)));
 });
 
-test("routes to every eligible assignee of the student's verified college and notifies only them", {skip: !emulated}, async () => {
+test("routes to eligible counselors only, ignores legacy portalStaff college assignments, and projects sanitized status", {skip: !emulated}, async () => {
   const id = await newInquiry("cite");
   const result = await routeInquiry(id);
-  assert.deepEqual(result.assigneeIds, [uid("c1"), uid("s1")].sort());
+  assert.deepEqual(result.assigneeIds, [uid("c1")]);
   const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
   assert.equal(inquiry.routingStatus, "routed");
   assert.equal(inquiry.routingReason, null);
@@ -98,16 +100,29 @@ test("routes to every eligible assignee of the student's verified college and no
   assert.equal(inquiry.routingMode, "automatic");
   assert.equal(inquiry.routingRevision, 1);
   assert.equal(inquiry.ownerId, null);
-  assert.deepEqual(inquiry.assigneeLabels, {[uid("c1")]: "Counselor One", [uid("s1")]: "Staff One"});
+  assert.deepEqual(inquiry.assigneeLabels, {[uid("c1")]: "Counselor One"});
+  assert.deepEqual(inquiry.monitoringStaffIds, []);
+
+  // Sanitized projection mirrors operational state without any student PII or body.
+  const projection = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
+  assert.equal(projection.inquiryId, id);
+  assert.equal(projection.operationalLabel, "Client Feedback Form");
+  assert.deepEqual(projection.assigneeIds, [uid("c1")]);
+  assert.deepEqual(projection.monitoringStaffIds, []);
+  const json = JSON.stringify(projection);
+  for (const forbidden of ["Sensitive subject text", "Sensitive message text", "s@example.invalid", "private answer", uid("student-cite")]) {
+    assert.ok(!json.includes(forbidden), `projection leaked: ${forbidden}`);
+  }
+
   const notes = await notificationsFor(id);
-  assert.deepEqual(notes.map((n) => n.userId).sort(), [uid("c1"), uid("s1")].sort());
+  assert.deepEqual(notes.map((n) => n.userId), [uid("c1")]);
   for (const n of notes) {
     assert.equal(n.audience, "portal");
     assert.ok(!JSON.stringify(n).includes("Sensitive"), "notification must not carry inquiry content");
   }
   const routed = await audit(id, "INQUIRY_ROUTED");
   assert.equal(routed.length, 1);
-  assert.deepEqual(routed[0].metadata.assigneeIds, [uid("c1"), uid("s1")].sort());
+  assert.deepEqual(routed[0].metadata.assigneeIds, [uid("c1")]);
   assert.equal(routed[0].category, "INQUIRIES");
 });
 
@@ -115,11 +130,13 @@ test("routing is idempotent and a retry repairs a missing notification without d
   const id = await newInquiry("cite");
   await routeInquiry(id);
   await db.doc(`notifications/portal_inquiry_${id}_${uid("c1")}`).delete();
+  await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).delete();
   const again = await routeInquiry(id);
   assert.equal(again.alreadyRouted, true);
-  assert.equal((await notificationsFor(id)).length, 2);
+  assert.equal((await notificationsFor(id)).length, 1);
+  assert.ok((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).exists, "retry repairs missing status projection");
   await routeInquiry(id);
-  assert.equal((await notificationsFor(id)).length, 2);
+  assert.equal((await notificationsFor(id)).length, 1);
   assert.equal((await audit(id, "INQUIRY_ROUTED")).length, 1);
   assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingRevision, 1);
 });
@@ -143,15 +160,28 @@ test("unverified, missing, unknown and unstaffed colleges go to super-admin tria
   assert.equal((await db.doc(`users/${uid("student-cite")}`).get()).data()!.collegeId, college("cite"));
 });
 
-test("only assignees or the super-administrator acknowledge; acknowledgement claims ownership", {skip: !emulated}, async () => {
+test("only clinical counselors/super-admin or explicit monitoring staff acknowledge; monitors never claim counselor ownerId", {skip: !emulated}, async () => {
   const id = await newInquiry("cite");
   await routeInquiry(id);
+  // Before explicit monitoring assignment, s1 cannot acknowledge or act.
+  await rejects(call(acknowledgeInquiry, "s1", {inquiryId: id}), "permission-denied");
+  await call(reassignInquiry, "admin", {
+    inquiryId: id,
+    assigneeIds: [uid("c1")],
+    monitoringStaffIds: [uid("s1")],
+    expectedRevision: 1,
+    reason: "Assign operational monitor",
+  });
   for (const actor of ["c2", "otherAdmin", "student-cite", "sus", "unv"]) {
     await rejects(call(acknowledgeInquiry, actor, {inquiryId: id}), "permission-denied");
   }
   await call(acknowledgeInquiry, "s1", {inquiryId: id});
   const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
-  assert.deepEqual([inquiry.status, inquiry.ownerId, inquiry.acknowledgedBy], ["in_progress", uid("s1"), uid("s1")]);
+  assert.deepEqual([inquiry.status, inquiry.ownerId, inquiry.acknowledgedBy], ["in_progress", null, uid("s1")]);
+  const projection = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
+  assert.equal(projection.status, "in_progress");
+  assert.ok(projection.acknowledgedAt != null);
+  assert.equal(projection.ownerId, null);
   assert.equal((await audit(id, "INQUIRY_ACKNOWLEDGED")).length, 1);
   const receipt = (await db.collection("notifications").where("inquiryId", "==", id).where("userId", "==", uid("student-cite")).get()).size;
   assert.equal(receipt, 1);
@@ -165,6 +195,7 @@ test("only assignees or the super-administrator acknowledge; acknowledgement cla
 test("resolved inquiries cannot be reopened by acknowledgement, including under concurrent updates", {skip: !emulated}, async () => {
   const resolvedId = await newInquiry("cite");
   await routeInquiry(resolvedId);
+  await call(reassignInquiry, "admin", {inquiryId: resolvedId, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
   await call(setInquiryStatus, "c1", {inquiryId: resolvedId, status: "resolved"});
   await rejects(call(acknowledgeInquiry, "s1", {inquiryId: resolvedId}), "failed-precondition");
   const resolvedDoc = (await db.doc(`inquiries/${resolvedId}`).get()).data()!;
@@ -180,6 +211,7 @@ test("resolved inquiries cannot be reopened by acknowledgement, including under 
   // Concurrent resolve vs acknowledge race never reopens status to in_progress.
   const raceId = await newInquiry("cite");
   await routeInquiry(raceId);
+  await call(reassignInquiry, "admin", {inquiryId: raceId, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
   const outcomes = await Promise.allSettled([
     call(setInquiryStatus, "c1", {inquiryId: raceId, status: "resolved"}),
     call(acknowledgeInquiry, "s1", {inquiryId: raceId}),
@@ -198,9 +230,11 @@ test("resolved inquiries cannot be reopened by acknowledgement, including under 
   }
 });
 
-test("status changes are server-side, assignee-scoped and audited", {skip: !emulated}, async () => {
+test("status changes are server-side, counselor/super-admin scoped and audited; portalStaff cannot alter clinical resolution", {skip: !emulated}, async () => {
   const id = await newInquiry("cite");
   await routeInquiry(id);
+  await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
+  await rejects(call(setInquiryStatus, "s1", {inquiryId: id, status: "resolved"}), "permission-denied");
   await rejects(call(setInquiryStatus, "c2", {inquiryId: id, status: "resolved"}), "permission-denied");
   await rejects(call(setInquiryStatus, "student-cite", {inquiryId: id, status: "resolved"}), "permission-denied");
   await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "deleted"}), "invalid-argument");
@@ -208,6 +242,9 @@ test("status changes are server-side, assignee-scoped and audited", {skip: !emul
   await call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved"});
   const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
   assert.deepEqual([inquiry.status, inquiry.resolvedBy], ["resolved", uid("c1")]);
+  const projection = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
+  assert.equal(projection.status, "resolved");
+  assert.ok(projection.resolvedAt != null);
   const changed = await audit(id, "INQUIRY_STATUS_CHANGED");
   const resolved = await audit(id, "INQUIRY_RESOLVED");
   assert.equal(changed.length, 1);
@@ -217,41 +254,76 @@ test("status changes are server-side, assignee-scoped and audited", {skip: !emul
   assert.equal((await audit(id, "INQUIRY_RESOLVED")).length, 1, "an unchanged status writes nothing");
 });
 
-test("an assignee escalates once to the super-administrator; others cannot", {skip: !emulated}, async () => {
+test("assigned counselors or monitoring staff escalate once to the super-administrator without leaking reason into projection", {skip: !emulated}, async () => {
   const id = await newInquiry("cite");
   await routeInquiry(id);
+  await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
   await rejects(call(escalateInquiry, "c2", {inquiryId: id, reason: "Needs supervisor review"}), "permission-denied");
   await rejects(call(escalateInquiry, "c1", {inquiryId: id, reason: "no"}), "invalid-argument");
-  await call(escalateInquiry, "c1", {inquiryId: id, reason: "Needs supervisor review"});
+  await call(escalateInquiry, "c1", {inquiryId: id, reason: "Private clinical escalation reason"});
   const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
-  assert.deepEqual([inquiry.escalation.status, inquiry.escalation.requestedBy, inquiry.escalation.reason], ["requested", uid("c1"), "Needs supervisor review"]);
-  const note = await db.doc(`notifications/portal_inquiry_escalation_${id}_1`).get();
+  assert.deepEqual([inquiry.escalation.status, inquiry.escalation.requestedBy, inquiry.escalation.reason], ["requested", uid("c1"), "Private clinical escalation reason"]);
+  const projection = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
+  assert.equal(projection.escalationStatus, "requested");
+  assert.ok(!JSON.stringify(projection).includes("Private clinical escalation reason"));
+  assert.equal(projection.escalationReason, undefined);
+  const note = await db.doc(`notifications/portal_inquiry_escalation_${id}_2`).get();
   assert.equal(note.data()?.userId, uid("admin"));
   assert.ok(!JSON.stringify(note.data()).includes("Sensitive"));
   assert.equal((await audit(id, "INQUIRY_ESCALATED")).length, 1);
   await rejects(call(escalateInquiry, "s1", {inquiryId: id, reason: "Again please"}), "failed-precondition");
 });
 
-test("the super-administrator reassigns with revision checks; removed assignees lose their notification", {skip: !emulated}, async () => {
+test("the super-administrator reassigns with revision checks; removed assignees and monitors lose projection access immediately", {skip: !emulated}, async () => {
   const id = await newInquiry("cite");
   await routeInquiry(id);
+  await call(reassignInquiry, "admin", {
+    inquiryId: id,
+    assigneeIds: [uid("c1")],
+    monitoringStaffIds: [uid("s1")],
+    expectedRevision: 1,
+    reason: "Add operational monitor",
+  });
   await call(escalateInquiry, "c1", {inquiryId: id, reason: "Needs another college"});
-  await rejects(call(reassignInquiry, "c1", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 1, reason: "Coverage change"}), "permission-denied");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("sus")], expectedRevision: 1, reason: "Coverage change"}), "failed-precondition");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("unv")], expectedRevision: 1, reason: "Coverage change"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "c1", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 2, reason: "Coverage change"}), "permission-denied");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("s1")], expectedRevision: 2, reason: "Invalid clinical role"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("c2")], expectedRevision: 2, reason: "Invalid monitor role"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("sus")], expectedRevision: 2, reason: "Coverage change"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("unv")], expectedRevision: 2, reason: "Coverage change"}), "failed-precondition");
   await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 0, reason: "Coverage change"}), "failed-precondition");
-  const result = await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 1, reason: "Coverage change"});
-  assert.equal(result.revision, 2);
+  const result = await call(reassignInquiry, "admin", {
+    inquiryId: id,
+    assigneeIds: [uid("c2")],
+    monitoringStaffIds: [],
+    expectedRevision: 2,
+    reason: "Coverage change",
+  });
+  assert.equal(result.revision, 3);
   const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
-  assert.deepEqual([inquiry.assigneeIds, inquiry.routingMode, inquiry.routingRevision, inquiry.escalation.status, inquiry.escalation.handledBy],
-    [[uid("c2")], "manual", 2, "handled", uid("admin")]);
-  const [row] = await audit(id, "INQUIRY_REASSIGNED");
+  assert.deepEqual([inquiry.assigneeIds, inquiry.monitoringStaffIds, inquiry.routingMode, inquiry.routingRevision, inquiry.escalation.status, inquiry.escalation.handledBy],
+    [[uid("c2")], [], "manual", 3, "handled", uid("admin")]);
+  const projection = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
+  assert.deepEqual(projection.assigneeIds, [uid("c2")]);
+  assert.deepEqual(projection.monitoringStaffIds, []);
+  assert.equal(projection.routingRevision, 3);
+  assert.equal(projection.escalationStatus, "handled");
+  const reassignments = await audit(id, "INQUIRY_REASSIGNED");
+  const row = reassignments.find((r) => r.metadata.reason === "Coverage change")!;
   assert.deepEqual([row.metadata.added, row.metadata.removed, row.metadata.outOfCollege, row.metadata.reason],
     [[uid("c2")], [uid("c1"), uid("s1")].sort(), [uid("c2")], "Coverage change"]);
   assert.ok((await db.doc(`notifications/portal_inquiry_${id}_${uid("c2")}`).get()).exists);
   assert.ok((await db.doc(`notifications/portal_inquiry_${id}_${uid("c1")}`).get()).data()!.archivedAt);
-  // The previous assignee can no longer act on it.
+  assert.ok((await db.doc(`notifications/portal_inquiry_${id}_${uid("s1")}`).get()).data()!.archivedAt);
+  // Previous clinical assignee and monitoring staff can no longer act on it.
   await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved"}), "permission-denied");
+  await rejects(call(acknowledgeInquiry, "s1", {inquiryId: id}), "permission-denied");
+
+  // Delayed sync with stale state cannot regress the newer revision.
+  await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).update({routingRevision: 5, monitoringStaffIds: ["newer-monitor"]});
+  assert.equal(await syncInquiryStatusProjection(id), false);
+  const preserved = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
+  assert.equal(preserved.routingRevision, 5);
+  assert.deepEqual(preserved.monitoringStaffIds, ["newer-monitor"]);
 });
 
 test("concurrent reassignments with the same revision: exactly one wins", {skip: !emulated}, async () => {
@@ -267,30 +339,37 @@ test("concurrent reassignments with the same revision: exactly one wins", {skip:
   assert.equal((await audit(id, "INQUIRY_REASSIGNED")).length, 1);
 });
 
-test("an assignee suspended after routing can no longer act", {skip: !emulated}, async () => {
+test("an assignee or monitoring staff suspended after routing can no longer act", {skip: !emulated}, async () => {
   const id = await newInquiry("cite");
   await routeInquiry(id);
+  await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
   await db.doc(`users/${uid("s1")}`).update({accountStatus: "suspended"});
   try {
-    await rejects(call(setInquiryStatus, "s1", {inquiryId: id, status: "resolved"}), "permission-denied");
     await rejects(call(acknowledgeInquiry, "s1", {inquiryId: id}), "permission-denied");
+    await rejects(call(escalateInquiry, "s1", {inquiryId: id, reason: "Blocked monitor"}), "permission-denied");
   } finally {
     await db.doc(`users/${uid("s1")}`).update({accountStatus: "active"});
   }
 });
 
-test("legacy inquiries are routed by the super-admin backfill; resolved ones are not re-notified", {skip: !emulated}, async () => {
+test("legacy unrouted and pre-projection routed inquiries are backfilled cleanly; resolved ones are not re-notified", {skip: !emulated}, async () => {
   const open = await newInquiry("cite");
   const resolved = await newInquiry("cite", {status: "resolved"});
+  const legacyRoutedWithoutProjection = await newInquiry("cite", {routingStatus: "routed", collegeId: college("cite"), assigneeIds: [uid("c1")], routingRevision: 1});
   await rejects(call(routeExistingInquiries, "c1", {limit: 50}), "permission-denied");
   const result = await call(routeExistingInquiries, "admin", {limit: 100});
   assert.ok(result.routed >= 2);
-  for (const id of [open, resolved]) assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingStatus, "routed");
-  assert.equal((await notificationsFor(open)).length, 2);
+  assert.ok(result.projectionsSynced >= 1);
+  for (const id of [open, resolved, legacyRoutedWithoutProjection]) {
+    assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingStatus, "routed");
+    assert.ok((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).exists, id);
+  }
+  assert.equal((await notificationsFor(open)).length, 1);
   assert.equal((await notificationsFor(resolved)).length, 0);
   const again = await call(routeExistingInquiries, "admin", {limit: 100});
   assert.equal((await audit(open, "INQUIRY_ROUTED")).length, 1);
   assert.equal(again.routed, 0);
+  assert.equal(again.projectionsSynced, 0);
 });
 
 test("reassigning A -> B -> A reactivates A's original notification without duplicating it", {skip: !emulated}, async () => {

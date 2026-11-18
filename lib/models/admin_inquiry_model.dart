@@ -82,9 +82,13 @@ class AdminInquiryModel {
     this.routingRevision = 0,
     this.assigneeIds = const [],
     this.assigneeLabels = const {},
+    this.monitoringStaffIds = const [],
+    this.monitoringStaffLabels = const {},
     this.ownerId,
     this.escalationStatus,
     this.escalationReason,
+    this.operationalLabel = '',
+    this.isOperationalProjection = false,
   });
 
   final String id;
@@ -113,9 +117,13 @@ class AdminInquiryModel {
   final int routingRevision;
   final List<String> assigneeIds;
   final Map<String, String> assigneeLabels;
+  final List<String> monitoringStaffIds;
+  final Map<String, String> monitoringStaffLabels;
   final String? ownerId;
   final String? escalationStatus;
   final String? escalationReason;
+  final String operationalLabel;
+  final bool isOperationalProjection;
 
   bool get isManuallyRouted => routingMode == 'manual';
   bool get isEscalated => escalationStatus == 'requested';
@@ -135,16 +143,21 @@ class AdminInquiryModel {
       (name ?? '').trim().isNotEmpty ? name!.trim() : email;
 
   factory AdminInquiryModel.fromJson(Map<String, dynamic> json, {String? id}) {
+    final parsedCategory = json['category']?.toString() ?? 'General';
+    final parsedFormType = _optional(json['formType']);
+    final fallbackOpLabel = parsedFormType != null
+        ? _label(parsedFormType)
+        : (parsedCategory.trim().isNotEmpty ? _label(parsedCategory) : 'General Inquiry');
     return AdminInquiryModel(
       id: (json['id'] ?? id ?? '').toString(),
       userId: json['userId']?.toString() ?? '',
       subject: json['subject']?.toString() ?? 'Untitled inquiry',
       message: json['message']?.toString() ?? '',
-      category: json['category']?.toString() ?? 'General',
+      category: parsedCategory,
       email: json['email']?.toString() ?? '',
       name: _optional(json['name']),
       role: _optional(json['role']),
-      formType: _optional(json['formType']),
+      formType: parsedFormType,
       formData: json['formData'] is Map
           ? Map<String, dynamic>.from(json['formData'] as Map)
           : const {},
@@ -157,15 +170,10 @@ class AdminInquiryModel {
       routingRevision: json['routingRevision'] is num
           ? (json['routingRevision'] as num).toInt()
           : 0,
-      assigneeIds: json['assigneeIds'] is List
-          ? (json['assigneeIds'] as List).whereType<String>().toList()
-          : const [],
-      assigneeLabels: json['assigneeLabels'] is Map
-          ? {
-              for (final entry in (json['assigneeLabels'] as Map).entries)
-                entry.key.toString(): entry.value?.toString() ?? '',
-            }
-          : const {},
+      assigneeIds: _stringList(json['assigneeIds']),
+      assigneeLabels: _stringMap(json['assigneeLabels']),
+      monitoringStaffIds: _stringList(json['monitoringStaffIds']),
+      monitoringStaffLabels: _stringMap(json['monitoringStaffLabels']),
       ownerId: _optional(json['ownerId']),
       escalationStatus: json['escalation'] is Map
           ? _optional((json['escalation'] as Map)['status'])
@@ -175,8 +183,68 @@ class AdminInquiryModel {
           : null,
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
       status: InquiryStatus.fromValue(json['status']),
+      operationalLabel: _optional(json['operationalLabel']) ?? fallbackOpLabel,
+      isOperationalProjection: false,
     );
   }
+
+  /// Parses the server-managed, staff-safe `inquiry_statuses` projection.
+  /// Student identifiers, message, user-authored subject, formData, and
+  /// free-text escalation reasons are intentionally never read here.
+  factory AdminInquiryModel.fromOperationalProjection(
+    Map<String, dynamic> json, {
+    String? id,
+  }) {
+    final parsedCategory = json['category']?.toString() ?? 'General';
+    final parsedFormType = _optional(json['formType']);
+    final fallbackLabel = parsedFormType != null
+        ? _label(parsedFormType)
+        : (parsedCategory.trim().isNotEmpty ? _label(parsedCategory) : 'General Inquiry');
+    final safeLabel = _optional(json['operationalLabel']) ?? fallbackLabel;
+    return AdminInquiryModel(
+      id: (json['inquiryId'] ?? json['id'] ?? id ?? '').toString(),
+      userId: '',
+      subject: safeLabel,
+      message: '',
+      category: parsedCategory,
+      email: '',
+      name: null,
+      role: null,
+      formType: parsedFormType,
+      formData: const {},
+      acknowledgedAt: dateTimeFromFirestore(json['acknowledgedAt']),
+      assignedStaffId: null,
+      collegeId: json['collegeId']?.toString() ?? '',
+      routingStatus: InquiryRoutingStatus.fromValue(json['routingStatus']),
+      routingReason: _optional(json['routingReason']),
+      routingMode: _optional(json['routingMode']),
+      routingRevision: json['routingRevision'] is num
+          ? (json['routingRevision'] as num).toInt()
+          : 0,
+      assigneeIds: _stringList(json['assigneeIds']),
+      assigneeLabels: _stringMap(json['assigneeLabels']),
+      monitoringStaffIds: _stringList(json['monitoringStaffIds']),
+      monitoringStaffLabels: _stringMap(json['monitoringStaffLabels']),
+      ownerId: _optional(json['ownerId']),
+      escalationStatus: _optional(json['escalationStatus']),
+      escalationReason: null,
+      createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
+      status: InquiryStatus.fromValue(json['status']),
+      operationalLabel: safeLabel,
+      isOperationalProjection: true,
+    );
+  }
+
+  static List<String> _stringList(Object? value) => value is List
+      ? value.whereType<String>().toList()
+      : const [];
+
+  static Map<String, String> _stringMap(Object? value) => value is Map
+      ? {
+          for (final entry in value.entries)
+            entry.key.toString(): entry.value?.toString() ?? '',
+        }
+      : const {};
 
   Map<String, dynamic> toJson() => {
     'userId': userId,

@@ -1,8 +1,11 @@
 import {handleAppointmentAgreement} from "./appointment_agreement";
 export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callable";
 export {acknowledgeInquiry, escalateInquiry, reassignInquiry, routeExistingInquiries, setInquiryStatus} from "./inquiry_routing_service";
-import {routeInquiry} from "./inquiry_routing_service";
-export {setStaffCollegeAssignments} from "./college_assignments_callable";
+import {routeInquiry, syncInquiryStatusProjection} from "./inquiry_routing_service";
+export {
+  reassignCollegeCounselor,
+  setStaffCollegeAssignments,
+} from "./college_assignments_callable";
 export {getStudentCaseHistory} from "./student_case_history_callable";
 export {getCaseRemarks, saveCaseRemarks} from "./case_remarks_callable";
 import {getApps, initializeApp} from "firebase-admin/app";
@@ -94,7 +97,9 @@ export {
   saveCounselingPopulation,
   getAcademicYears,
   createAcademicYear,
+  activateAcademicYear,
   closeAcademicYear,
+  voidAcademicYear,
 } from "./counseling_population";
 
 if (!getApps().length) initializeApp();
@@ -1512,6 +1517,13 @@ export const notifyPortalOfInquiry = onDocumentCreated(
   {document: "inquiries/{inquiryId}", retry: true},
   async (event) => {
     await routeInquiry(event.params.inquiryId);
+  },
+);
+
+export const syncInquiryStatusOnWrite = onDocumentWritten(
+  {document: "inquiries/{inquiryId}", retry: true},
+  async (event) => {
+    await syncInquiryStatusProjection(event.params.inquiryId);
   },
 );
 

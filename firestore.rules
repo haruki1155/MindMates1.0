@@ -803,20 +803,37 @@ service cloud.firestore {
         && request.resource.data.message.size() <= 4000
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt == request.time;
-      // College routing: an inquiry is readable by its student, by the staff
-      // and counselors it was routed to (assigneeIds, written only by Cloud
-      // Functions), and by the configured super-administrator. Unrouted and
-      // triage inquiries have no assignees, so only the owner and the
-      // super-administrator see them. Staff list queries must filter on
-      // `assigneeIds array-contains <uid>`.
+      // Raw inquiry documents carry student PII, messages and form responses.
+      // Read access is restricted strictly to:
+      // 1) the owning student,
+      // 2) the verified, active configured super-administrator, and
+      // 3) an active, approved, verified counselor explicitly assigned to it
+      //    (`assigneeIds`, written only by Cloud Functions).
+      // Operational `portalStaff` must NEVER read raw inquiries, even if their
+      // UID appears in a legacy `assigneeIds` array; they read sanitized
+      // operational projections under `inquiry_statuses/{inquiryId}`.
       allow read: if isOwner(resource.data.userId)
         || isSystemAdmin()
-        || (currentAccessRole() in ['portalStaff', 'counselor']
-          && hasPortalAccess()
+        || (currentAccessRole() == 'counselor'
+          && hasClinicalAccess()
           && request.auth.uid in resource.data.get('assigneeIds', []));
       // Acknowledge, status, escalation and reassignment are audited
       // callables (functions/src/inquiry_routing_service.ts).
       allow update, delete: if false;
+    }
+
+    // Server-managed, staff-safe operational status projection for inquiries.
+    // Excludes student UID, email, name, message, user-authored subject,
+    // formData and free-text escalation reasons.
+    match /inquiry_statuses/{inquiryId} {
+      allow read: if isSystemAdmin()
+        || (currentAccessRole() == 'portalStaff'
+          && hasPortalAccess()
+          && request.auth.uid in resource.data.get('monitoringStaffIds', []))
+        || (currentAccessRole() == 'counselor'
+          && hasClinicalAccess()
+          && request.auth.uid in resource.data.get('assigneeIds', []));
+      allow write: if false;
     }
 
     match /appointment_slots/{slotId} {

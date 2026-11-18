@@ -4,6 +4,7 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {getFirestore} from "firebase-admin/firestore";
 
 import {saveOrganizationRecord} from "./index";
+import {ensureAuthUser} from "./test_auth_helper";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
 
@@ -34,6 +35,7 @@ async function saveOk(data: Record<string, unknown>): Promise<string> {
 
 before(async () => {
   assert.ok(process.env.FIRESTORE_EMULATOR_HOST && adminUid, "emulator + SUPER_ADMIN_UID required");
+  await ensureAuthUser(adminUid, true);
   const admin = db.collection("users").doc(adminUid);
   if (!(await admin.get()).exists) {
     adminCreated = true;

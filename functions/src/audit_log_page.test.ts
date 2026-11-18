@@ -4,6 +4,7 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore} from "firebase-admin/firestore";
 
 import {getAuditLogPage} from "./index";
+import {ensureAuthUser} from "./test_auth_helper";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
 
@@ -33,6 +34,7 @@ let adminCreated = false;
 
 before(async () => {
   assert.ok(adminUid, "SUPER_ADMIN_UID is required");
+  await ensureAuthUser(adminUid, true);
   adminCreated = !(await db.doc(`users/${adminUid}`).get()).exists;
   await db.doc(`users/${adminUid}`).set({id: adminUid, accessRole: "admin", role: "admin", name: "Test Admin"}, {merge: true});
   // Pre-existing shape: an action about a staff account.

@@ -1147,15 +1147,37 @@ class AdminPortalRepository {
     return CounselingPopulationConfig.fromJson(result.data);
   }
 
-  Future<List<AcademicYearRecord>> fetchAcademicYears() async {
+  bool? _extendedAcademicYearLifecycleEnabled;
+
+  bool get isExtendedAcademicYearLifecycleEnabled =>
+      _extendedAcademicYearLifecycleEnabled ?? false;
+
+  Future<List<AcademicYearRecord>> _callAcademicYearAction(
+    String callable,
+    Map<String, dynamic> payload,
+  ) async {
     if (currentAccessRole != AccessRole.admin) {
       throw StateError('Administrator access is required.');
     }
-    final data = await _callCallable('getAcademicYears', const {});
-    return _academicYears(
-      data is Map ? Map<String, dynamic>.from(data) : const {},
-    );
+    final data = await _callCallable(callable, payload);
+    final map = data is Map
+        ? Map<String, dynamic>.from(data)
+        : const <String, dynamic>{};
+    if (map['extendedLifecycleEnabled'] is bool) {
+      _extendedAcademicYearLifecycleEnabled =
+          map['extendedLifecycleEnabled'] as bool;
+    } else if (callable == 'getAcademicYears') {
+      _extendedAcademicYearLifecycleEnabled = false;
+    }
+    return _academicYears(map);
   }
+
+  Future<List<AcademicYearRecord>> fetchAcademicYears({
+    bool includeVoided = false,
+  }) => _callAcademicYearAction(
+    'getAcademicYears',
+    includeVoided ? const {'includeVoided': true} : const {},
+  );
 
   Future<List<AcademicYearRecord>> createAcademicYear({
     required String schoolYear,
@@ -1163,32 +1185,51 @@ class AdminPortalRepository {
     String? endDate,
     String? copyFrom,
     bool copyPopulation = false,
-  }) async {
-    if (currentAccessRole != AccessRole.admin) {
-      throw StateError('Administrator access is required.');
-    }
-    final data = await _callCallable('createAcademicYear', {
-      'schoolYear': schoolYear,
-      'startDate': ?startDate,
-      'endDate': ?endDate,
-      'copyFrom': ?copyFrom,
-      'copyPopulation': copyPopulation,
-    });
-    return _academicYears(
-      data is Map ? Map<String, dynamic>.from(data) : const {},
-    );
-  }
+    String? reinstateReason,
+    int? expectedRevision,
+  }) => _callAcademicYearAction('createAcademicYear', {
+    'schoolYear': schoolYear,
+    'startDate': ?startDate,
+    'endDate': ?endDate,
+    'copyFrom': ?copyFrom,
+    'copyPopulation': copyPopulation,
+    'reinstateReason': ?reinstateReason,
+    'expectedRevision': ?expectedRevision,
+  });
 
-  Future<List<AcademicYearRecord>> closeAcademicYear(String schoolYear) async {
-    if (currentAccessRole != AccessRole.admin) {
-      throw StateError('Administrator access is required.');
+  Future<List<AcademicYearRecord>> activateAcademicYear(
+    String schoolYear, {
+    int? expectedRevision,
+  }) => _callAcademicYearAction('activateAcademicYear', {
+    'schoolYear': schoolYear,
+    'expectedRevision': ?expectedRevision,
+  });
+
+  Future<List<AcademicYearRecord>> closeAcademicYear(
+    String schoolYear, {
+    int? expectedRevision,
+    String? confirmation,
+  }) => _callAcademicYearAction('closeAcademicYear', {
+    'schoolYear': schoolYear,
+    'expectedRevision': ?expectedRevision,
+    'confirmation': ?confirmation,
+  });
+
+  Future<List<AcademicYearRecord>> voidAcademicYear({
+    required String schoolYear,
+    required String reason,
+    required String confirmationText,
+    int? expectedRevision,
+  }) async {
+    if (!isSuperAdmin) {
+      throw StateError('Super-admin access is required.');
     }
-    final data = await _callCallable('closeAcademicYear', {
+    return _callAcademicYearAction('voidAcademicYear', {
       'schoolYear': schoolYear,
+      'reason': reason,
+      'confirmation': confirmationText,
+      'expectedRevision': ?expectedRevision,
     });
-    return _academicYears(
-      data is Map ? Map<String, dynamic>.from(data) : const {},
-    );
   }
 
   static List<AcademicYearRecord> _academicYears(Map<String, dynamic> data) =>
@@ -1290,19 +1331,17 @@ class AdminPortalRepository {
     );
   }
 
-  /// Inquiries visible to this session. Firestore rules are the boundary:
-  /// the super-administrator lists all, staff and counselors must query the
-  /// inquiries routed to them (`assigneeIds array-contains uid`), and any
-  /// other portal account gets an error rather than an empty inbox.
+  /// Raw inquiry details visible to this session. Firestore rules restrict raw
+  /// inquiries strictly to the super-administrator (all) and assigned
+  /// counselors (`assigneeIds array-contains uid`). Operational portalStaff must
+  /// use [watchInquiryStatuses] instead and never fall back to raw reads.
   Stream<List<AdminInquiryModel>> watchInquiries() {
     final uid = currentUserId;
     final role = currentAccessRole;
-    final assignee =
-        role == AccessRole.portalStaff || role == AccessRole.counselor;
-    if (!isSuperAdmin && (!assignee || uid == null)) {
+    if (!isSuperAdmin && (role != AccessRole.counselor || uid == null)) {
       return Stream.error(
         StateError(
-          'Inquiries are visible to assigned staff and the super-administrator.',
+          'Raw inquiries are visible only to assigned counselors and the super-administrator.',
         ),
       );
     }
@@ -1316,6 +1355,43 @@ class AdminPortalRepository {
             items
                 .map(
                   (item) => AdminInquiryModel.fromJson(
+                    item,
+                    id: item['id']?.toString(),
+                  ),
+                )
+                .toList(),
+            role: role,
+            uid: uid,
+            isSuperAdmin: isSuperAdmin,
+          )..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+        );
+  }
+
+  /// Sanitized operational inquiry status projection for operational
+  /// monitoring staff (`monitoringStaffIds array-contains uid`) and the
+  /// super-administrator. Never queries raw `inquiries` as a fallback.
+  Stream<List<AdminInquiryModel>> watchInquiryStatuses() {
+    final uid = currentUserId;
+    final role = currentAccessRole;
+    if (!isSuperAdmin && (role != AccessRole.portalStaff || uid == null)) {
+      return Stream.error(
+        StateError(
+          'Operational inquiry statuses are visible only to assigned monitoring staff and the super-administrator.',
+        ),
+      );
+    }
+    return _firestoreService
+        .watchDocuments(
+          FirestoreCollections.inquiryStatuses,
+          whereArrayContains: isSuperAdmin
+              ? const {}
+              : {'monitoringStaffIds': uid},
+        )
+        .map(
+          (items) => scopeInquiriesForRole(
+            items
+                .map(
+                  (item) => AdminInquiryModel.fromOperationalProjection(
                     item,
                     id: item['id']?.toString(),
                   ),
@@ -1605,9 +1681,9 @@ class AdminPortalRepository {
     return (result.data['colleges'] as num?)?.toInt() ?? 0;
   }
 
-  /// Replaces the colleges a staff member or counselor serves. Authorization,
-  /// validation and the revision check happen server-side; returns the new
-  /// revision.
+  /// Replaces the colleges an authorized counselor serves. Authorization,
+  /// uniqueness, and revision checks happen server-side; returns the new
+  /// revision. Legacy portal staff accounts only permit removal/cleanup.
   Future<int> setStaffCollegeAssignments({
     required String userId,
     required List<String> collegeIds,
@@ -1622,6 +1698,32 @@ class AdminPortalRepository {
     });
     final data = result is Map ? result : const {};
     return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Atomically assigns, transfers, unassigns, or resolves a duplicate
+  /// counselor conflict for one college across all affected counselor accounts.
+  Future<Map<String, int>> reassignCollegeCounselor({
+    required String collegeId,
+    required String? toCounselorId,
+    required List<String> expectedOwnerIds,
+    required Map<String, int> expectedRevisions,
+    required String reason,
+  }) async {
+    final result = await _callCallable('reassignCollegeCounselor', {
+      'collegeId': collegeId,
+      'toCounselorId': toCounselorId,
+      'expectedOwnerIds': expectedOwnerIds,
+      'expectedRevisions': expectedRevisions,
+      'reason': reason,
+    });
+    final data = result is Map ? result : const {};
+    final rawRevisions = data['revisions'];
+    if (rawRevisions is! Map) return const {};
+    return {
+      for (final entry in rawRevisions.entries)
+        if (entry.key is String && entry.value is num)
+          entry.key as String: (entry.value as num).toInt(),
+    };
   }
 
   Future<void> updateStaffOrganization({
@@ -1663,16 +1765,19 @@ class AdminPortalRepository {
   Future<void> escalateInquiry(String id, {required String reason}) =>
       _callCallable('escalateInquiry', {'inquiryId': id, 'reason': reason});
 
-  /// Super-administrator replaces the assignees; returns the new revision.
+  /// Super-administrator replaces the clinical counselors (and optionally
+  /// operational monitoring staff); returns the new revision.
   Future<int> reassignInquiry(
     String id, {
     required List<String> assigneeIds,
+    List<String>? monitoringStaffIds,
     required int expectedRevision,
     required String reason,
   }) async {
     final result = await _callCallable('reassignInquiry', {
       'inquiryId': id,
       'assigneeIds': assigneeIds,
+      'monitoringStaffIds': ?monitoringStaffIds,
       'expectedRevision': expectedRevision,
       'reason': reason,
     });

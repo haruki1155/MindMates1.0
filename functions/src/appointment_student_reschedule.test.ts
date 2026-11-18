@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 import * as functions from "./index";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
+import {ensureAuthUser} from "./test_auth_helper";
 
 test("student appointment rescheduling exposes a trusted callable", () => {
   const callable = (functions as Record<string, unknown>).rescheduleStudentAppointment;
@@ -31,6 +32,7 @@ test("student proposals retain the slot and agreement safely replays", async () 
   const request = {auth: {uid}, data: {appointmentId: id, expectedScheduledAt: oldAt, expectedScheduleRevision: 0, scheduledAt: newAt, requestId: "request_123456"}};
   const baseline = (functions as Record<string, unknown>).initializeAppointmentScheduleRevision as {run: (r: unknown) => Promise<unknown>};
   const staff = "schedule-test-staff";
+  await ensureAuthUser(staff, true);
   await db.collection("users").doc(staff).set({accessRole: "admin", name: "Staff"});
   assert.ok(baseline, "legacy revision requires explicit initialization");
   const baselineRequest = {auth: {uid: staff}, data: {appointmentId: id, expectedScheduledAt: oldAt, expectedStatus: "confirmed"}};
@@ -107,6 +109,7 @@ test("legacy initialization races fail closed and never reset a revision", async
   const ref = db.doc(`appointments/${id}`);
   const slot = db.doc(`appointment_slots/pacc_${at}`);
   const lock = db.doc(`appointment_user_locks/${uid}`);
+  await ensureAuthUser(staff, true);
   await db.doc(`users/${staff}`).set({accessRole: "admin"});
   await ref.set({userId: uid, status: "confirmed", scheduledAt: Timestamp.fromMillis(at), concern: "history preserved"});
   await ref.collection("history").doc("historical").set({action: "rescheduled"});

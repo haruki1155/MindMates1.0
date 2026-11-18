@@ -35,6 +35,7 @@ class _AcademicYearManagementPageState
   List<AcademicYearRecord> _years = const [];
 
   bool get _isAdmin => widget.repository.currentAccessRole == AccessRole.admin;
+  bool get _isSuperAdmin => widget.repository.isSuperAdmin;
 
   DateTime _now() => (widget.nowProvider ?? DateTime.now)();
 
@@ -46,13 +47,23 @@ class _AcademicYearManagementPageState
     }
   }
 
+  @override
+  void didUpdateWidget(covariant AcademicYearManagementPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repository != widget.repository && _isAdmin) {
+      _loadYears();
+    }
+  }
+
   Future<void> _loadYears() async {
     setState(() {
       _loading = true;
       _loadError = null;
     });
     try {
-      final years = await widget.repository.fetchAcademicYears();
+      final years = await widget.repository.fetchAcademicYears(
+        includeVoided: true,
+      );
       if (!mounted) return;
       setState(() {
         _years = _sortedYears(years);
@@ -84,8 +95,11 @@ class _AcademicYearManagementPageState
 
   int _stateRank(AcademicYearPeriodState state) => switch (state) {
     AcademicYearPeriodState.current => 0,
-    AcademicYearPeriodState.upcoming => 1,
-    AcademicYearPeriodState.closed => 2,
+    AcademicYearPeriodState.planned => 1,
+    AcademicYearPeriodState.upcoming => 2,
+    AcademicYearPeriodState.closed => 3,
+    AcademicYearPeriodState.voided => 4,
+    AcademicYearPeriodState.unknown => 5,
   };
 
   static String _friendlyError(Object error, {required String fallback}) {
@@ -107,6 +121,7 @@ class _AcademicYearManagementPageState
     required String schoolYear,
     required String startText,
     required String endText,
+    DateTime? now,
   }) {
     final match = _schoolYearPattern.firstMatch(schoolYear);
     if (match == null) {
@@ -117,7 +132,16 @@ class _AcademicYearManagementPageState
     if (endYear != startYear + 1 || startYear < 2000 || startYear > 2100) {
       return 'School year must be consecutive years starting between 2000 and 2100 (e.g. 2026-2027).';
     }
+    final maxStartYear = manilaCurrentSchoolStartYear(now) + 1;
+    if (startYear > maxStartYear) {
+      return 'School year $schoolYear is too far in the future. Plan at most one year ahead (through $maxStartYear-${maxStartYear + 1}).';
+    }
+    final todayKey = manilaTodayDateKey(now);
     if (startText.isEmpty && endText.isEmpty) {
+      final defaultEnd = '$endYear-05-31';
+      if (defaultEnd.compareTo(todayKey) < 0) {
+        return 'Default end date ($defaultEnd) has already passed in Asia/Manila ($todayKey).';
+      }
       return null;
     }
     if (startText.isEmpty || endText.isEmpty) {
@@ -135,6 +159,9 @@ class _AcademicYearManagementPageState
     final maxBound = DateTime.utc(endYear, 12, 31);
     if (parsedStart.isBefore(minBound) || parsedEnd.isAfter(maxBound)) {
       return 'Dates must fall within $startYear-01-01 through $endYear-12-31.';
+    }
+    if (endText.compareTo(todayKey) < 0) {
+      return 'End date ($endText) has already passed in Asia/Manila ($todayKey).';
     }
     return null;
   }
@@ -154,15 +181,22 @@ class _AcademicYearManagementPageState
 
   Future<void> _openCreateDialog() async {
     final openSource = _years.cast<AcademicYearRecord?>().firstWhere(
-      (item) => item != null && !item.isClosed,
-      orElse: () => _years.isNotEmpty ? _years.first : null,
+      (item) => item != null && (item.isCurrent || item.isPlanned),
+      orElse: () => _years.cast<AcademicYearRecord?>().firstWhere(
+        (item) => item != null && !item.isVoided && !item.isUnknown,
+        orElse: () => null,
+      ),
     );
 
     final result = await showDialog<_CreateAcademicYearResult>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _CreateAcademicYearDialog(
+        now: _now(),
         copySourceYear: openSource?.schoolYear,
+        existingYears: _years,
+        extendedLifecycleEnabled:
+            widget.repository.isExtendedAcademicYearLifecycleEnabled,
         onSubmit:
             ({
               required String schoolYear,
@@ -170,6 +204,8 @@ class _AcademicYearManagementPageState
               String? endDate,
               String? copyFrom,
               required bool copyPopulation,
+              String? reinstateReason,
+              int? expectedRevision,
             }) async {
               setState(() => _submitting = true);
               try {
@@ -179,6 +215,8 @@ class _AcademicYearManagementPageState
                   endDate: endDate,
                   copyFrom: copyFrom,
                   copyPopulation: copyPopulation,
+                  reinstateReason: reinstateReason,
+                  expectedRevision: expectedRevision,
                 );
                 return updated;
               } finally {
@@ -190,10 +228,47 @@ class _AcademicYearManagementPageState
       ),
     );
     if (!mounted || result == null) return;
+    final matchingCreated = result.years
+        .where((item) => item.schoolYear == result.schoolYear)
+        .firstOrNull;
+    final reinstatedLabel = matchingCreated?.isCurrent == true
+        ? 'current'
+        : 'planned';
     setState(() {
       _years = _sortedYears(result.years);
       _statusIsError = false;
-      _statusMessage = 'Academic year ${result.schoolYear} created.';
+      _statusMessage = result.reinstated
+          ? 'Academic year ${result.schoolYear} reinstated as $reinstatedLabel.'
+          : 'Academic year ${result.schoolYear} created.';
+    });
+  }
+
+  Future<void> _openActivateDialog(AcademicYearRecord year) async {
+    final updated = await showDialog<List<AcademicYearRecord>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ActivateAcademicYearDialog(
+        schoolYear: year.schoolYear,
+        onConfirm: () async {
+          setState(() => _submitting = true);
+          try {
+            return await widget.repository.activateAcademicYear(
+              year.schoolYear,
+              expectedRevision: year.revision,
+            );
+          } finally {
+            if (mounted) {
+              setState(() => _submitting = false);
+            }
+          }
+        },
+      ),
+    );
+    if (!mounted || updated == null) return;
+    setState(() {
+      _years = _sortedYears(updated);
+      _statusIsError = false;
+      _statusMessage = 'Academic year ${year.schoolYear} is now active.';
     });
   }
 
@@ -203,10 +278,14 @@ class _AcademicYearManagementPageState
       barrierDismissible: false,
       builder: (_) => _CloseAcademicYearDialog(
         schoolYear: year.schoolYear,
-        onConfirm: () async {
+        onConfirm: (confirmation) async {
           setState(() => _submitting = true);
           try {
-            return await widget.repository.closeAcademicYear(year.schoolYear);
+            return await widget.repository.closeAcademicYear(
+              year.schoolYear,
+              expectedRevision: year.revision,
+              confirmation: confirmation,
+            );
           } finally {
             if (mounted) {
               setState(() => _submitting = false);
@@ -220,6 +299,39 @@ class _AcademicYearManagementPageState
       _years = _sortedYears(updated);
       _statusIsError = false;
       _statusMessage = 'Academic year ${year.schoolYear} closed and locked.';
+    });
+  }
+
+  Future<void> _openVoidDialog(AcademicYearRecord year) async {
+    if (!_isSuperAdmin) return;
+    final updated = await showDialog<List<AcademicYearRecord>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _VoidAcademicYearDialog(
+        schoolYear: year.schoolYear,
+        onConfirm: ({required String reason, required String confirmation}) async {
+          setState(() => _submitting = true);
+          try {
+            return await widget.repository.voidAcademicYear(
+              schoolYear: year.schoolYear,
+              reason: reason,
+              confirmationText: confirmation,
+              expectedRevision: year.revision,
+            );
+          } finally {
+            if (mounted) {
+              setState(() => _submitting = false);
+            }
+          }
+        },
+      ),
+    );
+    if (!mounted || updated == null) return;
+    setState(() {
+      _years = _sortedYears(updated);
+      _statusIsError = false;
+      _statusMessage =
+          'Academic year ${year.schoolYear} voided (audit history preserved).';
     });
   }
 
@@ -287,6 +399,14 @@ class _AcademicYearManagementPageState
                 children: [
                   _buildHeader(compact: compact),
                   const SizedBox(height: 20),
+                  if (!widget.repository.isExtendedAcademicYearLifecycleEnabled) ...[
+                    const _InlineMessageBanner(
+                      message:
+                          'Extended lifecycle transitions (Planned future years, activation, and voiding) are currently disabled until updated report analytics deploy.',
+                      isError: false,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   if (_statusMessage != null) ...[
                     _InlineMessageBanner(
                       message: _statusMessage!,
@@ -309,18 +429,30 @@ class _AcademicYearManagementPageState
                   else ...[
                     _buildSummaryStrip(compact: compact),
                     const SizedBox(height: 20),
-                    ..._years.map(
-                      (year) => Padding(
+                    ..._years.map((year) {
+                      final now = _now();
+                      final periodState = year.periodState(now: now);
+                      final hasActiveCurrent = _years.any((y) => y.isCurrent);
+                      return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: _AcademicYearRowCard(
                           year: year,
-                          periodState: year.periodState(now: _now()),
+                          periodState: periodState,
                           compact: compact,
                           busy: _submitting,
+                          isSuperAdmin: _isSuperAdmin,
+                          extendedLifecycleEnabled:
+                              widget
+                                  .repository
+                                  .isExtendedAcademicYearLifecycleEnabled,
+                          hasActiveCurrentYear: hasActiveCurrent,
+                          todayManila: manilaTodayDateKey(now),
+                          onActivate: () => _openActivateDialog(year),
                           onClose: () => _openCloseDialog(year),
+                          onVoid: () => _openVoidDialog(year),
                         ),
-                      ),
-                    ),
+                      );
+                    }),
                   ],
                 ],
               ),
@@ -386,13 +518,16 @@ class _AcademicYearManagementPageState
           (y) => y.periodState(now: now) == AcademicYearPeriodState.current,
         )
         .length;
-    final upcomingCount = _years
-        .where(
-          (y) => y.periodState(now: now) == AcademicYearPeriodState.upcoming,
-        )
-        .length;
+    final plannedCount = _years.where((y) {
+      final state = y.periodState(now: now);
+      return state == AcademicYearPeriodState.planned ||
+          state == AcademicYearPeriodState.upcoming;
+    }).length;
     final closedCount = _years
         .where((y) => y.periodState(now: now) == AcademicYearPeriodState.closed)
+        .length;
+    final voidedCount = _years
+        .where((y) => y.periodState(now: now) == AcademicYearPeriodState.voided)
         .length;
 
     final cards = [
@@ -402,14 +537,19 @@ class _AcademicYearManagementPageState
         accent: AdminColors.success,
       ),
       _SummaryTile(
-        label: 'Upcoming',
-        count: upcomingCount,
+        label: 'Planned',
+        count: plannedCount,
         accent: AdminColors.accentStrong,
       ),
       _SummaryTile(
         label: 'Closed',
         count: closedCount,
         accent: AdminColors.muted,
+      ),
+      _SummaryTile(
+        label: 'Voided',
+        count: voidedCount,
+        accent: AdminColors.danger,
       ),
     ];
 
@@ -428,11 +568,10 @@ class _AcademicYearManagementPageState
 
     return Row(
       children: [
-        Expanded(child: cards[0]),
-        const SizedBox(width: 12),
-        Expanded(child: cards[1]),
-        const SizedBox(width: 12),
-        Expanded(child: cards[2]),
+        for (var i = 0; i < cards.length; i++) ...[
+          if (i > 0) const SizedBox(width: 12),
+          Expanded(child: cards[i]),
+        ],
       ],
     );
   }
@@ -510,25 +649,35 @@ class _CreateAcademicYearResult {
   const _CreateAcademicYearResult({
     required this.schoolYear,
     required this.years,
+    this.reinstated = false,
   });
 
   final String schoolYear;
   final List<AcademicYearRecord> years;
+  final bool reinstated;
 }
 
 class _CreateAcademicYearDialog extends StatefulWidget {
   const _CreateAcademicYearDialog({
+    required this.now,
     required this.copySourceYear,
+    required this.existingYears,
+    required this.extendedLifecycleEnabled,
     required this.onSubmit,
   });
 
+  final DateTime now;
   final String? copySourceYear;
+  final List<AcademicYearRecord> existingYears;
+  final bool extendedLifecycleEnabled;
   final Future<List<AcademicYearRecord>> Function({
     required String schoolYear,
     String? startDate,
     String? endDate,
     String? copyFrom,
     required bool copyPopulation,
+    String? reinstateReason,
+    int? expectedRevision,
   })
   onSubmit;
 
@@ -541,6 +690,7 @@ class _CreateAcademicYearDialogState extends State<_CreateAcademicYearDialog> {
   final _schoolYearController = TextEditingController();
   final _startDateController = TextEditingController();
   final _endDateController = TextEditingController();
+  final _reinstateReasonController = TextEditingController();
   bool _copyPopulation = false;
   bool _saving = false;
   String? _error;
@@ -550,24 +700,76 @@ class _CreateAcademicYearDialogState extends State<_CreateAcademicYearDialog> {
     _schoolYearController.dispose();
     _startDateController.dispose();
     _endDateController.dispose();
+    _reinstateReasonController.dispose();
     super.dispose();
+  }
+
+  AcademicYearRecord? get _matchingExistingYear {
+    final target = _schoolYearController.text.trim();
+    for (final item in widget.existingYears) {
+      if (item.schoolYear == target) return item;
+    }
+    return null;
+  }
+
+  String? get _liveValidationHint {
+    final schoolYear = _schoolYearController.text.trim();
+    final startText = _startDateController.text.trim();
+    final endText = _endDateController.text.trim();
+    if (schoolYear.isEmpty && startText.isEmpty && endText.isEmpty) {
+      return null;
+    }
+    final formatError = _AcademicYearManagementPageState.validateCreateInputs(
+      schoolYear: schoolYear,
+      startText: startText,
+      endText: endText,
+      now: widget.now,
+    );
+    if (formatError != null) return formatError;
+    final existing = _matchingExistingYear;
+    if (existing != null && !existing.isVoided) {
+      return 'Academic year ${existing.schoolYear} already exists (${existing.status}).';
+    }
+    if (!widget.extendedLifecycleEnabled && _isFutureStartInput(schoolYear, startText)) {
+      return 'Creating planned future academic years is disabled until updated report analytics are deployed.';
+    }
+    return null;
+  }
+
+  bool _isFutureStartInput(String schoolYear, String startText) {
+    final startKey = startText.isNotEmpty
+        ? startText
+        : (schoolYear.length >= 4 ? '${schoolYear.substring(0, 4)}-06-01' : '');
+    if (startKey.isEmpty) return false;
+    return manilaTodayDateKey(widget.now).compareTo(startKey) < 0;
   }
 
   Future<void> _submit() async {
     final schoolYear = _schoolYearController.text.trim();
     final startText = _startDateController.text.trim();
     final endText = _endDateController.text.trim();
+    final reinstateReason = _reinstateReasonController.text.trim();
 
     final validationError =
         _AcademicYearManagementPageState.validateCreateInputs(
           schoolYear: schoolYear,
           startText: startText,
           endText: endText,
+          now: widget.now,
         );
     if (validationError != null) {
       setState(() => _error = validationError);
       return;
     }
+    final existing = _matchingExistingYear;
+    if (existing != null && !existing.isVoided) {
+      setState(
+        () => _error =
+            'Academic year ${existing.schoolYear} already exists (${existing.status}).',
+      );
+      return;
+    }
+    final isReinstating = existing?.isVoided == true;
 
     setState(() {
       _saving = true;
@@ -581,11 +783,20 @@ class _CreateAcademicYearDialogState extends State<_CreateAcademicYearDialog> {
         endDate: endText.isEmpty ? null : endText,
         copyFrom: _copyPopulation ? widget.copySourceYear : null,
         copyPopulation: _copyPopulation && widget.copySourceYear != null,
+        reinstateReason:
+            isReinstating && reinstateReason.isNotEmpty
+            ? reinstateReason
+            : null,
+        expectedRevision: isReinstating ? existing?.revision : null,
       );
       if (!mounted) return;
-      Navigator.of(
-        context,
-      ).pop(_CreateAcademicYearResult(schoolYear: schoolYear, years: updated));
+      Navigator.of(context).pop(
+        _CreateAcademicYearResult(
+          schoolYear: schoolYear,
+          years: updated,
+          reinstated: isReinstating,
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -600,8 +811,20 @@ class _CreateAcademicYearDialogState extends State<_CreateAcademicYearDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final existingMatch = _matchingExistingYear;
+    final isReinstating = existingMatch?.isVoided == true;
+    final schoolYearText = _schoolYearController.text.trim();
+    final startText = _startDateController.text.trim();
+    final willBeFutureStart = _isFutureStartInput(schoolYearText, startText);
+    final hasOtherCurrent = widget.existingYears.any(
+      (y) => y.isCurrent && y.schoolYear != existingMatch?.schoolYear,
+    );
+    final liveHint = _liveValidationHint;
+    final currentStart = manilaCurrentSchoolStartYear(widget.now);
     return AlertDialog(
-      title: const Text('Create academic year'),
+      title: Text(
+        isReinstating ? 'Reinstate academic year' : 'Create academic year',
+      ),
       content: SizedBox(
         width: 440,
         child: SingleChildScrollView(
@@ -609,9 +832,11 @@ class _CreateAcademicYearDialogState extends State<_CreateAcademicYearDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Define a consecutive academic year (YYYY-YYYY). Leave dates blank to use the standard June 1 – May 31 period.',
-                style: TextStyle(
+              Text(
+                widget.extendedLifecycleEnabled
+                    ? 'Define a consecutive academic year up to ${currentStart + 1}-${currentStart + 2}. Leave dates blank for June 1 – May 31 (Asia/Manila). Future years are created as Planned until activated.'
+                    : 'Define a consecutive academic year up to ${currentStart + 1}-${currentStart + 2}. Future planned years are disabled until updated report analytics deploy.',
+                style: const TextStyle(
                   fontSize: 13,
                   color: AdminColors.muted,
                   height: 1.4,
@@ -621,29 +846,51 @@ class _CreateAcademicYearDialogState extends State<_CreateAcademicYearDialog> {
               TextField(
                 controller: _schoolYearController,
                 enabled: !_saving,
-                decoration: const InputDecoration(
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
                   labelText: 'School year',
-                  hintText: '2027-2028',
+                  hintText: '${currentStart + 1}-${currentStart + 2}',
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _startDateController,
                 enabled: !_saving,
-                decoration: const InputDecoration(
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
                   labelText: 'Start date (YYYY-MM-DD)',
-                  hintText: '2027-06-01',
+                  hintText: '${currentStart + 1}-06-01',
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _endDateController,
                 enabled: !_saving,
-                decoration: const InputDecoration(
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
                   labelText: 'End date (YYYY-MM-DD)',
-                  hintText: '2028-05-31',
+                  hintText: '${currentStart + 2}-05-31',
                 ),
               ),
+              if (isReinstating) ...[
+                const SizedBox(height: 12),
+                _InlineMessageBanner(
+                  message: !willBeFutureStart && !hasOtherCurrent
+                      ? 'This school year was previously voided. Reinstating activates it as Current while preserving past void audit history.'
+                      : 'This school year was previously voided. Reinstating creates a Planned record while preserving past void audit history.',
+                  isError: false,
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _reinstateReasonController,
+                  enabled: !_saving,
+                  maxLength: 500,
+                  decoration: const InputDecoration(
+                    labelText: 'Reinstatement note (optional)',
+                    hintText: 'Why this period is being re-planned',
+                  ),
+                ),
+              ],
               if (widget.copySourceYear != null) ...[
                 const SizedBox(height: 12),
                 CheckboxListTile(
@@ -659,9 +906,12 @@ class _CreateAcademicYearDialogState extends State<_CreateAcademicYearDialog> {
                       setState(() => _copyPopulation = value ?? false),
                 ),
               ],
-              if (_error != null) ...[
+              if (_error != null || liveHint != null) ...[
                 const SizedBox(height: 12),
-                _InlineMessageBanner(message: _error!, isError: true),
+                _InlineMessageBanner(
+                  message: _error ?? liveHint!,
+                  isError: true,
+                ),
               ],
             ],
           ),
@@ -674,7 +924,13 @@ class _CreateAcademicYearDialogState extends State<_CreateAcademicYearDialog> {
         ),
         FilledButton(
           onPressed: _saving ? null : _submit,
-          child: Text(_saving ? 'Creating...' : 'Create'),
+          child: Text(
+            _saving
+                ? 'Creating...'
+                : isReinstating
+                ? 'Reinstate'
+                : 'Create',
+          ),
         ),
       ],
     );
@@ -688,7 +944,8 @@ class _CloseAcademicYearDialog extends StatefulWidget {
   });
 
   final String schoolYear;
-  final Future<List<AcademicYearRecord>> Function() onConfirm;
+  final Future<List<AcademicYearRecord>> Function(String confirmation)
+  onConfirm;
 
   @override
   State<_CloseAcademicYearDialog> createState() =>
@@ -709,13 +966,14 @@ class _CloseAcademicYearDialogState extends State<_CloseAcademicYearDialog> {
   }
 
   Future<void> _submit() async {
-    if (_confirmController.text.trim() != _expectedPhrase) return;
+    final confirmation = _confirmController.text.trim();
+    if (confirmation != _expectedPhrase) return;
     setState(() {
       _closing = true;
       _error = null;
     });
     try {
-      final updated = await widget.onConfirm();
+      final updated = await widget.onConfirm(confirmation);
       if (!mounted) return;
       Navigator.of(context).pop(updated);
     } catch (error) {
@@ -777,6 +1035,238 @@ class _CloseAcademicYearDialogState extends State<_CloseAcademicYearDialog> {
           onPressed: _closing || !matchesPhrase ? null : _submit,
           style: FilledButton.styleFrom(backgroundColor: AdminColors.danger),
           child: Text(_closing ? 'Locking...' : 'Lock year'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ActivateAcademicYearDialog extends StatefulWidget {
+  const _ActivateAcademicYearDialog({
+    required this.schoolYear,
+    required this.onConfirm,
+  });
+
+  final String schoolYear;
+  final Future<List<AcademicYearRecord>> Function() onConfirm;
+
+  @override
+  State<_ActivateAcademicYearDialog> createState() =>
+      _ActivateAcademicYearDialogState();
+}
+
+class _ActivateAcademicYearDialogState
+    extends State<_ActivateAcademicYearDialog> {
+  final _confirmController = TextEditingController();
+  bool _activating = false;
+  String? _error;
+
+  String get _expectedPhrase => 'ACTIVATE ${widget.schoolYear}';
+
+  @override
+  void dispose() {
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_confirmController.text.trim() != _expectedPhrase) return;
+    setState(() {
+      _activating = true;
+      _error = null;
+    });
+    try {
+      final updated = await widget.onConfirm();
+      if (!mounted) return;
+      Navigator.of(context).pop(updated);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _activating = false;
+        _error = _AcademicYearManagementPageState._friendlyError(
+          error,
+          fallback: 'Could not activate academic year.',
+        );
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final matchesPhrase = _confirmController.text.trim() == _expectedPhrase;
+    return AlertDialog(
+      title: Text('Activate academic year ${widget.schoolYear}'),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Activating ${widget.schoolYear} switches it from Planned to the sole Current academic year for reporting and population denominators. Type "$_expectedPhrase" to confirm.',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AdminColors.muted,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _confirmController,
+                enabled: !_activating,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  labelText: 'Confirmation',
+                  hintText: _expectedPhrase,
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                _InlineMessageBanner(message: _error!, isError: true),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _activating ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _activating || !matchesPhrase ? null : _submit,
+          child: Text(_activating ? 'Activating...' : 'Activate year'),
+        ),
+      ],
+    );
+  }
+}
+
+class _VoidAcademicYearDialog extends StatefulWidget {
+  const _VoidAcademicYearDialog({
+    required this.schoolYear,
+    required this.onConfirm,
+  });
+
+  final String schoolYear;
+  final Future<List<AcademicYearRecord>> Function({
+    required String reason,
+    required String confirmation,
+  })
+  onConfirm;
+
+  @override
+  State<_VoidAcademicYearDialog> createState() =>
+      _VoidAcademicYearDialogState();
+}
+
+class _VoidAcademicYearDialogState extends State<_VoidAcademicYearDialog> {
+  final _reasonController = TextEditingController();
+  final _confirmController = TextEditingController();
+  bool _voiding = false;
+  String? _error;
+
+  String get _expectedPhrase => 'VOID ${widget.schoolYear}';
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    _confirmController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final reason = _reasonController.text.trim();
+    final confirmation = _confirmController.text.trim();
+    if (reason.length < 10 || confirmation != _expectedPhrase) return;
+    setState(() {
+      _voiding = true;
+      _error = null;
+    });
+    try {
+      final updated = await widget.onConfirm(
+        reason: reason,
+        confirmation: confirmation,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(updated);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _voiding = false;
+        _error = _AcademicYearManagementPageState._friendlyError(
+          error,
+          fallback: 'Could not void academic year.',
+        );
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reasonLength = _reasonController.text.trim().length;
+    final canSubmit =
+        !_voiding &&
+        reasonLength >= 10 &&
+        reasonLength <= 500 &&
+        _confirmController.text.trim() == _expectedPhrase;
+    return AlertDialog(
+      title: Text('Void academic year ${widget.schoolYear}'),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Voiding ${widget.schoolYear} hides this unreferenced period from operational reporting while preserving immutable audit snapshots. It does NOT physically delete records. Enter a reason (10–500 characters) and type "$_expectedPhrase" to confirm.',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AdminColors.muted,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _reasonController,
+                enabled: !_voiding,
+                maxLines: 3,
+                maxLength: 500,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Void reason (required)',
+                  hintText: 'Explain why this academic year is being voided',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _confirmController,
+                enabled: !_voiding,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  labelText: 'Confirmation',
+                  hintText: _expectedPhrase,
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                _InlineMessageBanner(message: _error!, isError: true),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _voiding ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: canSubmit ? _submit : null,
+          style: FilledButton.styleFrom(backgroundColor: AdminColors.danger),
+          child: Text(_voiding ? 'Voiding...' : 'Void year'),
         ),
       ],
     );
@@ -847,14 +1337,199 @@ class _AcademicYearRowCard extends StatelessWidget {
     required this.periodState,
     required this.compact,
     required this.busy,
+    required this.isSuperAdmin,
+    required this.extendedLifecycleEnabled,
+    required this.hasActiveCurrentYear,
+    required this.todayManila,
+    required this.onActivate,
     required this.onClose,
+    required this.onVoid,
   });
 
   final AcademicYearRecord year;
   final AcademicYearPeriodState periodState;
   final bool compact;
   final bool busy;
+  final bool isSuperAdmin;
+  final bool extendedLifecycleEnabled;
+  final bool hasActiveCurrentYear;
+  final String todayManila;
+  final VoidCallback onActivate;
   final VoidCallback onClose;
+  final VoidCallback onVoid;
+
+  String? _activationDisabledReason() {
+    if (!extendedLifecycleEnabled) {
+      return 'Extended lifecycle transitions are disabled until updated report analytics are deployed.';
+    }
+    if (hasActiveCurrentYear) {
+      return 'Close the active current academic year before activating ${year.schoolYear}.';
+    }
+    if (year.startDate.isNotEmpty && todayManila.compareTo(year.startDate) < 0) {
+      return 'Activation opens on ${year.startDate} (Asia/Manila: $todayManila).';
+    }
+    return null;
+  }
+
+  Widget _buildStatusPill(IconData icon, String label, {bool danger = false}) {
+    final fg = danger ? AdminColors.danger : AdminColors.muted;
+    final bg = danger ? const Color(0xFFFEF2F2) : AdminColors.surfaceMuted;
+    final border = danger ? const Color(0xFFFECACA) : AdminColors.border;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: fg),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: fg,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActions() {
+    final voidButton = isSuperAdmin
+        ? OutlinedButton.icon(
+            onPressed: busy || !extendedLifecycleEnabled ? null : onVoid,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AdminColors.danger,
+              side: const BorderSide(color: Color(0xFFFCA5A5)),
+            ),
+            icon: const Icon(Icons.block_outlined, size: 16),
+            label: const Text('Void year'),
+          )
+        : null;
+    final voidDisabledNote =
+        isSuperAdmin && !extendedLifecycleEnabled
+        ? Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Text(
+                'Voiding is disabled until updated report analytics are deployed.',
+                textAlign: compact ? TextAlign.left : TextAlign.right,
+                style: const TextStyle(fontSize: 12, color: AdminColors.muted),
+              ),
+            ),
+          )
+        : null;
+
+    if (periodState == AcademicYearPeriodState.closed) {
+      return _buildStatusPill(Icons.lock_outline, 'Locked · read-only');
+    }
+    if (periodState == AcademicYearPeriodState.voided) {
+      return _buildStatusPill(
+        Icons.history_toggle_off,
+        'Voided · audit preserved',
+        danger: true,
+      );
+    }
+    if (periodState == AcademicYearPeriodState.unknown) {
+      return Column(
+        crossAxisAlignment:
+            compact ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _buildStatusPill(
+                Icons.warning_amber_rounded,
+                'Unknown status · blocked',
+                danger: true,
+              ),
+              ?voidButton,
+            ],
+          ),
+          ?voidDisabledNote,
+        ],
+      );
+    }
+    if (periodState == AcademicYearPeriodState.planned) {
+      final disabledReason = _activationDisabledReason();
+      return Column(
+        crossAxisAlignment:
+            compact ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: busy || disabledReason != null ? null : onActivate,
+                icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                label: const Text('Activate year'),
+              ),
+              ?voidButton,
+            ],
+          ),
+          if (disabledReason != null) ...[
+            const SizedBox(height: 6),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Text(
+                disabledReason,
+                textAlign: compact ? TextAlign.left : TextAlign.right,
+                style: const TextStyle(fontSize: 12, color: AdminColors.muted),
+              ),
+            ),
+          ] else
+            ?voidDisabledNote,
+        ],
+      );
+    }
+    final closeDisabledReason =
+        year.endDate.isNotEmpty && todayManila.compareTo(year.endDate) <= 0
+        ? 'Closure opens after ${year.endDate} (Asia/Manila: $todayManila).'
+        : null;
+    return Column(
+      crossAxisAlignment:
+          compact ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: busy || closeDisabledReason != null ? null : onClose,
+              icon: const Icon(Icons.lock_outline, size: 16),
+              label: const Text('Close year'),
+            ),
+            ?voidButton,
+          ],
+        ),
+        if (closeDisabledReason != null) ...[
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Text(
+              closeDisabledReason,
+              textAlign: compact ? TextAlign.left : TextAlign.right,
+              style: const TextStyle(fontSize: 12, color: AdminColors.muted),
+            ),
+          ),
+        ],
+        ?voidDisabledNote,
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -863,6 +1538,11 @@ class _AcademicYearRowCard extends StatelessWidget {
         'Current',
         const Color(0xFFEAF3EE),
         AdminColors.success,
+      ),
+      AcademicYearPeriodState.planned => (
+        'Planned',
+        const Color(0xFFE0F2FE),
+        const Color(0xFF075985),
       ),
       AcademicYearPeriodState.upcoming => (
         'Upcoming',
@@ -873,6 +1553,16 @@ class _AcademicYearRowCard extends StatelessWidget {
         'Closed',
         AdminColors.surfaceMuted,
         AdminColors.muted,
+      ),
+      AcademicYearPeriodState.voided => (
+        'Voided',
+        const Color(0xFFFEE2E2),
+        AdminColors.danger,
+      ),
+      AcademicYearPeriodState.unknown => (
+        'Unknown',
+        const Color(0xFFFEE2E2),
+        AdminColors.danger,
       ),
     };
 
@@ -914,38 +1604,25 @@ class _AcademicYearRowCard extends StatelessWidget {
           'Period: ${year.startDate} to ${year.endDate}',
           style: const TextStyle(fontSize: 13, color: AdminColors.muted),
         ),
+        if (periodState == AcademicYearPeriodState.upcoming) ...[
+          const SizedBox(height: 4),
+          const Text(
+            'Future-dated active record: does not reflect today in Asia/Manila.',
+            style: TextStyle(fontSize: 12, color: AdminColors.muted),
+          ),
+        ],
+        if (periodState == AcademicYearPeriodState.voided &&
+            year.voidReason.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Void reason: ${year.voidReason}',
+            style: const TextStyle(fontSize: 12, color: AdminColors.danger),
+          ),
+        ],
       ],
     );
 
-    final action = year.isClosed
-        ? Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            decoration: BoxDecoration(
-              color: AdminColors.surfaceMuted,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AdminColors.border),
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.lock_outline, size: 15, color: AdminColors.muted),
-                SizedBox(width: 6),
-                Text(
-                  'Locked · read-only',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: AdminColors.muted,
-                  ),
-                ),
-              ],
-            ),
-          )
-        : OutlinedButton.icon(
-            onPressed: busy ? null : onClose,
-            icon: const Icon(Icons.lock_outline, size: 16),
-            label: const Text('Close year'),
-          );
+    final action = _buildActions();
 
     return Container(
       padding: const EdgeInsets.all(18),

@@ -24,6 +24,8 @@ async function expects(promise: Promise<unknown>, code: string) {
 
 before(async () => {
   if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error("FIRESTORE_EMULATOR_HOST is required for emergency callable tests.");
+  const staleCounselors = await db.collection("users").where("accessRole", "==", "counselor").get();
+  await Promise.all(staleCounselors.docs.map((doc) => doc.ref.delete()));
   await Promise.all([
     db.collection("users").doc(student).set({accessRole: "appUser"}),
     db.collection("users").doc(staff).set({accessRole: "portalStaff"}),

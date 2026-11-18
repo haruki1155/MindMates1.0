@@ -64,27 +64,62 @@ void main() {
     expect(triage.routingReason, 'missing_college');
   });
 
-  test('staff and counselors see only inquiries routed to them', () {
-    final items = [
-      _inquiry('mine', assignees: ['c1', 's1']),
-      _inquiry('theirs', assignees: ['c2']),
-      _inquiry('triage', assignees: const []),
-      _inquiry('legacy'),
-    ];
-    for (final role in [AccessRole.counselor, AccessRole.portalStaff]) {
-      expect(
-        scopeInquiriesForRole(
-          items,
-          role: role,
-          uid: role == AccessRole.counselor ? 'c1' : 's1',
-          isSuperAdmin: false,
-        ).map((i) => i.id),
-        ['mine'],
-      );
-    }
+  test('counselors see only assigned raw inquiries; portalStaff see only assigned operational projections', () {
+    final rawMine = _inquiry('mine', assignees: ['c1', 's1']);
+    final rawTheirs = _inquiry('theirs', assignees: ['c2']);
+    final rawTriage = _inquiry('triage', assignees: const []);
+    final rawLegacy = _inquiry('legacy');
+    final opMine = AdminInquiryModel.fromOperationalProjection({
+      'inquiryId': 'mine',
+      'category': 'Service Form',
+      'operationalLabel': 'Service Form',
+      'status': 'pending',
+      'routingStatus': 'routed',
+      'assigneeIds': ['c1'],
+      'monitoringStaffIds': ['s1'],
+      'createdAt': '2026-11-14T08:00:00.000',
+    });
+    final opOther = AdminInquiryModel.fromOperationalProjection({
+      'inquiryId': 'other',
+      'category': 'Service Form',
+      'operationalLabel': 'Service Form',
+      'status': 'pending',
+      'routingStatus': 'routed',
+      'assigneeIds': ['c2'],
+      'monitoringStaffIds': ['s2'],
+      'createdAt': '2026-11-14T08:00:00.000',
+    });
+
     expect(
       scopeInquiriesForRole(
-        items,
+        [rawMine, rawTheirs, rawTriage, rawLegacy, opMine],
+        role: AccessRole.counselor,
+        uid: 'c1',
+        isSuperAdmin: false,
+      ).map((i) => i.id),
+      ['mine'],
+    );
+    expect(
+      scopeInquiriesForRole(
+        [rawMine, opMine, opOther],
+        role: AccessRole.portalStaff,
+        uid: 's1',
+        isSuperAdmin: false,
+      ).map((i) => i.id),
+      ['mine'],
+    );
+    expect(
+      scopeInquiriesForRole(
+        [rawMine, rawTheirs],
+        role: AccessRole.portalStaff,
+        uid: 's1',
+        isSuperAdmin: false,
+      ),
+      isEmpty,
+    );
+    expect(
+      scopeInquiriesForRole(
+        [rawMine, opMine],
         role: AccessRole.counselor,
         uid: null,
         isSuperAdmin: false,

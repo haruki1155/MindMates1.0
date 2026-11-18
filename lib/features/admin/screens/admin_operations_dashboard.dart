@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../models/admin_inquiry_model.dart';
 import '../../../models/appointment_model.dart';
+import '../../../models/profile_roles.dart';
 import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../domain/portal_appointment_metrics.dart';
@@ -26,7 +27,10 @@ class AdminOperationsDashboardPage extends StatelessWidget {
     child: StreamBuilder<List<UserModel>>(
       stream: repository.watchUsers(),
       builder: (context, usersSnapshot) => StreamBuilder<List<AdminInquiryModel>>(
-        stream: repository.watchInquiries(),
+        stream: repository.currentAccessRole == AccessRole.portalStaff &&
+                !repository.isSuperAdmin
+            ? repository.watchInquiryStatuses()
+            : repository.watchInquiries(),
         builder: (context, inquiriesSnapshot) => StreamBuilder<List<AdminAssessmentRecord>>(
           stream: repository.watchAssessments(),
           builder: (context, assessmentsSnapshot) => StreamBuilder<List<AppointmentModel>>(

@@ -26,8 +26,29 @@ AdminInquiryModel _inquiry({Map<String, dynamic> extra = const {}}) =>
       'routingStatus': 'routed',
       'routingMode': 'automatic',
       'routingRevision': 2,
-      'assigneeIds': ['c1', 's1'],
-      'assigneeLabels': {'c1': 'Counselor One', 's1': 'Staff One'},
+      'assigneeIds': ['c1'],
+      'assigneeLabels': {'c1': 'Counselor One'},
+      'monitoringStaffIds': ['s1'],
+      'monitoringStaffLabels': {'s1': 'Staff One'},
+      ...extra,
+    });
+
+AdminInquiryModel _operationalInquiry({Map<String, dynamic> extra = const {}}) =>
+    AdminInquiryModel.fromOperationalProjection({
+      'inquiryId': 'inq-1',
+      'category': 'Service Form',
+      'formType': 'client_feedback',
+      'operationalLabel': 'Client Feedback Form',
+      'status': 'pending',
+      'createdAt': '2026-11-14T08:00:00.000',
+      'collegeId': 'cite',
+      'routingStatus': 'routed',
+      'routingMode': 'manual',
+      'routingRevision': 2,
+      'assigneeIds': ['c1'],
+      'assigneeLabels': {'c1': 'Counselor One'},
+      'monitoringStaffIds': ['s1'],
+      'monitoringStaffLabels': {'s1': 'Staff One'},
       ...extra,
     });
 
@@ -52,6 +73,7 @@ class _Repo extends AdminPortalRepository {
     this.uid = 'c1',
     this.error,
     this.inquiriesStream,
+    this.statusStream,
     this.actionError,
   });
   final bool superAdmin;
@@ -59,16 +81,27 @@ class _Repo extends AdminPortalRepository {
   final String uid;
   final Object? error;
   final Stream<List<AdminInquiryModel>>? inquiriesStream;
+  final Stream<List<AdminInquiryModel>>? statusStream;
   final Object? actionError;
   final escalations = <String>[];
   final reassignments = <Map<String, Object?>>[];
   final acknowledgedIds = <String>[];
   final statusUpdates = <Map<String, Object?>>[];
+  int rawReads = 0;
+  int statusReads = 0;
   int backfills = 0;
 
   @override
-  Stream<List<AdminInquiryModel>> watchInquiries() =>
-      inquiriesStream ?? Stream.value([_inquiry()]);
+  Stream<List<AdminInquiryModel>> watchInquiries() {
+    rawReads++;
+    return inquiriesStream ?? Stream.value([_inquiry()]);
+  }
+
+  @override
+  Stream<List<AdminInquiryModel>> watchInquiryStatuses() {
+    statusReads++;
+    return statusStream ?? Stream.value([_operationalInquiry()]);
+  }
 
   @override
   Future<void> acknowledgeInquiry(String id) async {
@@ -113,6 +146,7 @@ class _Repo extends AdminPortalRepository {
   Future<int> reassignInquiry(
     String id, {
     required List<String> assigneeIds,
+    List<String>? monitoringStaffIds,
     required int expectedRevision,
     required String reason,
   }) async {
@@ -120,6 +154,7 @@ class _Repo extends AdminPortalRepository {
     reassignments.add({
       'id': id,
       'assigneeIds': assigneeIds,
+      'monitoringStaffIds': ?monitoringStaffIds,
       'expectedRevision': expectedRevision,
       'reason': reason,
     });
@@ -279,6 +314,7 @@ void main() {
       await tester.tap(find.text('Reassign'));
       await tester.pumpAndSettle();
       expect(find.text('Other Test'), findsOneWidget);
+      expect(find.text('Staff Test'), findsOneWidget);
       expect(find.text('Suspended Test'), findsNothing);
       expect(find.text('Pending Test'), findsNothing);
       expect(find.text('Admin X'), findsNothing);
@@ -291,6 +327,7 @@ void main() {
         {
           'id': 'inq-1',
           'assigneeIds': ['c2'],
+          'monitoringStaffIds': ['s1'],
           'expectedRevision': 2,
           'reason': 'Coverage change',
         },
@@ -549,4 +586,110 @@ void main() {
       expect(repo.acknowledgedIds, ['inq-1']);
     },
   );
+
+  testWidgets(
+    'portalStaff sees sanitized operational status without raw PII/message/PDF and retains acknowledge/escalate',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final projected = _operationalInquiry(
+        extra: {
+          'escalationStatus': 'requested',
+          'escalation': {'status': 'requested', 'reason': 'Secret note'},
+        },
+      );
+      final repo = _Repo(
+        superAdmin: false,
+        role: AccessRole.portalStaff,
+        uid: 's1',
+        statusStream: Stream.value([projected]),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: projected, repository: repo),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(repo.rawReads, 0, reason: 'portalStaff must never read raw inquiries');
+      expect(repo.statusReads, 1);
+      expect(find.text('Client Feedback Form'), findsOneWidget);
+      expect(find.text('Feedback'), findsNothing);
+      expect(find.text('Message'), findsNothing);
+      expect(find.text('Form responses'), findsNothing);
+      expect(find.text('PDF preview'), findsNothing);
+      expect(find.text('Download PDF'), findsNothing);
+      expect(find.byTooltip('Change inquiry status'), findsNothing);
+      expect(find.textContaining('Secret note'), findsNothing);
+      expect(find.textContaining('s@example.edu'), findsNothing);
+      expect(find.textContaining('Sanitized operational view'), findsOneWidget);
+
+      await tester.tap(find.text('Acknowledge receipt'));
+      await tester.pumpAndSettle();
+      expect(repo.acknowledgedIds, ['inq-1']);
+    },
+  );
+
+  testWidgets(
+    'portalStaff InquiryDetailScreen handles unavailable projection with Retry and never falls back to raw inquiries',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      var attempts = 0;
+      final projected = _operationalInquiry();
+      final repo = _RetryRepo(
+        projected: projected,
+        onStatusWatch: () {
+          attempts++;
+          return attempts == 1
+              ? Stream.error(
+                  FirebaseFunctionsException(
+                    code: 'unavailable',
+                    message: 'Service temporarily unavailable.',
+                  ),
+                )
+              : Stream.value([projected]);
+        },
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: projected, repository: repo),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(repo.rawReads, 0);
+      expect(find.text('Inquiry status unavailable'), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
+
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+
+      expect(repo.rawReads, 0);
+      expect(attempts, 2);
+      expect(find.text('Client Feedback Form'), findsOneWidget);
+    },
+  );
+}
+
+class _RetryRepo extends _Repo {
+  _RetryRepo({required this.projected, required this.onStatusWatch})
+    : super(role: AccessRole.portalStaff, uid: 's1');
+
+  final AdminInquiryModel projected;
+  final Stream<List<AdminInquiryModel>> Function() onStatusWatch;
+
+  @override
+  Stream<List<AdminInquiryModel>> watchInquiryStatuses() {
+    statusReads++;
+    return onStatusWatch();
+  }
 }

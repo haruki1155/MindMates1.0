@@ -12,6 +12,7 @@ import {
 } from "./index";
 import {issueCodesFor, rosterTestHooks} from "./student_roster";
 import {verifyActivationCode} from "./student_roster_domain";
+import {ensureAuthUser} from "./test_auth_helper";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
 
@@ -57,6 +58,7 @@ const ownedBy = (d: FirebaseFirestore.QueryDocumentSnapshot) => {
 before(async () => {
   suiteStart = Timestamp.fromMillis(Date.now() - 1000);
   assert.ok(process.env.FIRESTORE_EMULATOR_HOST && adminUid, "emulator + SUPER_ADMIN_UID required");
+  await ensureAuthUser(adminUid, true);
   const admin = db.collection("users").doc(adminUid);
   if (!(await admin.get()).exists) {
     adminCreated = true;

@@ -11,10 +11,13 @@ import {
 } from "@firebase/rules-unit-testing";
 import {collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where} from "firebase/firestore";
 
-// Since college routing, staff and counselors read inquiries only through an
-// assignee-filtered query; an unfiltered list is denied for them.
+// Operational portalStaff read ONLY explicit monitoring assignments in
+// `inquiry_statuses` (and `appointment_queue`), never raw `inquiries`.
+// Counselors read assigned raw `inquiries`; unfiltered lists are denied.
 const assigned = (firestore: ReturnType<RulesTestContext["firestore"]>, uid: string) =>
   getDocs(query(collection(firestore, "inquiries"), where("assigneeIds", "array-contains", uid)));
+const assignedStatus = (firestore: ReturnType<RulesTestContext["firestore"]>, uid: string) =>
+  getDocs(query(collection(firestore, "inquiry_statuses"), where("monitoringStaffIds", "array-contains", uid)));
 
 // Role matrix for PACC portal data visibility. Every portal account state that
 // the staff lifecycle can produce is represented, so a client that resolves a
@@ -95,6 +98,19 @@ beforeEach(async () => {
           "staff-suspended", "counselor-legacy", "counselor-legacy-active",
           "counselor-legacy-suspended", "staff-legacy-disabled",
         ],
+        monitoringStaffIds: [
+          "staff-approved", "staff-legacy", "staff-pending", "staff-stale-role",
+          "staff-suspended", "staff-legacy-disabled",
+        ],
+      }),
+      setDoc(doc(firestore, "inquiry_statuses/inquiry-1"), {
+        inquiryId: "inquiry-1", category: "General", operationalLabel: "General Inquiry",
+        status: "pending", routingStatus: "routed", collegeId: "cite",
+        assigneeIds: ["counselor", "counselor-legacy", "counselor-legacy-active", "counselor-legacy-suspended"],
+        monitoringStaffIds: [
+          "staff-approved", "staff-legacy", "staff-pending", "staff-stale-role",
+          "staff-suspended", "staff-legacy-disabled",
+        ],
       }),
       setDoc(doc(firestore, "appointment_queue/appointment-1"), {
         appointmentId: "appointment-1", studentDisplayName: "Student Name",
@@ -109,21 +125,26 @@ beforeEach(async () => {
 
 after(async () => environment.cleanup());
 
-test("approved, active, verified portal staff can list inquiries and the queue only", async () => {
+test("approved, active, verified portal staff can read inquiry_statuses and appointment_queue only, never raw inquiries", async () => {
   const staff = environment.authenticatedContext("staff-approved", verified).firestore();
-  await assertSucceeds(assigned(staff, "staff-approved"));
+  await assertFails(assigned(staff, "staff-approved"));
+  await assertFails(getDoc(doc(staff, "inquiries/inquiry-1")));
+  await assertSucceeds(assignedStatus(staff, "staff-approved"));
+  await assertFails(getDocs(collection(staff, "inquiry_statuses")));
   await assertSucceeds(getDocs(collection(staff, "appointment_queue")));
   await assertFails(getDocs(collection(staff, "appointments")));
   await assertFails(getDoc(doc(staff, "users/student")));
 });
 
-test("legacy portal staff record without lifecycle fields keeps read access when verified", async () => {
+test("legacy portal staff record without lifecycle fields keeps verified inquiry_statuses and queue access, never raw inquiries", async () => {
   const legacy = environment.authenticatedContext("staff-legacy", verified).firestore();
-  await assertSucceeds(assigned(legacy, "staff-legacy"));
+  await assertFails(assigned(legacy, "staff-legacy"));
+  await assertSucceeds(assignedStatus(legacy, "staff-legacy"));
   await assertSucceeds(getDocs(collection(legacy, "appointment_queue")));
   await assertFails(getDocs(collection(legacy, "appointments")));
   const legacyUnverified = environment.authenticatedContext("staff-legacy", unverified).firestore();
   await assertFails(assigned(legacyUnverified, "staff-legacy"));
+  await assertFails(assignedStatus(legacyUnverified, "staff-legacy"));
   await assertFails(getDocs(collection(legacyUnverified, "appointment_queue")));
 });
 
@@ -161,6 +182,7 @@ test("administrator clinical reads require a verified email token", async () => 
 test("pending staff registration cannot read any portal data", async () => {
   const pending = environment.authenticatedContext("staff-pending", verified).firestore();
   await assertFails(assigned(pending, "staff-pending"));
+  await assertFails(assignedStatus(pending, "staff-pending"));
   await assertFails(getDocs(collection(pending, "appointment_queue")));
   await assertFails(getDocs(collection(pending, "appointments")));
 });
@@ -168,18 +190,21 @@ test("pending staff registration cannot read any portal data", async () => {
 test("approvedRole alone never grants portal access", async () => {
   const stale = environment.authenticatedContext("staff-stale-role", verified).firestore();
   await assertFails(assigned(stale, "staff-stale-role"));
+  await assertFails(assignedStatus(stale, "staff-stale-role"));
   await assertFails(getDocs(collection(stale, "appointment_queue")));
 });
 
-test("suspended staff cannot read inquiries or the appointment queue", async () => {
+test("suspended staff cannot read inquiries, status projections, or the appointment queue", async () => {
   const suspended = environment.authenticatedContext("staff-suspended", verified).firestore();
   await assertFails(assigned(suspended, "staff-suspended"));
+  await assertFails(assignedStatus(suspended, "staff-suspended"));
   await assertFails(getDocs(collection(suspended, "appointment_queue")));
 });
 
-test("approved staff without a verified email token cannot read inquiries or the queue", async () => {
+test("approved staff without a verified email token cannot read inquiries, status projections, or the queue", async () => {
   const staff = environment.authenticatedContext("staff-approved", unverified).firestore();
   await assertFails(assigned(staff, "staff-approved"));
+  await assertFails(assignedStatus(staff, "staff-approved"));
   await assertFails(getDocs(collection(staff, "appointment_queue")));
 });
 
@@ -206,6 +231,7 @@ test("explicit suspended or disabled status denies legacy records; absent or act
   const disabledStaff = environment.authenticatedContext("staff-legacy-disabled", verified).firestore();
   await assertFails(getDocs(collection(disabledStaff, "appointment_queue")));
   await assertFails(assigned(disabledStaff, "staff-legacy-disabled"));
+  await assertFails(assignedStatus(disabledStaff, "staff-legacy-disabled"));
 });
 
 test("administrator rule gates require the verified, active lifecycle", async () => {

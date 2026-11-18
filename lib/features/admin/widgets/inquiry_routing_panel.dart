@@ -76,16 +76,28 @@ class InquiryRoutingPanel extends StatelessWidget {
   bool get _isAssignee {
     final role = repository.currentAccessRole;
     final uid = repository.currentUserId;
-    return !repository.isSuperAdmin &&
-        (role == AccessRole.portalStaff || role == AccessRole.counselor) &&
-        uid != null &&
-        inquiry.assigneeIds.contains(uid);
+    if (repository.isSuperAdmin || uid == null) return false;
+    if (role == AccessRole.counselor) {
+      return !inquiry.isOperationalProjection &&
+          inquiry.assigneeIds.contains(uid);
+    }
+    if (role == AccessRole.portalStaff) {
+      return inquiry.monitoringStaffIds.contains(uid);
+    }
+    return false;
   }
+
+  bool get _isOperationalView =>
+      inquiry.isOperationalProjection ||
+      (repository.currentAccessRole == AccessRole.portalStaff &&
+          !repository.isSuperAdmin);
 
   String _name(String uid) =>
       inquiry.assigneeLabels[uid]?.trim().isNotEmpty == true
       ? inquiry.assigneeLabels[uid]!
-      : 'Staff member';
+      : (inquiry.monitoringStaffLabels[uid]?.trim().isNotEmpty == true
+            ? inquiry.monitoringStaffLabels[uid]!
+            : 'Staff member');
 
   @override
   Widget build(BuildContext context) {
@@ -111,15 +123,25 @@ class InquiryRoutingPanel extends StatelessWidget {
         ),
         _row('Status', status),
         _row(
-          'Assigned to',
+          'Assigned counselors',
           inquiry.assigneeIds.isEmpty
-              ? 'No one assigned'
+              ? 'No counselor assigned'
               : inquiry.assigneeIds.map(_name).join(', '),
         ),
+        if (inquiry.monitoringStaffIds.isNotEmpty)
+          _row(
+            'Monitoring staff',
+            inquiry.monitoringStaffIds.map(_name).join(', '),
+          ),
         if (inquiry.ownerId != null)
           _row('Responsible', _name(inquiry.ownerId!)),
         if (inquiry.isEscalated)
-          _row('Escalation', 'Requested — ${inquiry.escalationReason ?? ''}'),
+          _row(
+            'Escalation',
+            _isOperationalView
+                ? 'Requested'
+                : 'Requested — ${inquiry.escalationReason ?? ''}',
+          ),
         const SizedBox(height: 10),
         Wrap(
           spacing: 10,
@@ -265,7 +287,10 @@ class _ReassignDialog extends StatefulWidget {
 }
 
 class _ReassignDialogState extends State<_ReassignDialog> {
-  late final Set<String> _selected = {...widget.inquiry.assigneeIds};
+  late final Set<String> _selectedCounselors = {...widget.inquiry.assigneeIds};
+  late final Set<String> _selectedMonitors = {
+    ...widget.inquiry.monitoringStaffIds,
+  };
   late final Stream<List<UserModel>> _users = widget.repository.watchUsers();
   final _reason = TextEditingController();
   bool _busy = false;
@@ -277,15 +302,29 @@ class _ReassignDialogState extends State<_ReassignDialog> {
     super.dispose();
   }
 
-  /// Mirrors the server's eligibility gate so ineligible accounts are not offered.
-  static bool _eligible(UserModel user) =>
-      (user.accessRole == AccessRole.portalStaff ||
-          user.accessRole == AccessRole.counselor) &&
+  static bool _activeApproved(UserModel user) =>
       (user.staffAccountStatus == null ||
           user.staffAccountStatus == StaffAccountStatus.approved) &&
       (user.accountStatus == null || user.accountStatus == 'active');
 
-  Future<void> _save() async {
+  /// Clinical inquiry ownership is restricted to counselors.
+  static bool _eligibleCounselor(UserModel user) =>
+      user.accessRole == AccessRole.counselor && _activeApproved(user);
+
+  /// Operational monitoring is restricted to approved, active portalStaff.
+  static bool _eligibleMonitor(UserModel user) =>
+      user.accessRole == AccessRole.portalStaff && _activeApproved(user);
+
+  Future<void> _save(
+    List<UserModel> counselors,
+    List<UserModel> monitors,
+  ) async {
+    final validCounselorIds = {for (final c in counselors) c.id};
+    final validMonitorIds = {for (final m in monitors) m.id};
+    final nextCounselors =
+        _selectedCounselors.where(validCounselorIds.contains).toList()..sort();
+    final nextMonitors =
+        _selectedMonitors.where(validMonitorIds.contains).toList()..sort();
     setState(() {
       _busy = true;
       _error = null;
@@ -293,7 +332,8 @@ class _ReassignDialogState extends State<_ReassignDialog> {
     try {
       await widget.repository.reassignInquiry(
         widget.inquiry.id,
-        assigneeIds: (_selected.toList()..sort()),
+        assigneeIds: nextCounselors,
+        monitoringStaffIds: nextMonitors,
         expectedRevision: widget.inquiry.routingRevision,
         reason: _reason.text.trim(),
       );
@@ -311,86 +351,129 @@ class _ReassignDialogState extends State<_ReassignDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Reassign inquiry'),
-    content: SizedBox(
-      width: 520,
-      child: StreamBuilder<List<UserModel>>(
-        stream: _users,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Text('Staff accounts could not be loaded.');
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final staff = snapshot.data!.where(_eligible).toList()
-            ..sort((a, b) => a.displayName.compareTo(b.displayName));
-          return SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.inquiry.collegeId.isEmpty
-                      ? 'College not identified. Any eligible staff member may be assigned.'
-                      : 'College ${widget.inquiry.collegeId}. Staff outside this college are allowed and recorded in the audit log.',
-                  style: const TextStyle(color: AdminColors.muted),
-                ),
-                for (final user in staff)
-                  CheckboxListTile(
-                    dense: true,
-                    value: _selected.contains(user.id),
-                    title: Text(user.displayName),
-                    subtitle: Text(
-                      user.assignedCollegeIds.contains(widget.inquiry.collegeId)
-                          ? 'Serves this college'
-                          : 'Other college',
-                    ),
-                    onChanged: _busy
-                        ? null
-                        : (checked) => setState(
-                            () => checked == true
-                                ? _selected.add(user.id)
-                                : _selected.remove(user.id),
+  Widget build(BuildContext context) => StreamBuilder<List<UserModel>>(
+    stream: _users,
+    builder: (context, snapshot) {
+      final allUsers = snapshot.data ?? const <UserModel>[];
+      final counselors = allUsers.where(_eligibleCounselor).toList()
+        ..sort((a, b) => a.displayName.compareTo(b.displayName));
+      final monitors = allUsers.where(_eligibleMonitor).toList()
+        ..sort((a, b) => a.displayName.compareTo(b.displayName));
+      final validCounselorIds = {for (final c in counselors) c.id};
+      final validMonitorIds = {for (final m in monitors) m.id};
+      final hasAnyAssignee =
+          _selectedCounselors.any(validCounselorIds.contains) ||
+          _selectedMonitors.any(validMonitorIds.contains);
+      return AlertDialog(
+        title: const Text('Reassign inquiry'),
+        content: SizedBox(
+          width: 520,
+          child: snapshot.hasError
+              ? const Text('Staff accounts could not be loaded.')
+              : !snapshot.hasData
+              ? const Center(child: CircularProgressIndicator())
+              : SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.inquiry.collegeId.isEmpty
+                            ? 'College not identified. Any eligible counselor may be assigned clinical handling.'
+                            : 'College ${widget.inquiry.collegeId}. Counselors outside this college are allowed and recorded in the audit log.',
+                        style: const TextStyle(color: AdminColors.muted),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Assigned counselors (clinical handling & raw record access)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      for (final user in counselors)
+                        CheckboxListTile(
+                          dense: true,
+                          value: _selectedCounselors.contains(user.id),
+                          title: Text(user.displayName),
+                          subtitle: Text(
+                            user.assignedCollegeIds.contains(
+                                  widget.inquiry.collegeId,
+                                )
+                                ? 'Serves this college'
+                                : 'Other college',
                           ),
-                  ),
-                TextField(
-                  controller: _reason,
-                  enabled: !_busy,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'Reason for change',
+                          onChanged: _busy
+                              ? null
+                              : (checked) => setState(
+                                  () => checked == true
+                                      ? _selectedCounselors.add(user.id)
+                                      : _selectedCounselors.remove(user.id),
+                                ),
+                        ),
+                      if (monitors.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        const Text(
+                          'Monitoring staff (operational status only — no raw message or PII)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        for (final user in monitors)
+                          CheckboxListTile(
+                            dense: true,
+                            value: _selectedMonitors.contains(user.id),
+                            title: Text(user.displayName),
+                            subtitle: const Text('Operational status monitoring'),
+                            onChanged: _busy
+                                ? null
+                                : (checked) => setState(
+                                    () => checked == true
+                                        ? _selectedMonitors.add(user.id)
+                                        : _selectedMonitors.remove(user.id),
+                                  ),
+                          ),
+                      ],
+                      TextField(
+                        controller: _reason,
+                        enabled: !_busy,
+                        onChanged: (_) => setState(() {}),
+                        decoration: const InputDecoration(
+                          labelText: 'Reason for change',
+                        ),
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-                if (_error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    _error!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          );
-        },
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: _busy ? null : () => Navigator.of(context).pop(false),
-        child: const Text('Cancel'),
-      ),
-      FilledButton(
-        onPressed:
-            !_busy && _selected.isNotEmpty && _reason.text.trim().length >= 3
-            ? _save
-            : null,
-        child: const Text('Save assignment'),
-      ),
-    ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed:
+                !_busy &&
+                    snapshot.hasData &&
+                    hasAnyAssignee &&
+                    _reason.text.trim().length >= 3
+                ? () => _save(counselors, monitors)
+                : null,
+            child: const Text('Save assignment'),
+          ),
+        ],
+      );
+    },
   );
 }
 

@@ -1,13 +1,13 @@
 import '../../../models/admin_inquiry_model.dart';
 import '../../../models/profile_roles.dart';
 
-/// Defensive client-side mirror of the Firestore inquiry rules.
+/// Defensive client-side mirror of the Firestore inquiry and operational
+/// status projection rules.
 ///
-/// Inquiries are routed server-side to the staff and counselors assigned to
-/// the student's college (`assigneeIds`). Only those assignees and the
-/// configured super-administrator may see an inquiry; the rules enforce this,
-/// and the repository already queries with `assigneeIds array-contains uid`.
-/// This filter only guarantees the UI never shows anything else.
+/// Raw `inquiries` are scoped exclusively to assigned active verified
+/// counselors (`assigneeIds`) and the super-administrator. Operational
+/// `portalStaff` receive ONLY sanitized `inquiry_statuses` projections scoped
+/// by explicit `monitoringStaffIds` (never raw `inquiries`).
 List<AdminInquiryModel> scopeInquiriesForRole(
   List<AdminInquiryModel> items, {
   required AccessRole role,
@@ -15,9 +15,23 @@ List<AdminInquiryModel> scopeInquiriesForRole(
   required bool isSuperAdmin,
 }) {
   if (isSuperAdmin) return items;
-  if (uid == null ||
-      (role != AccessRole.counselor && role != AccessRole.portalStaff)) {
-    return const [];
+  if (uid == null) return const [];
+  if (role == AccessRole.counselor) {
+    return items
+        .where(
+          (item) =>
+              !item.isOperationalProjection && item.assigneeIds.contains(uid),
+        )
+        .toList();
   }
-  return items.where((item) => item.assigneeIds.contains(uid)).toList();
+  if (role == AccessRole.portalStaff) {
+    return items
+        .where(
+          (item) =>
+              item.isOperationalProjection &&
+              item.monitoringStaffIds.contains(uid),
+        )
+        .toList();
+  }
+  return const [];
 }
