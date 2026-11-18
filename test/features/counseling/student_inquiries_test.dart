@@ -651,6 +651,7 @@ class _MemoryFirestoreService implements FirestoreService {
     String collection, {
     Map<String, Object?> whereEquals = const {},
     Map<String, Object?> whereArrayContains = const {},
+    Map<String, List<Object?>> whereIn = const {},
     String? orderBy,
     bool descending = false,
     int? limit,
