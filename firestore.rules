@@ -746,20 +746,47 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    function isAssignedCollegeCounselorForAppointmentData(data) {
+      return currentAccessRole() == 'counselor'
+        && hasClinicalAccess()
+        && data.studentVerificationStatus == 'verified'
+        && data.collegeId is string
+        && data.collegeId != ''
+        && data.collegeId in portalProfile().get('assignedCollegeIds', []);
+    }
+
+    function isLiveAssignedCollegeCounselorForStudent(studentId) {
+      return currentAccessRole() == 'counselor'
+        && hasClinicalAccess()
+        && studentId is string
+        && studentId != ''
+        && exists(/databases/$(database)/documents/users/$(studentId))
+        && get(/databases/$(database)/documents/users/$(studentId)).data.get('verificationStatus', '') == 'verified'
+        && get(/databases/$(database)/documents/users/$(studentId)).data.get('collegeId', '') is string
+        && get(/databases/$(database)/documents/users/$(studentId)).data.get('collegeId', '') != ''
+        && get(/databases/$(database)/documents/users/$(studentId)).data.get('collegeId', '') in portalProfile().get('assignedCollegeIds', []);
+    }
+
     match /appointments/{appointmentId} {
       // Appointment mutations are callable-only.  This prevents a student
       // from confirming/completing their own record or bypassing slot locks.
       allow create: if false;
-      allow read: if isOwner(resource.data.userId)
-        || hasClinicalAccess();
+      allow get: if isOwner(resource.data.userId)
+        || isSystemAdmin()
+        || isLiveAssignedCollegeCounselorForStudent(resource.data.userId);
+      allow list: if isOwner(resource.data.userId)
+        || isSystemAdmin()
+        || isAssignedCollegeCounselorForAppointmentData(resource.data);
       allow update, delete: if false;
       match /history/{historyId} {
         allow read: if isOwner(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId)
-          || hasClinicalAccess();
+          || isSystemAdmin()
+          || isLiveAssignedCollegeCounselorForStudent(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId);
         allow write: if false;
       }
       match /clinical_notes/{noteId} {
-        allow read: if hasClinicalAccess();
+        allow read: if isSystemAdmin()
+          || isLiveAssignedCollegeCounselorForStudent(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId);
         allow write: if false;
       }
     }

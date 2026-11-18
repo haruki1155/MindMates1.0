@@ -42,18 +42,20 @@ beforeEach(async () => {
   await environment.withSecurityRulesDisabled(async (context) => {
     const firestore = context.firestore();
     await Promise.all([
-      setDoc(doc(firestore, "users/student"), {accessRole: "appUser"}),
+      setDoc(doc(firestore, "users/student"), {
+        accessRole: "appUser", collegeId: "cite", verificationStatus: "verified",
+      }),
       setDoc(doc(firestore, "users/admin"), {accessRole: "admin", accountStatus: "active"}),
       setDoc(doc(firestore, "users/counselor"), {
         accessRole: "counselor", approvedRole: "counselor",
-        staffAccountStatus: "approved", accountStatus: "active",
+        staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: ["cite"],
       }),
       // Pre-lifecycle record: role only, no staffAccountStatus/accountStatus.
       setDoc(doc(firestore, "users/staff-legacy"), {accessRole: "portalStaff"}),
       // Suspended while the stored clinical role string was left intact.
       setDoc(doc(firestore, "users/counselor-suspended"), {
         accessRole: "counselor", approvedRole: "counselor",
-        staffAccountStatus: "disabled", accountStatus: "suspended",
+        staffAccountStatus: "disabled", accountStatus: "suspended", assignedCollegeIds: ["cite"],
       }),
       setDoc(doc(firestore, "appointments/appointment-1/clinical_notes/session"), {
         summary: "Sensitive clinical note",
@@ -61,9 +63,9 @@ beforeEach(async () => {
       setDoc(doc(firestore, "mind_aid_emergency_alerts/alert-1"), {userId: "student"}),
       // Legacy records: no staffAccountStatus. Absent or active accountStatus
       // keeps access; an explicit suspended/disabled status must not.
-      setDoc(doc(firestore, "users/counselor-legacy"), {accessRole: "counselor"}),
-      setDoc(doc(firestore, "users/counselor-legacy-active"), {accessRole: "counselor", accountStatus: "active"}),
-      setDoc(doc(firestore, "users/counselor-legacy-suspended"), {accessRole: "counselor", accountStatus: "suspended"}),
+      setDoc(doc(firestore, "users/counselor-legacy"), {accessRole: "counselor", assignedCollegeIds: ["cite"]}),
+      setDoc(doc(firestore, "users/counselor-legacy-active"), {accessRole: "counselor", accountStatus: "active", assignedCollegeIds: ["cite"]}),
+      setDoc(doc(firestore, "users/counselor-legacy-suspended"), {accessRole: "counselor", accountStatus: "suspended", assignedCollegeIds: ["cite"]}),
       setDoc(doc(firestore, "users/staff-legacy-disabled"), {accessRole: "portalStaff", accountStatus: "disabled"}),
       setDoc(doc(firestore, "users/admin-suspended"), {accessRole: "admin", accountStatus: "suspended"}),
       setDoc(doc(firestore, "system_config/security"), {superAdminUid: "admin"}),
@@ -117,7 +119,7 @@ beforeEach(async () => {
         scheduledTime: "5:00 PM", status: "requested",
       }),
       setDoc(doc(firestore, "appointments/appointment-1"), {
-        userId: "student", concern: "Sensitive concern",
+        userId: "student", collegeId: "cite", studentVerificationStatus: "verified", concern: "Sensitive concern",
       }),
     ]);
   });
@@ -148,10 +150,15 @@ test("legacy portal staff record without lifecycle fields keeps verified inquiry
   await assertFails(getDocs(collection(legacyUnverified, "appointment_queue")));
 });
 
-test("approved counselor can list inquiries and appointments but not other profiles", async () => {
+test("approved counselor can list assigned-college inquiries and appointments, never unfiltered appointments or other profiles", async () => {
   const counselor = environment.authenticatedContext("counselor", verified).firestore();
   await assertSucceeds(assigned(counselor, "counselor"));
-  await assertSucceeds(getDocs(collection(counselor, "appointments")));
+  await assertSucceeds(getDocs(query(
+    collection(counselor, "appointments"),
+    where("studentVerificationStatus", "==", "verified"),
+    where("collegeId", "in", ["cite"]),
+  )));
+  await assertFails(getDocs(collection(counselor, "appointments")));
   await assertFails(getDoc(doc(counselor, "users/student")));
   await assertFails(getDoc(doc(counselor, "users/staff-approved")));
 });
