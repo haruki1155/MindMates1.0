@@ -11,6 +11,7 @@ import {
   authorizeAppointmentApproval,
   authorizeAppointmentApprovalInTransaction,
   resolveApprovalScope,
+  syncStudentAppointmentsCollegeScope,
 } from "./appointment_approval_service";
 export {requestFirestoreBackup, refreshFirestoreBackupStatus, scheduledFirestoreBackup} from "./backup_management";
 export {
@@ -802,7 +803,7 @@ export const reviewProfileVerification = onCall(async (request) => {
   }
   const target = db.collection("users").doc(targetUserId);
   const audit = db.collection("role_audit_logs").doc();
-  await db.runTransaction(async (transaction) => {
+  const collegeId = await db.runTransaction(async (transaction) => {
     const before = await transaction.get(target);
     if (!before.exists) throw new HttpsError("not-found", "User profile not found.");
     transaction.update(target, {
@@ -822,7 +823,9 @@ export const reviewProfileVerification = onCall(async (request) => {
       after: {verificationStatus: decision},
       createdAt: FieldValue.serverTimestamp(),
     });
+    return String(before.data()?.collegeId ?? "");
   });
+  await syncStudentAppointmentsCollegeScope(targetUserId, collegeId, decision);
   return {ok: true};
 });
 
@@ -837,7 +840,7 @@ export const reviewRoleCorrection = onCall(async (request) => {
   const reason = requiredText(request.data?.reason, "Reason", 3, 500);
   const requestRef = db.collection("role_correction_requests").doc(requestId);
   const audit = db.collection("role_audit_logs").doc();
-  await db.runTransaction(async (transaction) => {
+  const approvedSync = await db.runTransaction(async (transaction) => {
     const correction = await transaction.get(requestRef);
     if (!correction.exists || correction.data()?.status !== "pending") {
       throw new HttpsError("failed-precondition", "This request is no longer pending.");
@@ -879,7 +882,11 @@ export const reviewRoleCorrection = onCall(async (request) => {
       after: {populationRole: approve ? requestedRole : before.data()?.populationRole ?? ""},
       createdAt: FieldValue.serverTimestamp(),
     });
+    return approve ? {userId: targetUserId, collegeId: String(before.data()?.collegeId ?? "")} : null;
   });
+  if (approvedSync) {
+    await syncStudentAppointmentsCollegeScope(approvedSync.userId, approvedSync.collegeId, "verified");
+  }
   return {ok: true};
 });
 
@@ -1492,6 +1499,21 @@ export const syncPortalAppointmentQueue = onDocumentWritten(
   },
 );
 
+export const syncStudentAppointmentCollegeScope = onDocumentWritten(
+  {document: "users/{userId}", retry: true},
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!after) return;
+    const beforeCollege = typeof before?.collegeId === "string" ? before.collegeId.trim() : "";
+    const afterCollege = typeof after.collegeId === "string" ? after.collegeId.trim() : "";
+    const beforeStatus = typeof before?.verificationStatus === "string" ? before.verificationStatus.trim() : "";
+    const afterStatus = typeof after.verificationStatus === "string" ? after.verificationStatus.trim() : "";
+    if (before && beforeCollege === afterCollege && beforeStatus === afterStatus) return;
+    await syncStudentAppointmentsCollegeScope(event.params.userId, afterCollege, afterStatus);
+  },
+);
+
 export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
   {document: "appointments/{appointmentId}", retry: true},
   async (event) => {
@@ -1949,12 +1971,12 @@ export const createAppointmentRequest = onCall(async (request) => {
   const bookingRequest = requestId
     ? db.collection("appointment_booking_requests").doc(`${userId}_${requestId}`)
     : null;
-  const profile = await db.collection("users").doc(userId).get();
   let appointmentId = appointment.id;
   let idempotentReplay = false;
   await db.runTransaction(async (transaction) => {
     const parent = parentAppointmentId ? db.collection("appointments").doc(parentAppointmentId) : null;
-    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, activeLockSnapshot, parentSnapshot, bookingRequestSnapshot] = await Promise.all([
+    const [profile, occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, activeLockSnapshot, parentSnapshot, bookingRequestSnapshot] = await Promise.all([
+      transaction.get(db.collection("users").doc(userId)),
       transaction.get(slot),
       transaction.get(availability),
       transaction.get(policyDocument),
@@ -2043,10 +2065,14 @@ export const createAppointmentRequest = onCall(async (request) => {
         createdAt: FieldValue.serverTimestamp(),
       });
     }
+    const studentCollegeId = typeof source.collegeId === "string" ? source.collegeId.trim() : "";
+    const studentVerificationStatus = typeof source.verificationStatus === "string" ? source.verificationStatus.trim() : "";
     transaction.create(appointment, {
       // Profile-derived identity wins over client payloads. Contact fields stay
       // editable by design, with a profile value only as the initial fallback.
       userId, fullName: boundedText(profileName || input.fullName, "Full name", 160),
+      collegeId: studentCollegeId,
+      studentVerificationStatus,
       contactNumber: appointmentPhone(input.contactNumber ?? source.phone), email: appointmentEmail(source.email ?? input.email),
       preferredContactMethod: boundedText(input.preferredContactMethod, "Preferred contact method", 64), concern,
       bestTime: boundedText(input.bestTime, "Preferred time", 120), location: boundedText(input.location ?? "PACC Office, 2nd Floor, Main Building", "Location", 200),

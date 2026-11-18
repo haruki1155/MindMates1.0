@@ -4,6 +4,7 @@ import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {configuredSuperAdminUid, requireAdmin, requireClinical, requireUid, roleOf} from "./access";
 import {canonicalLoginId} from "./account_recovery";
+import {syncStudentAppointmentsCollegeScope} from "./appointment_approval_service";
 import {AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
 import {loadAcademicIndex} from "./student_roster";
 import {
@@ -333,7 +334,7 @@ export const reviewStudentCorrection = onCall(async (request) => {
   const index = approve ? await loadAcademicIndex() : null;
   const requestRef = db.collection("student_correction_requests").doc(requestId);
 
-  await db.runTransaction(async (transaction) => {
+  const syncCollege = await db.runTransaction(async (transaction) => {
     const reqSnap = await transaction.get(requestRef);
     if (!reqSnap.exists) throw new HttpsError("not-found", "Request not found.");
     const req = reqSnap.data() as Doc;
@@ -341,6 +342,7 @@ export const reviewStudentCorrection = onCall(async (request) => {
     const userId = text(req.userId);
     const field = req.field as Field;
     const userRef = db.collection("users").doc(userId);
+    let updatedScope: {userId: string; collegeId: unknown; verificationStatus: unknown} | null = null;
 
     if (approve) {
       const rosterRef = db.collection("student_roster").doc(text(req.studentKey));
@@ -370,6 +372,7 @@ export const reviewStudentCorrection = onCall(async (request) => {
         }
         rosterPatch.collegeId = userPatch.collegeId = college.id;
         rosterPatch.college = userPatch.college = college.name;
+        updatedScope = {userId, collegeId: college.id, verificationStatus: userSnap.data()?.verificationStatus};
       } else if (field === "course") {
         const course = index!.courses.find((c) => c.id === value);
         if (!course) throw new HttpsError("failed-precondition", "That course is no longer available.");
@@ -399,7 +402,11 @@ export const reviewStudentCorrection = onCall(async (request) => {
       category: AUDIT_CATEGORIES.userManagement, targetType: "student", targetId: userId,
       metadata: {requestId, field},
     });
+    return updatedScope;
   });
+  if (syncCollege) {
+    await syncStudentAppointmentsCollegeScope(syncCollege.userId, syncCollege.collegeId, syncCollege.verificationStatus);
+  }
   return {status: approve ? "approved" : "rejected"};
 });
 

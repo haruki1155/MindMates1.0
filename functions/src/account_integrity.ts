@@ -5,6 +5,7 @@ import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {canonicalLoginId} from "./account_recovery";
+import {syncStudentAppointmentsCollegeScope} from "./appointment_approval_service";
 
 if (!getApps().length) initializeApp();
 
@@ -421,6 +422,7 @@ export const repairMyStudentCollege = onCall(
         });
       }
     });
+    await syncStudentAppointmentsCollegeScope(uid, collegeId, "verified");
 
     return {ok: true};
   },
@@ -475,6 +477,7 @@ export const repairMyStudentCollegeDev = onCall(
         });
       }
     });
+    await syncStudentAppointmentsCollegeScope(uid, collegeId, "verified");
 
     return {ok: true};
   },

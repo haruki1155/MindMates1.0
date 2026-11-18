@@ -3,6 +3,7 @@ import {FieldPath, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {configuredSuperAdminUid, requireStaff, requireUid} from "./access";
+import {AUDIT_CATEGORIES, actorName, writeAuditBatch} from "./audit";
 import {
   ApprovalAuthority,
   ApprovalError,
@@ -278,6 +279,29 @@ export async function listAppointmentApprovalsBatch(
   const items: Array<Record<string, unknown>> = [];
   let scanned = 0;
 
+  const finalize = async (result: ListAppointmentApprovalsResult): Promise<ListAppointmentApprovalsResult> => {
+    if (isSuperAdmin) {
+      const batch = db().batch();
+      writeAuditBatch(batch, db(), {
+        actorId: uid,
+        actorNameSnapshot: actorName(actor),
+        actorRoleSnapshot: role,
+        action: "APPOINTMENT_APPROVALS_LISTED",
+        category: AUDIT_CATEGORIES.security,
+        targetType: "appointment",
+        targetId: "exception_queue",
+        metadata: {
+          returned: result.items.length,
+          scanned: result.scanned,
+          truncated: result.truncated,
+          page: options.cursor ? "next" : "first",
+        },
+      });
+      await batch.commit();
+    }
+    return result;
+  };
+
   for (let page = 0; page < maxPages; page++) {
     let query = db()
       .collection("appointments")
@@ -287,7 +311,7 @@ export async function listAppointmentApprovalsBatch(
     if (cursor) query = query.startAfter(cursor);
     const snapshot = await query.get();
     if (snapshot.empty) {
-      return {ok: true, items, nextCursor: null, hasMore: false, done: true, truncated: false, scanned};
+      return finalize({ok: true, items, nextCursor: null, hasMore: false, done: true, truncated: false, scanned});
     }
     for (let i = 0; i < snapshot.docs.length; i++) {
       const doc = snapshot.docs[i];
@@ -313,7 +337,7 @@ export async function listAppointmentApprovalsBatch(
       });
       if (items.length >= limit) {
         const hasMore = i < snapshot.docs.length - 1 || snapshot.docs.length === pageSize;
-        return {
+        return finalize({
           ok: true,
           items,
           nextCursor: hasMore ? cursor : null,
@@ -321,14 +345,14 @@ export async function listAppointmentApprovalsBatch(
           done: !hasMore,
           truncated: hasMore,
           scanned,
-        };
+        });
       }
     }
     if (snapshot.docs.length < pageSize) {
-      return {ok: true, items, nextCursor: null, hasMore: false, done: true, truncated: false, scanned};
+      return finalize({ok: true, items, nextCursor: null, hasMore: false, done: true, truncated: false, scanned});
     }
   }
-  return {ok: true, items, nextCursor: cursor, hasMore: true, done: false, truncated: true, scanned};
+  return finalize({ok: true, items, nextCursor: cursor, hasMore: true, done: false, truncated: true, scanned});
 }
 
 /**
@@ -473,7 +497,60 @@ export async function getAuthorizedAppointmentForApproval(
     ...(department ? {department} : {}),
   };
 
+  if (isSuperAdmin) {
+    const batch = db().batch();
+    writeAuditBatch(batch, db(), {
+      actorId: uid,
+      actorNameSnapshot: actorName(actor),
+      actorRoleSnapshot: role,
+      action: "APPOINTMENT_EXCEPTION_VIEWED",
+      category: AUDIT_CATEGORIES.security,
+      targetType: "appointment",
+      targetId: snap.id,
+      metadata: {
+        studentId,
+        scope: scope.scope,
+        scopeReason: scope.reason,
+      },
+    });
+    await batch.commit();
+  }
+
   return {ok: true, available: true, appointment};
+}
+
+/**
+ * Keeps queryable `collegeId` and `studentVerificationStatus` projections on a
+ * student's appointment documents synchronized with their authoritative user
+ * profile so Firestore `list` rules and client queries stay accurate.
+ */
+export async function syncStudentAppointmentsCollegeScope(
+  userId: string,
+  collegeId: unknown,
+  verificationStatus: unknown,
+): Promise<number> {
+  if (!ID.test(userId)) return 0;
+  const nextCollegeId = typeof collegeId === "string" ? collegeId.trim() : "";
+  const nextVerificationStatus = typeof verificationStatus === "string" ? verificationStatus.trim() : "";
+  const snap = await db().collection("appointments").where("userId", "==", userId).get();
+  if (snap.empty) return 0;
+  const stale = snap.docs.filter((doc) => {
+    const data = doc.data();
+    return String(data.collegeId ?? "") !== nextCollegeId ||
+      String(data.studentVerificationStatus ?? "") !== nextVerificationStatus;
+  });
+  if (stale.length === 0) return 0;
+  for (let i = 0; i < stale.length; i += 400) {
+    const batch = db().batch();
+    for (const doc of stale.slice(i, i + 400)) {
+      batch.update(doc.ref, {
+        collegeId: nextCollegeId,
+        studentVerificationStatus: nextVerificationStatus,
+      });
+    }
+    await batch.commit();
+  }
+  return stale.length;
 }
 
 /**
