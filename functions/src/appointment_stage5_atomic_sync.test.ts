@@ -15,7 +15,10 @@ import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import {HttpsError} from "firebase-functions/v2/https";
 
 import {canonicalLoginId} from "./account_recovery";
-import {appointmentScopeSyncHooks} from "./appointment_approval_service";
+import {
+  appointmentScopeSyncHooks,
+  syncStudentAppointmentsCollegeScopeFromUserProfile,
+} from "./appointment_approval_service";
 import {
   createAppointmentRequest,
   reviewProfileVerification,
@@ -181,6 +184,8 @@ before(async () => {
 
 after(async () => {
   appointmentScopeSyncHooks.maxAtomicUpdates = undefined;
+  appointmentScopeSyncHooks.maxProfileSyncChunkSize = undefined;
+  appointmentScopeSyncHooks.maxProfileSyncPasses = undefined;
   appointmentScopeSyncHooks.beforeAtomicCommit = undefined;
   if (!emulated) return;
   if (previousSuperAdmin == null) delete process.env.SUPER_ADMIN_UID;
@@ -545,6 +550,123 @@ test(
       await db.doc(`appointments/${delayedApptId}`).delete().catch(() => undefined);
       await clientA.close();
       await clientB.close();
+    }
+  },
+);
+
+test(
+  "syncStudentAppointmentsCollegeScopeFromUserProfile fails loudly with standard Error at pass limit, logs, and makes idempotent forward progress on retry",
+  {skip: !emulated},
+  async () => {
+    const passLimitUserId = uid("student-pass-limit");
+    const apptIds = Array.from({length: 5}, (_, i) => `${prefix}-appt-pass-limit-${i}`);
+    createdAppointmentIds.push(...apptIds);
+
+    await db.doc(`users/${passLimitUserId}`).set({
+      accessRole: "appUser",
+      role: "student",
+      populationRole: "student",
+      accountStatus: "active",
+      name: "Pass Limit Student",
+      collegeId: collegeB,
+      verificationStatus: "verified",
+    });
+
+    const seedBatch = db.batch();
+    for (let i = 0; i < apptIds.length; i++) {
+      seedBatch.set(db.doc(`appointments/${apptIds[i]}`), {
+        userId: passLimitUserId,
+        fullName: "Pass Limit Student",
+        status: "completed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() - (i + 1) * 86_400_000),
+      });
+    }
+    await seedBatch.commit();
+
+    const trigger = syncStudentAppointmentCollegeScope as unknown as {run: (event: unknown) => Promise<void>};
+    const triggerEvent = {
+      params: {userId: passLimitUserId},
+      data: {
+        before: {data: () => ({collegeId: collegeA, verificationStatus: "verified"})},
+        after: {data: () => ({collegeId: collegeB, verificationStatus: "verified"})},
+      },
+    };
+
+    const loggedErrors: Array<{message: unknown; meta: unknown}> = [];
+    const originalConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      loggedErrors.push({message: args[0], meta: args[1]});
+      originalConsoleError(...args);
+    };
+
+    try {
+      appointmentScopeSyncHooks.maxProfileSyncChunkSize = 2;
+      appointmentScopeSyncHooks.maxProfileSyncPasses = 2;
+
+      // 1. First trigger run reaches 2-pass * 2-doc limit (4 updated, 1 remaining) and throws standard Error.
+      await assert.rejects(
+        trigger.run(triggerEvent),
+        (err: unknown) => {
+          assert.ok(err instanceof Error, "expected standard Error");
+          assert.ok(!(err instanceof HttpsError), "must not use HttpsError for background trigger");
+          assert.match(err.message, /incomplete.*after 2 pass\(es\): 1 stale appointment\(s\) remain after updating 4/i);
+          return true;
+        },
+      );
+
+      assert.ok(
+        loggedErrors.some(
+          (entry) =>
+            entry.message === "appointment_scope_sync_incomplete_after_max_passes" &&
+            typeof entry.meta === "object" &&
+            entry.meta !== null &&
+            (entry.meta as Record<string, unknown>).userId === passLimitUserId &&
+            (entry.meta as Record<string, unknown>).updated === 4 &&
+            (entry.meta as Record<string, unknown>).remainingCount === 1,
+        ),
+        "expected structured error log for incomplete pass-limit condition",
+      );
+
+      // Verify 4 appointments committed forward progress to collegeB and 1 remains at collegeA.
+      const snapsAfterFirstRun = await Promise.all(apptIds.map((id) => db.doc(`appointments/${id}`).get()));
+      const syncedAfterFirst = snapsAfterFirstRun.filter((s) => s.data()?.collegeId === collegeB);
+      const staleAfterFirst = snapsAfterFirstRun.filter((s) => s.data()?.collegeId === collegeA);
+      assert.equal(syncedAfterFirst.length, 4);
+      assert.equal(staleAfterFirst.length, 1);
+      const syncedUpdateTimes = new Map(
+        syncedAfterFirst.map((s) => [s.id, s.updateTime?.toMillis() ?? 0]),
+      );
+
+      // 2. Retry makes forward progress on the 1 remaining record without rewriting the 4 already-correct records.
+      const retryUpdated = await syncStudentAppointmentsCollegeScopeFromUserProfile(passLimitUserId);
+      assert.equal(retryUpdated, 1);
+
+      const snapsAfterRetry = await Promise.all(apptIds.map((id) => db.doc(`appointments/${id}`).get()));
+      for (const snap of snapsAfterRetry) {
+        assert.equal(snap.data()?.collegeId, collegeB);
+        assert.equal(snap.data()?.studentVerificationStatus, "verified");
+        if (syncedUpdateTimes.has(snap.id)) {
+          assert.equal(
+            snap.updateTime?.toMillis() ?? 0,
+            syncedUpdateTimes.get(snap.id),
+            "already-correct appointment must not be rewritten on retry",
+          );
+        }
+      }
+
+      // 3. Subsequent trigger invocation when fully synchronized returns normally with 0 writes.
+      await trigger.run(triggerEvent);
+      assert.equal(await syncStudentAppointmentsCollegeScopeFromUserProfile(passLimitUserId), 0);
+    } finally {
+      console.error = originalConsoleError;
+      appointmentScopeSyncHooks.maxProfileSyncChunkSize = undefined;
+      appointmentScopeSyncHooks.maxProfileSyncPasses = undefined;
+      await Promise.all([
+        db.doc(`users/${passLimitUserId}`).delete().catch(() => undefined),
+        ...apptIds.map((id) => db.doc(`appointments/${id}`).delete().catch(() => undefined)),
+      ]);
     }
   },
 );

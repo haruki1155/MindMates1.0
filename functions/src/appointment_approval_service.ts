@@ -520,9 +520,12 @@ export async function getAuthorizedAppointmentForApproval(
 }
 
 export const MAX_ATOMIC_APPOINTMENT_SCOPE_UPDATES = 400;
+export const MAX_PROFILE_SCOPE_SYNC_PASSES = 25;
 
 export const appointmentScopeSyncHooks: {
   maxAtomicUpdates?: number;
+  maxProfileSyncChunkSize?: number;
+  maxProfileSyncPasses?: number;
   beforeAtomicCommit?: () => Promise<void> | void;
 } = {};
 
@@ -638,8 +641,17 @@ export async function syncStudentAppointmentsCollegeScopeFromUserProfile(
   userId: string,
 ): Promise<number> {
   if (!ID.test(userId)) return 0;
+  const configuredPasses = appointmentScopeSyncHooks.maxProfileSyncPasses;
+  const maxChunkPasses = typeof configuredPasses === "number" && configuredPasses >= 1
+    ? Math.min(Math.trunc(configuredPasses), MAX_PROFILE_SCOPE_SYNC_PASSES)
+    : MAX_PROFILE_SCOPE_SYNC_PASSES;
+  const configuredChunkSize = appointmentScopeSyncHooks.maxProfileSyncChunkSize;
+  const chunkSize = typeof configuredChunkSize === "number" && configuredChunkSize >= 1
+    ? Math.min(Math.trunc(configuredChunkSize), MAX_ATOMIC_APPOINTMENT_SCOPE_UPDATES)
+    : MAX_ATOMIC_APPOINTMENT_SCOPE_UPDATES;
+
   let totalUpdated = 0;
-  const maxChunkPasses = 25;
+  let remainingCount = 0;
   for (let pass = 0; pass < maxChunkPasses; pass++) {
     const result = await db().runTransaction(async (tx) => {
       const [userSnap, apptsSnap] = await Promise.all([
@@ -647,7 +659,7 @@ export async function syncStudentAppointmentsCollegeScopeFromUserProfile(
         tx.get(db().collection("appointments").where("userId", "==", userId)),
       ]);
       if (!userSnap.exists || apptsSnap.empty) {
-        return {updated: 0, remaining: false};
+        return {updated: 0, remainingCount: 0};
       }
       const userData = userSnap.data() ?? {};
       const {collegeId: nextCollegeId, verificationStatus: nextVerificationStatus} =
@@ -658,9 +670,9 @@ export async function syncStudentAppointmentsCollegeScopeFromUserProfile(
         nextVerificationStatus,
       );
       if (stale.length === 0) {
-        return {updated: 0, remaining: false};
+        return {updated: 0, remainingCount: 0};
       }
-      const chunk = stale.slice(0, MAX_ATOMIC_APPOINTMENT_SCOPE_UPDATES);
+      const chunk = stale.slice(0, chunkSize);
       for (const doc of chunk) {
         tx.update(doc.ref, {
           collegeId: nextCollegeId,
@@ -669,11 +681,24 @@ export async function syncStudentAppointmentsCollegeScopeFromUserProfile(
       }
       return {
         updated: chunk.length,
-        remaining: stale.length > chunk.length,
+        remainingCount: stale.length - chunk.length,
       };
     });
     totalUpdated += result.updated;
-    if (!result.remaining) break;
+    remainingCount = result.remainingCount;
+    if (remainingCount === 0) break;
+  }
+  if (remainingCount > 0) {
+    console.error("appointment_scope_sync_incomplete_after_max_passes", {
+      userId,
+      updated: totalUpdated,
+      remainingCount,
+      maxChunkPasses,
+      chunkSize,
+    });
+    throw new Error(
+      `Appointment college-scope synchronization incomplete for user ${userId} after ${maxChunkPasses} pass(es): ${remainingCount} stale appointment(s) remain after updating ${totalUpdated}.`,
+    );
   }
   return totalUpdated;
 }
