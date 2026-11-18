@@ -205,21 +205,34 @@ test("backfillAppointmentCollegeScope populates legacy records boundedly, idempo
       .get();
     assert.ok(!preQuery.docs.some((d) => d.id === legacyCiteAppt));
 
-    // Paginated backfill (limit 1, pageSize 2) processes across multiple pages cleanly.
+    // Bounded pagination respects limit=1 and advances cursor cleanly, even with prior test data.
     const updates: number[] = [];
     let cursor: string | null = null;
-    let guard = 0;
-    do {
-      const page = await backfillAppointmentCollegeScopeBatch(uid("admin"), {
+    for (let step = 0; step < 2; step++) {
+      const boundedPage = await backfillAppointmentCollegeScopeBatch(uid("admin"), {
         limit: 1,
         pageSize: 2,
         maxPages: 2,
         cursor,
       });
+      assert.ok(boundedPage.updated <= 1);
+      updates.push(boundedPage.updated);
+      cursor = boundedPage.nextCursor;
+      if (!cursor) break;
+    }
+    let guard = 0;
+    while (cursor && guard < 20) {
+      const page = await backfillAppointmentCollegeScopeBatch(uid("admin"), {
+        limit: 200,
+        pageSize: 500,
+        maxPages: 10,
+        cursor,
+      });
       updates.push(page.updated);
       cursor = page.nextCursor;
       guard += 1;
-    } while (cursor && guard < 20);
+    }
+    assert.equal(cursor, null);
     assert.ok(updates.reduce((a, b) => a + b, 0) >= 3);
 
     const citeAfter = (await db.doc(`appointments/${legacyCiteAppt}`).get()).data()!;
