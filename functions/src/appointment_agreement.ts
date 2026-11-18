@@ -7,9 +7,18 @@ import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_po
 import {boundedText} from "./appointment_intake";
 import {AUDIT_CATEGORIES, writeAudit} from "./audit";
 import {canonicalAppointmentStatus} from "./appointment_lifecycle";
+import {approvalHistoryFields, approvalMetadata} from "./appointment_approval_service";
+import type {ApprovalAuthority} from "./appointment_approval";
 
-type StaffAuthorizer = (uid: string) => Promise<FirebaseFirestore.DocumentData>;
-export async function handleAppointmentAgreement(uid: string, input: Record<string, unknown>, authorizeStaff: StaffAuthorizer) {
+// The staff side is authorised per appointment (college-scoped approval).
+type StaffAuthorizer = (uid: string, appointment: FirebaseFirestore.DocumentData, input: Record<string, unknown>) => Promise<FirebaseFirestore.DocumentData>;
+type StaffTxAuthorizer = (tx: FirebaseFirestore.Transaction, uid: string, appointment: FirebaseFirestore.DocumentData, input: Record<string, unknown>) => Promise<FirebaseFirestore.DocumentData>;
+export async function handleAppointmentAgreement(
+  uid: string,
+  input: Record<string, unknown>,
+  authorizeStaff: StaffAuthorizer,
+  authorizeStaffInTransaction?: StaffTxAuthorizer,
+) {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
   const id = String(input.appointmentId ?? "");
   const requestId = String(input.requestId ?? "");
@@ -30,7 +39,8 @@ export async function handleAppointmentAgreement(uid: string, input: Record<stri
   if (!opened) throw new HttpsError("not-found", "Appointment unavailable.");
   const owner = String(opened.userId ?? "");
   const isStudent = owner === uid;
-  const actor = isStudent ? undefined : await authorizeStaff(uid);
+  const actor = isStudent ? undefined : await authorizeStaff(uid, opened, input);
+  const authority = actor?.approvalAuthority as ApprovalAuthority | undefined;
   if (action === "cancel" && !isStudent) throw new HttpsError("permission-denied", "Only the student can use this cancellation action.");
   const recipients = isStudent ? (await db.collection("users").where("accessRole", "in", ["portalStaff", "admin", "counselor"]).get()).docs.map(d => d.id) : [owner];
   const fingerprint = createHash("sha256").update(JSON.stringify([uid, action, expected, expectedRevision, expectedProposal, proposed?.millis ?? null, reason])).digest("hex");
@@ -61,6 +71,11 @@ export async function handleAppointmentAgreement(uid: string, input: Record<stri
       try { proposed = validateAppointmentTimestamp(data.proposedScheduledAt.toMillis()); }
       catch (e) { if (e instanceof AppointmentSchedulingValidationError) throw new HttpsError("failed-precondition", e.message); throw e; }
     }
+    let liveActor = actor;
+    if (!isStudent && authorizeStaffInTransaction) {
+      liveActor = await authorizeStaffInTransaction(tx, uid, data, input);
+    }
+    const liveAuthority = (liveActor?.approvalAuthority as ApprovalAuthority | undefined) ?? authority;
     if (action === "propose" && proposed!.millis === currentAt) {
       if (pending) throw new HttpsError("failed-precondition", "Choose another time or resolve the current proposal.");
       tx.create(replay, {fingerprint, createdAt: FieldValue.serverTimestamp()});
@@ -96,8 +111,8 @@ export async function handleAppointmentAgreement(uid: string, input: Record<stri
     }
     tx.update(ref, patch);
     tx.create(replay, {fingerprint, createdAt: FieldValue.serverTimestamp()});
-    tx.create(ref.collection("history").doc(), {type: event, performedBy: uid, performedByRole: isStudent ? "student" : "staff", previousStatus: status, newStatus: patch.status ?? status, previousScheduledAt: data.scheduledAt, scheduledAt: patch.scheduledAt ?? data.scheduledAt, ...(reason ? {reason} : {}), ...(action === "propose" ? {proposedScheduledAt: Timestamp.fromMillis(proposed!.millis), proposedScheduledTime: proposed!.scheduledTime, proposedBy: isStudent ? "student" : "counselor"} : {}), proposalRevision: proposalRevision + 1, createdAt: FieldValue.serverTimestamp()});
-    writeAudit(tx, db, {actorId: uid, actorNameSnapshot: isStudent ? "Student" : String(actor?.name ?? "PACC staff"), actorRoleSnapshot: isStudent ? "appUser" : String(actor?.accessRole ?? ""), action: action === "propose" ? "APPOINTMENT_SCHEDULE_PROPOSED" : action === "accept" ? "APPOINTMENT_SCHEDULE_AGREED" : "APPOINTMENT_CANCELLED", category: AUDIT_CATEGORIES.appointments, targetType: "appointment", targetId: id, metadata: {before: {status}, after: {status: patch.status ?? status, proposalRevision: proposalRevision + 1}}});
+    tx.create(ref.collection("history").doc(), {type: event, performedBy: uid, performedByRole: isStudent ? "student" : "staff", previousStatus: status, newStatus: patch.status ?? status, previousScheduledAt: data.scheduledAt, scheduledAt: patch.scheduledAt ?? data.scheduledAt, ...(reason ? {reason} : {}), ...(action === "propose" ? {proposedScheduledAt: Timestamp.fromMillis(proposed!.millis), proposedScheduledTime: proposed!.scheduledTime, proposedBy: isStudent ? "student" : "counselor"} : {}), proposalRevision: proposalRevision + 1, ...approvalHistoryFields(liveAuthority), createdAt: FieldValue.serverTimestamp()});
+    writeAudit(tx, db, {actorId: uid, actorNameSnapshot: isStudent ? "Student" : String(liveActor?.name ?? "PACC staff"), actorRoleSnapshot: isStudent ? "appUser" : String(liveActor?.accessRole ?? ""), action: action === "propose" ? "APPOINTMENT_SCHEDULE_PROPOSED" : action === "accept" ? "APPOINTMENT_SCHEDULE_AGREED" : "APPOINTMENT_CANCELLED", category: AUDIT_CATEGORIES.appointments, targetType: "appointment", targetId: id, metadata: {before: {status}, after: {status: patch.status ?? status, proposalRevision: proposalRevision + 1}, ...approvalMetadata(liveAuthority)}});
     for (const recipient of recipients) tx.create(db.doc(`notifications/agreement_${id}_${requestId}_${recipient}`), {
       userId: recipient, appointmentId: id, type: recipient === owner ? event : "appointment", agreementEvent: event,
       audience: recipient === owner ? "app" : "portal",

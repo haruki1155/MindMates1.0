@@ -32,6 +32,9 @@ test("student proposals retain the slot and agreement safely replays", async () 
   const request = {auth: {uid}, data: {appointmentId: id, expectedScheduledAt: oldAt, expectedScheduleRevision: 0, scheduledAt: newAt, requestId: "request_123456"}};
   const baseline = (functions as Record<string, unknown>).initializeAppointmentScheduleRevision as {run: (r: unknown) => Promise<unknown>};
   const staff = "schedule-test-staff";
+  const previousSuperAdmin = process.env.SUPER_ADMIN_UID;
+  process.env.SUPER_ADMIN_UID = staff; // triage path: student has no verified college
+  try {
   await ensureAuthUser(staff, true);
   await db.collection("users").doc(staff).set({accessRole: "admin", name: "Staff"});
   assert.ok(baseline, "legacy revision requires explicit initialization");
@@ -95,6 +98,10 @@ test("student proposals retain the slot and agreement safely replays", async () 
   assert.equal(raced.scheduledAt.toMillis(), newAt);
   assert.equal((await newSlot.get()).data()?.appointmentId, id);
   await assert.rejects(agree.run({...acceptance, data: {...acceptance.data, requestId: "stale_acceptance_2"}}), {code: "aborted"});
+  } finally {
+    if (previousSuperAdmin == null) delete process.env.SUPER_ADMIN_UID;
+    else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
+  }
 });
 
 test("legacy initialization races fail closed and never reset a revision", async () => {
@@ -103,6 +110,9 @@ test("legacy initialization races fail closed and never reset a revision", async
   const id = "legacy-race-appointment";
   const uid = "legacy-race-student";
   const staff = "legacy-race-staff";
+  const previousSuperAdmin = process.env.SUPER_ADMIN_UID;
+  process.env.SUPER_ADMIN_UID = staff; // triage path: student has no verified college
+  try {
   const day = new Date(Date.now() + 35 * 86400000);
   while ([0, 6].includes(day.getUTCDay())) day.setUTCDate(day.getUTCDate() + 1);
   const at = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 1);
@@ -149,4 +159,16 @@ test("legacy initialization races fail closed and never reset a revision", async
   const agree = functions.changeAppointmentAgreement as unknown as {run: (r: unknown) => Promise<unknown>};
   await agree.run({auth: {uid: staff}, data: {appointmentId: id, action: "accept", requestId: "legacy_final_accept", expectedScheduledAt: at, expectedScheduleRevision: 0, expectedProposalRevision: 1}});
   assert.equal((await ref.get()).data()?.status, "confirmed");
+  await assert.rejects(
+    review.run({auth: {uid}, data: {appointmentId: id, action: "confirmed", reply: "Spoof", expectedScheduledAt: at, expectedScheduleRevision: 0, expectedStatus: "confirmed", exceptionReason: "Override"}}),
+    (e: {code?: string}) => e.code === "permission-denied",
+  );
+  await assert.rejects(
+    baseline.run({auth: {uid}, data: {appointmentId: id, expectedScheduledAt: at, expectedStatus: "confirmed", exceptionReason: "Override"}}),
+    (e: {code?: string}) => e.code === "permission-denied",
+  );
+  } finally {
+    if (previousSuperAdmin == null) delete process.env.SUPER_ADMIN_UID;
+    else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
+  }
 });

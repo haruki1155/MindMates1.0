@@ -24,6 +24,7 @@ import '../models/pacc_availability_model.dart';
 import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
 import '../features/admin/domain/admin_management_models.dart';
+import '../features/admin/domain/appointment_approvals.dart';
 import '../features/admin/domain/inquiry_scope.dart';
 import '../features/admin/domain/inquiry_sla.dart';
 import '../features/admin/domain/report_generation_models.dart';
@@ -1434,35 +1435,98 @@ class AdminPortalRepository {
                   ..sort((a, b) => b.dateKey.compareTo(a.dateKey)),
           );
 
+  /// Clinical appointment callables keep their existing transport; tests may
+  /// inject [AdminCallableInvoker] instead.
+  Future<Object?> _clinicalAppointmentCallable(
+    String name,
+    Map<String, Object?> data,
+  ) async {
+    final invoker = _callableInvoker;
+    if (invoker != null) return invoker(name, data);
+    final result = await FirebaseFunctions.instance
+        .httpsCallable(name)
+        .call<Object?>(data);
+    return result.data;
+  }
+
+  /// [exceptionReason] is the super-administrator's written reason for acting
+  /// on an appointment a college counselor is assigned to.
   Future<void> initializeAppointmentScheduleRevision({
     required String appointmentId,
     required DateTime scheduledAt,
     required String status,
+    String? exceptionReason,
   }) async {
-    await FirebaseFunctions.instance
-        .httpsCallable('initializeAppointmentScheduleRevision')
-        .call({
-          'appointmentId': appointmentId,
-          'expectedScheduledAt': scheduledAt.millisecondsSinceEpoch,
-          'expectedStatus': status,
-        });
+    await _clinicalAppointmentCallable(
+      'initializeAppointmentScheduleRevision',
+      {
+        'appointmentId': appointmentId,
+        'expectedScheduledAt': scheduledAt.millisecondsSinceEpoch,
+        'expectedStatus': status,
+        'exceptionReason': ?exceptionReason,
+      },
+    );
   }
 
   Future<void> changeAppointmentAgreement(
     AppointmentModel appointment,
     String action,
-    String requestId,
-  ) async {
-    await FirebaseFunctions.instance
-        .httpsCallable('changeAppointmentAgreement')
-        .call({
-          'appointmentId': appointment.id,
-          'action': action,
-          'requestId': requestId,
-          'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
-          'expectedScheduleRevision': appointment.scheduleRevision,
-          'expectedProposalRevision': appointment.proposalRevision,
-        });
+    String requestId, {
+    String? exceptionReason,
+  }) async {
+    await _clinicalAppointmentCallable('changeAppointmentAgreement', {
+      'appointmentId': appointment.id,
+      'action': action,
+      'requestId': requestId,
+      'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
+      'expectedScheduleRevision': appointment.scheduleRevision,
+      'expectedProposalRevision': appointment.proposalRevision,
+      'exceptionReason': ?exceptionReason,
+    });
+  }
+
+  /// "My College's Approvals" for counselors; approval exceptions for the
+  /// super-administrator. Server-computed from live college assignments with
+  /// cursor-based pagination.
+  Future<AppointmentApprovalsPage> listAppointmentApprovalsPage({
+    String? cursor,
+    int limit = 50,
+  }) async {
+    final payload = <String, Object?>{
+      'limit': limit,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+    };
+    final result = await _callCallable('listAppointmentApprovals', payload);
+    final data = result is Map
+        ? Map<String, dynamic>.from(result)
+        : const <String, dynamic>{};
+    return AppointmentApprovalsPage.fromJson(data);
+  }
+
+  /// Convenience wrapper returning the first page of approvals.
+  Future<List<AppointmentApprovalItem>> listAppointmentApprovals() async =>
+      (await listAppointmentApprovalsPage()).items;
+
+  /// Fetches an authorized single pending appointment record via the
+  /// server-enforced `getAppointmentForApproval` callable when an item in the
+  /// paginated approvals queue is outside the currently streamed local list.
+  Future<AppointmentModel?> fetchAppointmentById(String appointmentId) async {
+    final id = appointmentId.trim();
+    if (id.isEmpty) return null;
+    if (currentAccessRole != AccessRole.counselor &&
+        !(currentAccessRole == AccessRole.admin && isSuperAdmin)) {
+      return null;
+    }
+    final result = await _callCallable('getAppointmentForApproval', {
+      'appointmentId': id,
+    });
+    if (result is! Map) return null;
+    final payload = Map<String, dynamic>.from(result);
+    if (payload['available'] != true) return null;
+    final raw = payload['appointment'];
+    if (raw is! Map) return null;
+    final data = Map<String, dynamic>.from(raw);
+    return AppointmentModel.fromJson(data, id: id);
   }
 
   Future<SessionEvidenceRecord?> getClinicalSessionEvidence(
@@ -1552,8 +1616,9 @@ class AdminPortalRepository {
     List<SessionEvidenceAttachment> attachments = const [],
     bool offerFollowUp = false,
     String? followUpMessage,
+    String? exceptionReason,
   }) async {
-    final data = <String, dynamic>{
+    final data = <String, Object?>{
       'appointmentId': appointmentId,
       'action': action,
       'reply': reply,
@@ -1577,9 +1642,8 @@ class AdminPortalRepository {
     }
     if (offerFollowUp) data['offerFollowUp'] = true;
     if (followUpMessage != null) data['followUpMessage'] = followUpMessage;
-    await FirebaseFunctions.instance
-        .httpsCallable('reviewAppointment')
-        .call(data);
+    if (exceptionReason != null) data['exceptionReason'] = exceptionReason;
+    await _clinicalAppointmentCallable('reviewAppointment', data);
   }
 
   Future<void> reviewProfileVerification({

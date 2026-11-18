@@ -142,6 +142,9 @@ test("integrated reschedule, notification retries, queue, confirmation, and revi
   const id = "gate2-integrated";
   const uid = "gate2-integrated-student";
   const staff = "gate2-integrated-staff";
+  const previousSuperAdmin = process.env.SUPER_ADMIN_UID;
+  process.env.SUPER_ADMIN_UID = staff; // triage path: student has no verified college
+  try {
   const ref = db.doc(`appointments/${id}`);
   await ensureAuthUser(staff, true);
   await db.doc(`users/${staff}`).set({accessRole: "admin"});
@@ -202,6 +205,10 @@ test("integrated reschedule, notification retries, queue, confirmation, and revi
   assert.equal((await db.doc(`appointment_slots/pacc_${a}`).get()).data()?.appointmentId, id);
   assert.equal((await db.doc(`appointment_slots/pacc_${b}`).get()).exists, false);
   assert.equal((await db.doc(`appointment_user_locks/${uid}`).get()).data()?.appointmentId, id);
+  } finally {
+    if (previousSuperAdmin == null) delete process.env.SUPER_ADMIN_UID;
+    else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
+  }
 });
 
 test("partial push retry does not resend to a successful device", async () => {
@@ -308,4 +315,86 @@ test("concurrent reminder delivery uses one lease and rejects ineligible statuse
     }
     assert.deepEqual(delivered, ["concurrent-device"]);
   } finally { send.mock.restore(); }
+});
+
+test("clinical appointment actions reject wrong-college, suspended, disabled, unverified, pending, portalStaff, and non-super-admin accounts", async () => {
+  const db = getFirestore();
+  const {getAuth} = await import("firebase-admin/auth");
+  const prefix = `gate2-neg-${Date.now()}`;
+  const cite = `${prefix}-cite`;
+  const cas = `${prefix}-cas`;
+  const studentUid = `${prefix}-student`;
+  const assignedUid = `${prefix}-assigned`;
+  const superAdminUid = `${prefix}-super-admin`;
+  const wrongCollegeUid = `${prefix}-wrong-college`;
+  const suspendedUid = `${prefix}-suspended`;
+  const disabledAuthUid = `${prefix}-disabled-auth`;
+  const unverifiedUid = `${prefix}-unverified`;
+  const pendingStaffUid = `${prefix}-pending`;
+  const portalStaffUid = `${prefix}-portal-staff`;
+  const nonSuperAdminUid = `${prefix}-non-super-admin`;
+  const previousSuperAdmin = process.env.SUPER_ADMIN_UID;
+  process.env.SUPER_ADMIN_UID = superAdminUid;
+  try {
+    await Promise.all([
+      db.doc(`colleges/${cite}`).set({name: "CITE", code: "CITE", active: true}),
+      db.doc(`colleges/${cas}`).set({name: "CAS", code: "CAS", active: true}),
+      db.doc(`users/${studentUid}`).set({accessRole: "appUser", verificationStatus: "verified", collegeId: cite}),
+      ensureAuthUser(assignedUid, true),
+      db.doc(`users/${assignedUid}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [cite]}),
+      ensureAuthUser(superAdminUid, true),
+      db.doc(`users/${superAdminUid}`).set({accessRole: "admin", accountStatus: "active"}),
+      ensureAuthUser(wrongCollegeUid, true),
+      db.doc(`users/${wrongCollegeUid}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [cas]}),
+      ensureAuthUser(suspendedUid, true),
+      db.doc(`users/${suspendedUid}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "suspended", assignedCollegeIds: [cite]}),
+      ensureAuthUser(disabledAuthUid, true),
+      db.doc(`users/${disabledAuthUid}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [cite]}),
+      ensureAuthUser(unverifiedUid, false),
+      db.doc(`users/${unverifiedUid}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [cite]}),
+      ensureAuthUser(pendingStaffUid, true),
+      db.doc(`users/${pendingStaffUid}`).set({accessRole: "counselor", staffAccountStatus: "pending", accountStatus: "active", assignedCollegeIds: [cite]}),
+      ensureAuthUser(portalStaffUid, true),
+      db.doc(`users/${portalStaffUid}`).set({accessRole: "portalStaff", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [cite]}),
+      ensureAuthUser(nonSuperAdminUid, true),
+      db.doc(`users/${nonSuperAdminUid}`).set({accessRole: "admin", accountStatus: "active"}),
+    ]);
+    await getAuth().updateUser(disabledAuthUid, {disabled: true, emailVerified: true});
+    const day = new Date(Date.now() + 49 * 86400000);
+    while ([0, 6].includes(day.getUTCDay())) day.setUTCDate(day.getUTCDate() + 1);
+    const slotAt = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 2);
+    const apptId = `${prefix}-appt`;
+    await db.doc(`appointments/${apptId}`).set({
+      userId: studentUid, status: "requested", scheduleRevision: 0, proposalRevision: 0,
+      scheduledAt: Timestamp.fromMillis(slotAt), scheduledTime: "10:00 AM", concern: "PRIVATE",
+    });
+    await db.doc(`appointment_slots/pacc_${slotAt}`).set({appointmentId: apptId});
+    await db.doc(`appointment_user_locks/${studentUid}`).set({appointmentId: apptId});
+    const review = functions.reviewAppointment as unknown as {run: (r: unknown) => Promise<unknown>};
+    for (const actorUid of [wrongCollegeUid, suspendedUid, disabledAuthUid, unverifiedUid, pendingStaffUid, portalStaffUid, nonSuperAdminUid]) {
+      await assert.rejects(
+        review.run({
+          auth: {uid: actorUid},
+          data: {
+            appointmentId: apptId, action: "confirmed", reply: "Approved.",
+            expectedScheduledAt: slotAt, expectedScheduleRevision: 0, expectedProposalRevision: 0, expectedStatus: "requested",
+          },
+        }),
+        (e: {code?: string}) => e.code === "permission-denied",
+        `expected permission-denied for ${actorUid}`,
+      );
+    }
+    assert.equal((await db.doc(`appointments/${apptId}`).get()).data()?.status, "requested");
+    await review.run({
+      auth: {uid: assignedUid},
+      data: {
+        appointmentId: apptId, action: "confirmed", reply: "Approved by college counselor.",
+        expectedScheduledAt: slotAt, expectedScheduleRevision: 0, expectedProposalRevision: 0, expectedStatus: "requested",
+      },
+    });
+    assert.equal((await db.doc(`appointments/${apptId}`).get()).data()?.status, "confirmed");
+  } finally {
+    if (previousSuperAdmin == null) delete process.env.SUPER_ADMIN_UID;
+    else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
+  }
 });
