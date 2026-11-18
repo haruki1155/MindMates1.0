@@ -5,6 +5,7 @@ import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../../routes/route_names.dart';
 import 'pacc_counseling_screen.dart';
 import 'service_detail_screen.dart';
+import 'student_inquiries_screen.dart';
 
 class ServicesScreen extends StatelessWidget {
   const ServicesScreen({super.key});
@@ -345,6 +346,7 @@ class ServicesScreen extends StatelessWidget {
                     delay: 420,
                     child: _SupportServicesCard(
                       onSetAppointment: () => _openPaccCounseling(context),
+                      onOpenInquiries: () => _openMyInquiries(context),
                     ),
                   ),
                 ]),
@@ -384,6 +386,12 @@ class ServicesScreen extends StatelessWidget {
     Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const PaccCounselingScreen()));
+  }
+
+  static void _openMyInquiries(BuildContext context) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const MyInquiriesScreen()));
   }
 }
 
@@ -562,9 +570,13 @@ class _ServiceCard extends StatelessWidget {
 }
 
 class _SupportServicesCard extends StatelessWidget {
-  const _SupportServicesCard({required this.onSetAppointment});
+  const _SupportServicesCard({
+    required this.onSetAppointment,
+    required this.onOpenInquiries,
+  });
 
   final VoidCallback onSetAppointment;
+  final VoidCallback onOpenInquiries;
 
   @override
   Widget build(BuildContext context) {
@@ -622,6 +634,32 @@ class _SupportServicesCard extends StatelessWidget {
                     child: _RoundedYellowButton(
                       label: 'Set Appointment',
                       onTap: onSetAppointment,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: onOpenInquiries,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.black,
+                        side: const BorderSide(
+                          color: _ServicesColors.sun,
+                          width: 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      icon: const Icon(Icons.mark_email_read_outlined, size: 18),
+                      label: const Text(
+                        'View My Inquiries',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
                   ),
                 ],

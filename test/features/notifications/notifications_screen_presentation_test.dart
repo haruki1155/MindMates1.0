@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/notifications/screens/notifications_screen.dart';
 import 'package:mind_mates/models/app_notification_model.dart';
+import 'package:mind_mates/models/student_inquiry_model.dart';
+import 'package:mind_mates/providers/appointment_provider.dart';
+import 'package:mind_mates/repositories/appointment_repository.dart';
+import 'package:mind_mates/repositories/inquiry_repository.dart';
 import 'package:mind_mates/repositories/notification_repository.dart';
+import 'package:provider/provider.dart';
 
 void main() {
   testWidgets('notifications empty state is clear without any actions', (
@@ -71,6 +76,101 @@ void main() {
     expect(tester.getSize(find.byKey(const ValueKey('notification-unread'))).height, greaterThanOrEqualTo(48));
     semantics.dispose();
   });
+
+  testWidgets('tapping inquiry notification marks read and opens StudentInquiryDetailScreen', (
+    tester,
+  ) async {
+    final repository = _MemoryNotificationsRepository([
+      AppNotificationModel(
+        id: 'notif-inq-1',
+        userId: 'user_1',
+        title: 'PACC replied to your inquiry',
+        body: 'Open MindMate to view the reply.',
+        type: 'inquiry',
+        inquiryId: 'inq_1',
+        createdAt: DateTime(2026, 11, 15, 9),
+      ),
+    ]);
+    final inquiryRepository = _TestInquiryRepository(
+      inquiry: StudentInquiryRecord(
+        id: 'inq_1',
+        userId: 'user_1',
+        subject: 'Intake Follow-up',
+        message: 'When is my next check-in?',
+        category: 'Service Form',
+        status: StudentInquiryStatus.inProgress,
+        createdAt: DateTime(2026, 11, 15, 8),
+        responseCount: 1,
+      ),
+      replies: [
+        StudentInquiryReply(
+          id: 'rep-1',
+          message: 'Your counselor scheduled Friday at 10 AM.',
+          authorName: 'Counselor Santos',
+          authorRole: 'counselor',
+          createdAt: DateTime(2026, 11, 15, 9),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotificationsScreen(
+          userId: 'user_1',
+          repository: repository,
+          inquiryRepository: inquiryRepository,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('PACC replied to your inquiry'));
+    await tester.pumpAndSettle();
+
+    expect(repository.markedIds, ['notif-inq-1']);
+    expect(find.text('Inquiry Details'), findsOneWidget);
+    expect(find.text('Intake Follow-up'), findsOneWidget);
+    expect(
+      find.text('Your counselor scheduled Friday at 10 AM.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('tapping appointment notification preserves appointment lookup behavior', (
+    tester,
+  ) async {
+    final repository = _MemoryNotificationsRepository([
+      AppNotificationModel(
+        id: 'notif-appt-1',
+        userId: 'user_1',
+        title: 'Appointment confirmed',
+        body: 'Your PACC appointment has been updated.',
+        type: 'appointment_confirmed',
+        appointmentId: 'appt_missing',
+        createdAt: DateTime(2026, 11, 15, 10),
+      ),
+    ]);
+    final provider = AppointmentProvider(_TestAppointmentRepository());
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppointmentProvider>.value(
+        value: provider,
+        child: MaterialApp(
+          home: NotificationsScreen(
+            userId: 'user_1',
+            repository: repository,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Appointment confirmed'));
+    await tester.pumpAndSettle();
+
+    expect(repository.markedIds, ['notif-appt-1']);
+    expect(find.text('This appointment is no longer available.'), findsOneWidget);
+  });
 }
 
 Widget _app(_MemoryNotificationsRepository repository, {double scale = 1}) {
@@ -106,4 +206,27 @@ class _MemoryNotificationsRepository extends NotificationRepository {
 
   @override
   Future<void> markRead(String id) async => markedIds.add(id);
+}
+
+class _TestInquiryRepository extends InquiryRepository {
+  _TestInquiryRepository({required this.inquiry, required this.replies})
+    : super(currentUserIdProvider: () => inquiry.userId);
+
+  final StudentInquiryRecord inquiry;
+  final List<StudentInquiryReply> replies;
+
+  @override
+  Stream<StudentInquiryRecord?> watchMyInquiry(
+    String inquiryId, {
+    required String userId,
+  }) => Stream.value(inquiryId == inquiry.id ? inquiry : null);
+
+  @override
+  Stream<List<StudentInquiryReply>> watchMyInquiryReplies(String inquiryId) =>
+      Stream.value(inquiryId == inquiry.id ? replies : const []);
+}
+
+class _TestAppointmentRepository implements AppointmentRepository {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

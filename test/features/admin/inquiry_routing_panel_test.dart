@@ -89,6 +89,7 @@ class _Repo extends AdminPortalRepository {
   final statusUpdates = <Map<String, Object?>>[];
   int rawReads = 0;
   int statusReads = 0;
+  int replyReads = 0;
   int backfills = 0;
 
   @override
@@ -104,13 +105,23 @@ class _Repo extends AdminPortalRepository {
   }
 
   @override
-  Future<void> acknowledgeInquiry(String id) async {
+  Stream<List<InquiryReply>> watchInquiryReplies(String inquiryId) {
+    replyReads++;
+    return Stream.value(const []);
+  }
+
+  @override
+  Future<void> acknowledgeInquiry(String id, {int? expectedRevision}) async {
     if (actionError != null) throw actionError!;
     acknowledgedIds.add(id);
   }
 
   @override
-  Future<void> updateInquiryStatus(String id, InquiryStatus status) async {
+  Future<void> updateInquiryStatus(
+    String id,
+    InquiryStatus status, {
+    int? expectedRevision,
+  }) async {
     if (actionError != null) throw actionError!;
     statusUpdates.add({'id': id, 'status': status.name});
   }
@@ -137,9 +148,13 @@ class _Repo extends AdminPortalRepository {
     ),
   ]);
   @override
-  Future<void> escalateInquiry(String id, {required String reason}) async {
+  Future<void> escalateInquiry(
+    String id, {
+    required String reason,
+    int? expectedRevision,
+  }) async {
     if (error != null) throw error!;
-    escalations.add('$id:$reason');
+    escalations.add('$id:$reason:$expectedRevision');
   }
 
   @override
@@ -256,7 +271,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, 'Escalate'));
       await tester.pumpAndSettle();
-      expect(repo.escalations, ['inq-1:Needs supervisor review']);
+      expect(repo.escalations, ['inq-1:Needs supervisor review:2']);
     },
   );
 
@@ -667,10 +682,14 @@ void main() {
 
       expect(repo.rawReads, 0, reason: 'portalStaff must never read raw inquiries');
       expect(repo.statusReads, 1);
+      expect(repo.replyReads, 0, reason: 'portalStaff must never watch inquiry replies');
       expect(find.text('Client Feedback Form'), findsOneWidget);
       expect(find.text('Feedback'), findsNothing);
       expect(find.text('Message'), findsNothing);
       expect(find.text('Form responses'), findsNothing);
+      expect(find.text('Replies'), findsNothing);
+      expect(find.text('Send reply'), findsNothing);
+      expect(find.text('Take over'), findsNothing);
       expect(find.text('PDF preview'), findsNothing);
       expect(find.text('Download PDF'), findsNothing);
       expect(find.byTooltip('Change inquiry status'), findsNothing);
@@ -681,6 +700,34 @@ void main() {
       await tester.tap(find.text('Acknowledge receipt'));
       await tester.pumpAndSettle();
       expect(repo.acknowledgedIds, ['inq-1']);
+    },
+  );
+
+  testWidgets(
+    'InquiryRoutingPanel hides takeover details in operational projection',
+    (tester) async {
+      final projectedTaken = _operationalInquiry(
+        extra: {
+          'isTakenOver': true,
+          'takeover': {
+            'by': 'admin',
+            'byName': 'Secret Admin Name',
+            'reason': 'Confidential takeover justification',
+          },
+        },
+      );
+      await _pump(
+        tester,
+        InquiryRoutingPanel(
+          inquiry: projectedTaken,
+          repository: _Repo(role: AccessRole.portalStaff, uid: 's1'),
+        ),
+      );
+      expect(find.textContaining('Administrator handling'), findsOneWidget);
+      expect(find.textContaining('Secret Admin Name'), findsNothing);
+      expect(find.textContaining('Confidential takeover justification'), findsNothing);
+      expect(find.text('Escalate to administrator'), findsNothing);
+      expect(find.text('Take over'), findsNothing);
     },
   );
 

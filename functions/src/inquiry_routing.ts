@@ -214,6 +214,10 @@ export type InquiryStatusProjection = {
   monitoringStaffLabels: Record<string, string>;
   ownerId: string | null;
   escalationStatus: "requested" | "handled" | null;
+  responseCount: number;
+  isTakenOver: boolean;
+  firstResponseAt: unknown;
+  lastResponseAt: unknown;
   createdAt: unknown;
   acknowledgedAt: unknown;
   resolvedAt: unknown;
@@ -295,6 +299,11 @@ export function buildInquiryStatusProjection(
   const rawEscStatus = typeof escalation?.status === "string" ? escalation.status : "";
   const escalationStatus = rawEscStatus === "requested" || rawEscStatus === "handled" ? rawEscStatus : null;
 
+  const responseCount = Number.isInteger(inquiry.responseCount) && Number(inquiry.responseCount) >= 0
+    ? Number(inquiry.responseCount)
+    : 0;
+  const isTakenOver = Boolean(inquiry.takeover && typeof inquiry.takeover === "object" && !Array.isArray(inquiry.takeover));
+
   return {
     inquiryId,
     collegeId,
@@ -312,6 +321,10 @@ export function buildInquiryStatusProjection(
     monitoringStaffLabels: sanitizeLabels(monitoringStaffIds, inquiry.monitoringStaffLabels),
     ownerId,
     escalationStatus,
+    responseCount,
+    isTakenOver,
+    firstResponseAt: inquiry.firstResponseAt ?? null,
+    lastResponseAt: inquiry.lastResponseAt ?? null,
     createdAt: inquiry.createdAt ?? null,
     acknowledgedAt: inquiry.acknowledgedAt ?? null,
     resolvedAt: inquiry.resolvedAt ?? null,
@@ -347,6 +360,10 @@ export function shouldWriteInquiryProjection(
     monitoringStaffIds: sanitizeIdArray(doc.monitoringStaffIds),
     ownerId: doc.ownerId ?? null,
     escalationStatus: doc.escalationStatus ?? null,
+    responseCount: Number.isInteger(doc.responseCount) ? doc.responseCount : 0,
+    isTakenOver: doc.isTakenOver === true,
+    firstResponse: doc.firstResponseAt != null,
+    lastResponse: doc.lastResponseAt != null,
     acknowledged: doc.acknowledgedAt != null,
     resolved: doc.resolvedAt != null,
   });

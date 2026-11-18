@@ -49,6 +49,17 @@ void main() {
       'monitoringStaffLabels': {'s1': 'Staff One'},
       'escalationStatus': 'requested',
       'escalation': {'status': 'requested', 'reason': 'Secret escalation note'},
+      'responseCount': 2,
+      'firstResponseAt': '2026-11-18T09:00:00.000Z',
+      'lastResponseAt': '2026-11-18T10:00:00.000Z',
+      'lastResponseByName': 'Secret Responder',
+      'lastResponseRole': 'counselor',
+      'isTakenOver': true,
+      'takeover': {
+        'by': 'admin',
+        'byName': 'Super Admin Secret',
+        'reason': 'Confidential takeover note',
+      },
       'createdAt': '2026-11-18T08:00:00.000',
     });
 
@@ -63,6 +74,14 @@ void main() {
     expect(projection.formData, isEmpty);
     expect(projection.escalationStatus, 'requested');
     expect(projection.escalationReason, isNull);
+    expect(projection.responseCount, 2);
+    expect(projection.firstResponseAt, DateTime.utc(2026, 11, 18, 9));
+    expect(projection.lastResponseAt, DateTime.utc(2026, 11, 18, 10));
+    expect(projection.lastResponseByName, isNull);
+    expect(projection.lastResponseRole, isNull);
+    expect(projection.isTakenOver, isTrue);
+    expect(projection.takeoverByName, isNull);
+    expect(projection.takeoverReason, isNull);
     expect(projection.monitoringStaffIds, ['s1']);
   });
 }

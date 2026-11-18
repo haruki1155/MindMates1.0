@@ -22,14 +22,14 @@ import {
 // sanitized `inquiry_statuses/{id}` projection in the same transaction alongside
 // an audit record; notifications carry no inquiry content and use deterministic IDs.
 
-type Actor = {uid: string; name: string; role: string};
+export type Actor = {uid: string; name: string; role: string};
 const SYSTEM: Actor = {uid: "system", name: "Inquiry routing", role: "system"};
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const STATUSES = new Set(["pending", "in_progress", "resolved"]);
 export const INQUIRY_STATUSES_COLLECTION = "inquiry_statuses";
 
 const db = () => getFirestore();
-const statusCollection = () => db().collection(INQUIRY_STATUSES_COLLECTION);
+export const statusCollection = () => db().collection(INQUIRY_STATUSES_COLLECTION);
 
 function superAdminUid(): string {
   try {
@@ -53,7 +53,7 @@ async function authStates(uids: string[]): Promise<Map<string, AuthState>> {
   return states;
 }
 
-function notification(recipient: string, inquiryId: string, title: string, body: string): Record<string, unknown> {
+export function notification(recipient: string, inquiryId: string, title: string, body: string): Record<string, unknown> {
   return {
     userId: recipient, type: "inquiry", audience: "portal", title, body, inquiryId,
     createdAt: FieldValue.serverTimestamp(), readAt: null, resolvedAt: null,
@@ -62,7 +62,7 @@ function notification(recipient: string, inquiryId: string, title: string, body:
 }
 
 /** Create once; an existing document (retry) counts as delivered. */
-async function createOnce(id: string, payload: Record<string, unknown>): Promise<void> {
+export async function createOnce(id: string, payload: Record<string, unknown>): Promise<void> {
   try {
     await db().collection("notifications").doc(id).create(payload);
   } catch (error: unknown) {
@@ -226,7 +226,7 @@ export async function routeInquiry(inquiryId: string, actor: Actor = SYSTEM): Pr
 }
 
 /** Assignee (clinical counselor or operational monitor) or configured super-administrator. */
-async function inquiryActor(request: {auth?: {uid: string} | null}): Promise<{actor: Actor; isSuperAdmin: boolean; role: string}> {
+export async function inquiryActor(request: {auth?: {uid: string} | null}): Promise<{actor: Actor; isSuperAdmin: boolean; role: string}> {
   const uid = requireUid(request);
   const profile = await requireStaff(uid);
   const role = String(profile.accessRole);
@@ -234,32 +234,65 @@ async function inquiryActor(request: {auth?: {uid: string} | null}): Promise<{ac
 }
 
 /** Clinical handling/ownership (`assigneeIds` counselor or super-admin). */
-function canHandleClinical(who: {actor: Actor; isSuperAdmin: boolean; role: string}, inquiry: FirebaseFirestore.DocumentData): boolean {
+export function canHandleClinical(who: {actor: Actor; isSuperAdmin: boolean; role: string}, inquiry: FirebaseFirestore.DocumentData): boolean {
   if (who.isSuperAdmin) return true;
+  // After a super-admin takeover the assignees keep read access but can no
+  // longer act until the inquiry is reassigned.
+  if (inquiry.takeover) return false;
   return who.role === "counselor" &&
     Array.isArray(inquiry.assigneeIds) && inquiry.assigneeIds.includes(who.actor.uid);
 }
 
 /** Operational monitoring + acknowledgment/escalation (`monitoringStaffIds` portalStaff, or clinical handler). */
-function canOperateOnInquiry(who: {actor: Actor; isSuperAdmin: boolean; role: string}, inquiry: FirebaseFirestore.DocumentData): boolean {
+export function canOperateOnInquiry(who: {actor: Actor; isSuperAdmin: boolean; role: string}, inquiry: FirebaseFirestore.DocumentData): boolean {
   if (canHandleClinical(who, inquiry)) return true;
+  if (inquiry.takeover) return false;
   return who.role === "portalStaff" &&
     Array.isArray(inquiry.monitoringStaffIds) && inquiry.monitoringStaffIds.includes(who.actor.uid);
 }
 
-function inquiryIdFrom(data: unknown): string {
+export function inquiryIdFrom(data: unknown): string {
   const id = typeof (data as {inquiryId?: unknown})?.inquiryId === "string" ? (data as {inquiryId: string}).inquiryId.trim() : "";
   if (!ID.test(id)) throw new HttpsError("invalid-argument", "Inquiry ID is required.");
   return id;
 }
 
-function reasonFrom(data: unknown): string {
+export function reasonFrom(data: unknown): string {
   const text = typeof (data as {reason?: unknown})?.reason === "string" ? (data as {reason: string}).reason.trim() : "";
   if (text.length < 3 || text.length > 500) throw new HttpsError("invalid-argument", "Reason must be 3-500 characters.");
   return text;
 }
 
-const DENIED = "Only the staff assigned to this inquiry or the super-administrator can do this.";
+export const STALE_REVISION = "This inquiry was updated by someone else. Reload and try again.";
+
+/**
+ * Optimistic-concurrency policy for inquiry workflow actions. Every mutation
+ * (acknowledge, status, escalate, reply, takeover, reassign) advances
+ * `routingRevision`.
+ * - A supplied `expectedRevision` is always enforced.
+ * - Acknowledge, status and escalate also accept an omitted revision, because
+ *   PR #4 web clients do not send one; such calls are served and audited as
+ *   `revisionChecked: false`. Setting INQUIRY_REQUIRE_EXPECTED_REVISION=true
+ *   (after every client sends revisions) makes the revision mandatory.
+ * - Reply and takeover always require it.
+ */
+export function checkExpectedRevision(expected: unknown, revision: number): {revisionChecked: boolean} {
+  if (expected === undefined || expected === null) {
+    if ((process.env.INQUIRY_REQUIRE_EXPECTED_REVISION ?? "").trim().toLowerCase() === "true") {
+      throw new HttpsError("invalid-argument", "expectedRevision is required.");
+    }
+    return {revisionChecked: false};
+  }
+  if (!Number.isInteger(expected)) throw new HttpsError("invalid-argument", "expectedRevision must be an integer.");
+  if (expected !== revision) throw new HttpsError("failed-precondition", STALE_REVISION);
+  return {revisionChecked: true};
+}
+
+export function revisionOf(data: FirebaseFirestore.DocumentData): number {
+  return Number.isInteger(data.routingRevision) ? Number(data.routingRevision) : 0;
+}
+
+export const DENIED = "Only the staff assigned to this inquiry or the super-administrator can do this.";
 
 export const acknowledgeInquiry = onCall(async (request) => {
   const who = await inquiryActor(request);
@@ -271,7 +304,11 @@ export const acknowledgeInquiry = onCall(async (request) => {
     const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
-    if (!canOperateOnInquiry(who, data)) throw new HttpsError("permission-denied", DENIED);
+    if (!canOperateOnInquiry(who, data)) {
+      throw new HttpsError("permission-denied", data.takeover ? "An administrator has taken over this inquiry." : DENIED);
+    }
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     if (String(data.status ?? "pending").toLowerCase() === "resolved") {
       throw new HttpsError("failed-precondition", "Resolved inquiries cannot be acknowledged.");
     }
@@ -286,6 +323,7 @@ export const acknowledgeInquiry = onCall(async (request) => {
       acknowledgedAt: FieldValue.serverTimestamp(),
       acknowledgedBy: who.actor.uid,
       ownerId: nextOwnerId,
+      routingRevision: revision + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
     const projection = buildInquiryStatusProjection(inquiryId, {
@@ -293,6 +331,7 @@ export const acknowledgeInquiry = onCall(async (request) => {
       status: "in_progress",
       acknowledgedAt: nowTs,
       ownerId: nextOwnerId,
+      routingRevision: revision + 1,
       updatedAt: nowTs,
     });
     if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, projection)) {
@@ -300,13 +339,16 @@ export const acknowledgeInquiry = onCall(async (request) => {
     }
     tx.create(db().collection("notifications").doc(), {
       userId, inquiryId, type: "inquiry", title: "Form received",
-      body: `PACC received your ${String(data.subject ?? "form")}. Our staff will review it.`,
+      body: "PACC received your inquiry. Open MindMate to view its status.",
       staffName: who.actor.name || "PACC staff", createdAt: FieldValue.serverTimestamp(), readAt: null,
     });
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ACKNOWLEDGED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {before: String(data.status ?? "pending"), after: "in_progress", ownerId: nextOwnerId},
+      metadata: {
+        before: String(data.status ?? "pending"), after: "in_progress", ownerId: nextOwnerId,
+        revision: revision + 1, revisionChecked,
+      },
     });
   });
   return {ok: true};
@@ -325,12 +367,20 @@ export const setInquiryStatus = onCall(async (request) => {
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
     if (!canHandleClinical(who, data)) {
-      throw new HttpsError("permission-denied", "Only the counselor assigned to this inquiry or the super-administrator can change clinical inquiry status.");
+      throw new HttpsError(
+        "permission-denied",
+        data.takeover
+          ? "An administrator has taken over this inquiry."
+          : "Only the counselor assigned to this inquiry or the super-administrator can change clinical inquiry status.",
+      );
     }
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     const before = String(data.status ?? "pending");
-    if (before === status) return {ok: true, changed: false};
+    if (before === status) return {ok: true, changed: false, revision};
     tx.update(ref, {
       status,
+      routingRevision: revision + 1,
       updatedAt: FieldValue.serverTimestamp(),
       resolvedAt: status === "resolved" ? FieldValue.serverTimestamp() : null,
       resolvedBy: status === "resolved" ? who.actor.uid : null,
@@ -338,6 +388,7 @@ export const setInquiryStatus = onCall(async (request) => {
     const projection = buildInquiryStatusProjection(inquiryId, {
       ...data,
       status,
+      routingRevision: revision + 1,
       updatedAt: nowTs,
       resolvedAt: status === "resolved" ? nowTs : null,
     });
@@ -348,9 +399,9 @@ export const setInquiryStatus = onCall(async (request) => {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: status === "resolved" ? "INQUIRY_RESOLVED" : "INQUIRY_STATUS_CHANGED",
       category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {before, after: status},
+      metadata: {before, after: status, revision: revision + 1, revisionChecked},
     });
-    return {ok: true, changed: true};
+    return {ok: true, changed: true, revision: revision + 1};
   });
 });
 
@@ -372,15 +423,19 @@ export const escalateInquiry = onCall(async (request) => {
       throw new HttpsError("permission-denied", "Only staff assigned to this inquiry can escalate it.");
     }
     if (data.status === "resolved") throw new HttpsError("failed-precondition", "Resolved inquiries cannot be escalated.");
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     if (data.escalation?.status === "requested") throw new HttpsError("failed-precondition", "This inquiry is already escalated.");
     const nextEscalation = {status: "requested", reason, requestedBy: who.actor.uid, requestedAt: FieldValue.serverTimestamp()};
     tx.update(ref, {
       escalation: nextEscalation,
+      routingRevision: revision + 1,
       updatedAt: FieldValue.serverTimestamp(),
     });
     const projection = buildInquiryStatusProjection(inquiryId, {
       ...data,
       escalation: {status: "requested"},
+      routingRevision: revision + 1,
       updatedAt: nowTs,
     });
     if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, projection)) {
@@ -389,9 +444,9 @@ export const escalateInquiry = onCall(async (request) => {
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ESCALATED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {reason, recipient: admin},
+      metadata: {reason, recipient: admin, revision: revision + 1, revisionChecked},
     });
-    return Number(data.routingRevision ?? 0);
+    return revision;
   });
   await createOnce(escalationNotificationId(inquiryId, revision),
     notification(admin, inquiryId, "Inquiry escalated", "An assigned inquiry was escalated for administrator review."));
@@ -453,6 +508,7 @@ export const reassignInquiry = onCall(async (request) => {
       routingRevision: plan.revision,
       routedAt: FieldValue.serverTimestamp(),
       escalation,
+      takeover: null,
       updatedAt: FieldValue.serverTimestamp(),
     };
     tx.update(ref, updates);
@@ -503,42 +559,65 @@ export const reassignInquiry = onCall(async (request) => {
 
 export type BackfillOptions = {limit?: number; cursor?: string | null; pageSize?: number; maxPages?: number};
 export type BackfillResult = {routed: number; needsTriage: number; projectionsSynced: number; scanned: number; nextCursor: string | null; done: boolean};
+export type BackfillPageEntry = {id: string; routingStatus: unknown; hasProjection: boolean};
+export type BackfillDeps = {
+  readPage?: (afterCursor: string | null, pageSize: number) => Promise<BackfillPageEntry[]>;
+  routeDoc?: (inquiryId: string, actor: Actor) => Promise<{routingStatus: string; assigneeIds: string[]; alreadyRouted: boolean}>;
+  syncProjection?: (inquiryId: string) => Promise<boolean>;
+};
+
+async function readBackfillPage(afterCursor: string | null, pageSize: number): Promise<BackfillPageEntry[]> {
+  let query = db().collection("inquiries").orderBy(FieldPath.documentId()).limit(pageSize);
+  if (afterCursor) query = query.startAfter(afterCursor);
+  const snapshot = await query.get();
+  if (snapshot.empty) return [];
+  const projectionRefs = snapshot.docs.map((docSnap) => statusCollection().doc(docSnap.id));
+  const projectionSnaps = projectionRefs.length > 0 ? await db().getAll(...projectionRefs) : [];
+  const hasProjection = new Map(projectionSnaps.map((snap) => [snap.id, snap.exists]));
+  return snapshot.docs.map((docSnap) => ({
+    id: docSnap.id,
+    routingStatus: docSnap.data().routingStatus,
+    hasProjection: Boolean(hasProjection.get(docSnap.id)),
+  }));
+}
 
 /**
  * Route inquiries that predate college routing (and backfill any missing
  * `inquiry_statuses` projections for previously routed inquiries), in
  * document-ID order. Bounded and resumable via `nextCursor`.
  */
-export async function routeExistingInquiriesBatch(actor: Actor, options: BackfillOptions = {}): Promise<BackfillResult> {
+export async function routeExistingInquiriesBatch(
+  actor: Actor,
+  options: BackfillOptions = {},
+  deps: BackfillDeps = {},
+): Promise<BackfillResult> {
   const limit = Math.min(Math.max(Math.trunc(options.limit ?? 50), 1), 100);
   const pageSize = Math.min(Math.max(Math.trunc(options.pageSize ?? 500), 1), 500);
   const maxPages = Math.min(Math.max(Math.trunc(options.maxPages ?? 10), 1), 20);
+  const readPage = deps.readPage ?? readBackfillPage;
+  const routeDoc = deps.routeDoc ?? routeInquiry;
+  const syncProjection = deps.syncProjection ?? syncInquiryStatusProjection;
   let cursor = options.cursor ?? null;
   let routed = 0;
   let needsTriage = 0;
   let projectionsSynced = 0;
   let scanned = 0;
   for (let page = 0; page < maxPages; page++) {
-    let query = db().collection("inquiries").orderBy(FieldPath.documentId()).limit(pageSize);
-    if (cursor) query = query.startAfter(cursor);
-    const snapshot = await query.get();
-    if (snapshot.empty) return {routed, needsTriage, projectionsSynced, scanned, nextCursor: null, done: true};
-    const projectionRefs = snapshot.docs.map((docSnap) => statusCollection().doc(docSnap.id));
-    const projectionSnaps = projectionRefs.length > 0 ? await db().getAll(...projectionRefs) : [];
-    const hasProjection = new Map(projectionSnaps.map((snap) => [snap.id, snap.exists]));
-    for (const inquiry of snapshot.docs) {
+    const entries = await readPage(cursor, pageSize);
+    if (entries.length === 0) return {routed, needsTriage, projectionsSynced, scanned, nextCursor: null, done: true};
+    for (const entry of entries) {
       scanned += 1;
-      cursor = inquiry.id;
-      if (inquiry.data().routingStatus != null) {
-        if (!hasProjection.get(inquiry.id)) {
-          if (await syncInquiryStatusProjection(inquiry.id)) projectionsSynced += 1;
+      cursor = entry.id;
+      if (entry.routingStatus != null) {
+        if (!entry.hasProjection) {
+          if (await syncProjection(entry.id)) projectionsSynced += 1;
         }
       } else {
-        const result = await routeInquiry(inquiry.id, actor);
+        const result = await routeDoc(entry.id, actor);
         if (!result.alreadyRouted) {
           routed += 1;
           if (result.routingStatus === "needs_triage") needsTriage += 1;
-        } else if (!hasProjection.get(inquiry.id)) {
+        } else if (!entry.hasProjection) {
           projectionsSynced += 1;
         }
       }
@@ -546,7 +625,7 @@ export async function routeExistingInquiriesBatch(actor: Actor, options: Backfil
         return {routed, needsTriage, projectionsSynced, scanned, nextCursor: cursor, done: false};
       }
     }
-    if (snapshot.size < pageSize) return {routed, needsTriage, projectionsSynced, scanned, nextCursor: null, done: true};
+    if (entries.length < pageSize) return {routed, needsTriage, projectionsSynced, scanned, nextCursor: null, done: true};
   }
   return {routed, needsTriage, projectionsSynced, scanned, nextCursor: cursor, done: false};
 }

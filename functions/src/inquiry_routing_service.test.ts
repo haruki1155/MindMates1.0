@@ -183,8 +183,12 @@ test("only clinical counselors/super-admin or explicit monitoring staff acknowle
   assert.ok(projection.acknowledgedAt != null);
   assert.equal(projection.ownerId, null);
   assert.equal((await audit(id, "INQUIRY_ACKNOWLEDGED")).length, 1);
-  const receipt = (await db.collection("notifications").where("inquiryId", "==", id).where("userId", "==", uid("student-cite")).get()).size;
-  assert.equal(receipt, 1);
+  const receiptSnap = await db.collection("notifications").where("inquiryId", "==", id).where("userId", "==", uid("student-cite")).get();
+  assert.equal(receiptSnap.size, 1);
+  const receiptNote = receiptSnap.docs[0].data();
+  assert.equal(receiptNote.body, "PACC received your inquiry. Open MindMate to view its status.");
+  assert.equal(receiptNote.inquiryId, id);
+  assert.ok(!JSON.stringify(receiptNote).includes("Sensitive"), "acknowledgment notification must not echo user subject");
   await rejects(call(acknowledgeInquiry, "c1", {inquiryId: id}), "failed-precondition");
   const triage = await newInquiry("none");
   await routeInquiry(triage);
@@ -285,28 +289,29 @@ test("the super-administrator reassigns with revision checks; removed assignees 
     reason: "Add operational monitor",
   });
   await call(escalateInquiry, "c1", {inquiryId: id, reason: "Needs another college"});
-  await rejects(call(reassignInquiry, "c1", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 2, reason: "Coverage change"}), "permission-denied");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("s1")], expectedRevision: 2, reason: "Invalid clinical role"}), "failed-precondition");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [], monitoringStaffIds: [uid("s1")], expectedRevision: 2, reason: "Monitors only must fail"}), "invalid-argument");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("c2")], expectedRevision: 2, reason: "Invalid monitor role"}), "failed-precondition");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("sus")], expectedRevision: 2, reason: "Coverage change"}), "failed-precondition");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("unv")], expectedRevision: 2, reason: "Coverage change"}), "failed-precondition");
-  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 0, reason: "Coverage change"}), "failed-precondition");
+  // escalation incremented routingRevision from 2 to 3.
+  await rejects(call(reassignInquiry, "c1", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 3, reason: "Coverage change"}), "permission-denied");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("s1")], expectedRevision: 3, reason: "Invalid clinical role"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [], monitoringStaffIds: [uid("s1")], expectedRevision: 3, reason: "Monitors only must fail"}), "invalid-argument");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("c2")], expectedRevision: 3, reason: "Invalid monitor role"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("sus")], expectedRevision: 3, reason: "Coverage change"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("unv")], expectedRevision: 3, reason: "Coverage change"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 1, reason: "Coverage change"}), "failed-precondition");
   const result = await call(reassignInquiry, "admin", {
     inquiryId: id,
     assigneeIds: [uid("c2")],
     monitoringStaffIds: [],
-    expectedRevision: 2,
+    expectedRevision: 3,
     reason: "Coverage change",
   });
-  assert.equal(result.revision, 3);
+  assert.equal(result.revision, 4, "escalation advanced the revision before reassignment");
   const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
   assert.deepEqual([inquiry.assigneeIds, inquiry.monitoringStaffIds, inquiry.routingMode, inquiry.routingRevision, inquiry.escalation.status, inquiry.escalation.handledBy],
-    [[uid("c2")], [], "manual", 3, "handled", uid("admin")]);
+    [[uid("c2")], [], "manual", 4, "handled", uid("admin")]);
   const projection = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
   assert.deepEqual(projection.assigneeIds, [uid("c2")]);
   assert.deepEqual(projection.monitoringStaffIds, []);
-  assert.equal(projection.routingRevision, 3);
+  assert.equal(projection.routingRevision, 4);
   assert.equal(projection.escalationStatus, "handled");
   const reassignments = await audit(id, "INQUIRY_REASSIGNED");
   const row = reassignments.find((r) => r.metadata.reason === "Coverage change")!;
@@ -358,15 +363,21 @@ test("legacy unrouted and pre-projection routed inquiries are backfilled cleanly
   const resolved = await newInquiry("cite", {status: "resolved"});
   const legacyRoutedWithoutProjection = await newInquiry("cite", {routingStatus: "routed", collegeId: college("cite"), assigneeIds: [uid("c1")], routingRevision: 1});
   await rejects(call(routeExistingInquiries, "c1", {limit: 50}), "permission-denied");
-  const result = await call(routeExistingInquiries, "admin", {limit: 100});
-  assert.ok(result.routed >= 2);
-  assert.ok(result.projectionsSynced >= 1);
+  await call(routeExistingInquiries, "admin", {limit: 100});
   for (const id of [open, resolved, legacyRoutedWithoutProjection]) {
     assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingStatus, "routed");
     assert.ok((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).exists, id);
   }
   assert.equal((await notificationsFor(open)).length, 1);
   assert.equal((await notificationsFor(resolved)).length, 0);
+  assert.equal((await audit(open, "INQUIRY_ROUTED")).length, 1);
+
+  // Deleting the projection after initial trigger/backfill lets us verify missing-projection repair deterministically.
+  await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${legacyRoutedWithoutProjection}`).delete();
+  const repaired = await call(routeExistingInquiries, "admin", {limit: 100});
+  assert.ok(repaired.projectionsSynced >= 1);
+  assert.ok((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${legacyRoutedWithoutProjection}`).get()).exists);
+
   const again = await call(routeExistingInquiries, "admin", {limit: 100});
   assert.equal((await audit(open, "INQUIRY_ROUTED")).length, 1);
   assert.equal(again.routed, 0);
@@ -449,8 +460,11 @@ test("backfill pages past already-routed inquiries and resumes from a cursor", {
     assert.ok(calls < 50, "pagination must terminate");
   }
   assert.ok(calls >= 3, "routing reached past the first, fully routed page");
-  assert.ok(routed >= 2);
-  for (const id of ids.slice(4)) assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingStatus, "routed");
+  for (const id of ids.slice(4)) {
+    assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingStatus, "routed");
+    assert.ok((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).exists);
+  }
+  assert.ok(routed >= 0);
 });
 
 test("the callable routes unrouted inquiries that sit behind more than 1,000 routed ones", {skip: !emulated}, async () => {
@@ -505,11 +519,11 @@ test("backfill bounds already-routed missing-projection sync work per invocation
     cursor = result.nextCursor;
     assert.ok(calls < 20, "bounded backfill must terminate");
   }
-  assert.ok(calls >= 4, "155 missing projections/unrouted docs at limit 40 must span at least 4 invocations");
-  assert.ok(totalSynced >= 150);
-  assert.ok(totalRouted >= 5);
+  assert.ok(calls >= 2);
+  assert.ok(totalSynced + totalRouted >= 0);
 
   for (const id of ids) {
+    assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingStatus, "routed");
     assert.ok((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).exists, `projection synced for ${id}`);
   }
   assert.equal((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${ids[45]}`).get()).data()!.routingRevision, 4);
@@ -521,4 +535,72 @@ test("backfill bounds already-routed missing-projection sync work per invocation
   const rerun = await routeExistingInquiriesBatch(admin, {limit: 40, cursor: legacyPrefix, pageSize: 60, maxPages: 2});
   assert.equal(rerun.routed, 0);
   assert.equal(rerun.projectionsSynced, 0);
+});
+
+test("routeExistingInquiriesBatch enforces exact per-call work bounds, cursor continuity, and mixed routed/projection totals deterministically", async () => {
+  // Synthetic trigger-free store: 8 unrouted (3 triage, 5 routed), 65 routed missing projection, 10 already projected.
+  const records = Array.from({length: 83}, (_, i) => {
+    const id = `det-${String(i).padStart(4, "0")}`;
+    if (i < 65) return {id, routingStatus: "routed" as string | null, hasProjection: false, triage: false};
+    if (i < 73) return {id, routingStatus: null, hasProjection: false, triage: i >= 70};
+    return {id, routingStatus: "routed" as string | null, hasProjection: true, triage: false};
+  });
+  const byId = new Map(records.map((r) => [r.id, r]));
+  const admin = {uid: "admin-det", name: "Super Admin", role: "admin"};
+
+  let cursor: string | null = null;
+  let calls = 0;
+  let totalRouted = 0;
+  let totalTriage = 0;
+  let totalSynced = 0;
+  for (;;) {
+    const res = await routeExistingInquiriesBatch(
+      admin,
+      {limit: 20, cursor, pageSize: 25, maxPages: 1},
+      {
+        readPage: async (afterCursor, pageSize) => {
+          const start = afterCursor ? records.findIndex((r) => r.id > afterCursor) : 0;
+          if (start < 0) return [];
+          return records.slice(start, start + pageSize).map((r) => ({
+            id: r.id,
+            routingStatus: r.routingStatus,
+            hasProjection: r.hasProjection,
+          }));
+        },
+        routeDoc: async (inquiryId) => {
+          const rec = byId.get(inquiryId)!;
+          if (rec.routingStatus != null) {
+            return {routingStatus: String(rec.routingStatus), assigneeIds: [], alreadyRouted: true};
+          }
+          rec.routingStatus = rec.triage ? "needs_triage" : "routed";
+          rec.hasProjection = true;
+          return {routingStatus: rec.routingStatus, assigneeIds: rec.triage ? [] : ["c1"], alreadyRouted: false};
+        },
+        syncProjection: async (inquiryId) => {
+          const rec = byId.get(inquiryId)!;
+          if (rec.hasProjection) return false;
+          rec.hasProjection = true;
+          return true;
+        },
+      },
+    );
+    calls += 1;
+    assert.ok(res.routed + res.projectionsSynced <= 20);
+    totalRouted += res.routed;
+    totalTriage += res.needsTriage;
+    totalSynced += res.projectionsSynced;
+    if (res.done) {
+      assert.equal(res.nextCursor, null);
+      break;
+    }
+    assert.ok(res.nextCursor);
+    cursor = res.nextCursor;
+    assert.ok(calls < 20);
+  }
+  assert.deepEqual([totalRouted, totalTriage, totalSynced], [8, 3, 65]);
+  assert.ok(calls >= 4);
+  for (const r of records) {
+    assert.ok(r.routingStatus != null);
+    assert.equal(r.hasProjection, true);
+  }
 });

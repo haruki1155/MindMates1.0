@@ -111,6 +111,11 @@ class InquiryRoutingPanel extends StatelessWidget {
     final canEscalate =
         _isAssignee &&
         !inquiry.isEscalated &&
+        !inquiry.isTakenOver &&
+        inquiry.status != InquiryStatus.resolved;
+    final canTakeOver =
+        repository.isSuperAdmin &&
+        !inquiry.isTakenOver &&
         inquiry.status != InquiryStatus.resolved;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -142,6 +147,13 @@ class InquiryRoutingPanel extends StatelessWidget {
                 ? 'Requested'
                 : 'Requested — ${inquiry.escalationReason ?? ''}',
           ),
+        if (inquiry.isTakenOver)
+          _row(
+            'Taken over',
+            _isOperationalView
+                ? 'Administrator handling'
+                : '${inquiry.takeoverByName} — ${inquiry.takeoverReason ?? ''}',
+          ),
         const SizedBox(height: 10),
         Wrap(
           spacing: 10,
@@ -152,6 +164,12 @@ class InquiryRoutingPanel extends StatelessWidget {
                 onPressed: () => _escalate(context),
                 icon: const Icon(Icons.flag_outlined),
                 label: const Text('Escalate to administrator'),
+              ),
+            if (canTakeOver)
+              OutlinedButton.icon(
+                onPressed: () => _takeOver(context),
+                icon: const Icon(Icons.admin_panel_settings_outlined),
+                label: const Text('Take over'),
               ),
             if (repository.isSuperAdmin)
               OutlinedButton.icon(
@@ -186,8 +204,27 @@ class InquiryRoutingPanel extends StatelessWidget {
       builder: (_) => _ReasonDialog(
         title: 'Escalate to administrator',
         actionLabel: 'Escalate',
-        onSubmit: (reason) =>
-            repository.escalateInquiry(inquiry.id, reason: reason),
+        onSubmit: (reason) => repository.escalateInquiry(
+          inquiry.id,
+          reason: reason,
+          expectedRevision: inquiry.routingRevision,
+        ),
+      ),
+    );
+    if (done == true) onChanged?.call();
+  }
+
+  Future<void> _takeOver(BuildContext context) async {
+    final done = await showDialog<bool>(
+      context: context,
+      builder: (_) => _ReasonDialog(
+        title: 'Take over inquiry',
+        actionLabel: 'Take over',
+        onSubmit: (reason) => repository.takeOverInquiry(
+          inquiry.id,
+          expectedRevision: inquiry.routingRevision,
+          reason: reason,
+        ),
       ),
     );
     if (done == true) onChanged?.call();

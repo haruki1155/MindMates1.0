@@ -169,6 +169,13 @@ test("buildInquiryStatusProjection strips all PII, user-authored text and escala
     monitoringStaffLabels: {s1: "Staff One"},
     ownerId: "c1",
     escalation: {status: "requested", reason: "Student disclosed sensitive personal details"},
+    responseCount: 2,
+    firstResponseAt: "ts1",
+    lastResponseAt: "ts2",
+    lastResponseBy: "c1",
+    lastResponseByName: "Secret Responder Name",
+    lastResponseRole: "counselor",
+    takeover: {by: "admin", byName: "Super Admin", reason: "Confidential takeover note"},
   });
   const json = JSON.stringify(projection);
   for (const forbidden of [
@@ -181,14 +188,19 @@ test("buildInquiryStatusProjection strips all PII, user-authored text and escala
     "Confidential notes",
     "Confidential transcript",
     "Student disclosed sensitive personal details",
+    "Confidential takeover note",
+    "Super Admin",
+    "Secret Responder Name",
   ]) {
     assert.ok(!json.includes(forbidden), `projection leaked: ${forbidden}`);
   }
-  for (const key of ["userId", "subject", "message", "formData", "email", "name", "role", "escalationReason", "escalation", "clinicalNotes", "transcript"]) {
+  for (const key of ["userId", "subject", "message", "formData", "email", "name", "role", "escalationReason", "escalation", "clinicalNotes", "transcript", "takeover", "takeoverReason", "takeoverByName", "lastResponseByName", "lastResponseBy", "lastResponseRole"]) {
     assert.equal(Object.prototype.hasOwnProperty.call(projection, key), false, `unexpected key: ${key}`);
   }
   assert.equal(projection.operationalLabel, "Client Feedback Form");
   assert.equal(projection.escalationStatus, "requested");
+  assert.equal(projection.responseCount, 2);
+  assert.equal(projection.isTakenOver, true);
   assert.deepEqual(projection.monitoringStaffIds, ["s1"]);
 
   // Unknown client-supplied category or formType cannot smuggle user text.

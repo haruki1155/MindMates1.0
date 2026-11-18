@@ -39,6 +39,7 @@ import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/inquiry_oversight.dart';
 import '../widgets/inquiry_routing_panel.dart';
 import '../widgets/pacc_schedule_editor_widgets.dart';
 import '../widgets/clinical_interview_widgets.dart';
@@ -5465,6 +5466,12 @@ class _InquiriesPageState extends State<_InquiriesPage> {
           children: [
             InquiryBackfillButton(repository: widget.repository),
             const SizedBox(height: 10),
+            InquiryOverduePanel(
+              repository: widget.repository,
+              inquiries: all,
+              onOpen: _openInquiry,
+            ),
+            const SizedBox(height: 10),
             _CompactSummaryStrip(
               values: {
                 'Total': all.length,
@@ -5995,7 +6002,8 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
             widget.repository.currentAccessRole == AccessRole.portalStaff);
     final canUpdateClinicalStatus =
         widget.repository.isSuperAdmin ||
-        widget.repository.currentAccessRole == AccessRole.counselor;
+        (widget.repository.currentAccessRole == AccessRole.counselor &&
+            !item.isTakenOver);
     return Container(
       padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 18 : 22),
       decoration: _box,
@@ -6126,6 +6134,8 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                 ],
               ),
             ],
+            const Divider(height: 34),
+            InquiryReplyThread(inquiry: item, repository: widget.repository),
           ],
           const Divider(height: 34),
           InquiryRoutingPanel(
@@ -6147,6 +6157,7 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                 onPressed:
                     item.isAcknowledged ||
                         item.status == InquiryStatus.resolved ||
+                        (item.isTakenOver && !widget.repository.isSuperAdmin) ||
                         _acknowledging
                     ? null
                     : () => _acknowledge(context),
@@ -6182,7 +6193,10 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     if (_acknowledging) return;
     setState(() => _acknowledging = true);
     try {
-      await widget.repository.acknowledgeInquiry(widget.item!.id);
+      await widget.repository.acknowledgeInquiry(
+        widget.item!.id,
+        expectedRevision: widget.item!.routingRevision,
+      );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Receipt notification sent.')),
@@ -6205,7 +6219,11 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     if (_updatingStatus || next == widget.item!.status) return;
     setState(() => _updatingStatus = true);
     try {
-      await widget.repository.updateInquiryStatus(widget.item!.id, next);
+      await widget.repository.updateInquiryStatus(
+        widget.item!.id,
+        next,
+        expectedRevision: widget.item!.routingRevision,
+      );
       widget.onUpdated();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

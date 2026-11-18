@@ -59,6 +59,36 @@ class InquiryRoutingBackfillResult {
   final String? nextCursor;
 }
 
+/// One authored reply on an inquiry (inquiries/{id}/replies/{requestId}).
+class InquiryReply {
+  const InquiryReply({
+    required this.id,
+    required this.message,
+    required this.authorName,
+    required this.authorRole,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String message;
+  final String authorName;
+  final String authorRole;
+  final DateTime? createdAt;
+
+  bool get isAdministrator => authorRole == 'admin';
+
+  factory InquiryReply.fromJson(
+    Map<String, dynamic> json, {
+    required String id,
+  }) => InquiryReply(
+    id: id,
+    message: json['message']?.toString() ?? '',
+    authorName: json['authorName']?.toString() ?? 'PACC staff',
+    authorRole: json['authorRole']?.toString() ?? '',
+    createdAt: dateTimeFromFirestore(json['createdAt']),
+  );
+}
+
 class AdminInquiryModel {
   const AdminInquiryModel({
     required this.id,
@@ -89,6 +119,14 @@ class AdminInquiryModel {
     this.escalationReason,
     this.operationalLabel = '',
     this.isOperationalProjection = false,
+    this.firstResponseAt,
+    this.lastResponseAt,
+    this.lastResponseByName,
+    this.lastResponseRole,
+    this.responseCount = 0,
+    this.takeoverByName,
+    this.takeoverReason,
+    this.isTakenOverFlag = false,
   });
 
   final String id;
@@ -125,6 +163,19 @@ class AdminInquiryModel {
   final String operationalLabel;
   final bool isOperationalProjection;
 
+  /// First and latest authored reply (not the acknowledgement receipt).
+  final DateTime? firstResponseAt;
+  final DateTime? lastResponseAt;
+  final String? lastResponseByName;
+  final String? lastResponseRole;
+  final int responseCount;
+
+  /// Set when the super-administrator has taken over the inquiry.
+  final String? takeoverByName;
+  final String? takeoverReason;
+  final bool isTakenOverFlag;
+
+  bool get isTakenOver => isTakenOverFlag || takeoverByName != null;
   bool get isManuallyRouted => routingMode == 'manual';
   bool get isEscalated => escalationStatus == 'requested';
 
@@ -147,7 +198,9 @@ class AdminInquiryModel {
     final parsedFormType = _optional(json['formType']);
     final fallbackOpLabel = parsedFormType != null
         ? _label(parsedFormType)
-        : (parsedCategory.trim().isNotEmpty ? _label(parsedCategory) : 'General Inquiry');
+        : (parsedCategory.trim().isNotEmpty
+              ? _label(parsedCategory)
+              : 'General Inquiry');
     return AdminInquiryModel(
       id: (json['id'] ?? id ?? '').toString(),
       userId: json['userId']?.toString() ?? '',
@@ -181,6 +234,20 @@ class AdminInquiryModel {
       escalationReason: json['escalation'] is Map
           ? _optional((json['escalation'] as Map)['reason'])
           : null,
+      firstResponseAt: dateTimeFromFirestore(json['firstResponseAt']),
+      lastResponseAt: dateTimeFromFirestore(json['lastResponseAt']),
+      lastResponseByName: _optional(json['lastResponseByName']),
+      lastResponseRole: _optional(json['lastResponseRole']),
+      responseCount: json['responseCount'] is num
+          ? (json['responseCount'] as num).toInt()
+          : 0,
+      takeoverByName: json['takeover'] is Map
+          ? (_optional((json['takeover'] as Map)['byName']) ??
+                _optional((json['takeover'] as Map)['by']))
+          : null,
+      takeoverReason: json['takeover'] is Map
+          ? _optional((json['takeover'] as Map)['reason'])
+          : null,
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
       status: InquiryStatus.fromValue(json['status']),
       operationalLabel: _optional(json['operationalLabel']) ?? fallbackOpLabel,
@@ -199,7 +266,9 @@ class AdminInquiryModel {
     final parsedFormType = _optional(json['formType']);
     final fallbackLabel = parsedFormType != null
         ? _label(parsedFormType)
-        : (parsedCategory.trim().isNotEmpty ? _label(parsedCategory) : 'General Inquiry');
+        : (parsedCategory.trim().isNotEmpty
+              ? _label(parsedCategory)
+              : 'General Inquiry');
     final safeLabel = _optional(json['operationalLabel']) ?? fallbackLabel;
     return AdminInquiryModel(
       id: (json['inquiryId'] ?? json['id'] ?? id ?? '').toString(),
@@ -228,6 +297,16 @@ class AdminInquiryModel {
       ownerId: _optional(json['ownerId']),
       escalationStatus: _optional(json['escalationStatus']),
       escalationReason: null,
+      firstResponseAt: dateTimeFromFirestore(json['firstResponseAt']),
+      lastResponseAt: dateTimeFromFirestore(json['lastResponseAt']),
+      lastResponseByName: null,
+      lastResponseRole: null,
+      responseCount: json['responseCount'] is num
+          ? (json['responseCount'] as num).toInt()
+          : 0,
+      takeoverByName: null,
+      takeoverReason: null,
+      isTakenOverFlag: json['isTakenOver'] == true,
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
       status: InquiryStatus.fromValue(json['status']),
       operationalLabel: safeLabel,
@@ -235,9 +314,8 @@ class AdminInquiryModel {
     );
   }
 
-  static List<String> _stringList(Object? value) => value is List
-      ? value.whereType<String>().toList()
-      : const [];
+  static List<String> _stringList(Object? value) =>
+      value is List ? value.whereType<String>().toList() : const [];
 
   static Map<String, String> _stringMap(Object? value) => value is Map
       ? {
