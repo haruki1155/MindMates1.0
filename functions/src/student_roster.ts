@@ -36,6 +36,7 @@ type Classified = {
   kind: PreviewRow["kind"];
   value?: OfficialFields;
   existing?: Doc;
+  existingUpdateTime?: Timestamp;
   linkUid?: string;
   linkUser?: Doc;
   personalInfoExists?: boolean;
@@ -107,10 +108,12 @@ async function classify(rows: RosterRowInput[]): Promise<Classified[]> {
   const byIndex = new Map<number, Classified>();
   valid.forEach((r, i) => {
     const {value} = r;
-    const existing = rosterSnaps[i].exists ? rosterSnaps[i].data() : undefined;
+    const rosterSnap = rosterSnaps[i];
+    const existing = rosterSnap.exists ? rosterSnap.data() : undefined;
+    const existingUpdateTime = rosterSnap.exists ? rosterSnap.updateTime : undefined;
     const reserved = reservationSnaps[i].exists;
     const uid = reservedUids[i];
-    const base = {index: r.index, studentNo: value.studentNo, value, existing};
+    const base = {index: r.index, studentNo: value.studentNo, value, existing, existingUpdateTime};
     if (existing && existing.activated === true) {
       byIndex.set(r.index, {...base, kind: "update", changes: diff(value, existing)});
     } else if (reserved) {
@@ -265,8 +268,144 @@ function userAcademicFields(v: OfficialFields): Record<string, unknown> {
 const PREVIOUS_FIELDS = ["schoolId", "firstName", "middleName", "lastName", "name", "dateOfBirthKey", "collegeId", "courseId",
   "departmentId", "department", "course", "yearLevel", "populationRole"];
 
-type Unit = {ops: ((b: WriteBatch) => void)[]; kind: "new" | "updated" | "linked"; index: number; studentNo: string;
-  code?: IssuedCode; previous?: Record<string, unknown>};
+type BatchUnit = {
+  mode: "batch";
+  ops: ((b: WriteBatch) => void)[];
+  kind: "new" | "updated";
+  index: number;
+  studentNo: string;
+  code?: IssuedCode;
+};
+type TxUnit = {
+  mode: "tx";
+  kind: "updated" | "linked";
+  index: number;
+  studentNo: string;
+  run: () => Promise<Record<string, unknown> | undefined>;
+};
+type Unit = BatchUnit | TxUnit;
+type CommitStep =
+  | {mode: "batch"; units: BatchUnit[]}
+  | {mode: "tx"; unit: TxUnit};
+
+async function applyLinkedRosterRowInTransaction(
+  db: FirebaseFirestore.Firestore,
+  {
+    actorId,
+    importId,
+    studentKey,
+    uid,
+    v,
+    fallbackStatus,
+  }: {
+    actorId: string;
+    importId: string;
+    studentKey: string;
+    uid: string;
+    v: OfficialFields;
+    fallbackStatus: unknown;
+  },
+): Promise<Record<string, unknown>> {
+  const rosterRef = db.collection("student_roster").doc(studentKey);
+  const reservationRef = db.collection("student_id_reservations").doc(studentKey);
+  const userRef = db.collection("users").doc(uid);
+  const infoRef = db.collection("student_personal_info").doc(uid);
+
+  return db.runTransaction(async (transaction) => {
+    // Perform all transaction reads before any writes.
+    const [rosterSnap, reservationSnap, userSnap, infoSnap, apptsSnap] = await Promise.all([
+      transaction.get(rosterRef),
+      transaction.get(reservationRef),
+      transaction.get(userRef),
+      transaction.get(infoRef),
+      readStudentAppointmentsForScopeSyncInTransaction(transaction, uid),
+    ]);
+    const liveRoster = rosterSnap.data();
+    if (liveRoster?.activated === true) {
+      throw new HttpsError("failed-precondition", "Roster row was already activated.");
+    }
+    if (!reservationSnap.exists || String(reservationSnap.data()?.userId ?? "") !== uid || !userSnap.exists) {
+      throw new HttpsError("failed-precondition", "Student reservation or account is no longer linkable.");
+    }
+    const userData = userSnap.data() ?? {};
+    const previous = {
+      studentNo: v.studentNo,
+      userId: uid,
+      previous: Object.fromEntries(PREVIOUS_FIELDS.map((f) => [f, userData[f] === undefined ? null : userData[f]])),
+    };
+    await applyStudentAppointmentsCollegeScopeInTransaction(
+      transaction,
+      apptsSnap,
+      v.collegeId,
+      userData.verificationStatus,
+      {reservedWrites: 3},
+    );
+    transaction.set(rosterRef, {
+      ...officialFields(v),
+      status: liveRoster?.status ?? fallbackStatus ?? "active",
+      activated: true,
+      userId: uid,
+      activationCode: null,
+      linkedAt: FieldValue.serverTimestamp(),
+      importId,
+      ...(rosterSnap.exists ? {} : {createdBy: actorId, createdAt: FieldValue.serverTimestamp()}),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+    transaction.set(userRef, {
+      ...userAcademicFields(v),
+      rosterLinked: true,
+      personalInfoRequired: !infoSnap.exists,
+    }, {merge: true});
+    return previous;
+  });
+}
+
+async function applyActivatedRosterUpdateInTransaction(
+  db: FirebaseFirestore.Firestore,
+  {
+    importId,
+    studentKey,
+    uid,
+    v,
+  }: {
+    importId: string;
+    studentKey: string;
+    uid: string;
+    v: OfficialFields;
+  },
+): Promise<void> {
+  const rosterRef = db.collection("student_roster").doc(studentKey);
+  const userRef = db.collection("users").doc(uid);
+
+  await db.runTransaction(async (transaction) => {
+    // Perform all transaction reads before any writes.
+    const [rosterSnap, userSnap, apptsSnap] = await Promise.all([
+      transaction.get(rosterRef),
+      transaction.get(userRef),
+      readStudentAppointmentsForScopeSyncInTransaction(transaction, uid),
+    ]);
+    const liveRoster = rosterSnap.data();
+    if (!rosterSnap.exists || liveRoster?.activated !== true || String(liveRoster.userId ?? "") !== uid) {
+      throw new HttpsError("failed-precondition", "Roster row activation state changed concurrently.");
+    }
+    if (!userSnap.exists) {
+      throw new HttpsError("failed-precondition", "Linked student account no longer exists.");
+    }
+    await applyStudentAppointmentsCollegeScopeInTransaction(
+      transaction,
+      apptsSnap,
+      v.collegeId,
+      userSnap.data()?.verificationStatus,
+      {reservedWrites: 3},
+    );
+    transaction.set(userRef, userAcademicFields(v), {merge: true});
+    transaction.update(rosterRef, {
+      ...officialFields(v),
+      importId,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
 
 export const importStudentRoster = onCall(async (request) => {
   const actorId = requireUid(request);
@@ -294,47 +433,90 @@ export const importStudentRoster = onCall(async (request) => {
     const base = {index: c.index, studentNo: v.studentNo};
     if (c.kind === "new") {
       const m = minted[newRows.indexOf(c)];
-      return {...base, kind: "new", code: issued(v as unknown as Doc, m), ops: [(b: WriteBatch) => b.create(rosterRef, {
-        ...officialFields(v), status: "active", activated: false, userId: null,
-        activationCode: storedCodeField(m.stored), importId: importRef.id,
-        createdBy: actorId, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-      })]};
+      return {
+        ...base,
+        mode: "batch",
+        kind: "new",
+        code: issued(v as unknown as Doc, m),
+        ops: [(b: WriteBatch) => b.create(rosterRef, {
+          ...officialFields(v), status: "active", activated: false, userId: null,
+          activationCode: storedCodeField(m.stored), importId: importRef.id,
+          createdBy: actorId, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+        })],
+      };
     }
     if (c.kind === "link") {
       const uid = c.linkUid as string;
-      const prev = c.linkUser ?? {};
-      return {...base, kind: "linked", previous: {studentNo: v.studentNo, userId: uid,
-        previous: Object.fromEntries(PREVIOUS_FIELDS.map((f) => [f, prev[f] === undefined ? null : prev[f]]))},
-      ops: [
-        (b: WriteBatch) => b.set(rosterRef, {
-          ...officialFields(v), status: c.existing?.status ?? "active", activated: true, userId: uid, activationCode: null,
-          linkedAt: FieldValue.serverTimestamp(), importId: importRef.id,
-          ...(c.existing ? {} : {createdBy: actorId, createdAt: FieldValue.serverTimestamp()}),
-          updatedAt: FieldValue.serverTimestamp(),
-        }, {merge: true}),
-        (b: WriteBatch) => b.set(db.collection("users").doc(uid), {
-          ...userAcademicFields(v), rosterLinked: true, personalInfoRequired: !c.personalInfoExists,
-        }, {merge: true}),
-      ]};
+      return {
+        ...base,
+        mode: "tx",
+        kind: "linked",
+        run: () => applyLinkedRosterRowInTransaction(db, {
+          actorId,
+          importId: importRef.id,
+          studentKey: v.studentKey,
+          uid,
+          v,
+          fallbackStatus: c.existing?.status,
+        }),
+      };
     }
     const uid = c.existing?.activated === true ? String(c.existing.userId ?? "") : "";
-    return {...base, kind: "updated", ops: [
-      (b: WriteBatch) => b.update(rosterRef, {...officialFields(v), importId: importRef.id, updatedAt: FieldValue.serverTimestamp()}),
-      ...(uid ? [(b: WriteBatch) => b.set(db.collection("users").doc(uid), userAcademicFields(v), {merge: true})] : []),
-    ]};
+    if (uid) {
+      return {
+        ...base,
+        mode: "tx",
+        kind: "updated",
+        run: async () => {
+          await applyActivatedRosterUpdateInTransaction(db, {
+            importId: importRef.id,
+            studentKey: v.studentKey,
+            uid,
+            v,
+          });
+          return undefined;
+        },
+      };
+    }
+    const updateTime = c.existingUpdateTime;
+    return {
+      ...base,
+      mode: "batch",
+      kind: "updated",
+      ops: [
+        (b: WriteBatch) => {
+          // Reject concurrent activation or edits between classify() and batch commit.
+          if (!updateTime) {
+            throw new HttpsError("failed-precondition", "Roster row version unavailable for batch update.");
+          }
+          b.update(
+            rosterRef,
+            {...officialFields(v), importId: importRef.id, updatedAt: FieldValue.serverTimestamp()},
+            {lastUpdateTime: updateTime},
+          );
+        },
+      ],
+    };
   });
 
-  // Never split a row across batches.
+  // Never split a row across batches; run linked-student updates via per-student transactions.
   const limit = rosterTestHooks.batchLimit ?? batchLimit;
-  const groups: Unit[][] = [];
+  const steps: CommitStep[] = [];
   let size = 0;
   for (const u of units) {
-    if (!groups.length || size + u.ops.length > limit) {
-      groups.push([]);
+    if (u.mode === "tx") {
+      steps.push({mode: "tx", unit: u});
       size = 0;
+      continue;
     }
-    groups[groups.length - 1].push(u);
-    size += u.ops.length;
+    const last = steps[steps.length - 1];
+    if (!last || last.mode !== "batch" || size + u.ops.length > limit) {
+      steps.push({mode: "batch", units: [u]});
+      size = u.ops.length;
+    } else {
+      last.units.push(u);
+      size += u.ops.length;
+    }
   }
 
   await importRef.create({fileName, status: "pending", rowCount: rows.length, actorId,
@@ -344,19 +526,32 @@ export const importStudentRoster = onCall(async (request) => {
   const codes: IssuedCode[] = [];
   const previous: Record<string, unknown>[] = [];
   let failedRows: {index: number; studentNo: string}[] = [];
-  for (let g = 0; g < groups.length; g++) {
-    const batch = db.batch();
-    for (const u of groups[g]) for (const op of u.ops) op(batch);
-    try {
-      await batch.commit();
-    } catch {
-      failedRows = groups.slice(g).flat().map((u) => ({index: u.index, studentNo: u.studentNo}));
-      break;
+  const stepUnits = (step: CommitStep): Unit[] => (step.mode === "batch" ? step.units : [step.unit]);
+
+  for (let s = 0; s < steps.length; s++) {
+    const step = steps[s];
+    if (step.mode === "batch") {
+      try {
+        const batch = db.batch();
+        for (const u of step.units) for (const op of u.ops) op(batch);
+        await batch.commit();
+      } catch {
+        failedRows = steps.slice(s).flatMap(stepUnits).map((u) => ({index: u.index, studentNo: u.studentNo}));
+        break;
+      }
+      for (const u of step.units) {
+        counts[u.kind] += 1;
+        if (u.code) codes.push(u.code);
+      }
+      continue;
     }
-    for (const u of groups[g]) {
-      counts[u.kind] += 1;
-      if (u.code) codes.push(u.code);
-      if (u.previous) previous.push(u.previous);
+    try {
+      const prev = await step.unit.run();
+      counts[step.unit.kind] += 1;
+      if (prev) previous.push(prev);
+    } catch {
+      failedRows = steps.slice(s).flatMap(stepUnits).map((u) => ({index: u.index, studentNo: u.studentNo}));
+      break;
     }
   }
 

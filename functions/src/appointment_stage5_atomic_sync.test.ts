@@ -5,6 +5,8 @@ import {connectAuthEmulator, getAuth as getClientAuth, signInWithEmailAndPasswor
 import {
   collection,
   connectFirestoreEmulator,
+  doc,
+  getDoc,
   getDocs,
   getFirestore as getClientFirestore,
   query,
@@ -21,12 +23,15 @@ import {
 } from "./appointment_approval_service";
 import {
   createAppointmentRequest,
+  importStudentRoster,
   reviewProfileVerification,
   reviewStudentCorrection,
   setStaffCollegeAssignments,
   syncStudentAppointmentCollegeScope,
   updateStudentRosterRecord,
 } from "./index";
+import {rosterTestHooks} from "./student_roster";
+import {verifyActivationCode} from "./student_roster_domain";
 
 const emulated = Boolean(process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST);
 const projectId = process.env.GCLOUD_PROJECT ?? "demo-mindmate-test";
@@ -187,6 +192,8 @@ after(async () => {
   appointmentScopeSyncHooks.maxProfileSyncChunkSize = undefined;
   appointmentScopeSyncHooks.maxProfileSyncPasses = undefined;
   appointmentScopeSyncHooks.beforeAtomicCommit = undefined;
+  rosterTestHooks.batchLimit = undefined;
+  rosterTestHooks.afterClassify = undefined;
   if (!emulated) return;
   if (previousSuperAdmin == null) delete process.env.SUPER_ADMIN_UID;
   else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
@@ -666,6 +673,884 @@ test(
       await Promise.all([
         db.doc(`users/${passLimitUserId}`).delete().catch(() => undefined),
         ...apptIds.map((id) => db.doc(`appointments/${id}`).delete().catch(() => undefined)),
+      ]);
+    }
+  },
+);
+
+async function resetMainAssignments() {
+  const [snapA, snapB] = await Promise.all([
+    db.doc(`users/${uid("counselorA")}`).get(),
+    db.doc(`users/${uid("counselorB")}`).get(),
+  ]);
+  const revA = Number(snapA.data()?.collegeAssignmentRevision ?? 0);
+  const colsA = (snapA.data()?.assignedCollegeIds as string[] | undefined) ?? [];
+  if (colsA.length !== 1 || colsA[0] !== collegeA) {
+    await call(setStaffCollegeAssignments, "admin", {
+      userId: uid("counselorA"),
+      collegeIds: [collegeA],
+      expectedRevision: revA,
+      reason: "Test setup assign College A",
+    });
+  }
+  const revB = Number(snapB.data()?.collegeAssignmentRevision ?? 0);
+  const colsB = (snapB.data()?.assignedCollegeIds as string[] | undefined) ?? [];
+  if (colsB.length !== 1 || colsB[0] !== collegeB) {
+    await call(setStaffCollegeAssignments, "admin", {
+      userId: uid("counselorB"),
+      collegeIds: [collegeB],
+      expectedRevision: revB,
+      reason: "Test setup assign College B",
+    });
+  }
+}
+
+async function cleanupImportArtifacts(importIds: string[]) {
+  const uniqueIds = [...new Set(importIds.filter(Boolean))];
+  if (!uniqueIds.length) return;
+  const auditSnaps = await Promise.all(
+    uniqueIds.map((id) => db.collection("admin_audit_logs").where("targetId", "==", id).get()),
+  );
+  await Promise.all([
+    ...uniqueIds.map((id) => db.doc(`student_roster_imports/${id}`).delete().catch(() => undefined)),
+    ...auditSnaps.flatMap((snap) => snap.docs.map((d) => d.ref.delete().catch(() => undefined))),
+  ]);
+}
+
+test(
+  "Step 11.3D Test A & B: importStudentRoster atomically transfers activated student College A -> College B and preserves same-college updates",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const courseA2 = `${prefix}-course-a2`;
+    const localNo = `${Date.now().toString().slice(-6)}01`;
+    const localKey = canonicalLoginId(localNo);
+    const localUid = `${prefix}-roster-student-ab`;
+    const apptId = `${prefix}-appt-roster-ab`;
+    const importIds: string[] = [];
+
+    await Promise.all([
+      db.doc(`courses/${courseA2}`).set({
+        name: "BS Course A2",
+        code: "BSCA2",
+        collegeId: collegeA,
+        departmentId: deptA,
+        active: true,
+      }),
+      getAuth().createUser({uid: localUid, email: `${localUid}@example.invalid`, password, emailVerified: true}),
+      db.doc(`users/${localUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        name: "Roster Transfer Student",
+        schoolId: localNo,
+        collegeId: collegeA,
+        college: "College A",
+        courseId: courseA,
+        course: "BS Course A",
+        departmentId: deptA,
+        department: "Dept A",
+        yearLevel: "2nd Year",
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_roster/${localKey}`).set({
+        studentNo: localNo,
+        studentKey: localKey,
+        surname: "Transfer",
+        surnameNormalized: "transfer",
+        firstName: "Roster",
+        middleName: "",
+        dateOfBirthKey: "2004-05-06",
+        dateOfBirth: Timestamp.fromDate(new Date("2004-05-06T00:00:00Z")),
+        collegeId: collegeA,
+        college: "College A",
+        courseId: courseA,
+        course: "BS Course A",
+        departmentId: deptA,
+        department: "Dept A",
+        yearLevel: "2nd Year",
+        status: "active",
+        activated: true,
+        userId: localUid,
+      }),
+      db.doc(`appointments/${apptId}`).set({
+        userId: localUid,
+        fullName: "Roster Transfer Student",
+        concern: "Private clinical concern",
+        status: "confirmed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+    ]);
+
+    const clientA = await asClientFirestore("counselorA");
+    const clientB = await asClientFirestore("counselorB");
+    try {
+      // Test B: academic field & course update within College A preserves Counselor A access and denies Counselor B.
+      const resSame = await call(importStudentRoster, "admin", {
+        fileName: "same-college-update.csv",
+        rows: [{
+          studentNo: localNo,
+          surname: "Transfer",
+          firstName: "Roster",
+          middleName: "",
+          dateOfBirth: "2004-05-06",
+          college: "College A",
+          course: "BS Course A2",
+          yearLevel: "3rd Year",
+        }],
+      });
+      if (resSame.importId) importIds.push(resSame.importId);
+      assert.equal(resSame.status, "complete");
+      assert.deepEqual(resSame.counts, {new: 0, updated: 1, linked: 0});
+      assert.equal((await db.doc(`users/${localUid}`).get()).data()?.yearLevel, "3rd Year");
+      assert.equal((await db.doc(`users/${localUid}`).get()).data()?.courseId, courseA2);
+      assert.deepEqual((await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, localUid)).map((d) => d.id), [apptId]);
+      await assert.rejects(getDoc(doc(clientB.clientDb, "appointments", apptId)));
+
+      // Counselor B unassigned vs assigned behavior around College A -> College B import transfer.
+      const revB0 = Number((await db.doc(`users/${uid("counselorB")}`).get()).data()?.collegeAssignmentRevision ?? 0);
+      await call(setStaffCollegeAssignments, "admin", {
+        userId: uid("counselorB"),
+        collegeIds: [],
+        expectedRevision: revB0,
+        reason: "Temporarily unassign Counselor B before transfer",
+      });
+
+      // Test A: transfer College A -> College B via importStudentRoster.
+      const resTransfer = await call(importStudentRoster, "admin", {
+        fileName: "transfer-a-to-b.csv",
+        rows: [{
+          studentNo: localNo,
+          surname: "Transfer",
+          firstName: "Roster",
+          middleName: "",
+          dateOfBirth: "2004-05-06",
+          college: "College B",
+          course: "BS Course B",
+          yearLevel: "3rd Year",
+        }],
+      });
+      if (resTransfer.importId) importIds.push(resTransfer.importId);
+      assert.equal(resTransfer.status, "complete");
+      assert.deepEqual(resTransfer.counts, {new: 0, updated: 1, linked: 0});
+
+      // Immediately after callable returns: profile and appointment projections match collegeB.
+      const userAfter = (await db.doc(`users/${localUid}`).get()).data()!;
+      const apptAfter = (await db.doc(`appointments/${apptId}`).get()).data()!;
+      assert.equal(userAfter.collegeId, collegeB);
+      assert.equal(apptAfter.collegeId, collegeB);
+      assert.equal(apptAfter.studentVerificationStatus, "verified");
+
+      // Counselor A is immediately blocked on both GET and LIST.
+      await assert.rejects(getDoc(doc(clientA.clientDb, "appointments", apptId)));
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, localUid), []);
+
+      // Counselor B is denied while unassigned, then gains access once assigned College B.
+      await assert.rejects(getDoc(doc(clientB.clientDb, "appointments", apptId)));
+      await assert.rejects(listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, localUid));
+      await resetMainAssignments();
+      assert.equal((await getDoc(doc(clientB.clientDb, "appointments", apptId))).exists(), true);
+      assert.deepEqual((await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, localUid)).map((d) => d.id), [apptId]);
+    } finally {
+      await clientA.close();
+      await clientB.close();
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        getAuth().deleteUser(localUid).catch(() => undefined),
+        db.doc(`users/${localUid}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${localKey}`).delete().catch(() => undefined),
+        db.doc(`appointments/${apptId}`).delete().catch(() => undefined),
+        db.doc(`courses/${courseA2}`).delete().catch(() => undefined),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3D Test C: importStudentRoster links existing accounts atomically for both verified and unverified students",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const verifiedNo = `${Date.now().toString().slice(-6)}02`;
+    const unverifiedNo = `${Date.now().toString().slice(-6)}03`;
+    const verifiedKey = canonicalLoginId(verifiedNo);
+    const unverifiedKey = canonicalLoginId(unverifiedNo);
+    const verifiedUid = `${prefix}-link-verified`;
+    const unverifiedUid = `${prefix}-link-unverified`;
+    const apptVerId = `${prefix}-appt-link-ver`;
+    const apptUnvId = `${prefix}-appt-link-unv`;
+    const importIds: string[] = [];
+
+    await Promise.all([
+      getAuth().createUser({uid: verifiedUid, email: `${verifiedUid}@example.invalid`, password, emailVerified: true}),
+      getAuth().createUser({uid: unverifiedUid, email: `${unverifiedUid}@example.invalid`, password, emailVerified: true}),
+      db.doc(`users/${verifiedUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        firstName: "Verified",
+        lastName: "Linker",
+        collegeId: collegeA,
+        verificationStatus: "verified",
+      }),
+      db.doc(`users/${unverifiedUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        firstName: "Pending",
+        lastName: "Linker",
+        collegeId: collegeA,
+        verificationStatus: "needsReview",
+      }),
+      db.doc(`student_id_reservations/${verifiedKey}`).set({userId: verifiedUid}),
+      db.doc(`student_id_reservations/${unverifiedKey}`).set({userId: unverifiedUid}),
+      db.doc(`appointments/${apptVerId}`).set({
+        userId: verifiedUid,
+        fullName: "Verified Linker",
+        status: "confirmed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+      db.doc(`appointments/${apptUnvId}`).set({
+        userId: unverifiedUid,
+        fullName: "Pending Linker",
+        status: "requested",
+        collegeId: collegeA,
+        studentVerificationStatus: "needsReview",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 172_800_000),
+      }),
+    ]);
+
+    const clientA = await asClientFirestore("counselorA");
+    const clientB = await asClientFirestore("counselorB");
+    try {
+      const res = await call(importStudentRoster, "admin", {
+        fileName: "link-transfer.csv",
+        rows: [
+          {
+            studentNo: verifiedNo,
+            surname: "Linker",
+            firstName: "Verified",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "1st Year",
+          },
+          {
+            studentNo: unverifiedNo,
+            surname: "Linker",
+            firstName: "Pending",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "1st Year",
+          },
+        ],
+      });
+      if (res.importId) importIds.push(res.importId);
+      assert.equal(res.status, "complete");
+      assert.deepEqual(res.counts, {new: 0, updated: 0, linked: 2});
+
+      // Verified linked student moved atomically to College B; Counselor A blocked, Counselor B authorized.
+      assert.equal((await db.doc(`appointments/${apptVerId}`).get()).data()?.collegeId, collegeB);
+      assert.equal((await db.doc(`appointments/${apptVerId}`).get()).data()?.studentVerificationStatus, "verified");
+      await assert.rejects(getDoc(doc(clientA.clientDb, "appointments", apptVerId)));
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, verifiedUid), []);
+      assert.deepEqual((await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, verifiedUid)).map((d) => d.id), [apptVerId]);
+
+      // Unverified linked student keeps non-verified status; neither counselor can access appointment.
+      const unvAppt = (await db.doc(`appointments/${apptUnvId}`).get()).data()!;
+      assert.equal(unvAppt.collegeId, collegeB);
+      assert.equal(unvAppt.studentVerificationStatus, "needsReview");
+      await assert.rejects(getDoc(doc(clientA.clientDb, "appointments", apptUnvId)));
+      await assert.rejects(getDoc(doc(clientB.clientDb, "appointments", apptUnvId)));
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, unverifiedUid), []);
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, unverifiedUid), []);
+    } finally {
+      await clientA.close();
+      await clientB.close();
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        getAuth().deleteUser(verifiedUid).catch(() => undefined),
+        getAuth().deleteUser(unverifiedUid).catch(() => undefined),
+        db.doc(`users/${verifiedUid}`).delete().catch(() => undefined),
+        db.doc(`users/${unverifiedUid}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${verifiedKey}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${unverifiedKey}`).delete().catch(() => undefined),
+        db.doc(`student_id_reservations/${verifiedKey}`).delete().catch(() => undefined),
+        db.doc(`student_id_reservations/${unverifiedKey}`).delete().catch(() => undefined),
+        db.doc(`appointments/${apptVerId}`).delete().catch(() => undefined),
+        db.doc(`appointments/${apptUnvId}`).delete().catch(() => undefined),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3D Test D, E & F: handles atomic overflow safely, resists delayed triggers, and preserves mixed import semantics",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const baseNo = Date.now().toString().slice(-6);
+    const overflowNo = `${baseNo}04`;
+    const overflowKey = canonicalLoginId(overflowNo);
+    const overflowUid = `${prefix}-overflow-uid`;
+    const newNo1 = `${baseNo}05`;
+    const newKey1 = canonicalLoginId(newNo1);
+    const linkNo = `${baseNo}06`;
+    const linkKey = canonicalLoginId(linkNo);
+    const linkUid = `${prefix}-mixed-link-uid`;
+    const updNo = `${baseNo}07`;
+    const updKey = canonicalLoginId(updNo);
+    const updUid = `${prefix}-mixed-upd-uid`;
+    const newNo2 = `${baseNo}08`;
+    const newKey2 = canonicalLoginId(newNo2);
+    const blockedLinkNo = `${baseNo}09`;
+    const blockedLinkKey = canonicalLoginId(blockedLinkNo);
+    const blockedLinkUid = `${prefix}-mixed-blocked-link-uid`;
+
+    const overflowAppts = [0, 1, 2].map((i) => `${prefix}-ov-appt-${i}`);
+    const linkAppt = `${prefix}-mixed-link-appt`;
+    const updAppt = `${prefix}-mixed-upd-appt`;
+    const importIds: string[] = [];
+
+    await Promise.all([
+      db.doc(`users/${overflowUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        name: "Overflow Student",
+        collegeId: collegeA,
+        college: "College A",
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_roster/${overflowKey}`).set({
+        studentNo: overflowNo,
+        studentKey: overflowKey,
+        surname: "Overflow",
+        surnameNormalized: "overflow",
+        firstName: "Student",
+        middleName: "",
+        dateOfBirthKey: "2004-05-06",
+        dateOfBirth: Timestamp.fromDate(new Date("2004-05-06T00:00:00Z")),
+        collegeId: collegeA,
+        college: "College A",
+        courseId: courseA,
+        course: "BS Course A",
+        departmentId: deptA,
+        department: "Dept A",
+        yearLevel: "2nd Year",
+        status: "active",
+        activated: true,
+        userId: overflowUid,
+      }),
+      ...overflowAppts.map((id, i) => db.doc(`appointments/${id}`).set({
+        userId: overflowUid,
+        fullName: "Overflow Student",
+        status: "completed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() - (i + 1) * 86_400_000),
+      })),
+      db.doc(`users/${linkUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        firstName: "PreLink",
+        lastName: "Student",
+        yearLevel: "1st Year",
+        collegeId: collegeA,
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_id_reservations/${linkKey}`).set({userId: linkUid}),
+      db.doc(`appointments/${linkAppt}`).set({
+        userId: linkUid,
+        fullName: "PreLink Student",
+        status: "confirmed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+      db.doc(`users/${updUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        firstName: "PreUpd",
+        lastName: "Student",
+        collegeId: collegeA,
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_roster/${updKey}`).set({
+        studentNo: updNo,
+        studentKey: updKey,
+        surname: "Student",
+        surnameNormalized: "student",
+        firstName: "PreUpd",
+        middleName: "",
+        dateOfBirthKey: "2004-05-06",
+        dateOfBirth: Timestamp.fromDate(new Date("2004-05-06T00:00:00Z")),
+        collegeId: collegeA,
+        college: "College A",
+        courseId: courseA,
+        course: "BS Course A",
+        departmentId: deptA,
+        department: "Dept A",
+        yearLevel: "2nd Year",
+        status: "active",
+        activated: true,
+        userId: updUid,
+      }),
+      db.doc(`appointments/${updAppt}`).set({
+        userId: updUid,
+        fullName: "PreUpd Student",
+        status: "confirmed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 172_800_000),
+      }),
+      db.doc(`users/${blockedLinkUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        collegeId: collegeA,
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_id_reservations/${blockedLinkKey}`).set({userId: blockedLinkUid}),
+    ]);
+
+    const clientA = await asClientFirestore("counselorA");
+    const clientB = await asClientFirestore("counselorB");
+    const trigger = syncStudentAppointmentCollegeScope as unknown as {run: (event: unknown) => Promise<void>};
+    try {
+      // Test D & F (partial mixed import with atomic overflow on row 2):
+      // [newRow2, overflowRow, blockedLinkRow]
+      appointmentScopeSyncHooks.maxAtomicUpdates = 2;
+      const partialRes = await call(importStudentRoster, "admin", {
+        fileName: "mixed-overflow.csv",
+        rows: [
+          {
+            studentNo: newNo2,
+            surname: "PartialNew",
+            firstName: "One",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "1st Year",
+          },
+          {
+            studentNo: overflowNo,
+            surname: "Overflow",
+            firstName: "Student",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "3rd Year",
+          },
+          {
+            studentNo: blockedLinkNo,
+            surname: "Blocked",
+            firstName: "Link",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "1st Year",
+          },
+        ],
+      });
+      if (partialRes.importId) importIds.push(partialRes.importId);
+      assert.equal(partialRes.status, "partial");
+      assert.deepEqual(partialRes.counts, {new: 1, updated: 0, linked: 0});
+      assert.deepEqual(partialRes.codes.map((c: {studentNo: string}) => c.studentNo), [newNo2]);
+      assert.deepEqual(partialRes.failedRows.map((f: {studentNo: string}) => f.studentNo), [overflowNo, blockedLinkNo]);
+      // Zero partial commit on overflowing student; Counselor B cannot read overflow student appointments.
+      assert.equal((await db.doc(`users/${overflowUid}`).get()).data()?.collegeId, collegeA);
+      assert.equal((await db.doc(`student_roster/${overflowKey}`).get()).data()?.collegeId, collegeA);
+      for (const id of overflowAppts) {
+        assert.equal((await db.doc(`appointments/${id}`).get()).data()?.collegeId, collegeA);
+      }
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, overflowUid), []);
+      assert.equal((await db.doc(`student_roster/${blockedLinkKey}`).get()).exists, false);
+      const partialImportDoc = (await db.doc(`student_roster_imports/${partialRes.importId}`).get()).data()!;
+      assert.equal(partialImportDoc.status, "partial");
+      assert.deepEqual(partialImportDoc.counts, {new: 1, updated: 0, linked: 0});
+
+      // Test F (successful mixed import with new + link + activated update):
+      appointmentScopeSyncHooks.maxAtomicUpdates = undefined;
+      const mixedRes = await call(importStudentRoster, "admin", {
+        fileName: "mixed-complete.csv",
+        rows: [
+          {
+            studentNo: newNo1,
+            surname: "MixedNew",
+            firstName: "First",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "1st Year",
+          },
+          {
+            studentNo: linkNo,
+            surname: "Student",
+            firstName: "PreLink",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "2nd Year",
+          },
+          {
+            studentNo: updNo,
+            surname: "Student",
+            firstName: "PreUpd",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "4th Year",
+          },
+        ],
+      });
+      if (mixedRes.importId) importIds.push(mixedRes.importId);
+      assert.equal(mixedRes.status, "complete");
+      assert.deepEqual(mixedRes.counts, {new: 1, updated: 1, linked: 1});
+      assert.deepEqual(mixedRes.codes.map((c: {studentNo: string}) => c.studentNo), [newNo1]);
+      const storedCode = (await db.doc(`student_roster/${newKey1}`).get()).data()!.activationCode;
+      assert.equal(await verifyActivationCode(mixedRes.codes[0].code, {
+        hash: storedCode.hash,
+        salt: storedCode.salt,
+        issuedAt: storedCode.issuedAt.toDate(),
+        expiresAt: storedCode.expiresAt.toDate(),
+      }), true);
+      assert.equal((await db.doc(`appointments/${linkAppt}`).get()).data()?.collegeId, collegeB);
+      assert.equal((await db.doc(`appointments/${updAppt}`).get()).data()?.collegeId, collegeB);
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, linkUid), []);
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, updUid), []);
+      assert.deepEqual((await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, linkUid)).map((d) => d.id), [linkAppt]);
+      assert.deepEqual((await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, updUid)).map((d) => d.id), [updAppt]);
+      const auditSnap = await db.collection("admin_audit_logs").where("targetId", "==", mixedRes.importId).get();
+      assert.equal(auditSnap.size, 1);
+      assert.equal(auditSnap.docs[0].data().action, "STUDENT_ROSTER_IMPORTED");
+      assert.deepEqual(auditSnap.docs[0].data().metadata.counts, {new: 1, updated: 1, linked: 1});
+      assert.equal(auditSnap.docs[0].data().metadata.linkedPreviousValues[0].userId, linkUid);
+      assert.equal(auditSnap.docs[0].data().metadata.linkedPreviousValues[0].previous.collegeId, collegeA);
+
+      // Test E: capture snapshot before transfer back to College A, then replay stale A->B event.
+      const beforeBackSnap = await db.doc(`users/${updUid}`).get();
+      const backRes = await call(importStudentRoster, "admin", {
+        fileName: "back-to-a.csv",
+        rows: [{
+          studentNo: updNo,
+          surname: "Student",
+          firstName: "PreUpd",
+          middleName: "",
+          dateOfBirth: "2004-05-06",
+          college: "College A",
+          course: "BS Course A",
+          yearLevel: "4th Year",
+        }],
+      });
+      if (backRes.importId) importIds.push(backRes.importId);
+      const afterBackSnap = await db.doc(`users/${updUid}`).get();
+      assert.equal(afterBackSnap.data()?.collegeId, collegeA);
+      assert.equal((await db.doc(`appointments/${updAppt}`).get()).data()?.collegeId, collegeA);
+
+      // Replay out-of-order College A -> College B event after student moved back to College A.
+      await trigger.run({
+        params: {userId: updUid},
+        data: {
+          before: afterBackSnap,
+          after: beforeBackSnap,
+        },
+      });
+      assert.equal((await db.doc(`appointments/${updAppt}`).get()).data()?.collegeId, collegeA);
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, updUid), []);
+      assert.deepEqual((await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, updUid)).map((d) => d.id), [updAppt]);
+    } finally {
+      appointmentScopeSyncHooks.maxAtomicUpdates = undefined;
+      await clientA.close();
+      await clientB.close();
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        ...[overflowUid, linkUid, updUid, blockedLinkUid].map((id) => db.doc(`users/${id}`).delete().catch(() => undefined)),
+        ...[overflowKey, newKey1, linkKey, updKey, newKey2, blockedLinkKey].map((k) => db.doc(`student_roster/${k}`).delete().catch(() => undefined)),
+        ...[linkKey, blockedLinkKey].map((k) => db.doc(`student_id_reservations/${k}`).delete().catch(() => undefined)),
+        ...[...overflowAppts, linkAppt, updAppt].map((id) => db.doc(`appointments/${id}`).delete().catch(() => undefined)),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3D Test G: concurrent profile verification updates and roster imports keep profile and appointments synchronized",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const concNo = `${Date.now().toString().slice(-6)}10`;
+    const concKey = canonicalLoginId(concNo);
+    const concUid = `${prefix}-conc-import-uid`;
+    const concApptId = `${prefix}-conc-import-appt`;
+    const importIds: string[] = [];
+
+    await Promise.all([
+      db.doc(`users/${concUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        name: "Concurrent Student",
+        collegeId: collegeA,
+        college: "College A",
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_roster/${concKey}`).set({
+        studentNo: concNo,
+        studentKey: concKey,
+        surname: "Concurrent",
+        surnameNormalized: "concurrent",
+        firstName: "Student",
+        middleName: "",
+        dateOfBirthKey: "2004-05-06",
+        dateOfBirth: Timestamp.fromDate(new Date("2004-05-06T00:00:00Z")),
+        collegeId: collegeA,
+        college: "College A",
+        courseId: courseA,
+        course: "BS Course A",
+        departmentId: deptA,
+        department: "Dept A",
+        yearLevel: "2nd Year",
+        status: "active",
+        activated: true,
+        userId: concUid,
+      }),
+      db.doc(`appointments/${concApptId}`).set({
+        userId: concUid,
+        fullName: "Concurrent Student",
+        status: "confirmed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+    ]);
+
+    try {
+      const [importRes, verifyRes] = await Promise.all([
+        call(importStudentRoster, "admin", {
+          fileName: "concurrent-transfer.csv",
+          rows: [{
+            studentNo: concNo,
+            surname: "Concurrent",
+            firstName: "Student",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "3rd Year",
+          }],
+        }),
+        call(reviewProfileVerification, "admin", {
+          userId: concUid,
+          decision: "needsReview",
+          reason: "Concurrent verification status change",
+        }),
+      ]);
+      if (importRes.importId) importIds.push(importRes.importId);
+      assert.equal(importRes.status, "complete");
+      assert.equal(verifyRes.ok, true);
+
+      const finalUser = (await db.doc(`users/${concUid}`).get()).data()!;
+      const finalAppt = (await db.doc(`appointments/${concApptId}`).get()).data()!;
+      assert.equal(finalUser.collegeId, collegeB);
+      assert.equal(finalUser.verificationStatus, "needsReview");
+      assert.equal(finalAppt.collegeId, finalUser.collegeId);
+      assert.equal(finalAppt.studentVerificationStatus, finalUser.verificationStatus);
+    } finally {
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        db.doc(`users/${concUid}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${concKey}`).delete().catch(() => undefined),
+        db.doc(`appointments/${concApptId}`).delete().catch(() => undefined),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3D hardening: rejects stale batch update when unactivated roster row activates between classify and commit",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const baseNo = Date.now().toString().slice(-6);
+    const batchNewNo = `${baseNo}11`;
+    const batchNewKey = canonicalLoginId(batchNewNo);
+    const raceNo = `${baseNo}12`;
+    const raceKey = canonicalLoginId(raceNo);
+    const claimantUid = `${prefix}-race-activate-uid`;
+    const claimantApptId = `${prefix}-race-activate-appt`;
+    const importIds: string[] = [];
+
+    await Promise.all([
+      db.doc(`users/${claimantUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        name: "Race Claimant",
+        schoolId: raceNo,
+        collegeId: collegeA,
+        college: "College A",
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_roster/${raceKey}`).set({
+        studentNo: raceNo,
+        studentKey: raceKey,
+        surname: "Claimant",
+        surnameNormalized: "claimant",
+        firstName: "Race",
+        middleName: "",
+        dateOfBirthKey: "2004-05-06",
+        dateOfBirth: Timestamp.fromDate(new Date("2004-05-06T00:00:00Z")),
+        collegeId: collegeA,
+        college: "College A",
+        courseId: courseA,
+        course: "BS Course A",
+        departmentId: deptA,
+        department: "Dept A",
+        yearLevel: "2nd Year",
+        status: "active",
+        activated: false,
+        userId: null,
+      }),
+      db.doc(`appointments/${claimantApptId}`).set({
+        userId: claimantUid,
+        fullName: "Race Claimant",
+        status: "confirmed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+    ]);
+
+    const clientA = await asClientFirestore("counselorA");
+    const clientB = await asClientFirestore("counselorB");
+    try {
+      // Simulate concurrent student activation right after classify() and before batch commit.
+      rosterTestHooks.batchLimit = 1;
+      rosterTestHooks.afterClassify = async () => {
+        await db.doc(`student_roster/${raceKey}`).update({
+          activated: true,
+          userId: claimantUid,
+          activationCode: null,
+          updatedAt: Timestamp.now(),
+        });
+      };
+
+      const res = await call(importStudentRoster, "admin", {
+        fileName: "concurrent-activation-race.csv",
+        rows: [
+          {
+            studentNo: batchNewNo,
+            surname: "FreshBatch",
+            firstName: "Student",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College A",
+            course: "BS Course A",
+            yearLevel: "1st Year",
+          },
+          {
+            studentNo: raceNo,
+            surname: "Claimant",
+            firstName: "Race",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "3rd Year",
+          },
+        ],
+      });
+      if (res.importId) importIds.push(res.importId);
+
+      // Concurrent change must reject the stale batch update through partial-import reporting
+      // while preserving earlier valid batch writes, codes, counts, and audit records.
+      assert.equal(res.status, "partial");
+      assert.deepEqual(res.counts, {new: 1, updated: 0, linked: 0});
+      assert.deepEqual(res.codes.map((c: {studentNo: string}) => c.studentNo), [batchNewNo]);
+      assert.deepEqual(res.failedRows.map((f: {studentNo: string}) => f.studentNo), [raceNo]);
+
+      const storedNewCode = (await db.doc(`student_roster/${batchNewKey}`).get()).data()!.activationCode;
+      assert.equal(await verifyActivationCode(res.codes[0].code, {
+        hash: storedNewCode.hash,
+        salt: storedNewCode.salt,
+        issuedAt: storedNewCode.issuedAt.toDate(),
+        expiresAt: storedNewCode.expiresAt.toDate(),
+      }), true);
+
+      const auditSnap = await db.collection("admin_audit_logs").where("targetId", "==", res.importId).get();
+      assert.equal(auditSnap.size, 1);
+      assert.equal(auditSnap.docs[0].data().metadata.partial, true);
+      assert.deepEqual(auditSnap.docs[0].data().metadata.counts, {new: 1, updated: 0, linked: 0});
+
+      // Roster, user profile, and appointment projections must all remain consistent at College A.
+      const rosterData = (await db.doc(`student_roster/${raceKey}`).get()).data()!;
+      const userData = (await db.doc(`users/${claimantUid}`).get()).data()!;
+      const apptData = (await db.doc(`appointments/${claimantApptId}`).get()).data()!;
+      assert.equal(rosterData.activated, true);
+      assert.equal(rosterData.userId, claimantUid);
+      assert.equal(rosterData.collegeId, collegeA);
+      assert.equal(userData.collegeId, collegeA);
+      assert.equal(apptData.collegeId, collegeA);
+      assert.deepEqual((await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, claimantUid)).map((d) => d.id), [claimantApptId]);
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, claimantUid), []);
+
+      // Re-importing the now-activated row without stale hooks executes atomically across roster, user, and appointments.
+      rosterTestHooks.batchLimit = undefined;
+      rosterTestHooks.afterClassify = undefined;
+      const retryRes = await call(importStudentRoster, "admin", {
+        fileName: "concurrent-activation-retry.csv",
+        rows: [{
+          studentNo: raceNo,
+          surname: "Claimant",
+          firstName: "Race",
+          middleName: "",
+          dateOfBirth: "2004-05-06",
+          college: "College B",
+          course: "BS Course B",
+          yearLevel: "3rd Year",
+        }],
+      });
+      if (retryRes.importId) importIds.push(retryRes.importId);
+      assert.equal(retryRes.status, "complete");
+      assert.deepEqual(retryRes.counts, {new: 0, updated: 1, linked: 0});
+      assert.equal((await db.doc(`student_roster/${raceKey}`).get()).data()?.collegeId, collegeB);
+      assert.equal((await db.doc(`users/${claimantUid}`).get()).data()?.collegeId, collegeB);
+      assert.equal((await db.doc(`appointments/${claimantApptId}`).get()).data()?.collegeId, collegeB);
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, claimantUid), []);
+      assert.deepEqual((await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, claimantUid)).map((d) => d.id), [claimantApptId]);
+    } finally {
+      rosterTestHooks.batchLimit = undefined;
+      rosterTestHooks.afterClassify = undefined;
+      await clientA.close();
+      await clientB.close();
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        db.doc(`users/${claimantUid}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${raceKey}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${batchNewKey}`).delete().catch(() => undefined),
+        db.doc(`appointments/${claimantApptId}`).delete().catch(() => undefined),
       ]);
     }
   },
