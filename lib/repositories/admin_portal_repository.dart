@@ -828,45 +828,187 @@ class AdminPortalRepository {
                   ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
           );
 
-  Stream<List<AppointmentModel>> watchAppointments() => _firestoreService
-      .watchDocuments(FirestoreCollections.appointments)
-      .map(
-        (items) =>
-            items
-                .map(
-                  (item) => AppointmentModel.fromJson(
-                    item,
-                    id: item['id']?.toString(),
-                  ),
-                )
-                .toList()
-              ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
-      );
+  List<AppointmentModel> _mapAppointments(List<Map<String, dynamic>> items) =>
+      items
+          .map(
+            (item) =>
+                AppointmentModel.fromJson(item, id: item['id']?.toString()),
+          )
+          .toList()
+        ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt));
 
-  /// The counselor's assigned caseload is an explicit secondary scope. The
-  /// primary appointment stream is organization-wide for clinical staff.
+  Stream<List<AppointmentModel>> _watchCollegeScopedAppointments({
+    Map<String, Object?> extraWhereEquals = const {},
+    required bool errorWhenUnauthorized,
+  }) {
+    final uid = currentUserId;
+    final role = currentAccessRole;
+    if (extraWhereEquals.isEmpty && isSuperAdmin) {
+      return _firestoreService
+          .watchDocuments(FirestoreCollections.appointments)
+          .map(_mapAppointments);
+    }
+    if (role != AccessRole.counselor || uid == null || uid.trim().isEmpty) {
+      if (errorWhenUnauthorized) {
+        return Stream<List<AppointmentModel>>.error(
+          StateError(
+            'Appointments are visible only to assigned counselors and the super-administrator.',
+          ),
+        );
+      }
+      return Stream.value(const <AppointmentModel>[]);
+    }
+
+    late final StreamController<List<AppointmentModel>> controller;
+    StreamSubscription<Map<String, dynamic>?>? profileSub;
+    final querySubs = <StreamSubscription<List<Map<String, dynamic>>>>[];
+    var chunkResults = <int, List<Map<String, dynamic>>>{};
+    String? activeScopeKey;
+    var hasResolvedScope = false;
+
+    Future<void> cancelQuerySubs() async {
+      final subs = List<StreamSubscription<List<Map<String, dynamic>>>>.from(
+        querySubs,
+      );
+      querySubs.clear();
+      chunkResults = <int, List<Map<String, dynamic>>>{};
+      for (final sub in subs) {
+        await sub.cancel();
+      }
+    }
+
+    void emitMerged() {
+      if (controller.isClosed) return;
+      final byId = <String, Map<String, dynamic>>{};
+      for (final list in chunkResults.values) {
+        for (final item in list) {
+          final id = item['id']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            byId[id] = item;
+          }
+        }
+      }
+      controller.add(_mapAppointments(byId.values.toList(growable: false)));
+    }
+
+    controller = StreamController<List<AppointmentModel>>(
+      onListen: () {
+        profileSub = _firestoreService
+            .watchDocument(FirestoreCollections.users, uid)
+            .listen(
+              (profile) async {
+                if (controller.isClosed) return;
+                final accessRole = profile?['accessRole']?.toString().trim();
+                final accountStatus = profile?['accountStatus']
+                    ?.toString()
+                    .trim();
+                final staffStatus = profile?['staffAccountStatus']
+                    ?.toString()
+                    .trim();
+                final isActiveCounselor =
+                    profile != null &&
+                    (accessRole == null ||
+                        accessRole.isEmpty ||
+                        accessRole == 'counselor') &&
+                    (accountStatus == null ||
+                        accountStatus.isEmpty ||
+                        accountStatus == 'active') &&
+                    (staffStatus == null ||
+                        staffStatus.isEmpty ||
+                        staffStatus == 'approved');
+                final rawColleges = profile?['assignedCollegeIds'];
+                final collegeIds = isActiveCounselor && rawColleges is List
+                    ? (rawColleges
+                          .whereType<String>()
+                          .map((id) => id.trim())
+                          .where((id) => id.isNotEmpty)
+                          .toSet()
+                          .toList()
+                        ..sort())
+                    : <String>[];
+
+                final nextScopeKey = isActiveCounselor
+                    ? collegeIds.join('\u0000')
+                    : null;
+                if (hasResolvedScope &&
+                    nextScopeKey == activeScopeKey &&
+                    (collegeIds.isEmpty || querySubs.isNotEmpty)) {
+                  return;
+                }
+                hasResolvedScope = true;
+                activeScopeKey = nextScopeKey;
+                await cancelQuerySubs();
+                if (controller.isClosed) return;
+                if (collegeIds.isEmpty) {
+                  controller.add(const <AppointmentModel>[]);
+                  return;
+                }
+
+                const chunkSize = 30;
+                final chunks = <List<String>>[
+                  for (var i = 0; i < collegeIds.length; i += chunkSize)
+                    collegeIds.sublist(
+                      i,
+                      min(i + chunkSize, collegeIds.length),
+                    ),
+                ];
+                for (var index = 0; index < chunks.length; index++) {
+                  final chunk = chunks[index];
+                  final sub = _firestoreService
+                      .watchDocuments(
+                        FirestoreCollections.appointments,
+                        whereEquals: {
+                          ...extraWhereEquals,
+                          'studentVerificationStatus': 'verified',
+                        },
+                        whereIn: {'collegeId': chunk},
+                      )
+                      .listen(
+                        (items) {
+                          chunkResults[index] = items;
+                          if (chunkResults.length == chunks.length) {
+                            emitMerged();
+                          }
+                        },
+                        onError: (Object error, StackTrace stackTrace) {
+                          if (!controller.isClosed) {
+                            controller.addError(error, stackTrace);
+                          }
+                        },
+                      );
+                  querySubs.add(sub);
+                }
+              },
+              onError: (Object error, StackTrace stackTrace) {
+                if (!controller.isClosed) {
+                  controller.addError(error, stackTrace);
+                }
+              },
+            );
+      },
+      onCancel: () async {
+        await profileSub?.cancel();
+        await cancelQuerySubs();
+      },
+    );
+    return controller.stream;
+  }
+
+  /// College-scoped appointments for counselors (verified students in
+  /// `assignedCollegeIds`), or all appointments for the super-administrator.
+  Stream<List<AppointmentModel>> watchAppointments() =>
+      _watchCollegeScopedAppointments(errorWhenUnauthorized: true);
+
+  /// The counselor's assigned caseload within their currently assigned colleges.
   Stream<List<AppointmentModel>> watchMyAssignedAppointments() {
-    final userId = currentAuthUser?.uid;
+    final userId = currentUserId;
     if (currentAccessRole != AccessRole.counselor || userId == null) {
       return Stream.value(const <AppointmentModel>[]);
     }
-    return _firestoreService
-        .watchDocuments(
-          FirestoreCollections.appointments,
-          whereEquals: {'assignedStaffId': userId},
-        )
-        .map(
-          (items) =>
-              items
-                  .map(
-                    (item) => AppointmentModel.fromJson(
-                      item,
-                      id: item['id']?.toString(),
-                    ),
-                  )
-                  .toList()
-                ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
-        );
+    return _watchCollegeScopedAppointments(
+      extraWhereEquals: {'assignedStaffId': userId},
+      errorWhenUnauthorized: false,
+    );
   }
 
   /// Explicitly backfill the staff-safe queue from canonical appointments.

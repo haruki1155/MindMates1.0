@@ -12,6 +12,23 @@
       ]
     },
     {
+      "collectionGroup": "appointments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "studentVerificationStatus", "order": "ASCENDING" },
+        { "fieldPath": "collegeId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "appointments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "assignedStaffId", "order": "ASCENDING" },
+        { "fieldPath": "studentVerificationStatus", "order": "ASCENDING" },
+        { "fieldPath": "collegeId", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "admin_audit_logs",
       "queryScope": "COLLECTION",
       "fields": [
