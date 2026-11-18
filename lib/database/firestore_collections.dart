@@ -6,6 +6,7 @@ class FirestoreCollections {
   static const roleCorrectionRequests = 'role_correction_requests';
   static const roleAuditLogs = 'role_audit_logs';
   static const adminAuditLogs = 'admin_audit_logs';
+  static const backupJobs = 'backup_jobs';
   static const colleges = 'colleges';
   static const departments = 'departments';
   static const courses = 'courses';

@@ -25,6 +25,7 @@ import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
 import '../features/admin/domain/admin_management_models.dart';
 import '../features/admin/domain/appointment_approvals.dart';
+import '../features/admin/domain/backup_job.dart';
 import '../features/admin/domain/inquiry_scope.dart';
 import '../features/admin/domain/inquiry_sla.dart';
 import '../features/admin/domain/report_generation_models.dart';
@@ -650,6 +651,41 @@ class AdminPortalRepository {
             v.map(Course.fromJson).toList()
               ..sort((a, b) => a.name.compareTo(b.name)),
       );
+
+  /// Firestore managed-export job history. Only the configured
+  /// super-administrator may read `backup_jobs`; everyone else gets an
+  /// error stream so the page shows "not authorized", never "no backups".
+  Stream<List<BackupJob>> watchBackupJobs() {
+    if (!isSuperAdmin) {
+      return Stream.error(
+        StateError(
+          'Backup history requires the configured super-administrator account.',
+        ),
+      );
+    }
+    return _firestoreService
+        .watchDocuments(
+          FirestoreCollections.backupJobs,
+          orderBy: 'requestedAt',
+          descending: true,
+          limit: 50,
+        )
+        .map(
+          (items) => items
+              .map((item) => BackupJob.fromJson(item, id: item['id']?.toString()))
+              .toList(),
+        );
+  }
+
+  /// Starts one managed Firestore export. Server-side authorization only.
+  Future<String> requestFirestoreBackup() async {
+    final result = await _callCallable('requestFirestoreBackup', {});
+    final data = result is Map ? Map<String, dynamic>.from(result) : const {};
+    return data['jobId']?.toString() ?? '';
+  }
+
+  Future<void> refreshBackupJobStatus(String jobId) =>
+      _callCallable('refreshFirestoreBackupStatus', {'jobId': jobId});
 
   Stream<List<AdminAuditEvent>> watchAdminAudit(String userId) =>
       _firestoreService

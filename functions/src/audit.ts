@@ -49,6 +49,9 @@ export const AUDIT_ACTIONS = [
   "STUDENT_ACTIVATION_REVOKED", "STUDENT_INFO_REQUIREMENT_BACKFILLED",
   "ACADEMIC_CATALOGUE_IMPORTED",
   "STAFF_COLLEGE_ASSIGNMENTS_UPDATED",
+  // Server-only backup lifecycle events (BACKUP_REQUESTED, BACKUP_COMPLETED,
+  // BACKUP_FAILED, BACKUP_SKIPPED) are written by backup_management.ts and
+  // omitted from AUDIT_ACTIONS so recordAuditEvent cannot forge them.
 ] as const;
 
 /** Views of a student's record target the student, so the per-staff activity

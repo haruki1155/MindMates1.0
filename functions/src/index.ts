@@ -10,6 +10,7 @@ import {
   authorizeAppointmentApproval,
   authorizeAppointmentApprovalInTransaction,
 } from "./appointment_approval_service";
+export {requestFirestoreBackup, refreshFirestoreBackupStatus, scheduledFirestoreBackup} from "./backup_management";
 export {
   reassignCollegeCounselor,
   setStaffCollegeAssignments,
