@@ -4,7 +4,10 @@ import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {configuredSuperAdminUid, requireAdmin, requireClinical, requireUid, roleOf} from "./access";
 import {canonicalLoginId} from "./account_recovery";
-import {syncStudentAppointmentsCollegeScope} from "./appointment_approval_service";
+import {
+  applyStudentAppointmentsCollegeScopeInTransaction,
+  readStudentAppointmentsForScopeSyncInTransaction,
+} from "./appointment_approval_service";
 import {AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
 import {loadAcademicIndex} from "./student_roster";
 import {
@@ -334,7 +337,7 @@ export const reviewStudentCorrection = onCall(async (request) => {
   const index = approve ? await loadAcademicIndex() : null;
   const requestRef = db.collection("student_correction_requests").doc(requestId);
 
-  const syncCollege = await db.runTransaction(async (transaction) => {
+  await db.runTransaction(async (transaction) => {
     const reqSnap = await transaction.get(requestRef);
     if (!reqSnap.exists) throw new HttpsError("not-found", "Request not found.");
     const req = reqSnap.data() as Doc;
@@ -342,11 +345,14 @@ export const reviewStudentCorrection = onCall(async (request) => {
     const userId = text(req.userId);
     const field = req.field as Field;
     const userRef = db.collection("users").doc(userId);
-    let updatedScope: {userId: string; collegeId: unknown; verificationStatus: unknown} | null = null;
 
     if (approve) {
       const rosterRef = db.collection("student_roster").doc(text(req.studentKey));
-      const [rosterSnap, userSnap] = await Promise.all([transaction.get(rosterRef), transaction.get(userRef)]);
+      const [rosterSnap, userSnap, apptsSnap] = await Promise.all([
+        transaction.get(rosterRef),
+        transaction.get(userRef),
+        field === "college" ? readStudentAppointmentsForScopeSyncInTransaction(transaction, userId) : Promise.resolve(null),
+      ]);
       const roster = rosterSnap.data();
       if (!roster || roster.userId !== userId || !userSnap.exists) {
         throw new HttpsError("failed-precondition", "The student's roster record is no longer linked to this account.");
@@ -372,7 +378,13 @@ export const reviewStudentCorrection = onCall(async (request) => {
         }
         rosterPatch.collegeId = userPatch.collegeId = college.id;
         rosterPatch.college = userPatch.college = college.name;
-        updatedScope = {userId, collegeId: college.id, verificationStatus: userSnap.data()?.verificationStatus};
+        await applyStudentAppointmentsCollegeScopeInTransaction(
+          transaction,
+          apptsSnap,
+          college.id,
+          userSnap.data()?.verificationStatus,
+          {reservedWrites: 4},
+        );
       } else if (field === "course") {
         const course = index!.courses.find((c) => c.id === value);
         if (!course) throw new HttpsError("failed-precondition", "That course is no longer available.");
@@ -402,11 +414,7 @@ export const reviewStudentCorrection = onCall(async (request) => {
       category: AUDIT_CATEGORIES.userManagement, targetType: "student", targetId: userId,
       metadata: {requestId, field},
     });
-    return updatedScope;
   });
-  if (syncCollege) {
-    await syncStudentAppointmentsCollegeScope(syncCollege.userId, syncCollege.collegeId, syncCollege.verificationStatus);
-  }
   return {status: approve ? "approved" : "rejected"};
 });
 

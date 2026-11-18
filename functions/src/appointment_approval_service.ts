@@ -519,10 +519,90 @@ export async function getAuthorizedAppointmentForApproval(
   return {ok: true, available: true, appointment};
 }
 
+export const MAX_ATOMIC_APPOINTMENT_SCOPE_UPDATES = 400;
+
+export const appointmentScopeSyncHooks: {
+  maxAtomicUpdates?: number;
+  beforeAtomicCommit?: () => Promise<void> | void;
+} = {};
+
+function normalizedScopePair(collegeId: unknown, verificationStatus: unknown) {
+  return {
+    collegeId: typeof collegeId === "string" ? collegeId.trim() : "",
+    verificationStatus: typeof verificationStatus === "string" ? verificationStatus.trim() : "",
+  };
+}
+
+function staleAppointmentScopeDocs(
+  docs: FirebaseFirestore.QueryDocumentSnapshot[],
+  nextCollegeId: string,
+  nextVerificationStatus: string,
+) {
+  return docs.filter((doc) => {
+    const data = doc.data();
+    return data.collegeId !== nextCollegeId ||
+      data.studentVerificationStatus !== nextVerificationStatus;
+  });
+}
+
+/**
+ * Reads a student's appointment projections inside an active transaction so
+ * caller transactions perform all reads before any writes.
+ */
+export async function readStudentAppointmentsForScopeSyncInTransaction(
+  tx: FirebaseFirestore.Transaction,
+  userId: string,
+): Promise<FirebaseFirestore.QuerySnapshot | null> {
+  if (!ID.test(userId)) return null;
+  return tx.get(db().collection("appointments").where("userId", "==", userId));
+}
+
+/**
+ * Atomically updates stale appointment projections inside the same Firestore
+ * transaction as the authoritative student profile update. Fails closed before
+ * committing if stale updates exceed Firestore's safe transaction write bound.
+ */
+export async function applyStudentAppointmentsCollegeScopeInTransaction(
+  tx: FirebaseFirestore.Transaction,
+  appointmentsSnap: FirebaseFirestore.QuerySnapshot | null,
+  collegeId: unknown,
+  verificationStatus: unknown,
+  options: {reservedWrites?: number} = {},
+): Promise<number> {
+  if (!appointmentsSnap || appointmentsSnap.empty) return 0;
+  const {collegeId: nextCollegeId, verificationStatus: nextVerificationStatus} =
+    normalizedScopePair(collegeId, verificationStatus);
+  const stale = staleAppointmentScopeDocs(appointmentsSnap.docs, nextCollegeId, nextVerificationStatus);
+  if (stale.length === 0) return 0;
+
+  const reservedWrites = Math.max(0, Math.trunc(options.reservedWrites ?? 10));
+  const hardCap = Math.max(1, Math.min(MAX_ATOMIC_APPOINTMENT_SCOPE_UPDATES, 500 - reservedWrites));
+  const configuredCap = appointmentScopeSyncHooks.maxAtomicUpdates;
+  const effectiveCap = typeof configuredCap === "number" && configuredCap >= 1
+    ? Math.min(Math.trunc(configuredCap), hardCap)
+    : hardCap;
+
+  if (stale.length > effectiveCap) {
+    throw new HttpsError(
+      "failed-precondition",
+      `Too many appointments (${stale.length}) require atomic scope synchronization in one transaction (limit ${effectiveCap}). No profile or appointment changes were saved.`,
+    );
+  }
+  await appointmentScopeSyncHooks.beforeAtomicCommit?.();
+  for (const doc of stale) {
+    tx.update(doc.ref, {
+      collegeId: nextCollegeId,
+      studentVerificationStatus: nextVerificationStatus,
+    });
+  }
+  return stale.length;
+}
+
 /**
  * Keeps queryable `collegeId` and `studentVerificationStatus` projections on a
  * student's appointment documents synchronized with their authoritative user
- * profile so Firestore `list` rules and client queries stay accurate.
+ * profile so Firestore `list` rules and client queries stay accurate. Used by
+ * bounded backfill and the out-of-band `users/{userId}` fallback trigger.
  */
 export async function syncStudentAppointmentsCollegeScope(
   userId: string,
@@ -530,15 +610,11 @@ export async function syncStudentAppointmentsCollegeScope(
   verificationStatus: unknown,
 ): Promise<number> {
   if (!ID.test(userId)) return 0;
-  const nextCollegeId = typeof collegeId === "string" ? collegeId.trim() : "";
-  const nextVerificationStatus = typeof verificationStatus === "string" ? verificationStatus.trim() : "";
+  const {collegeId: nextCollegeId, verificationStatus: nextVerificationStatus} =
+    normalizedScopePair(collegeId, verificationStatus);
   const snap = await db().collection("appointments").where("userId", "==", userId).get();
   if (snap.empty) return 0;
-  const stale = snap.docs.filter((doc) => {
-    const data = doc.data();
-    return String(data.collegeId ?? "") !== nextCollegeId ||
-      String(data.studentVerificationStatus ?? "") !== nextVerificationStatus;
-  });
+  const stale = staleAppointmentScopeDocs(snap.docs, nextCollegeId, nextVerificationStatus);
   if (stale.length === 0) return 0;
   for (let i = 0; i < stale.length; i += 400) {
     const batch = db().batch();

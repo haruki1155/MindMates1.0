@@ -10,10 +10,12 @@ export {
 } from "./appointment_approval_service";
 import {
   appointmentPortalRecipients,
+  applyStudentAppointmentsCollegeScopeInTransaction,
   approvalHistoryFields,
   approvalMetadata,
   authorizeAppointmentApproval,
   authorizeAppointmentApprovalInTransaction,
+  readStudentAppointmentsForScopeSyncInTransaction,
   resolveApprovalScope,
   syncStudentAppointmentsCollegeScope,
 } from "./appointment_approval_service";
@@ -807,9 +809,14 @@ export const reviewProfileVerification = onCall(async (request) => {
   }
   const target = db.collection("users").doc(targetUserId);
   const audit = db.collection("role_audit_logs").doc();
-  const collegeId = await db.runTransaction(async (transaction) => {
-    const before = await transaction.get(target);
+  await db.runTransaction(async (transaction) => {
+    const [before, apptsSnap] = await Promise.all([
+      transaction.get(target),
+      readStudentAppointmentsForScopeSyncInTransaction(transaction, targetUserId),
+    ]);
     if (!before.exists) throw new HttpsError("not-found", "User profile not found.");
+    const collegeId = String(before.data()?.collegeId ?? "");
+    await applyStudentAppointmentsCollegeScopeInTransaction(transaction, apptsSnap, collegeId, decision, {reservedWrites: 2});
     transaction.update(target, {
       verificationStatus: decision,
       verifiedAt: decision === "verified" ? FieldValue.serverTimestamp() : null,
@@ -827,9 +834,7 @@ export const reviewProfileVerification = onCall(async (request) => {
       after: {verificationStatus: decision},
       createdAt: FieldValue.serverTimestamp(),
     });
-    return String(before.data()?.collegeId ?? "");
   });
-  await syncStudentAppointmentsCollegeScope(targetUserId, collegeId, decision);
   return {ok: true};
 });
 
@@ -844,7 +849,7 @@ export const reviewRoleCorrection = onCall(async (request) => {
   const reason = requiredText(request.data?.reason, "Reason", 3, 500);
   const requestRef = db.collection("role_correction_requests").doc(requestId);
   const audit = db.collection("role_audit_logs").doc();
-  const approvedSync = await db.runTransaction(async (transaction) => {
+  await db.runTransaction(async (transaction) => {
     const correction = await transaction.get(requestRef);
     if (!correction.exists || correction.data()?.status !== "pending") {
       throw new HttpsError("failed-precondition", "This request is no longer pending.");
@@ -854,17 +859,20 @@ export const reviewRoleCorrection = onCall(async (request) => {
       throw new HttpsError("permission-denied", "You cannot approve your own role change.");
     }
     const target = db.collection("users").doc(targetUserId);
-    const before = await transaction.get(target);
+    const [before, apptsSnap] = await Promise.all([
+      transaction.get(target),
+      approve ? readStudentAppointmentsForScopeSyncInTransaction(transaction, targetUserId) : Promise.resolve(null),
+    ]);
     if (!before.exists) throw new HttpsError("not-found", "User profile not found.");
     const requestedRole = String(correction.data()?.requestedRole ?? "");
-    transaction.update(requestRef, {
-      status: approve ? "approved" : "rejected",
-      reviewReason: reason,
-      reviewedBy: actorId,
-      reviewedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
     if (approve) {
+      await applyStudentAppointmentsCollegeScopeInTransaction(
+        transaction,
+        apptsSnap,
+        String(before.data()?.collegeId ?? ""),
+        "verified",
+        {reservedWrites: 3},
+      );
       transaction.update(target, {
         populationRole: requestedRole,
         declaredRole: requestedRole,
@@ -875,6 +883,13 @@ export const reviewRoleCorrection = onCall(async (request) => {
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
+    transaction.update(requestRef, {
+      status: approve ? "approved" : "rejected",
+      reviewReason: reason,
+      reviewedBy: actorId,
+      reviewedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
     transaction.create(audit, {
       targetUserId,
       actorId,
@@ -886,11 +901,7 @@ export const reviewRoleCorrection = onCall(async (request) => {
       after: {populationRole: approve ? requestedRole : before.data()?.populationRole ?? ""},
       createdAt: FieldValue.serverTimestamp(),
     });
-    return approve ? {userId: targetUserId, collegeId: String(before.data()?.collegeId ?? "")} : null;
   });
-  if (approvedSync) {
-    await syncStudentAppointmentsCollegeScope(approvedSync.userId, approvedSync.collegeId, "verified");
-  }
   return {ok: true};
 });
 
@@ -1503,6 +1514,10 @@ export const syncPortalAppointmentQueue = onDocumentWritten(
   },
 );
 
+// Eventual-consistency fallback for authorized out-of-band `users/{userId}` edits.
+// Callable-driven profile/roster updates sync appointment projections atomically
+// inside the same transaction; this async trigger alone cannot guarantee zero
+// synchronization delay for Firestore `allow list` queries.
 export const syncStudentAppointmentCollegeScope = onDocumentWritten(
   {document: "users/{userId}", retry: true},
   async (event) => {
