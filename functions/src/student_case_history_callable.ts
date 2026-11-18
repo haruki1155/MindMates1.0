@@ -64,17 +64,13 @@ export const getStudentCaseHistory = onCall(async (request) => {
 
     const db = getFirestore();
     // Entitlement first: no appointment content is read for a refused caller.
-    const [profileSnap, assignedSnap] = await Promise.all([
-      db.collection("users").doc(studentId).get(),
-      db.collection("appointments").where("userId", "==", studentId).where("assignedStaffId", "==", actorId).limit(1).get(),
-    ]);
+    const profileSnap = await db.collection("users").doc(studentId).get();
     const target = profileSnap.exists ? profileSnap.data() ?? {} : null;
     const basis = decideCaseHistoryAccess({
       actorId,
       actor,
       superAdminUid: superAdminUid.value().trim(),
       target,
-      assignedToActor: !assignedSnap.empty,
     });
 
     const {records: kept, truncated} = await readStudentAppointments(db, studentId);

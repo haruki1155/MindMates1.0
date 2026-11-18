@@ -38,8 +38,9 @@ test("a counselor for another college, or a student with an unverified college, 
   denied(() => decide({actor: {accessRole: "counselor"}}), "permission-denied");
 });
 
-test("a counselor assigned to one of the student's cases may view it without the college", () => {
-  assert.equal(decide({actor: counselor([]), assignedToActor: true}), "assigned");
+test("a counselor assigned to an appointment without current college assignment is refused", () => {
+  denied(() => decide({actor: counselor([]), assignedToActor: true}), "permission-denied");
+  denied(() => decide({actor: counselor(["cas"]), assignedToActor: true}), "permission-denied");
 });
 
 test("only the configured super-administrator among admins is allowed", () => {

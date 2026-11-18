@@ -26,6 +26,9 @@ const db = getFirestore();
 const run = `PI${Date.now()}`;
 const adminUid = process.env.SUPER_ADMIN_UID ?? "";
 const counselorUid = `${run}-counselor`;
+const otherCounselorUid = `${run}-counselor-other`;
+const suspendedCounselorUid = `${run}-counselor-suspended`;
+const otherAdminUid = `${run}-other-admin`;
 const unverifiedCounselorUid = `${run}-counselor-unverified`;
 const staffUid = `${run}-staff`;
 const authUids: string[] = [];
@@ -60,6 +63,7 @@ async function seedStudent(n: string, opts: {roster?: boolean; user?: Record<str
   await put(`users/${uid}`, {
     id: uid, email: `${uid}@example.com`, schoolId: studentNo, populationRole: "student", role: "student",
     accessRole: "appUser", firstName: "Nick", middleName: "", lastName: "Name", name: "Nick Name", gender: "",
+    collegeId: collegeA, verificationStatus: "verified",
     college: "College of Testing", course: "BS Testing", yearLevel: "2nd Year", dateOfBirthKey: "2004-05-06",
     personalInfoRequired: true, rosterLinked: opts.roster !== false, ...opts.user,
   });
@@ -107,7 +111,16 @@ before(async () => {
   // A legitimately active counselor: approved PACC access, active account and a verified email.
   await putAuthUser(counselorUid, true);
   await put(`users/${counselorUid}`, {id: counselorUid, accessRole: "counselor", role: "counselor", name: "Test Counselor",
-    staffAccountStatus: "approved", accountStatus: "active", email: `${counselorUid}@example.com`.toLowerCase()});
+    staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [collegeA], email: `${counselorUid}@example.com`.toLowerCase()});
+  await putAuthUser(otherCounselorUid, true);
+  await put(`users/${otherCounselorUid}`, {id: otherCounselorUid, accessRole: "counselor", role: "counselor", name: "Other Counselor",
+    staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [collegeB], email: `${otherCounselorUid}@example.com`.toLowerCase()});
+  await putAuthUser(suspendedCounselorUid, true);
+  await put(`users/${suspendedCounselorUid}`, {id: suspendedCounselorUid, accessRole: "counselor", role: "counselor", name: "Suspended Counselor",
+    staffAccountStatus: "disabled", accountStatus: "suspended", assignedCollegeIds: [collegeA], email: `${suspendedCounselorUid}@example.com`.toLowerCase()});
+  await putAuthUser(otherAdminUid, true);
+  await put(`users/${otherAdminUid}`, {id: otherAdminUid, accessRole: "admin", role: "admin", name: "Other Admin",
+    accountStatus: "active", email: `${otherAdminUid}@example.com`.toLowerCase()});
   // Same approval, but the email was never verified: locked out of every staff callable.
   await putAuthUser(unverifiedCounselorUid, false);
   await put(`users/${unverifiedCounselorUid}`, {id: unverifiedCounselorUid, accessRole: "counselor", role: "counselor",
@@ -126,7 +139,7 @@ after(async () => {
   const reqs = await db.collection("student_correction_requests").where("studentNo", ">=", run).where("studentNo", "<=", `${run}~`).get();
   await Promise.all(reqs.docs.map((d) => d.ref.delete()));
   await Promise.all(created.map((r) => r.delete()));
-  for (let i = 1; i <= 15; i++) await db.doc(`student_personal_info/${uidOf(String(i))}`).delete();
+  for (let i = 1; i <= 16; i++) await db.doc(`student_personal_info/${uidOf(String(i))}`).delete();
   const aud = await db.collection("admin_audit_logs").where("targetType", "==", "student").get();
   await Promise.all(aud.docs.filter((d) => String(d.data().targetId).startsWith(run)).map((d) => d.ref.delete()));
   await Promise.all(authUids.map((uid) => getAuth().deleteUser(uid).catch(() => undefined)));
@@ -234,6 +247,30 @@ test("an approved counselor whose email is unverified cannot read student inform
 test("a non-student target is refused and leaves no view audit", async () => {
   await rejects(view.run({auth: {uid: counselorUid}, data: {userId: staffUid}}), "failed-precondition");
   assert.equal((await audits("STUDENT_PERSONAL_INFO_VIEWED", staffUid)).length, 0);
+});
+
+test("getStudentPersonalInfo enforces current college assignment, verification, and super-admin scope", async () => {
+  const {uid: verifiedId} = await seedStudent("12");
+  const {uid: unverifiedId} = await seedStudent("16", {user: {verificationStatus: "needsReview"}});
+
+  // Wrong-college counselor, suspended counselor, and non-super admin are denied without audit rows.
+  for (const actor of [otherCounselorUid, suspendedCounselorUid, otherAdminUid]) {
+    await rejects(view.run({auth: {uid: actor}, data: {userId: verifiedId}}), "permission-denied");
+  }
+  // Unverified student cannot be read by a counselor, only by super-admin (audited).
+  await rejects(view.run({auth: {uid: counselorUid}, data: {userId: unverifiedId}}), "permission-denied");
+  assert.equal((await audits("STUDENT_PERSONAL_INFO_VIEWED", unverifiedId)).length, 0);
+  await view.run({auth: {uid: adminUid}, data: {userId: unverifiedId}});
+  assert.equal((await audits("STUDENT_PERSONAL_INFO_VIEWED", unverifiedId)).length, 1);
+
+  // Losing college assignment immediately revokes counselor access.
+  const auditsBefore = (await audits("STUDENT_PERSONAL_INFO_VIEWED", verifiedId)).length;
+  await view.run({auth: {uid: counselorUid}, data: {userId: verifiedId}});
+  assert.equal((await audits("STUDENT_PERSONAL_INFO_VIEWED", verifiedId)).length, auditsBefore + 1);
+  await db.doc(`users/${counselorUid}`).update({assignedCollegeIds: []});
+  await rejects(view.run({auth: {uid: counselorUid}, data: {userId: verifiedId}}), "permission-denied");
+  assert.equal((await audits("STUDENT_PERSONAL_INFO_VIEWED", verifiedId)).length, auditsBefore + 1);
+  await db.doc(`users/${counselorUid}`).update({assignedCollegeIds: [collegeA]});
 });
 
 // ------------------------------------------------------------------ corrections

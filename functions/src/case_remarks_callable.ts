@@ -21,7 +21,7 @@ type Access = {
   actor: FirebaseFirestore.DocumentData;
   appointmentId: string;
   studentId: string;
-  basis: "college" | "assigned";
+  basis: "college";
 };
 
 function appointmentIdOf(data: Record<string, unknown>): string {
@@ -39,16 +39,12 @@ async function authorize(db: FirebaseFirestore.Firestore, actorId: string, actor
   const appointment = await db.collection("appointments").doc(appointmentId).get();
   const studentId = String(appointment.data()?.userId ?? "");
   if (!appointment.exists || !DOC_ID.test(studentId)) throw new CaseRemarksError("permission-denied", NOT_AUTHORIZED_REMARKS);
-  const [profileSnap, assignedSnap] = await Promise.all([
-    db.collection("users").doc(studentId).get(),
-    db.collection("appointments").where("userId", "==", studentId).where("assignedStaffId", "==", actorId).limit(1).get(),
-  ]);
+  const profileSnap = await db.collection("users").doc(studentId).get();
   const basis = decideCaseRemarksAccess({
     actorId,
     actor,
     superAdminUid: superAdminUid.value().trim(),
     target: profileSnap.exists ? profileSnap.data() ?? {} : null,
-    assignedToActor: !assignedSnap.empty,
   });
   return {actorId, actor, appointmentId, studentId, basis};
 }
@@ -124,14 +120,28 @@ export const saveCaseRemarks = onCall(async (request) => {
     const access = await authorize(db, actorId, actor, appointmentId);
     const ref = remarksRef(db, appointmentId);
     await db.runTransaction(async (tx) => {
-      const [appointment, current] = await Promise.all([
+      const [appointment, current, liveActorSnap, liveStudentSnap] = await Promise.all([
         tx.get(db.collection("appointments").doc(appointmentId)),
         tx.get(ref),
+        tx.get(db.collection("users").doc(actorId)),
+        tx.get(db.collection("users").doc(access.studentId)),
       ]);
-      // The case must still belong to the student the entitlement was decided for.
-      if (String(appointment.data()?.userId ?? "") !== access.studentId) {
+      // The case must still belong to the student and the counselor must still hold active college assignment.
+      if (!appointment.exists || String(appointment.data()?.userId ?? "") !== access.studentId) {
         throw new CaseRemarksError("permission-denied", NOT_AUTHORIZED_REMARKS);
       }
+      const liveActor = liveActorSnap.data() ?? {};
+      const liveAccountStatus = liveActor.accountStatus == null ? "active" : String(liveActor.accountStatus);
+      const liveStaffStatus = liveActor.staffAccountStatus == null ? null : String(liveActor.staffAccountStatus);
+      if (liveAccountStatus !== "active" || (liveStaffStatus != null && liveStaffStatus !== "approved")) {
+        throw new CaseRemarksError("permission-denied", NOT_AUTHORIZED_REMARKS);
+      }
+      decideCaseRemarksAccess({
+        actorId,
+        actor: liveActor,
+        superAdminUid: superAdminUid.value().trim(),
+        target: liveStudentSnap.exists ? liveStudentSnap.data() ?? {} : null,
+      });
       const existing = current.exists ? current.data() ?? {} : null;
       if (data.text == null && typeof existing?.text === "string" && existing.text !== "") {
         throw new CaseRemarksError("invalid-argument", "Provide remarks text, or pass an empty string to clear saved remarks.");

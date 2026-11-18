@@ -2,7 +2,7 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 
-import {requireAdmin, requireClinical, requireUid, roleOf} from "./access";
+import {configuredSuperAdminUid, requireAdmin, requireClinical, requireUid, roleOf} from "./access";
 import {canonicalLoginId} from "./account_recovery";
 import {AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
 import {loadAcademicIndex} from "./student_roster";
@@ -178,21 +178,52 @@ export const getMyStudentInformation = onCall(async (request) => {
   return {official: officialView(user, roster), personal: personalView(personal.data()), corrections};
 });
 
+function safeSuperAdminUid(): string {
+  try {
+    return configuredSuperAdminUid();
+  } catch {
+    return "";
+  }
+}
+
 export const getStudentPersonalInfo = onCall(async (request) => {
   const actorId = requireUid(request);
   const actor = await requireClinical(actorId);
   const targetId = text((request.data as {userId?: unknown} | null)?.userId);
-  if (!targetId) throw new HttpsError("invalid-argument", "A student is required.");
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(targetId)) throw new HttpsError("invalid-argument", "A student is required.");
   const db = database();
 
   const result = await db.runTransaction(async (transaction) => {
-    const userSnap = await transaction.get(db.collection("users").doc(targetId));
-    if (!userSnap.exists) throw new HttpsError("not-found", "Student not found.");
+    const [actorSnap, userSnap] = await Promise.all([
+      transaction.get(db.collection("users").doc(actorId)),
+      transaction.get(db.collection("users").doc(targetId)),
+    ]);
+    const liveActor = actorSnap.exists ? actorSnap.data() as Doc : {};
+    const liveRole = roleOf(liveActor) || roleOf(actor);
+    const liveAccountStatus = liveActor.accountStatus == null ? "active" : String(liveActor.accountStatus);
+    const liveStaffStatus = liveActor.staffAccountStatus == null ? null : String(liveActor.staffAccountStatus);
+    if (!["counselor", "admin"].includes(liveRole) || liveAccountStatus !== "active" ||
+        (liveRole !== "admin" && liveStaffStatus != null && liveStaffStatus !== "approved")) {
+      throw new HttpsError("permission-denied", "Your PACC portal access is not active.");
+    }
+    const isSuperAdmin = liveRole === "admin" && safeSuperAdminUid() !== "" && actorId === safeSuperAdminUid();
+    if (liveRole === "admin" && !isSuperAdmin) {
+      throw new HttpsError("permission-denied", "Super-administrator access is required.");
+    }
+    if (!userSnap.exists) {
+      throw new HttpsError(isSuperAdmin ? "not-found" : "permission-denied",
+        isSuperAdmin ? "Student not found." : "You are not authorized to view this student's information.");
+    }
     const user = userSnap.data() as Doc;
     // Refuse employee/staff targets outright rather than returning an "official" view and writing a
     // STUDENT_PERSONAL_INFO_VIEWED audit row about an account that is not a student.
     if (!isStudentProfile(user)) {
       throw new HttpsError("failed-precondition", "That account is not a student.");
+    }
+    const studentCollegeId = text(user.collegeId);
+    const served = Array.isArray(liveActor.assignedCollegeIds) ? liveActor.assignedCollegeIds : [];
+    if (!isSuperAdmin && (user.verificationStatus !== "verified" || !studentCollegeId || !served.includes(studentCollegeId))) {
+      throw new HttpsError("permission-denied", "You are not authorized to view this student's information.");
     }
     const key = keyOrNull(user.schoolId);
     const [rosterSnap, personalSnap] = await Promise.all([
@@ -202,9 +233,14 @@ export const getStudentPersonalInfo = onCall(async (request) => {
     const roster = rosterSnap?.exists && rosterSnap.data()?.userId === targetId ? rosterSnap.data() as Doc : null;
     // The audit record commits with this transaction, before the caller sees anything.
     writeAudit(transaction, db, {
-      actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: roleOf(actor),
+      actorId, actorNameSnapshot: actorName(liveActor), actorRoleSnapshot: liveRole,
       action: "STUDENT_PERSONAL_INFO_VIEWED", category: AUDIT_CATEGORIES.security,
-      targetType: "student", targetId, metadata: {hasPersonalInfo: personalSnap.exists},
+      targetType: "student", targetId,
+      metadata: {
+        hasPersonalInfo: personalSnap.exists,
+        basis: isSuperAdmin ? "super_admin" : "college",
+        ...(studentCollegeId ? {collegeId: studentCollegeId} : {}),
+      },
     });
     return {official: officialView(user, roster), personal: personalView(personalSnap.data())};
   });

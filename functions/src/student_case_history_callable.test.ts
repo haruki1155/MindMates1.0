@@ -137,11 +137,16 @@ test("pagination returns every case exactly once and every page is audited", {sk
   await rejects(run("cite-counselor", {studentId: uid("ana"), cursor: "garbage"}), "invalid-argument");
 });
 
-test("a counselor assigned to one of the student's cases may view the history", {skip: !emulated}, async () => {
-  const result = await run("case-counselor", {studentId: uid("ana")});
-  assert.equal(result.basis, "assigned");
-  assert.deepEqual(result.items.map((item) => item.id), anaOrder.map(id));
+test("a counselor assigned to a past case without current college assignment is refused, and losing college assignment revokes access immediately", {skip: !emulated}, async () => {
+  await rejects(run("case-counselor", {studentId: uid("ana")}), "permission-denied");
   await rejects(run("case-counselor", {studentId: uid("ana-twin")}), "permission-denied");
+
+  // Granting cite allows access; revoking cite immediately denies subsequent access.
+  await db.doc(`users/${uid("case-counselor")}`).update({assignedCollegeIds: [cite]});
+  const granted = await run("case-counselor", {studentId: uid("ana")});
+  assert.equal(granted.basis, "college");
+  await db.doc(`users/${uid("case-counselor")}`).update({assignedCollegeIds: []});
+  await rejects(run("case-counselor", {studentId: uid("ana")}), "permission-denied");
 });
 
 test("the configured super-administrator may view any student's history", {skip: !emulated}, async () => {
