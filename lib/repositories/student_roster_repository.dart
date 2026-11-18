@@ -66,13 +66,17 @@ class StudentRosterRepository {
   final FirebaseFunctions? _functions;
   final StudentRosterCallableInvoker? _invoker;
 
-  Future<Object?> _call(String name, [Map<String, Object?> data = const {}]) {
+  Future<Object?> _call(
+    String name, [
+    Map<String, Object?> data = const {},
+    HttpsCallableOptions? options,
+  ]) {
     final invoker = _invoker;
     if (invoker != null) return invoker(name, data);
     final functions =
         _functions ?? FirebaseFunctions.instanceFor(region: 'us-central1');
     return functions
-        .routedCallable(name)
+        .routedCallable(name, options: options)
         .call<Object?>(data)
         .then((result) => result.data);
   }
@@ -80,7 +84,8 @@ class StudentRosterRepository {
   Future<Map<String, Object?>> _callMap(
     String name, [
     Map<String, Object?> data = const {},
-  ]) async => asStringMap(await _call(name, data));
+    HttpsCallableOptions? options,
+  ]) async => asStringMap(await _call(name, data, options));
 
   // ---------------------------------------------------------- activation
 
@@ -199,10 +204,14 @@ class StudentRosterRepository {
     String fileName,
     List<Map<String, String>> rows,
   ) async {
-    final result = await _callMap('importStudentRoster', {
-      'fileName': fileName,
-      'rows': rows,
-    });
+    final result = await _callMap(
+      'importStudentRoster',
+      {
+        'fileName': fileName,
+        'rows': rows,
+      },
+      HttpsCallableOptions(timeout: const Duration(minutes: 10)),
+    );
     final message = asText(result['message']);
     return RosterImportResult(
       status: result['status'] == 'partial'

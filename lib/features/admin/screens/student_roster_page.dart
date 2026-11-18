@@ -905,10 +905,15 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
       }
     } catch (e) {
       if (mounted) {
+        final aborted = e is FirebaseFunctionsException && e.code == 'aborted';
         setState(
-          () => _importError =
-              '${_errorText(e)} The import stopped; rows already imported '
-              'stay in the roster.',
+          () => _importError = aborted
+              ? 'Roster records may already have been saved, but finalizing '
+                    'the import log failed. Check Import history and existing '
+                    'roster records before re-uploading this file.'
+              : '${_errorText(e)} Some rows may already have been saved. '
+                    'Check Import history before retrying or re-uploading this '
+                    'file.',
         );
       }
     } finally {
@@ -1382,6 +1387,85 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
     }
   }
 
+  ({String label, Color fg, Color bg}) _historyStatusStyle(
+    RosterImportRecord record,
+  ) {
+    if (record.status == RosterImportHistoryStatus.partial &&
+        record.failureCode == 'finalization-failed') {
+      return (
+        label: 'Needs attention',
+        fg: AdminColors.danger,
+        bg: const Color(0xFFFBEAEA),
+      );
+    }
+    return switch (record.status) {
+      RosterImportHistoryStatus.complete => (
+        label: 'Complete',
+        fg: AdminColors.success,
+        bg: const Color(0xFFE7F2EC),
+      ),
+      RosterImportHistoryStatus.partial => (
+        label: 'Partially imported',
+        fg: AdminColors.accentStrong,
+        bg: AdminColors.accentFaint,
+      ),
+      RosterImportHistoryStatus.pending => (
+        label: 'Not finalized',
+        fg: AdminColors.accentStrong,
+        bg: AdminColors.accentFaint,
+      ),
+      RosterImportHistoryStatus.unknown => (
+        label: 'Status unavailable',
+        fg: AdminColors.muted,
+        bg: AdminColors.surfaceMuted,
+      ),
+    };
+  }
+
+  String _historyFailureMessage(String? failureCode) => switch (failureCode) {
+    'time-budget-exceeded' =>
+      'Stopped within execution time limits; remaining rows were not imported.',
+    'concurrent-conflict' =>
+      'Stopped because a roster or student record changed concurrently.',
+    'appointment-sync-overflow' =>
+      'Stopped because a linked student has too many appointments for one transaction.',
+    _ => 'Stopped partway while saving updates.',
+  };
+
+  String _historyDetails(RosterImportRecord record) {
+    final total = record.rowCount != null
+        ? ' · ${record.rowCount} total row(s)'
+        : '';
+    final failed = record.failedRowCount != null && record.failedRowCount! > 0
+        ? ' · ${record.failedRowCount} row(s) not imported'
+        : '';
+    if (record.status == RosterImportHistoryStatus.pending) {
+      final rowsNote = record.rowCount != null
+          ? ' File had ${record.rowCount} row(s).'
+          : '';
+      return 'Import outcome requires verification.$rowsNote Some records may '
+          'already have been saved; check the roster and do not blindly '
+          're-upload the same file.';
+    }
+    if (record.status == RosterImportHistoryStatus.partial &&
+        record.failureCode == 'finalization-failed') {
+      final rowsNote = record.rowCount != null
+          ? ' File had ${record.rowCount} row(s).'
+          : '';
+      return 'Import outcome requires verification.$rowsNote$failed '
+          'Recorded before finalization failed: ${_countsLine(record.counts)}. '
+          'Check saved roster records and do not blindly re-upload the same file.';
+    }
+    if (record.status == RosterImportHistoryStatus.partial) {
+      return '${_countsLine(record.counts)}$total$failed\n'
+          '${_historyFailureMessage(record.failureCode)}';
+    }
+    if (record.status == RosterImportHistoryStatus.unknown) {
+      return '${_countsLine(record.counts)}$total · Final import status unavailable.';
+    }
+    return '${_countsLine(record.counts)}$total';
+  }
+
   Widget _historyTab() {
     final list = _imports;
     if (list == null) return _loading();
@@ -1391,22 +1475,62 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         if (_importsError != null) _error(_importsError!),
         if (list.isEmpty && _importsError == null)
           const Text('No imports yet.'),
-        for (final i in list)
-          Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              title: Text(
-                i.fileName,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: Text(
-                '${_countsLine(i.counts)}\n'
-                '${i.importedByName} · ${_shortDate(i.importedAt)}',
-              ),
-              isThreeLine: true,
-            ),
-          ),
+        for (final i in list) _historyCard(i),
       ],
+    );
+  }
+
+  Widget _historyCard(RosterImportRecord record) {
+    final style = _historyStatusStyle(record);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    record.fileName,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: style.bg,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: style.fg.withValues(alpha: 0.25),
+                    ),
+                  ),
+                  child: Text(
+                    style.label,
+                    style: TextStyle(
+                      color: style.fg,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(_historyDetails(record)),
+            const SizedBox(height: 4),
+            Text(
+              '${record.importedByName} · ${_shortDate(record.importedAt)}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
     );
   }
 

@@ -26,6 +26,7 @@ import {
   importStudentRoster,
   reviewProfileVerification,
   reviewStudentCorrection,
+  revokeStudentActivation,
   setStaffCollegeAssignments,
   syncStudentAppointmentCollegeScope,
   updateStudentRosterRecord,
@@ -194,6 +195,10 @@ after(async () => {
   appointmentScopeSyncHooks.beforeAtomicCommit = undefined;
   rosterTestHooks.batchLimit = undefined;
   rosterTestHooks.afterClassify = undefined;
+  (rosterTestHooks as Record<string, unknown>).timeBudgetMs = undefined;
+  (rosterTestHooks as Record<string, unknown>).beforeFinalize = undefined;
+  (rosterTestHooks as Record<string, unknown>).afterStep = undefined;
+  (rosterTestHooks as Record<string, unknown>).onCodeMinted = undefined;
   if (!emulated) return;
   if (previousSuperAdmin == null) delete process.env.SUPER_ADMIN_UID;
   else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
@@ -1552,6 +1557,743 @@ test(
         db.doc(`student_roster/${batchNewKey}`).delete().catch(() => undefined),
         db.doc(`appointments/${claimantApptId}`).delete().catch(() => undefined),
       ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3F Test A & F: shared batch (batchLimit >= 2) rolls back sibling new row on lastUpdateTime conflict with zero code leakage",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const baseNo = Date.now().toString().slice(-6);
+    const siblingNewNo = `${baseNo}21`;
+    const siblingNewKey = canonicalLoginId(siblingNewNo);
+    const conflictNo = `${baseNo}22`;
+    const conflictKey = canonicalLoginId(conflictNo);
+    const conflictUid = `${prefix}-shared-batch-uid`;
+    const conflictApptId = `${prefix}-shared-batch-appt`;
+    const importIds: string[] = [];
+
+    await Promise.all([
+      db.doc(`users/${conflictUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        name: "Shared Conflict Student",
+        collegeId: collegeA,
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_roster/${conflictKey}`).set({
+        studentNo: conflictNo,
+        studentKey: conflictKey,
+        surname: "Conflict",
+        surnameNormalized: "conflict",
+        firstName: "Shared",
+        middleName: "",
+        dateOfBirthKey: "2004-05-06",
+        dateOfBirth: Timestamp.fromDate(new Date("2004-05-06T00:00:00Z")),
+        collegeId: collegeA,
+        college: "College A",
+        courseId: courseA,
+        course: "BS Course A",
+        departmentId: deptA,
+        department: "Dept A",
+        yearLevel: "2nd Year",
+        status: "active",
+        activated: false,
+        userId: null,
+      }),
+      db.doc(`appointments/${conflictApptId}`).set({
+        userId: conflictUid,
+        fullName: "Shared Conflict Student",
+        status: "confirmed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+    ]);
+
+    const capturedErrors: unknown[] = [];
+    const origError = console.error;
+    console.error = (...args: unknown[]) => {
+      capturedErrors.push(args);
+      origError(...args);
+    };
+    try {
+      rosterTestHooks.batchLimit = 10;
+      rosterTestHooks.afterClassify = async () => {
+        await db.doc(`student_roster/${conflictKey}`).update({
+          activated: true,
+          userId: conflictUid,
+          activationCode: null,
+          updatedAt: Timestamp.now(),
+        });
+      };
+
+      const res = await call(importStudentRoster, "admin", {
+        fileName: "shared-batch-conflict.csv",
+        rows: [
+          {
+            studentNo: siblingNewNo,
+            surname: "Sibling",
+            firstName: "New",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College A",
+            course: "BS Course A",
+            yearLevel: "1st Year",
+          },
+          {
+            studentNo: conflictNo,
+            surname: "Conflict",
+            firstName: "Shared",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "3rd Year",
+          },
+        ],
+      });
+      if (res.importId) importIds.push(res.importId);
+
+      // Shared batch must roll back atomically: sibling new row NOT created, zero codes returned.
+      assert.equal(res.status, "partial");
+      assert.deepEqual(res.counts, {new: 0, updated: 0, linked: 0});
+      assert.deepEqual(res.codes, []);
+      assert.deepEqual(res.failedRows.map((f: {studentNo: string}) => f.studentNo), [siblingNewNo, conflictNo]);
+      assert.equal((await db.doc(`student_roster/${siblingNewKey}`).get()).exists, false);
+      assert.equal((await db.doc(`student_roster/${conflictKey}`).get()).data()?.collegeId, collegeA);
+      assert.equal((await db.doc(`users/${conflictUid}`).get()).data()?.collegeId, collegeA);
+      assert.equal((await db.doc(`appointments/${conflictApptId}`).get()).data()?.collegeId, collegeA);
+
+      // Failure must be logged safely and recorded with sanitized failureCode on import + audit.
+      const importDoc = (await db.doc(`student_roster_imports/${res.importId}`).get()).data()!;
+      assert.equal(importDoc.status, "partial");
+      assert.deepEqual(importDoc.counts, {new: 0, updated: 0, linked: 0});
+      assert.equal(typeof importDoc.failureCode, "string");
+      assert.ok(importDoc.failureCode.length > 0);
+      assert.equal(importDoc.failedRows.length, 2);
+
+      const auditSnap = await db.collection("admin_audit_logs").where("targetId", "==", res.importId).get();
+      assert.equal(auditSnap.size, 1);
+      assert.equal(auditSnap.docs[0].data().metadata.partial, true);
+      assert.equal(auditSnap.docs[0].data().metadata.failureCode, importDoc.failureCode);
+
+      assert.ok(
+        capturedErrors.some((entry) => JSON.stringify(entry).includes("student_roster_import_step_failed")),
+        "expected structured step failure log",
+      );
+      const serializedSensitiveSurface = JSON.stringify({capturedErrors, importDoc, audit: auditSnap.docs[0].data()});
+      assert.doesNotMatch(serializedSensitiveSurface, /Shared Conflict Student|2004-05-06/);
+    } finally {
+      console.error = origError;
+      rosterTestHooks.batchLimit = undefined;
+      rosterTestHooks.afterClassify = undefined;
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        db.doc(`users/${conflictUid}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${siblingNewKey}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${conflictKey}`).delete().catch(() => undefined),
+        db.doc(`appointments/${conflictApptId}`).delete().catch(() => undefined),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3F Test B: concurrent link rejection protects against stolen reservation or concurrent activation",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const baseNo = Date.now().toString().slice(-6);
+    const linkNo = `${baseNo}23`;
+    const linkKey = canonicalLoginId(linkNo);
+    const linkUid = `${prefix}-link-race-uid`;
+    const otherUid = `${prefix}-link-thief-uid`;
+    const apptId = `${prefix}-link-race-appt`;
+    const importIds: string[] = [];
+
+    await Promise.all([
+      db.doc(`users/${linkUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        firstName: "Orig",
+        lastName: "Student",
+        collegeId: collegeA,
+        verificationStatus: "verified",
+      }),
+      db.doc(`users/${otherUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        firstName: "Other",
+        lastName: "User",
+        collegeId: collegeA,
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_id_reservations/${linkKey}`).set({userId: linkUid}),
+      db.doc(`appointments/${apptId}`).set({
+        userId: linkUid,
+        fullName: "Orig Student",
+        status: "confirmed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+    ]);
+
+    try {
+      rosterTestHooks.afterClassify = async () => {
+        await db.doc(`student_id_reservations/${linkKey}`).set({userId: otherUid});
+      };
+      const res = await call(importStudentRoster, "admin", {
+        fileName: "concurrent-link-reject.csv",
+        rows: [{
+          studentNo: linkNo,
+          surname: "Student",
+          firstName: "Orig",
+          middleName: "",
+          dateOfBirth: "2004-05-06",
+          college: "College B",
+          course: "BS Course B",
+          yearLevel: "2nd Year",
+        }],
+      });
+      if (res.importId) importIds.push(res.importId);
+
+      assert.equal(res.status, "partial");
+      assert.deepEqual(res.counts, {new: 0, updated: 0, linked: 0});
+      assert.deepEqual(res.failedRows.map((f: {studentNo: string}) => f.studentNo), [linkNo]);
+      assert.equal((await db.doc(`student_roster/${linkKey}`).get()).exists, false);
+      assert.equal((await db.doc(`users/${linkUid}`).get()).data()?.collegeId, collegeA);
+      assert.equal((await db.doc(`users/${otherUid}`).get()).data()?.collegeId, collegeA);
+      assert.equal((await db.doc(`appointments/${apptId}`).get()).data()?.collegeId, collegeA);
+    } finally {
+      rosterTestHooks.afterClassify = undefined;
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        db.doc(`users/${linkUid}`).delete().catch(() => undefined),
+        db.doc(`users/${otherUid}`).delete().catch(() => undefined),
+        db.doc(`student_id_reservations/${linkKey}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${linkKey}`).delete().catch(() => undefined),
+        db.doc(`appointments/${apptId}`).delete().catch(() => undefined),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3F Test C: concurrent student activation revocation blocks stale import transfer without leaking access",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const revNo = `${Date.now().toString().slice(-6)}24`;
+    const revKey = canonicalLoginId(revNo);
+    const revUid = `${prefix}-revoke-race-uid`;
+    const revApptId = `${prefix}-revoke-race-appt`;
+    const importIds: string[] = [];
+
+    await getAuth().createUser({uid: revUid, email: `${revUid}@example.invalid`, password, emailVerified: true});
+    await Promise.all([
+      db.doc(`users/${revUid}`).set({
+        accessRole: "appUser",
+        role: "student",
+        populationRole: "student",
+        accountStatus: "active",
+        firstName: "Revoke",
+        lastName: "Student",
+        collegeId: collegeA,
+        verificationStatus: "verified",
+      }),
+      db.doc(`student_id_reservations/${revKey}`).set({userId: revUid}),
+      db.doc(`student_roster/${revKey}`).set({
+        studentNo: revNo,
+        studentKey: revKey,
+        surname: "Student",
+        surnameNormalized: "student",
+        firstName: "Revoke",
+        middleName: "",
+        dateOfBirthKey: "2004-05-06",
+        dateOfBirth: Timestamp.fromDate(new Date("2004-05-06T00:00:00Z")),
+        collegeId: collegeA,
+        college: "College A",
+        courseId: courseA,
+        course: "BS Course A",
+        departmentId: deptA,
+        department: "Dept A",
+        yearLevel: "2nd Year",
+        status: "active",
+        activated: true,
+        userId: revUid,
+      }),
+      db.doc(`appointments/${revApptId}`).set({
+        userId: revUid,
+        fullName: "Revoke Student",
+        status: "confirmed",
+        collegeId: collegeA,
+        studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+    ]);
+
+    const clientA = await asClientFirestore("counselorA");
+    const clientB = await asClientFirestore("counselorB");
+    try {
+      rosterTestHooks.afterClassify = async () => {
+        await call(revokeStudentActivation, "admin", {
+          studentNo: revNo,
+          reason: "Revoked concurrently during roster import",
+        });
+      };
+      const res = await call(importStudentRoster, "admin", {
+        fileName: "concurrent-revoke.csv",
+        rows: [{
+          studentNo: revNo,
+          surname: "Student",
+          firstName: "Revoke",
+          middleName: "",
+          dateOfBirth: "2004-05-06",
+          college: "College B",
+          course: "BS Course B",
+          yearLevel: "3rd Year",
+        }],
+      });
+      if (res.importId) importIds.push(res.importId);
+
+      assert.equal(res.status, "partial");
+      assert.deepEqual(res.counts, {new: 0, updated: 0, linked: 0});
+      assert.deepEqual(res.failedRows.map((f: {studentNo: string}) => f.studentNo), [revNo]);
+
+      const rosterData = (await db.doc(`student_roster/${revKey}`).get()).data()!;
+      const userData = (await db.doc(`users/${revUid}`).get()).data()!;
+      const apptData = (await db.doc(`appointments/${revApptId}`).get()).data()!;
+      assert.equal(rosterData.activated, false);
+      assert.equal(rosterData.userId, null);
+      assert.equal(rosterData.collegeId, collegeA);
+      assert.equal(userData.accountStatus, "revoked");
+      assert.equal(userData.collegeId, collegeA);
+      assert.equal(apptData.collegeId, collegeA);
+      assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientB.clientDb, collegeB, revUid), []);
+      await assert.rejects(getDoc(doc(clientB.clientDb, "appointments", revApptId)));
+    } finally {
+      rosterTestHooks.afterClassify = undefined;
+      await clientA.close();
+      await clientB.close();
+      await cleanupImportArtifacts(importIds);
+      const revAudits = await db.collection("admin_audit_logs").where("targetId", "==", revKey).get();
+      await Promise.all([
+        getAuth().deleteUser(revUid).catch(() => undefined),
+        db.doc(`users/${revUid}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${revKey}`).delete().catch(() => undefined),
+        db.doc(`student_id_reservations/${revKey}`).delete().catch(() => undefined),
+        db.doc(`appointments/${revApptId}`).delete().catch(() => undefined),
+        ...revAudits.docs.map((d) => d.ref.delete().catch(() => undefined)),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3F Test D & F: execution deadline safeguard stops cleanly with finalized partial status, codes for committed rows only, and safe resume",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const baseNo = Date.now().toString().slice(-6);
+    const n1 = `${baseNo}31`;
+    const u1 = `${baseNo}32`;
+    const l1 = `${baseNo}33`;
+    const n2 = `${baseNo}34`;
+    const kN1 = canonicalLoginId(n1);
+    const kU1 = canonicalLoginId(u1);
+    const kL1 = canonicalLoginId(l1);
+    const kN2 = canonicalLoginId(n2);
+    const u1Uid = `${prefix}-budget-u1`;
+    const l1Uid = `${prefix}-budget-l1`;
+    const u1Appt = `${prefix}-budget-u1-appt`;
+    const l1Appt = `${prefix}-budget-l1-appt`;
+    const importIds: string[] = [];
+
+    await Promise.all([
+      db.doc(`users/${u1Uid}`).set({accessRole: "appUser", populationRole: "student", collegeId: collegeA, verificationStatus: "verified"}),
+      db.doc(`users/${l1Uid}`).set({accessRole: "appUser", populationRole: "student", collegeId: collegeA, verificationStatus: "verified"}),
+      db.doc(`student_id_reservations/${kL1}`).set({userId: l1Uid}),
+      db.doc(`student_roster/${kU1}`).set({
+        studentNo: u1, studentKey: kU1, surname: "Upd", surnameNormalized: "upd", firstName: "One", middleName: "",
+        dateOfBirthKey: "2004-05-06", dateOfBirth: Timestamp.fromDate(new Date("2004-05-06T00:00:00Z")),
+        collegeId: collegeA, college: "College A", courseId: courseA, course: "BS Course A",
+        departmentId: deptA, department: "Dept A", yearLevel: "2nd Year", status: "active", activated: true, userId: u1Uid,
+      }),
+      db.doc(`appointments/${u1Appt}`).set({
+        userId: u1Uid, fullName: "Upd One", status: "confirmed", collegeId: collegeA, studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+      db.doc(`appointments/${l1Appt}`).set({
+        userId: l1Uid, fullName: "Link One", status: "confirmed", collegeId: collegeA, studentVerificationStatus: "verified",
+        scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+      }),
+    ]);
+
+    const hookBag = rosterTestHooks as {
+      batchLimit?: number;
+      timeBudgetMs?: number;
+      afterStep?: (stepIndex: number) => Promise<void>;
+    };
+    const capturedLogs: unknown[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      capturedLogs.push(args);
+      origWarn(...args);
+    };
+    try {
+      // Force budget expiration right after step 0 commits cleanly (step 0 = n1).
+      hookBag.timeBudgetMs = 60_000;
+      hookBag.afterStep = async (stepIndex) => {
+        if (stepIndex === 0) hookBag.timeBudgetMs = 0;
+      };
+      const rows = [
+        {studentNo: n1, surname: "New", firstName: "One", middleName: "", dateOfBirth: "2004-05-06", college: "College B", course: "BS Course B", yearLevel: "1st Year"},
+        {studentNo: u1, surname: "Upd", firstName: "One", middleName: "", dateOfBirth: "2004-05-06", college: "College B", course: "BS Course B", yearLevel: "3rd Year"},
+        {studentNo: l1, surname: "Link", firstName: "One", middleName: "", dateOfBirth: "2004-05-06", college: "College B", course: "BS Course B", yearLevel: "2nd Year"},
+        {studentNo: n2, surname: "New", firstName: "Two", middleName: "", dateOfBirth: "2004-05-06", college: "College B", course: "BS Course B", yearLevel: "1st Year"},
+      ];
+      const partialRes = await call(importStudentRoster, "admin", {fileName: "budget-stop.csv", rows});
+      if (partialRes.importId) importIds.push(partialRes.importId);
+
+      assert.equal(partialRes.status, "partial");
+      assert.deepEqual(partialRes.counts, {new: 1, updated: 0, linked: 0});
+      assert.deepEqual(partialRes.codes.map((c: {studentNo: string}) => c.studentNo), [n1]);
+      assert.deepEqual(partialRes.failedRows.map((f: {studentNo: string}) => f.studentNo), [u1, l1, n2]);
+      assert.equal((await db.doc(`student_roster/${kN1}`).get()).exists, true);
+      assert.equal((await db.doc(`student_roster/${kN2}`).get()).exists, false);
+      assert.equal((await db.doc(`users/${u1Uid}`).get()).data()?.collegeId, collegeA);
+      assert.equal((await db.doc(`appointments/${u1Appt}`).get()).data()?.collegeId, collegeA);
+
+      const storedN1 = (await db.doc(`student_roster/${kN1}`).get()).data()!.activationCode;
+      assert.equal(await verifyActivationCode(partialRes.codes[0].code, {
+        hash: storedN1.hash, salt: storedN1.salt, issuedAt: storedN1.issuedAt.toDate(), expiresAt: storedN1.expiresAt.toDate(),
+      }), true);
+
+      const rec = (await db.doc(`student_roster_imports/${partialRes.importId}`).get()).data()!;
+      assert.equal(rec.status, "partial");
+      assert.equal(rec.failureCode, "time-budget-exceeded");
+      assert.deepEqual(rec.counts, {new: 1, updated: 0, linked: 0});
+
+      const auditSnap = await db.collection("admin_audit_logs").where("targetId", "==", partialRes.importId).get();
+      assert.equal(auditSnap.size, 1);
+      assert.equal(auditSnap.docs[0].data().metadata.partial, true);
+      assert.equal(auditSnap.docs[0].data().metadata.failureCode, "time-budget-exceeded");
+      assert.ok(!JSON.stringify([capturedLogs, rec, auditSnap.docs[0].data()]).includes(partialRes.codes[0].code));
+
+      // Resume remaining failed rows + check re-importing n1 does not duplicate activation codes.
+      hookBag.timeBudgetMs = undefined;
+      hookBag.afterStep = undefined;
+      const resumeRes = await call(importStudentRoster, "admin", {fileName: "budget-resume.csv", rows});
+      if (resumeRes.importId) importIds.push(resumeRes.importId);
+      assert.equal(resumeRes.status, "complete");
+      assert.deepEqual(resumeRes.counts, {new: 1, updated: 2, linked: 1});
+      assert.deepEqual(resumeRes.codes.map((c: {studentNo: string}) => c.studentNo), [n2]);
+      assert.equal((await db.doc(`student_roster/${kN1}`).get()).data()!.activationCode.hash, storedN1.hash);
+      assert.equal((await db.doc(`users/${u1Uid}`).get()).data()?.collegeId, collegeB);
+      assert.equal((await db.doc(`users/${u1Uid}`).get()).data()?.college, "College B");
+      assert.equal((await db.doc(`appointments/${u1Appt}`).get()).data()?.collegeId, collegeB);
+      assert.equal((await db.doc(`users/${l1Uid}`).get()).data()?.collegeId, collegeB);
+      assert.equal((await db.doc(`appointments/${l1Appt}`).get()).data()?.collegeId, collegeB);
+    } finally {
+      console.warn = origWarn;
+      hookBag.timeBudgetMs = undefined;
+      hookBag.afterStep = undefined;
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        db.doc(`users/${u1Uid}`).delete().catch(() => undefined),
+        db.doc(`users/${l1Uid}`).delete().catch(() => undefined),
+        db.doc(`student_id_reservations/${kL1}`).delete().catch(() => undefined),
+        ...[kN1, kU1, kL1, kN2].map((k) => db.doc(`student_roster/${k}`).delete().catch(() => undefined)),
+        db.doc(`appointments/${u1Appt}`).delete().catch(() => undefined),
+        db.doc(`appointments/${l1Appt}`).delete().catch(() => undefined),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3F Test E: finalization retry is idempotent (no duplicate audit) and persistent finalization failure never reports complete",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const baseNo = Date.now().toString().slice(-6);
+    const no1 = `${baseNo}41`;
+    const no2 = `${baseNo}42`;
+    const key1 = canonicalLoginId(no1);
+    const key2 = canonicalLoginId(no2);
+    const importIds: string[] = [];
+
+    const hookBag = rosterTestHooks as {
+      beforeFinalize?: (attempt: number) => Promise<void>;
+    };
+    const origError = console.error;
+    const loggedErrors: unknown[] = [];
+    console.error = (...args: unknown[]) => {
+      loggedErrors.push(args);
+      origError(...args);
+    };
+    try {
+      // 1. Transient failure on finalization attempt 1 -> retry succeeds with exactly ONE audit doc.
+      let seenAttempts = 0;
+      hookBag.beforeFinalize = async (attempt: number) => {
+        seenAttempts = attempt;
+        if (attempt === 1) throw new Error("Simulated transient finalization failure");
+      };
+      const okAfterRetry = await call(importStudentRoster, "admin", {
+        fileName: "finalize-retry.csv",
+        rows: [{studentNo: no1, surname: "Final", firstName: "Retry", middleName: "", dateOfBirth: "2004-05-06", college: "College A", course: "BS Course A", yearLevel: "1st Year"}],
+      });
+      if (okAfterRetry.importId) importIds.push(okAfterRetry.importId);
+      assert.equal(seenAttempts, 2);
+      assert.equal(okAfterRetry.status, "complete");
+      assert.deepEqual(okAfterRetry.counts, {new: 1, updated: 0, linked: 0});
+      const auditsRetry = await db.collection("admin_audit_logs").where("targetId", "==", okAfterRetry.importId).get();
+      assert.equal(auditsRetry.size, 1, "finalization retry must never write duplicate audit rows");
+      const recRetry = (await db.doc(`student_roster_imports/${okAfterRetry.importId}`).get()).data()!;
+      assert.equal(recRetry.status, "complete");
+
+      // 2. Persistent finalization failure across all retries -> must throw HttpsError, never return false complete, never log codes.
+      hookBag.beforeFinalize = async () => {
+        throw new Error("Simulated persistent finalization outage");
+      };
+      const beforeImportsSnap = await db.collection("student_roster_imports").where("actorId", "==", uid("admin")).get();
+      const beforeIds = new Set(beforeImportsSnap.docs.map((d) => d.id));
+      await assert.rejects(
+        call(importStudentRoster, "admin", {
+          fileName: "finalize-persistent-fail.csv",
+          rows: [{studentNo: no2, surname: "Final", firstName: "Fail", middleName: "", dateOfBirth: "2004-05-06", college: "College A", course: "BS Course A", yearLevel: "1st Year"}],
+        }),
+        (err: unknown) => err instanceof HttpsError && err.code === "aborted",
+      );
+      const afterImportsSnap = await db.collection("student_roster_imports").where("actorId", "==", uid("admin")).get();
+      const createdImport = afterImportsSnap.docs.find((d) => !beforeIds.has(d.id));
+      assert.ok(createdImport, "import summary record should exist after committed rows");
+      importIds.push(createdImport!.id);
+      const failedSummary = createdImport!.data();
+      assert.notEqual(failedSummary.status, "complete");
+      assert.equal(failedSummary.counts.new, 1);
+      assert.equal(failedSummary.failureCode, "finalization-failed");
+      assert.ok(
+        loggedErrors.some((entry) => JSON.stringify(entry).includes("student_roster_import_finalize_failed")),
+        "expected structured finalization failure log",
+      );
+      assert.doesNotMatch(JSON.stringify(loggedErrors), /[A-Z2-9]{5}-[A-Z2-9]{5}/);
+    } finally {
+      console.error = origError;
+      hookBag.beforeFinalize = undefined;
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        db.doc(`student_roster/${key1}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${key2}`).delete().catch(() => undefined),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3G.1 Test D: expired execution budget before step 0 halts cleanly without writes or codes",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const baseNo = Date.now().toString().slice(-6);
+    const nNew = `${baseNo}51`;
+    const uNo = `${baseNo}52`;
+    const kNew = canonicalLoginId(nNew);
+    const uKey = canonicalLoginId(uNo);
+    const uUid = `${prefix}-3gd-upd-uid`;
+    const apptId = `${prefix}-3gd-appt`;
+    const importIds: string[] = [];
+    const hookBag = rosterTestHooks as {
+      timeBudgetMs?: number;
+      afterStep?: (stepIndex: number) => Promise<void>;
+      onCodeMinted?: (studentNo: string) => void;
+    };
+    const mintedNos: string[] = [];
+    try {
+      await Promise.all([
+        db.doc(`users/${uUid}`).set({
+          accessRole: "appUser",
+          populationRole: "student",
+          collegeId: collegeA,
+          college: "College A",
+          verificationStatus: "verified",
+          schoolId: uNo,
+        }),
+        db.doc(`student_roster/${uKey}`).set({
+          studentNo: uNo,
+          studentKey: uKey,
+          surname: "Upd",
+          surnameNormalized: "upd",
+          firstName: "One",
+          middleName: "",
+          dateOfBirthKey: "2004-05-06",
+          dateOfBirth: Timestamp.fromDate(new Date("2004-05-06T00:00:00Z")),
+          collegeId: collegeA,
+          college: "College A",
+          courseId: courseA,
+          course: "BS Course A",
+          departmentId: deptA,
+          department: "Dept A",
+          yearLevel: "2nd Year",
+          status: "active",
+          activated: true,
+          userId: uUid,
+        }),
+        db.doc(`appointments/${apptId}`).set({
+          userId: uUid,
+          fullName: "Upd One",
+          status: "confirmed",
+          collegeId: collegeA,
+          studentVerificationStatus: "verified",
+          scheduledAt: Timestamp.fromMillis(Date.now() + 86_400_000),
+        }),
+      ]);
+
+      hookBag.timeBudgetMs = 0;
+      hookBag.onCodeMinted = (no) => mintedNos.push(no);
+      const res = await call(importStudentRoster, "admin", {
+        fileName: "expired-before-step0.csv",
+        rows: [
+          {
+            studentNo: nNew,
+            surname: "Zero",
+            firstName: "New",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "1st Year",
+          },
+          {
+            studentNo: uNo,
+            surname: "Upd",
+            firstName: "One",
+            middleName: "",
+            dateOfBirth: "2004-05-06",
+            college: "College B",
+            course: "BS Course B",
+            yearLevel: "3rd Year",
+          },
+        ],
+      });
+      if (res.importId) importIds.push(res.importId);
+
+      assert.equal(res.status, "partial");
+      assert.equal(res.failureCode, "time-budget-exceeded");
+      assert.deepEqual(res.counts, {new: 0, updated: 0, linked: 0});
+      assert.deepEqual(res.codes, []);
+      assert.deepEqual(mintedNos, []);
+      assert.deepEqual(res.failedRows.map((r: {studentNo: string}) => r.studentNo), [nNew, uNo]);
+
+      assert.equal((await db.doc(`student_roster/${kNew}`).get()).exists, false);
+      assert.equal((await db.doc(`users/${uUid}`).get()).data()?.collegeId, collegeA);
+      assert.equal((await db.doc(`appointments/${apptId}`).get()).data()?.collegeId, collegeA);
+
+      const summary = (await db.doc(`student_roster_imports/${res.importId}`).get()).data()!;
+      assert.equal(summary.status, "partial");
+      assert.equal(summary.failureCode, "time-budget-exceeded");
+      assert.deepEqual(summary.counts, {new: 0, updated: 0, linked: 0});
+
+      const audit = (
+        await db.collection("admin_audit_logs").doc(`student_roster_import_${res.importId}`).get()
+      ).data()!;
+      assert.deepEqual(audit.metadata.counts, {new: 0, updated: 0, linked: 0});
+      assert.equal(audit.metadata.partial, true);
+      assert.equal(audit.metadata.failureCode, "time-budget-exceeded");
+    } finally {
+      hookBag.timeBudgetMs = undefined;
+      hookBag.afterStep = undefined;
+      hookBag.onCodeMinted = undefined;
+      await cleanupImportArtifacts(importIds);
+      await Promise.all([
+        db.doc(`student_roster/${kNew}`).delete().catch(() => undefined),
+        db.doc(`student_roster/${uKey}`).delete().catch(() => undefined),
+        db.doc(`users/${uUid}`).delete().catch(() => undefined),
+        db.doc(`appointments/${apptId}`).delete().catch(() => undefined),
+      ]);
+    }
+  },
+);
+
+test(
+  "Step 11.3G.1 Test E: lazy activation code generation mints codes only for executed batches",
+  {skip: !emulated},
+  async () => {
+    await resetMainAssignments();
+    const baseNo = Date.now().toString().slice(-6);
+    const nos = [61, 62, 63, 64].map((suffix) => `${baseNo}${suffix}`);
+    const keys = nos.map((n) => canonicalLoginId(n));
+    const importIds: string[] = [];
+    const hookBag = rosterTestHooks as {
+      batchLimit?: number;
+      timeBudgetMs?: number;
+      afterStep?: (stepIndex: number) => Promise<void>;
+      onCodeMinted?: (studentNo: string) => void;
+    };
+    const mintedNos: string[] = [];
+    const warnLogs: unknown[] = [];
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnLogs.push(args);
+      origWarn(...args);
+    };
+    try {
+      hookBag.batchLimit = 2;
+      hookBag.timeBudgetMs = 60_000;
+      hookBag.onCodeMinted = (no) => mintedNos.push(no);
+      hookBag.afterStep = async (stepIndex) => {
+        if (stepIndex === 0) {
+          hookBag.timeBudgetMs = 0;
+        }
+      };
+
+      const rows = nos.map((studentNo, i) => ({
+        studentNo,
+        surname: `Lazy${i}`,
+        firstName: "Student",
+        middleName: "",
+        dateOfBirth: "2004-05-06",
+        college: "College B",
+        course: "BS Course B",
+        yearLevel: "1st Year",
+      }));
+
+      const res = await call(importStudentRoster, "admin", {fileName: "lazy-codes.csv", rows});
+      if (res.importId) importIds.push(res.importId);
+
+      assert.equal(res.status, "partial");
+      assert.equal(res.failureCode, "time-budget-exceeded");
+      assert.deepEqual(res.counts, {new: 2, updated: 0, linked: 0});
+      assert.deepEqual(res.codes.map((c: {studentNo: string}) => c.studentNo), [nos[0], nos[1]]);
+      assert.deepEqual([...mintedNos].sort(), [nos[0], nos[1]].sort());
+      assert.deepEqual(res.failedRows.map((r: {studentNo: string}) => r.studentNo), [nos[2], nos[3]]);
+
+      const [r0, r1, r2, r3] = await Promise.all(keys.map((k) => db.doc(`student_roster/${k}`).get()));
+      assert.equal(r0.exists, true);
+      assert.equal(r1.exists, true);
+      assert.equal(r2.exists, false);
+      assert.equal(r3.exists, false);
+      assert.equal(await verifyActivationCode(res.codes[0].code, r0.data()!.activationCode), true);
+      assert.equal(await verifyActivationCode(res.codes[1].code, r1.data()!.activationCode), true);
+      assert.doesNotMatch(JSON.stringify(warnLogs), /[A-Z2-9]{5}-[A-Z2-9]{5}/);
+    } finally {
+      console.warn = origWarn;
+      hookBag.batchLimit = undefined;
+      hookBag.timeBudgetMs = undefined;
+      hookBag.afterStep = undefined;
+      hookBag.onCodeMinted = undefined;
+      await cleanupImportArtifacts(importIds);
+      await Promise.all(keys.map((k) => db.doc(`student_roster/${k}`).delete().catch(() => undefined)));
     }
   },
 );
