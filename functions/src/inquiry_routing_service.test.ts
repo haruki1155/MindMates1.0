@@ -372,11 +372,24 @@ test("legacy unrouted and pre-projection routed inquiries are backfilled cleanly
   assert.equal((await notificationsFor(resolved)).length, 0);
   assert.equal((await audit(open, "INQUIRY_ROUTED")).length, 1);
 
-  // Deleting the projection after initial trigger/backfill lets us verify missing-projection repair deterministically.
-  await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${legacyRoutedWithoutProjection}`).delete();
-  const repaired = await call(routeExistingInquiries, "admin", {limit: 100});
+  // Deleting the projection after initial trigger/backfill lets us verify missing-projection repair.
+  // At most two asynchronous creation triggers (notifyPortalOfInquiry + syncInquiryStatusOnWrite)
+  // can race with the delete, so at most three delete-and-backfill attempts are needed.
+  let repaired = {routed: 0, projectionsSynced: 0};
+  for (let attempt = 0; attempt < 3 && repaired.projectionsSynced < 1; attempt++) {
+    await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${legacyRoutedWithoutProjection}`).delete();
+    repaired = await call(routeExistingInquiries, "admin", {limit: 100});
+  }
   assert.ok(repaired.projectionsSynced >= 1);
-  assert.ok((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${legacyRoutedWithoutProjection}`).get()).exists);
+  const repairedProjection = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${legacyRoutedWithoutProjection}`).get()).data();
+  assert.ok(repairedProjection);
+  assert.equal(repairedProjection.inquiryId, legacyRoutedWithoutProjection);
+  assert.equal(repairedProjection.routingStatus, "routed");
+  assert.equal(repairedProjection.collegeId, college("cite"));
+  assert.deepEqual(repairedProjection.assigneeIds, [uid("c1")]);
+  assert.equal(repairedProjection.routingRevision, 1);
+  assert.equal((await db.doc(`inquiries/${resolved}`).get()).data()!.status, "resolved");
+  assert.equal((await notificationsFor(resolved)).length, 0);
 
   const again = await call(routeExistingInquiries, "admin", {limit: 100});
   assert.equal((await audit(open, "INQUIRY_ROUTED")).length, 1);
