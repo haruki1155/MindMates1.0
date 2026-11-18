@@ -686,7 +686,8 @@ class PortalWorkspaceNavigation extends StatelessWidget {
     AdminPortalPage.profiling => isSuperAdmin,
     AdminPortalPage.cases ||
     AdminPortalPage.followUps => accessRole == AccessRole.counselor,
-    AdminPortalPage.reports => accessRole.canAccessClinicalData,
+    AdminPortalPage.reports =>
+      accessRole == AccessRole.counselor || isSuperAdmin,
     AdminPortalPage.academicYear => accessRole == AccessRole.admin,
     // Notifications are opened from the persistent header bell instead of
     // duplicating the destination in the workspace navigation.

@@ -246,13 +246,21 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
     _reloadReport();
   }
 
+  bool get _canAccessReports =>
+      widget.repository.currentAccessRole == AccessRole.counselor ||
+      widget.repository.isSuperAdmin;
+
   @override
   Widget build(BuildContext context) {
-    if (!widget.repository.currentAccessRole.canAccessClinicalData) {
-      return const Center(
+    if (!_canAccessReports) {
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text('Counselor or administrator access is required.'),
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            widget.repository.currentAccessRole == AccessRole.admin
+                ? 'Super-administrator access is required.'
+                : 'Counselor or administrator access is required.',
+          ),
         ),
       );
     }
@@ -281,14 +289,18 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
                     downloading: _downloading,
                     previewing: _previewing,
                     canDownload: readySnapshot,
-                    showImport: _reportType == AdminReportType.appointments,
+                    showImport:
+                        _reportType == AdminReportType.appointments &&
+                        _canAccessReports,
                     onDownload: readySnapshot
                         ? () => _download(snapshot.requireData)
                         : null,
                     onPreview: readySnapshot
                         ? () => _preview(snapshot.requireData)
                         : null,
-                    onImport: _reportType == AdminReportType.appointments
+                    onImport:
+                        _reportType == AdminReportType.appointments &&
+                            _canAccessReports
                         ? _showBulkImport
                         : null,
                   ),
@@ -447,7 +459,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
                 ),
         ),
         if (_reportType == AdminReportType.appointments &&
-            widget.repository.currentAccessRole == AccessRole.admin) ...[
+            widget.repository.isSuperAdmin) ...[
           const SizedBox(height: 26),
           Text('Report setup', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 10),

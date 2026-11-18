@@ -22,6 +22,9 @@ class _FiltersPreviewFakeRepository extends AdminPortalRepository {
   AccessRole get currentAccessRole => AccessRole.admin;
 
   @override
+  bool get isSuperAdmin => true;
+
+  @override
   Future<void> recordAuditEvent({
     required String action,
     required String category,

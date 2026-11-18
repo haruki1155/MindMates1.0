@@ -256,6 +256,7 @@ void main() {
                   page: AdminPortalPage.dashboard,
                   onChanged: (page) => selected = page,
                   accessRole: role,
+                  isSuperAdmin: role == AccessRole.admin,
                 ),
               ),
             ),
@@ -538,7 +539,7 @@ void main() {
           theme: AdminTheme.data,
           home: Scaffold(
             body: ReportGenerationPage(
-              repository: _AcademicYearFakeRepository(),
+              repository: _AcademicYearFakeRepository(superAdmin: true),
             ),
           ),
         ),
