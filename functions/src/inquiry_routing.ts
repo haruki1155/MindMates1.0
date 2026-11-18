@@ -141,14 +141,11 @@ export function planReassignment(input: {
     : [];
   const nextMonitors = requestedMonitoring === undefined ? existingMonitors : sanitizeIdList(requestedMonitoring);
 
-  if (next.length > MAX_INQUIRY_ASSIGNEES || nextMonitors.length > MAX_INQUIRY_ASSIGNEES) {
-    throw new InquiryRoutingError("invalid-assignees", `Choose at most ${MAX_INQUIRY_ASSIGNEES} accounts per role.`);
-  }
-  if (requestedMonitoring === undefined && next.length < 1) {
+  if (next.length < 1 || next.length > MAX_INQUIRY_ASSIGNEES) {
     throw new InquiryRoutingError("invalid-assignees", `Choose between 1 and ${MAX_INQUIRY_ASSIGNEES} counselor accounts.`);
   }
-  if (next.length + nextMonitors.length < 1) {
-    throw new InquiryRoutingError("invalid-assignees", "Choose at least 1 counselor or monitoring staff account.");
+  if (nextMonitors.length > MAX_INQUIRY_ASSIGNEES) {
+    throw new InquiryRoutingError("invalid-assignees", `Choose at most ${MAX_INQUIRY_ASSIGNEES} monitoring staff accounts.`);
   }
 
   const storedRevision = Number.isInteger(inquiry.routingRevision) ? Number(inquiry.routingRevision) : 0;

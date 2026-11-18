@@ -136,6 +136,7 @@ test("reassignment separates clinical counselors and operational monitoring staf
   assert.throws(() => planReassignment({inquiry, requested: ["bad"], candidates, expectedRevision: 2}), code("ineligible-assignee"));
   assert.throws(() => planReassignment({inquiry, requested: ["ghost"], candidates, expectedRevision: 2}), code("ineligible-assignee"));
   assert.throws(() => planReassignment({inquiry, requested: [], candidates, expectedRevision: 2}), code("invalid-assignees"));
+  assert.throws(() => planReassignment({inquiry, requested: [], requestedMonitoring: ["s1"], candidates, expectedRevision: 2}), code("invalid-assignees"));
   assert.throws(() => planReassignment({inquiry, requested: [], requestedMonitoring: [], candidates, expectedRevision: 2}), code("invalid-assignees"));
   assert.throws(() => planReassignment({inquiry, requested: Array.from({length: 11}, (_, i) => `u${i}`), candidates, expectedRevision: 2}), code("invalid-assignees"));
   assert.throws(() => planReassignment({inquiry, requested: ["bad/id"], candidates, expectedRevision: 2}), code("invalid-assignees"));

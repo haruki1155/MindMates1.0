@@ -287,6 +287,7 @@ test("the super-administrator reassigns with revision checks; removed assignees 
   await call(escalateInquiry, "c1", {inquiryId: id, reason: "Needs another college"});
   await rejects(call(reassignInquiry, "c1", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 2, reason: "Coverage change"}), "permission-denied");
   await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("s1")], expectedRevision: 2, reason: "Invalid clinical role"}), "failed-precondition");
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [], monitoringStaffIds: [uid("s1")], expectedRevision: 2, reason: "Monitors only must fail"}), "invalid-argument");
   await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("c2")], expectedRevision: 2, reason: "Invalid monitor role"}), "failed-precondition");
   await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("sus")], expectedRevision: 2, reason: "Coverage change"}), "failed-precondition");
   await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("unv")], expectedRevision: 2, reason: "Coverage change"}), "failed-precondition");
@@ -464,4 +465,60 @@ test("the callable routes unrouted inquiries that sit behind more than 1,000 rou
     assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingStatus, "routed", id);
   }
   await rejects(call(routeExistingInquiries, "admin", {limit: 100, cursor: "bad/cursor"}), "invalid-argument");
+});
+
+test("backfill bounds already-routed missing-projection sync work per invocation, preserves revisions, and finishes cleanly", {skip: !emulated}, async () => {
+  // Explicitly confirm triage inquiry cannot become monitor-only routed while super-admin still resolves it.
+  const triageId = await newInquiry("empty");
+  await routeInquiry(triageId);
+  await rejects(
+    call(reassignInquiry, "admin", {inquiryId: triageId, assigneeIds: [], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Monitor only triage"}),
+    "invalid-argument",
+  );
+  assert.equal((await db.doc(`inquiries/${triageId}`).get()).data()!.routingStatus, "needs_triage");
+  await call(setInquiryStatus, "admin", {inquiryId: triageId, status: "resolved"});
+
+  const legacyPrefix = `${p}-legacy-proj`;
+  const ids = await seedInquiries(legacyPrefix, 155, 150);
+  // Seed revision 4 on one inquiry whose projection is missing to test live revision preservation.
+  await db.doc(`inquiries/${ids[45]}`).update({routingRevision: 4, assigneeIds: [uid("c1")]});
+  const admin = {uid: uid("admin"), name: "Super Admin", role: "admin"};
+
+  let cursor: string | null = legacyPrefix;
+  let calls = 0;
+  let totalSynced = 0;
+  let totalRouted = 0;
+  for (;;) {
+    const result = await routeExistingInquiriesBatch(admin, {limit: 40, cursor, pageSize: 60, maxPages: 2});
+    calls += 1;
+    assert.ok(
+      result.routed + result.projectionsSynced <= 40,
+      `per-invocation mutation work exceeded limit 40: routed=${result.routed}, projectionsSynced=${result.projectionsSynced}`,
+    );
+    totalSynced += result.projectionsSynced;
+    totalRouted += result.routed;
+    if (result.done) {
+      assert.equal(result.nextCursor, null);
+      break;
+    }
+    assert.ok(result.nextCursor);
+    cursor = result.nextCursor;
+    assert.ok(calls < 20, "bounded backfill must terminate");
+  }
+  assert.ok(calls >= 4, "155 missing projections/unrouted docs at limit 40 must span at least 4 invocations");
+  assert.ok(totalSynced >= 150);
+  assert.ok(totalRouted >= 5);
+
+  for (const id of ids) {
+    assert.ok((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).exists, `projection synced for ${id}`);
+  }
+  assert.equal((await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${ids[45]}`).get()).data()!.routingRevision, 4);
+  for (const id of ids.slice(0, 150)) {
+    assert.equal((await notificationsFor(id)).length, 0, `no duplicate notifications for already-routed ${id}`);
+  }
+
+  // Subsequent pass does zero duplicate work.
+  const rerun = await routeExistingInquiriesBatch(admin, {limit: 40, cursor: legacyPrefix, pageSize: 60, maxPages: 2});
+  assert.equal(rerun.routed, 0);
+  assert.equal(rerun.projectionsSynced, 0);
 });

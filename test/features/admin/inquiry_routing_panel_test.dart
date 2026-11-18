@@ -363,6 +363,56 @@ void main() {
     expect(find.byType(AlertDialog), findsOneWidget);
   });
 
+  testWidgets(
+    'reassigning with only monitoring staff and no counselor is disabled in UI',
+    (tester) async {
+      final repo = _Repo(
+        superAdmin: true,
+        role: AccessRole.admin,
+        uid: 'admin',
+      );
+      await _pump(
+        tester,
+        InquiryRoutingPanel(
+          inquiry: _inquiry(
+            extra: {
+              'routingStatus': 'needs_triage',
+              'routingReason': 'no_eligible_staff',
+              'assigneeIds': <String>[],
+              'monitoringStaffIds': <String>[],
+            },
+          ),
+          repository: repo,
+        ),
+      );
+
+      await tester.tap(find.text('Reassign'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Staff Test'));
+      await tester.enterText(find.byType(TextField), 'Monitoring coverage');
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Select at least one eligible counselor to mark this inquiry routed.',
+        ),
+        findsOneWidget,
+      );
+      final saveButton = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Save assignment'),
+      );
+      expect(saveButton.onPressed, isNull);
+      expect(repo.reassignments, isEmpty);
+
+      await tester.tap(find.text('Other Test'));
+      await tester.pumpAndSettle();
+      final enabledSave = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Save assignment'),
+      );
+      expect(enabledSave.onPressed, isNotNull);
+    },
+  );
+
   testWidgets('only the super-administrator sees the backfill action', (
     tester,
   ) async {

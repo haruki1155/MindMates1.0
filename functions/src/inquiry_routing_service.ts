@@ -533,14 +533,18 @@ export async function routeExistingInquiriesBatch(actor: Actor, options: Backfil
         if (!hasProjection.get(inquiry.id)) {
           if (await syncInquiryStatusProjection(inquiry.id)) projectionsSynced += 1;
         }
-        continue;
+      } else {
+        const result = await routeInquiry(inquiry.id, actor);
+        if (!result.alreadyRouted) {
+          routed += 1;
+          if (result.routingStatus === "needs_triage") needsTriage += 1;
+        } else if (!hasProjection.get(inquiry.id)) {
+          projectionsSynced += 1;
+        }
       }
-      const result = await routeInquiry(inquiry.id, actor);
-      if (!result.alreadyRouted) {
-        routed += 1;
-        if (result.routingStatus === "needs_triage") needsTriage += 1;
+      if (routed + projectionsSynced >= limit) {
+        return {routed, needsTriage, projectionsSynced, scanned, nextCursor: cursor, done: false};
       }
-      if (routed >= limit) return {routed, needsTriage, projectionsSynced, scanned, nextCursor: cursor, done: false};
     }
     if (snapshot.size < pageSize) return {routed, needsTriage, projectionsSynced, scanned, nextCursor: null, done: true};
   }

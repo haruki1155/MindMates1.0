@@ -325,6 +325,13 @@ class _ReassignDialogState extends State<_ReassignDialog> {
         _selectedCounselors.where(validCounselorIds.contains).toList()..sort();
     final nextMonitors =
         _selectedMonitors.where(validMonitorIds.contains).toList()..sort();
+    if (nextCounselors.isEmpty) {
+      setState(
+        () => _error =
+            'Select at least one eligible counselor to mark this inquiry routed.',
+      );
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -360,10 +367,9 @@ class _ReassignDialogState extends State<_ReassignDialog> {
       final monitors = allUsers.where(_eligibleMonitor).toList()
         ..sort((a, b) => a.displayName.compareTo(b.displayName));
       final validCounselorIds = {for (final c in counselors) c.id};
-      final validMonitorIds = {for (final m in monitors) m.id};
-      final hasAnyAssignee =
-          _selectedCounselors.any(validCounselorIds.contains) ||
-          _selectedMonitors.any(validMonitorIds.contains);
+      final hasSelectedCounselor = _selectedCounselors.any(
+        validCounselorIds.contains,
+      );
       return AlertDialog(
         title: const Text('Reassign inquiry'),
         content: SizedBox(
@@ -435,6 +441,16 @@ class _ReassignDialogState extends State<_ReassignDialog> {
                                   ),
                           ),
                       ],
+                      if (!hasSelectedCounselor) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Select at least one eligible counselor to mark this inquiry routed.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
                       TextField(
                         controller: _reason,
                         enabled: !_busy,
@@ -465,7 +481,7 @@ class _ReassignDialogState extends State<_ReassignDialog> {
             onPressed:
                 !_busy &&
                     snapshot.hasData &&
-                    hasAnyAssignee &&
+                    hasSelectedCounselor &&
                     _reason.text.trim().length >= 3
                 ? () => _save(counselors, monitors)
                 : null,
