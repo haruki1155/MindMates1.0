@@ -10,6 +10,7 @@ import {
   AuthState,
   decideApprovalAuthority,
   decideApprovalScope,
+  isEligibleCounselor,
 } from "./appointment_approval";
 import {canonicalAppointmentStatus} from "./appointment_lifecycle";
 
@@ -76,11 +77,13 @@ function decideFromInputs(
   }
 }
 
-async function collegeCounselors(collegeId: string, cache?: Map<string, Promise<Array<{profile: Record<string, unknown>; auth: AuthState}>>>) {
+export type CollegeCounselorRecord = {uid: string; profile: Record<string, unknown>; auth: AuthState};
+
+async function collegeCounselors(collegeId: string, cache?: Map<string, Promise<CollegeCounselorRecord[]>>) {
   const load = async () => {
     const assigned = await db().collection("users").where("assignedCollegeIds", "array-contains", collegeId).get();
     const auth = await authStates(assigned.docs.map((d) => d.id));
-    return assigned.docs.map((d) => ({profile: d.data(), auth: auth.get(d.id) ?? null}));
+    return assigned.docs.map((d) => ({uid: d.id, profile: d.data(), auth: auth.get(d.id) ?? null}));
   };
   if (!cache) return load();
   if (!cache.has(collegeId)) cache.set(collegeId, load());
@@ -90,7 +93,7 @@ async function collegeCounselors(collegeId: string, cache?: Map<string, Promise<
 /** Scope of a student's appointments: college-approvable or administrative exception. */
 export async function resolveApprovalScope(
   studentId: string,
-  cache?: Map<string, Promise<Array<{profile: Record<string, unknown>; auth: AuthState}>>>,
+  cache?: Map<string, Promise<CollegeCounselorRecord[]>>,
 ): Promise<ApprovalScope> {
   const student = ID.test(studentId) ? await db().collection("users").doc(studentId).get() : null;
   const data = student?.exists ? student.data() ?? {} : null;
@@ -98,6 +101,44 @@ export async function resolveApprovalScope(
   const collegeExists = ID.test(collegeId) ? (await db().collection("colleges").doc(collegeId).get()).exists : false;
   const counselors = collegeExists && data?.verificationStatus === "verified" ? await collegeCounselors(collegeId, cache) : [];
   return decideApprovalScope({student: data, collegeExists, counselors});
+}
+
+/**
+ * Authorized portal notification recipients for a student's appointment:
+ * eligible counselors serving the student's verified college, or the
+ * configured active, verified super-administrator when the appointment is in
+ * the administrative exception scope. Never returns portalStaff or other
+ * colleges' counselors.
+ */
+export async function appointmentPortalRecipients(studentId: string): Promise<string[]> {
+  const cache = new Map<string, Promise<Array<{uid: string; profile: Record<string, unknown>; auth: AuthState}>>>();
+  const scope = await resolveApprovalScope(studentId, cache);
+  if (scope.scope === "college") {
+    const counselors = await collegeCounselors(scope.collegeId, cache);
+    return counselors
+      .filter(({profile, auth}) =>
+        Array.isArray(profile.assignedCollegeIds) &&
+        profile.assignedCollegeIds.includes(scope.collegeId) &&
+        isEligibleCounselor(profile, auth),
+      )
+      .map(({uid}) => uid);
+  }
+  const adminUid = superAdminUid();
+  if (!ID.test(adminUid)) return [];
+  const [adminSnap, auth] = await Promise.all([
+    db().collection("users").doc(adminUid).get(),
+    authStates([adminUid]),
+  ]);
+  const adminData = adminSnap.data();
+  const adminAuth = auth.get(adminUid);
+  const legacyRole = String(adminData?.role ?? "").toLowerCase();
+  const accessRole = String(adminData?.accessRole ?? (legacyRole === "admin" ? "admin" : ""));
+  const accountStatus = adminData?.accountStatus == null ? "active" : String(adminData.accountStatus);
+  if (!adminSnap.exists || accessRole !== "admin" || accountStatus !== "active" ||
+      !adminAuth || adminAuth.disabled || !adminAuth.emailVerified) {
+    return [];
+  }
+  return [adminUid];
 }
 
 /**
@@ -231,7 +272,7 @@ export async function listAppointmentApprovalsBatch(
   const maxPages = Math.min(Math.max(Math.trunc(options.maxPages ?? 5), 1), 10);
 
   const served = Array.isArray(actor.assignedCollegeIds) ? actor.assignedCollegeIds as string[] : [];
-  const cache = new Map<string, Promise<Array<{profile: Record<string, unknown>; auth: AuthState}>>>();
+  const cache = new Map<string, Promise<CollegeCounselorRecord[]>>();
   const scopes = new Map<string, Promise<ApprovalScope>>();
   const seen = new Set<string>();
   const items: Array<Record<string, unknown>> = [];

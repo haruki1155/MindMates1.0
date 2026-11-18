@@ -7,7 +7,7 @@ import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_po
 import {boundedText} from "./appointment_intake";
 import {AUDIT_CATEGORIES, writeAudit} from "./audit";
 import {canonicalAppointmentStatus} from "./appointment_lifecycle";
-import {approvalHistoryFields, approvalMetadata} from "./appointment_approval_service";
+import {approvalHistoryFields, approvalMetadata, appointmentPortalRecipients} from "./appointment_approval_service";
 import type {ApprovalAuthority} from "./appointment_approval";
 
 // The staff side is authorised per appointment (college-scoped approval).
@@ -42,7 +42,7 @@ export async function handleAppointmentAgreement(
   const actor = isStudent ? undefined : await authorizeStaff(uid, opened, input);
   const authority = actor?.approvalAuthority as ApprovalAuthority | undefined;
   if (action === "cancel" && !isStudent) throw new HttpsError("permission-denied", "Only the student can use this cancellation action.");
-  const recipients = isStudent ? (await db.collection("users").where("accessRole", "in", ["portalStaff", "admin", "counselor"]).get()).docs.map(d => d.id) : [owner];
+  const recipients = isStudent ? await appointmentPortalRecipients(owner) : [owner];
   const fingerprint = createHash("sha256").update(JSON.stringify([uid, action, expected, expectedRevision, expectedProposal, proposed?.millis ?? null, reason])).digest("hex");
   return db.runTransaction(async tx => {
     const replay = ref.collection("agreement_requests").doc(requestId);
