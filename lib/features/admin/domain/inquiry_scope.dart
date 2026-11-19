@@ -1,25 +1,37 @@
 import '../../../models/admin_inquiry_model.dart';
 import '../../../models/profile_roles.dart';
 
-/// Which inquiries a signed-in portal user should see.
+/// Defensive client-side mirror of the Firestore inquiry and operational
+/// status projection rules.
 ///
-/// No server component assigns `assignedStaffId` on inquiries yet, so a
-/// counselor must see the shared unassigned pool plus anything explicitly
-/// assigned to them. Hiding the unassigned pool behind an equality filter on
-/// a never-written field made every counselor inbox look empty while the
-/// administrator view showed the same records. Firestore rules already permit
-/// approved portal accounts to read inquiries; this only narrows the UI.
+/// Raw `inquiries` are scoped exclusively to assigned active verified
+/// counselors (`assigneeIds`) and the super-administrator. Operational
+/// `portalStaff` receive ONLY sanitized `inquiry_statuses` projections scoped
+/// by explicit `monitoringStaffIds` (never raw `inquiries`).
 List<AdminInquiryModel> scopeInquiriesForRole(
   List<AdminInquiryModel> items, {
   required AccessRole role,
   required String? uid,
+  required bool isSuperAdmin,
 }) {
-  if (role != AccessRole.counselor) return items;
-  return items
-      .where(
-        (item) =>
-            item.assignedStaffId == null ||
-            (uid != null && item.assignedStaffId == uid),
-      )
-      .toList();
+  if (isSuperAdmin) return items;
+  if (uid == null) return const [];
+  if (role == AccessRole.counselor) {
+    return items
+        .where(
+          (item) =>
+              !item.isOperationalProjection && item.assigneeIds.contains(uid),
+        )
+        .toList();
+  }
+  if (role == AccessRole.portalStaff) {
+    return items
+        .where(
+          (item) =>
+              item.isOperationalProjection &&
+              item.monitoringStaffIds.contains(uid),
+        )
+        .toList();
+  }
+  return const [];
 }

@@ -56,7 +56,7 @@ const accounts: Record<string, {verified: boolean; profile: Record<string, unkno
   counselor: {verified: true, profile: {accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: ["cite"]}},
   "unassigned-counselor": {verified: true, profile: {accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: []}},
   staff: {verified: true, profile: {accessRole: "portalStaff", staffAccountStatus: "approved", accountStatus: "active"}},
-  student: {verified: true, profile: {accessRole: "appUser", role: "student", accountStatus: "active", collegeId: "cite"}},
+  student: {verified: true, profile: {accessRole: "appUser", role: "student", accountStatus: "active", collegeId: "cite", verificationStatus: "verified"}},
 };
 
 const allDepartments = [
@@ -127,8 +127,9 @@ test("only active verified admins manage years; only configured super-admin can 
     await rejects(as(savePop, actor, {schoolYear: "2026-2027", populations: {}}), "permission-denied");
     await rejects(as(voidYear, actor, {schoolYear: "2028-2029"}), "permission-denied");
   }
-  // Regular active admin cannot void academic years (super-admin only).
+  // Regular active admin cannot void academic years or view clinical report analytics (super-admin only).
   await rejects(as(voidYear, "admin", {schoolYear: "2028-2029", confirmation: "VOID 2028-2029", reason: "Not super admin", expectedRevision: 0}), "permission-denied");
+  await rejects(as(fetchReport, "admin", {schoolYear: "2026-2027"}), "permission-denied");
 
   await rejects(listYears.run({}), "unauthenticated");
   await rejects(createYear.run({data: {schoolYear: "2026-2027"}}), "unauthenticated");

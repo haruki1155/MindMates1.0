@@ -1,18 +1,99 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/admin/domain/session_evidence.dart';
 import 'package:mind_mates/features/admin/screens/admin_portal.dart';
 import 'package:mind_mates/models/appointment_model.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/repositories/admin_portal_repository.dart';
 import 'package:mind_mates/repositories/appointment_repository.dart';
 
 class _Repository extends AdminPortalRepository {
-  _Repository(this.records);
+  _Repository(
+    this.records, {
+    this.role = AccessRole.appUser,
+    this.superAdmin = false,
+    this.uid,
+  });
 
   final List<AppointmentModel> records;
+  final AccessRole role;
+  final bool superAdmin;
+  final String? uid;
   String? agreementAction;
   int? agreementRevision;
+  bool uploadCalled = false;
+  Map<String, Object?>? reviewedSubmission;
+
   @override
-  Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId) async { agreementAction = action; agreementRevision = appointment.proposalRevision; }
+  AccessRole get currentAccessRole => role;
+
+  @override
+  bool get isSuperAdmin => superAdmin;
+
+  @override
+  String? get currentUserId => uid;
+
+  @override
+  Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId, {String? exceptionReason}) async { agreementAction = action; agreementRevision = appointment.proposalRevision; }
+
+  @override
+  Future<List<SessionEvidenceAttachment>> uploadClinicalEvidenceFiles({
+    required String appointmentId,
+    required List<PendingSessionEvidenceFile> files,
+  }) async {
+    uploadCalled = true;
+    return super.uploadClinicalEvidenceFiles(
+      appointmentId: appointmentId,
+      files: files,
+    );
+  }
+
+  @override
+  Future<void> reviewAppointment({
+    required String appointmentId,
+    required String action,
+    required String reply,
+    int? expectedScheduledAt,
+    required int expectedScheduleRevision,
+    int expectedProposalRevision = 0,
+    required String expectedStatus,
+    DateTime? proposedScheduledAt,
+    String? proposedScheduledTime,
+    String? rescheduleReason,
+    String? sessionSummary,
+    List<SessionEvidenceAttachment> attachments = const [],
+    bool offerFollowUp = false,
+    String? followUpMessage,
+    String? exceptionReason,
+  }) async {
+    reviewedSubmission = {
+      'appointmentId': appointmentId,
+      'action': action,
+      'sessionSummary': sessionSummary,
+      'attachments': attachments,
+      'offerFollowUp': offerFollowUp,
+      'followUpMessage': followUpMessage,
+      'exceptionReason': exceptionReason,
+    };
+  }
+
+  @override
+  Future<SessionEvidenceRecord?> getClinicalSessionEvidence(
+    String appointmentId,
+  ) async => const SessionEvidenceRecord(
+    summary: 'Existing summary',
+    attachments: [
+      SessionEvidenceAttachment(
+        path:
+            'counseling_session_files/apt/counselor/0123456789abcdef0123456789abcdef.pdf',
+        name: 'Existing worksheet.pdf',
+        contentType: 'application/pdf',
+        size: 1024,
+      ),
+    ],
+  );
 
   @override
   Stream<List<AppointmentModel>> watchAppointments() => Stream.value(records);
@@ -37,7 +118,8 @@ void main() {
     );
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: AdminAppointmentsPage(
-        repository: _Repository([record]), onOpenAssessments: null,
+        repository: _Repository([record], role: AccessRole.counselor),
+        onOpenAssessments: null,
       )),
     ));
     await tester.pumpAndSettle();
@@ -190,6 +272,231 @@ void main() {
 
       expect(find.text('Available times'), findsOneWidget);
       expect(find.text('e.g. 2:00 PM'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'super-admin disables attachment upload while preserving summary, follow-up, and attachment viewing',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final confirmed = _appointment(
+        'confirmed',
+        DateTime.now().subtract(const Duration(days: 1)),
+        'Triage Student',
+      ).copyWith(hasScheduleRevision: true);
+      final completed = _appointment(
+        'completed',
+        DateTime.now().subtract(const Duration(days: 2)),
+        'Completed Student',
+      );
+      final repo = _Repository(
+        [confirmed, completed],
+        role: AccessRole.admin,
+        superAdmin: true,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: repo,
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Session summary (internal)'), findsOneWidget);
+      expect(find.text('Offer a follow-up session'), findsOneWidget);
+      expect(
+        find.text(
+          'Session attachments can only be uploaded by an assigned college counselor.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Add images / documents'), findsNothing);
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Session summary (internal)'),
+        'Super-admin triage summary',
+      );
+      await tester.tap(find.text('Offer a follow-up session'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Client message'),
+        'Follow-up check-in',
+      );
+      await tester.tap(find.text('Send decision'));
+      await tester.pumpAndSettle();
+
+      expect(repo.uploadCalled, isFalse);
+      expect(repo.reviewedSubmission?['action'], 'completed');
+      expect(
+        repo.reviewedSubmission?['sessionSummary'],
+        'Super-admin triage summary',
+      );
+      expect(repo.reviewedSubmission?['offerFollowUp'], isTrue);
+      expect(
+        repo.reviewedSubmission?['followUpMessage'],
+        'Follow-up check-in',
+      );
+      expect(repo.reviewedSubmission?['attachments'], isEmpty);
+
+      await tester.ensureVisible(find.text('Completed 1'));
+      await tester.tap(find.text('Completed 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('View'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('View session documentation'));
+      await tester.pumpAndSettle();
+      expect(find.text('Existing summary'), findsOneWidget);
+      expect(find.text('Existing worksheet.pdf'), findsOneWidget);
+      expect(find.byTooltip('Download Existing worksheet.pdf'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'counselor session completion keeps clinical attachment upload enabled',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final record = _appointment(
+        'confirmed',
+        DateTime.now().subtract(const Duration(days: 1)),
+        'Counselor Student',
+      );
+      final repo = _Repository(
+        [record],
+        role: AccessRole.counselor,
+        superAdmin: false,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: repo,
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Session summary (internal)'), findsOneWidget);
+      expect(find.text('Session attachments'), findsOneWidget);
+      expect(find.text('Add images / documents'), findsOneWidget);
+    },
+  );
+
+  for (final roleCase in const [
+    (label: 'ordinary admin', role: AccessRole.admin, superAdmin: false),
+    (
+      label: 'PACC operational staff',
+      role: AccessRole.portalStaff,
+      superAdmin: false,
+    ),
+  ]) {
+    testWidgets(
+      '${roleCase.label} does not see attachment upload control while preserving summary and follow-up',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(1440, 1200));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final record = _appointment(
+          'confirmed',
+          DateTime.now().subtract(const Duration(days: 1)),
+          'Scoped Student',
+        );
+        final repo = _Repository(
+          [record],
+          role: roleCase.role,
+          superAdmin: roleCase.superAdmin,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: AdminAppointmentsPage(
+                repository: repo,
+                onOpenAssessments: null,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Review'));
+        await tester.pumpAndSettle();
+        expect(find.text('Session summary (internal)'), findsOneWidget);
+        expect(find.text('Offer a follow-up session'), findsOneWidget);
+        expect(
+          find.text(
+            'Session attachments can only be uploaded by an assigned college counselor.',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Add images / documents'), findsNothing);
+      },
+    );
+  }
+
+  test(
+    'AdminPortalRepository restricts clinical attachment uploads to authenticated counselors',
+    () async {
+      final adminRepo = AdminPortalRepository();
+      final file = PendingSessionEvidenceFile(
+        name: 'notes.pdf',
+        contentType: 'application/pdf',
+        bytes: Uint8List.fromList([1, 2, 3]),
+      );
+
+      for (final unauthorized in [
+        _Repository(const [], role: AccessRole.admin, superAdmin: true),
+        _Repository(const [], role: AccessRole.admin, superAdmin: false),
+        _Repository(const [], role: AccessRole.portalStaff, superAdmin: false),
+        _Repository(const [], role: AccessRole.appUser, superAdmin: false),
+      ]) {
+        expect(
+          () => unauthorized.uploadClinicalEvidenceFiles(
+            appointmentId: 'apt-1',
+            files: [file],
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              'Clinical session attachment uploads are restricted to assigned college counselors.',
+            ),
+          ),
+        );
+      }
+
+      final unauthenticatedCounselor = _Repository(
+        const [],
+        role: AccessRole.counselor,
+        superAdmin: false,
+        uid: null,
+      );
+      expect(
+        () => unauthenticatedCounselor.uploadClinicalEvidenceFiles(
+          appointmentId: 'apt-1',
+          files: [file],
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            'Sign in again to upload attachments.',
+          ),
+        ),
+      );
+      expect(adminRepo.isSuperAdmin, isFalse);
     },
   );
 }

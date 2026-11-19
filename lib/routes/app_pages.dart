@@ -10,6 +10,7 @@ import '../features/authentication/screens/email_verification_screen.dart';
 import '../features/authentication/screens/profile_setup_screen.dart';
 import '../features/breathing/screens/mindful_breathing_screen.dart';
 import '../features/counseling/screens/services_screen.dart';
+import '../features/counseling/screens/student_inquiries_screen.dart';
 import '../features/home/screens/home_screen.dart';
 import '../features/home/screens/home_appointment_calendar_screen.dart';
 import '../features/mood/screens/log_mood_screen.dart';
@@ -57,6 +58,7 @@ class AppPages {
     RouteNames.appointmentCalendar: (_) =>
         const HomeAppointmentCalendarScreen(),
     RouteNames.services: (_) => const ServicesScreen(),
+    RouteNames.myInquiries: (_) => const MyInquiriesScreen(),
     RouteNames.mindAid: (_) => const MindAidPage(),
     RouteNames.secretChat: (_) => const SecretChatPage(),
     RouteNames.secretChatProfile: (_) => const SecretChatProfileScreen(),

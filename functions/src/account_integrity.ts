@@ -5,6 +5,10 @@ import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {canonicalLoginId} from "./account_recovery";
+import {
+  applyStudentAppointmentsCollegeScopeInTransaction,
+  readStudentAppointmentsForScopeSyncInTransaction,
+} from "./appointment_approval_service";
 
 if (!getApps().length) initializeApp();
 
@@ -393,7 +397,10 @@ export const repairMyStudentCollege = onCall(
     );
 
     await db.runTransaction(async (transaction) => {
-      const current = await transaction.get(ref);
+      const [current, apptsSnap] = await Promise.all([
+        transaction.get(ref),
+        readStudentAppointmentsForScopeSyncInTransaction(transaction, uid),
+      ]);
       const currentData = current.data() ?? {};
 
       if (!current.exists ||
@@ -414,6 +421,7 @@ export const repairMyStudentCollege = onCall(
         );
       }
 
+      await applyStudentAppointmentsCollegeScopeInTransaction(transaction, apptsSnap, collegeId, "verified", {reservedWrites: 1});
       if (!existing) {
         transaction.update(ref, {
           collegeId,
@@ -448,7 +456,10 @@ export const repairMyStudentCollegeDev = onCall(
     );
 
     await db.runTransaction(async (transaction) => {
-      const current = await transaction.get(ref);
+      const [current, apptsSnap] = await Promise.all([
+        transaction.get(ref),
+        readStudentAppointmentsForScopeSyncInTransaction(transaction, uid),
+      ]);
       const currentData = current.data() ?? {};
       if (!current.exists ||
           currentData.populationRole !== "student" ||
@@ -468,6 +479,7 @@ export const repairMyStudentCollegeDev = onCall(
         );
       }
 
+      await applyStudentAppointmentsCollegeScopeInTransaction(transaction, apptsSnap, collegeId, "verified", {reservedWrites: 1});
       if (!existing) {
         transaction.update(ref, {
           collegeId,

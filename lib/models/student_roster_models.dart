@@ -149,6 +149,27 @@ class LegacyStudent {
   }
 }
 
+enum RosterImportHistoryStatus {
+  complete,
+  partial,
+  pending,
+  unknown;
+
+  static RosterImportHistoryStatus parse(Object? value) => switch (value) {
+    'complete' => RosterImportHistoryStatus.complete,
+    'partial' => RosterImportHistoryStatus.partial,
+    'pending' => RosterImportHistoryStatus.pending,
+    _ => RosterImportHistoryStatus.unknown,
+  };
+}
+
+int? _optionalNonNegativeInt(Object? value) {
+  if (value is num && value.isFinite && value >= 0) {
+    return value.toInt();
+  }
+  return null;
+}
+
 class RosterImportRecord {
   const RosterImportRecord({
     required this.id,
@@ -156,6 +177,10 @@ class RosterImportRecord {
     required this.counts,
     required this.importedByName,
     required this.importedAt,
+    this.status = RosterImportHistoryStatus.unknown,
+    this.failureCode,
+    this.rowCount,
+    this.failedRowCount,
   });
 
   final String id;
@@ -165,15 +190,29 @@ class RosterImportRecord {
   final Map<String, int> counts;
   final String importedByName;
   final DateTime importedAt;
+  final RosterImportHistoryStatus status;
+  final String? failureCode;
+  final int? rowCount;
+  final int? failedRowCount;
+
+  bool get needsAttention =>
+      status == RosterImportHistoryStatus.pending ||
+      failureCode == 'finalization-failed';
 
   factory RosterImportRecord.fromJson(Map<Object?, Object?> json) {
     final map = asStringMap(json);
+    final rawCode = map['failureCode'];
+    final code = rawCode is String ? rawCode.trim() : '';
     return RosterImportRecord(
       id: asText(map['id']),
       fileName: asText(map['fileName']),
       counts: intMap(map['counts']),
       importedByName: asText(map['importedByName']),
       importedAt: parseIso(map['importedAt']),
+      status: RosterImportHistoryStatus.parse(map['status']),
+      failureCode: code.isEmpty ? null : code,
+      rowCount: _optionalNonNegativeInt(map['rowCount']),
+      failedRowCount: _optionalNonNegativeInt(map['failedRowCount']),
     );
   }
 }

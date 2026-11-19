@@ -6,6 +6,7 @@ class FirestoreCollections {
   static const roleCorrectionRequests = 'role_correction_requests';
   static const roleAuditLogs = 'role_audit_logs';
   static const adminAuditLogs = 'admin_audit_logs';
+  static const backupJobs = 'backup_jobs';
   static const colleges = 'colleges';
   static const departments = 'departments';
   static const courses = 'courses';
@@ -21,6 +22,7 @@ class FirestoreCollections {
   static const analyticsDaily = 'analytics_daily';
   static const analyticsEvents = '_analytics_events';
   static const inquiries = 'inquiries';
+  static const inquiryStatuses = 'inquiry_statuses';
   static const paccAvailability = 'pacc_availability';
   static const recommendations = 'recommendations';
   static const reports = 'reports';

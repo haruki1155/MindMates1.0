@@ -15,7 +15,7 @@ export class CaseHistoryError extends Error {
   }
 }
 
-export type CaseHistoryBasis = "super_admin" | "college" | "assigned";
+export type CaseHistoryBasis = "super_admin" | "college";
 
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 50;
@@ -43,10 +43,10 @@ export function decideCaseHistoryAccess(input: {
   actor: Doc;
   superAdminUid: string;
   target: Doc | null;
-  /** Whether any of the student's appointments has assignedStaffId == actorId. */
-  assignedToActor: boolean;
+  /** Deprecated: legacy assignment flag is no longer sufficient without current college assignment. */
+  assignedToActor?: boolean;
 }): CaseHistoryBasis {
-  const {actorId, actor, superAdminUid, target, assignedToActor} = input;
+  const {actorId, actor, superAdminUid, target} = input;
   const isSuperAdmin = superAdminUid !== "" && actorId === superAdminUid && text(actor.accessRole) === "admin";
   if (isSuperAdmin) {
     if (!target) throw new CaseHistoryError("not-found", "Student not found.");
@@ -61,7 +61,6 @@ export function decideCaseHistoryAccess(input: {
   const collegeId = text(target.collegeId);
   const served = Array.isArray(actor.assignedCollegeIds) ? actor.assignedCollegeIds : [];
   if (target.verificationStatus === "verified" && collegeId !== "" && served.includes(collegeId)) return "college";
-  if (assignedToActor) return "assigned";
   throw new CaseHistoryError("permission-denied", NOT_AUTHORIZED);
 }
 

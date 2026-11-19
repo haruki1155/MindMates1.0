@@ -142,9 +142,9 @@ test("a stale update conflicts and changes nothing", {skip: !emulated}, async ()
   assert.equal((await remarkAudits("ana-history", "CASE_REMARKS_UPDATED")).length, auditsBefore);
 });
 
-test("a counselor assigned to one of the student's cases may use remarks on that student's cases only", {skip: !emulated}, async () => {
-  const view = await as(getRemarks, "case-counselor", {appointmentId: id("ana-done")});
-  assert.equal(view.text, "SECRET REMARK TEXT");
+test("a counselor assigned to a case without current college assignment cannot read or write remarks", {skip: !emulated}, async () => {
+  await rejects(as(getRemarks, "case-counselor", {appointmentId: id("ana-done")}), "permission-denied");
+  await rejects(as(saveRemarks, "case-counselor", {appointmentId: id("ana-done"), text: "Unauthorized", expectedRevision: 1}), "permission-denied");
   await rejects(as(getRemarks, "case-counselor", {appointmentId: id("bea-open")}), "permission-denied");
 });
 

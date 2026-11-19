@@ -21,6 +21,9 @@ class _EmotionalReportFakeRepository extends AdminPortalRepository {
   AccessRole get currentAccessRole => role;
 
   @override
+  bool get isSuperAdmin => role == AccessRole.admin;
+
+  @override
   Future<AdminReportAnalytics> fetchEmotionalReportAnalytics({
     String userCategory = 'all',
     String appointmentDepartment = 'all',

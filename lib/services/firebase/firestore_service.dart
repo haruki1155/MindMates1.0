@@ -97,6 +97,8 @@ class FirestoreService {
   Stream<List<Map<String, dynamic>>> watchDocuments(
     String collection, {
     Map<String, Object?> whereEquals = const {},
+    Map<String, Object?> whereArrayContains = const {},
+    Map<String, List<Object?>> whereIn = const {},
     String? orderBy,
     bool descending = true,
     int? limit,
@@ -105,6 +107,12 @@ class FirestoreService {
 
     for (final entry in whereEquals.entries) {
       query = query.where(entry.key, isEqualTo: entry.value);
+    }
+    for (final entry in whereArrayContains.entries) {
+      query = query.where(entry.key, arrayContains: entry.value);
+    }
+    for (final entry in whereIn.entries) {
+      query = query.where(entry.key, whereIn: entry.value);
     }
 
     if (orderBy != null) {

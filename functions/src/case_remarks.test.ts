@@ -52,9 +52,10 @@ test("the expected revision must be a non-negative integer", () => {
   }
 });
 
-test("a counselor for the student's verified college, or assigned to one of the student's cases, may use remarks", () => {
+test("only a counselor for the student's verified college may use remarks; assignedToActor without current college is refused", () => {
   assert.equal(decide({}), "college");
-  assert.equal(decide({actor: counselor([]), assignedToActor: true}), "assigned");
+  rejects(() => decide({actor: counselor([]), assignedToActor: true}), "permission-denied");
+  rejects(() => decide({actor: counselor(["cas"]), assignedToActor: true}), "permission-denied");
 });
 
 test("the super-administrator, other admins, other-college counselors and staff targets are refused", () => {

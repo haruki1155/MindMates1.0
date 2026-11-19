@@ -20,6 +20,7 @@ class RouteNames {
   static const home = '/home';
   static const appointmentCalendar = '/home/appointment-calendar';
   static const services = '/services';
+  static const myInquiries = '/services/my-inquiries';
   static const mindAid = '/mind-aid';
   static const secretChat = '/secret-chat';
   static const secretChatProfile = '/secret-chat/profile';

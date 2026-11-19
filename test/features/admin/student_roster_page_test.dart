@@ -65,6 +65,9 @@ class _Repo extends StudentRosterRepository {
   List<StudentCorrection> corrections = [];
   RosterImportResult? Function(int callIndex)? commitOverride;
   Future<void> Function(int callIndex)? beforeCommit;
+  List<RosterImportRecord>? importsOverride;
+  Object? importsError;
+  Future<void>? importsDelay;
   var _commitCalls = 0;
   var _codeSeq = 0;
   Map<String, String>? lastUpdateFields;
@@ -215,15 +218,20 @@ class _Repo extends StudentRosterRepository {
   }
 
   @override
-  Future<List<RosterImportRecord>> listImports() async => [
-    RosterImportRecord(
-      id: 'i1',
-      fileName: 'registrar_2026.xlsx',
-      counts: const {'new': 5, 'updated': 2, 'linked': 1},
-      importedByName: 'Admin A',
-      importedAt: DateTime.utc(2026, 11, 1, 8),
-    ),
-  ];
+  Future<List<RosterImportRecord>> listImports() async {
+    if (importsDelay != null) await importsDelay;
+    if (importsError != null) throw importsError!;
+    return importsOverride ??
+        [
+          RosterImportRecord(
+            id: 'i1',
+            fileName: 'registrar_2026.xlsx',
+            counts: const {'new': 5, 'updated': 2, 'linked': 1},
+            importedByName: 'Admin A',
+            importedAt: DateTime.utc(2026, 11, 1, 8),
+          ),
+        ];
+  }
 
   @override
   Future<List<LegacyStudent>> listLegacyNotInRoster() async => const [
@@ -809,4 +817,155 @@ void main() {
     expect(find.text('Old Timer'), findsOneWidget);
     expect(find.text('2019-777'), findsOneWidget);
   });
+
+  testWidgets(
+    'import history renders complete, partial, pending, finalization-failed, legacy, empty, loading, and error states safely',
+    (tester) async {
+      final gate = Completer<void>();
+      final loadingRepo = _Repo()..importsDelay = gate.future;
+      await _pump(tester, loadingRepo);
+      await tester.tap(find.text('Import history'));
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      gate.complete();
+      await tester.pumpAndSettle();
+
+      final emptyRepo = _Repo()..importsOverride = const [];
+      await tester.pumpWidget(const SizedBox());
+      await _pump(tester, emptyRepo);
+      await _openTab(tester, 'Import history');
+      expect(find.text('No imports yet.'), findsOneWidget);
+
+      final errRepo = _Repo()
+        ..importsError = FirebaseFunctionsException(
+          message: 'History unavailable right now.',
+          code: 'unavailable',
+        );
+      await tester.pumpWidget(const SizedBox());
+      await _pump(tester, errRepo);
+      await _openTab(tester, 'Import history');
+      expect(find.text('History unavailable right now.'), findsOneWidget);
+
+      final repo = _Repo()
+        ..importsOverride = [
+          RosterImportRecord(
+            id: 'c1',
+            fileName: 'done.xlsx',
+            status: RosterImportHistoryStatus.complete,
+            rowCount: 15,
+            failedRowCount: 0,
+            counts: const {'new': 10, 'updated': 3, 'linked': 2},
+            importedByName: 'Admin A',
+            importedAt: DateTime.utc(2026, 11, 2, 8),
+          ),
+          RosterImportRecord(
+            id: 'p1',
+            fileName: 'part.xlsx',
+            status: RosterImportHistoryStatus.partial,
+            rowCount: 12,
+            failedRowCount: 4,
+            failureCode: 'time-budget-exceeded',
+            counts: const {'new': 6, 'updated': 2, 'linked': 0},
+            importedByName: 'Admin B',
+            importedAt: DateTime.utc(2026, 11, 2, 9),
+          ),
+          RosterImportRecord(
+            id: 'u1',
+            fileName: 'crashed.xlsx',
+            status: RosterImportHistoryStatus.pending,
+            rowCount: 30,
+            counts: const {'new': 0, 'updated': 0, 'linked': 0},
+            importedByName: 'Admin C',
+            importedAt: DateTime.utc(2026, 11, 2, 10),
+          ),
+          RosterImportRecord(
+            id: 'f1',
+            fileName: 'finfail.xlsx',
+            status: RosterImportHistoryStatus.partial,
+            rowCount: 20,
+            failedRowCount: 0,
+            failureCode: 'finalization-failed',
+            counts: const {'new': 20, 'updated': 0, 'linked': 0},
+            importedByName: 'Admin D',
+            importedAt: DateTime.utc(2026, 11, 2, 11),
+          ),
+          RosterImportRecord(
+            id: 'l1',
+            fileName: 'legacy.xlsx',
+            counts: const {'new': 4, 'updated': 0, 'linked': 0},
+            importedByName: 'Admin E',
+            importedAt: DateTime.utc(2026, 10, 1, 8),
+          ),
+        ];
+      await tester.pumpWidget(const SizedBox());
+      await _pump(tester, repo);
+      await _openTab(tester, 'Import history');
+
+      expect(find.text('Complete'), findsOneWidget);
+      expect(find.text('Partially imported'), findsOneWidget);
+      expect(find.text('Not finalized'), findsOneWidget);
+      expect(find.text('Needs attention'), findsOneWidget);
+      expect(find.text('Status unavailable'), findsOneWidget);
+      expect(
+        find.textContaining('10 new · 3 updated · 2 linked'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('4 row(s) not imported'), findsOneWidget);
+      expect(
+        find.textContaining('Import outcome requires verification.'),
+        findsWidgets,
+      );
+      expect(find.textContaining('do not blindly re-upload'), findsWidgets);
+      expect(
+        find.descendant(
+          of: find.ancestor(
+            of: find.text('crashed.xlsx'),
+            matching: find.byType(Card),
+          ),
+          matching: find.textContaining('0 new'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is Text && (w.data ?? '').contains('CODE0'),
+        ),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'aborted finalization directs admin safely to Import history without auto-retry',
+    (tester) async {
+      final repo = _Repo()
+        ..beforeCommit = (i) async {
+          throw FirebaseFunctionsException(
+            message:
+                'Roster records were updated, but finalizing the import log failed. Check Import History before retrying.',
+            code: 'aborted',
+          );
+        };
+      await _pump(
+        tester,
+        repo,
+        file: _csvFile([for (var i = 0; i < 1500; i++) _csvRow('S-$i')]),
+      );
+      await _chooseAndPreview(tester);
+      await tester.tap(find.widgetWithText(FilledButton, 'Import'));
+      await tester.pumpAndSettle();
+
+      expect(
+        repo.commitSizes,
+        [1000],
+        reason: 'must stop without retrying or sending remaining chunks',
+      );
+      expect(find.textContaining('Check Import history'), findsOneWidget);
+      expect(
+        find.textContaining('may already have been saved'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('FirebaseFunctionsException'), findsNothing);
+    },
+  );
 }

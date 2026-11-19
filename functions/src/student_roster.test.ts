@@ -470,6 +470,163 @@ test("listStudentRosterImports returns history with actor name", async () => {
   assert.ok(!Number.isNaN(Date.parse(mine.importedAt)));
 });
 
+test("Step 11.3G.1 Test A: listStudentRosterImports returns safe status, rowCount, failedRowCount, and failureCode across states", async () => {
+  const futureBase = Date.now() + 60_000;
+  const refs: FirebaseFirestore.DocumentReference[] = [];
+  const docSpecs = [
+    {
+      id: `${run}-hist-complete`,
+      data: {
+        fileName: `${run}-complete.xlsx`,
+        status: "complete",
+        rowCount: 10,
+        counts: {new: 10, updated: 0, linked: 0},
+        actorId: adminUid,
+        createdAt: Timestamp.fromMillis(futureBase + 100),
+      },
+    },
+    {
+      id: `${run}-hist-partial`,
+      data: {
+        fileName: `${run}-partial.xlsx`,
+        status: "partial",
+        rowCount: 10,
+        counts: {new: 4, updated: 1, linked: 0},
+        failureCode: "concurrent-conflict",
+        failedRows: [
+          {index: 5, studentNo: "2026-LEAK-NO-1", rawCsv: "SECRET-ROW"},
+          {index: 6, studentNo: "2026-LEAK-NO-2", activationCode: "ABCD2-EFGH3"},
+        ],
+        actorId: adminUid,
+        createdAt: Timestamp.fromMillis(futureBase + 200),
+      },
+    },
+    {
+      id: `${run}-hist-pending`,
+      data: {
+        fileName: `${run}-pending.xlsx`,
+        status: "pending",
+        rowCount: 8,
+        counts: {new: 0, updated: 0, linked: 0},
+        actorId: adminUid,
+        createdAt: Timestamp.fromMillis(futureBase + 300),
+      },
+    },
+    {
+      id: `${run}-hist-finfail`,
+      data: {
+        fileName: `${run}-finfail.xlsx`,
+        status: "partial",
+        rowCount: 12,
+        counts: {new: 12, updated: 0, linked: 0},
+        failureCode: "finalization-failed",
+        actorId: adminUid,
+        createdAt: Timestamp.fromMillis(futureBase + 400),
+      },
+    },
+    {
+      id: `${run}-hist-legacy`,
+      data: {
+        fileName: `${run}-legacy.xlsx`,
+        counts: {new: 3, updated: 1, linked: 0},
+        actorId: adminUid,
+        createdAt: Timestamp.fromMillis(futureBase + 500),
+      },
+    },
+    {
+      id: `${run}-hist-malformed`,
+      data: {
+        fileName: `${run}-malformed.xlsx`,
+        status: 123,
+        rowCount: "not-a-number",
+        failureCode: {nested: true},
+        failedRows: "corrupted-non-array",
+        counts: {new: 1, updated: 0, linked: 0},
+        actorId: adminUid,
+        createdAt: Timestamp.fromMillis(futureBase + 600),
+      },
+    },
+  ];
+  try {
+    await Promise.all(
+      docSpecs.map((spec) => {
+        const ref = db.collection("student_roster_imports").doc(spec.id);
+        refs.push(ref);
+        return ref.set(spec.data);
+      }),
+    );
+
+    // Existing admin authorization must still reject non-admins and unauthenticated callers.
+    await denied(listImports.run({data: {}}), "unauthenticated");
+    const nonAdminUid = `${run}-hist-student`;
+    await db.collection("users").doc(nonAdminUid).set({accessRole: "student"});
+    refs.push(db.collection("users").doc(nonAdminUid));
+    await denied(listImports.run({auth: {uid: nonAdminUid}, data: {}}), "permission-denied");
+
+    const out = await listImports.run({auth, data: {}}) as {
+      imports: {
+        id: string;
+        fileName: string;
+        status?: string;
+        rowCount?: number;
+        failedRowCount?: number;
+        failureCode?: string;
+        counts: Record<string, number>;
+        importedByName: string;
+        importedAt: string;
+      }[];
+    };
+
+    const byId = new Map(out.imports.map((i) => [i.id, i]));
+    const comp = byId.get(`${run}-hist-complete`)!;
+    assert.ok(comp);
+    assert.equal(comp.status, "complete");
+    assert.equal(comp.rowCount, 10);
+    assert.equal(comp.failedRowCount, 0);
+    assert.equal(comp.failureCode, undefined);
+
+    const part = byId.get(`${run}-hist-partial`)!;
+    assert.ok(part);
+    assert.equal(part.status, "partial");
+    assert.equal(part.rowCount, 10);
+    assert.equal(part.failedRowCount, 2);
+    assert.equal(part.failureCode, "concurrent-conflict");
+    const serializedPartial = JSON.stringify(part);
+    assert.ok(!serializedPartial.includes("2026-LEAK-NO-1"));
+    assert.ok(!serializedPartial.includes("SECRET-ROW"));
+    assert.ok(!serializedPartial.includes("ABCD2-EFGH3"));
+    assert.equal((part as Record<string, unknown>).failedRows, undefined);
+
+    const pend = byId.get(`${run}-hist-pending`)!;
+    assert.ok(pend);
+    assert.equal(pend.status, "pending");
+    assert.equal(pend.rowCount, 8);
+    assert.equal(pend.failedRowCount, undefined);
+
+    const finFail = byId.get(`${run}-hist-finfail`)!;
+    assert.ok(finFail);
+    assert.equal(finFail.status, "partial");
+    assert.equal(finFail.rowCount, 12);
+    assert.equal(finFail.failureCode, "finalization-failed");
+
+    const legacy = byId.get(`${run}-hist-legacy`)!;
+    assert.ok(legacy);
+    assert.equal(legacy.status, "unknown");
+    assert.equal(legacy.rowCount, undefined);
+    assert.equal(legacy.failedRowCount, undefined);
+    assert.equal(legacy.failureCode, undefined);
+
+    const malformed = byId.get(`${run}-hist-malformed`)!;
+    assert.ok(malformed);
+    assert.equal(malformed.status, "unknown");
+    assert.equal(malformed.rowCount, undefined);
+    assert.equal(malformed.failedRowCount, undefined);
+    assert.equal(malformed.failureCode, undefined);
+  } finally {
+    await Promise.all(refs.map((r) => r.delete().catch(() => undefined)));
+  }
+});
+
 test("issueStudentActivationCodes replaces the hash and skips ineligible rows", async () => {
   const oldCode = await importOne("IC1");
   await importOne("IC2");

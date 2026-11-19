@@ -1,7 +1,8 @@
 import {getApps, initializeApp} from "firebase-admin/app";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
-import {requireClinical} from "./access";
+import {configuredSuperAdminUid, requireClinical} from "./access";
+import {AUDIT_CATEGORIES, actorName, writeAuditBatch} from "./audit";
 import {defaultSchoolYear, listAcademicYears, readPopulationConfig} from "./counseling_population";
 import {
   buildEmotionalActivityReport,
@@ -673,6 +674,18 @@ export const getReportAnalytics = onCall(async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
   const actor = await requireClinical(uid);
+  const restrictByCollege = actor.accessRole === "counselor";
+  if (!restrictByCollege) {
+    let expectedSuperAdmin = "";
+    try {
+      expectedSuperAdmin = configuredSuperAdminUid();
+    } catch {
+      expectedSuperAdmin = "";
+    }
+    if (actor.accessRole !== "admin" || !expectedSuperAdmin || uid !== expectedSuperAdmin) {
+      throw new HttpsError("permission-denied", "Super-administrator access is required.");
+    }
+  }
 
   const userCategory = text(request.data?.userCategory) || "all";
   if (!["all", "student", "teaching", "nonTeaching", "unspecified"].includes(userCategory)) {
@@ -763,7 +776,7 @@ export const getReportAnalytics = onCall(async (request) => {
   const assignedCollegeIds = Array.isArray(actor.assignedCollegeIds)
     ? actor.assignedCollegeIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
     : [];
-  const restrictByCollege = actor.accessRole === "counselor";
+  const assignedCollegeIdSet = new Set(assignedCollegeIds.map((id) => id.trim()));
   if (restrictByCollege && assignedCollegeIds.length === 0) {
     throw new HttpsError(
       "permission-denied",
@@ -833,6 +846,14 @@ export const getReportAnalytics = onCall(async (request) => {
   }));
   const userMatchesAllowedColleges = (data: RecordData): boolean => {
     if (!restrictByCollege) return true;
+    const popRole = normalizedPopulationRole(data);
+    const verificationStatus = text(data.verificationStatus);
+    const userCollegeId = text(data.collegeId);
+    if (popRole === "student" || popRole === "unspecified") {
+      return verificationStatus === "verified" && Boolean(userCollegeId) && assignedCollegeIdSet.has(userCollegeId);
+    }
+    if (verificationStatus && verificationStatus !== "verified") return false;
+    if (userCollegeId) return assignedCollegeIdSet.has(userCollegeId);
     const col = userCollegeInfo(data, collegeNameById);
     return [...col.keys].some((k) => allowedCollegeKeys.has(k));
   };
@@ -844,12 +865,12 @@ export const getReportAnalytics = onCall(async (request) => {
   const allAppointments = appointmentsSnapshot.docs.map((document) => document.data() as RecordData);
   const scopedAppointments = restrictByCollege
     ? allAppointments.filter((appointment) => {
-        const apptDept = (
-          text(appointment.department) ||
-          text(appointment.college) ||
-          text(appointment.collegeId)
-        ).toLocaleLowerCase("en-US");
-        if (apptDept && allowedCollegeKeys.has(apptDept)) return true;
+        if (appointment.source === "walk_in_import") {
+          const walkInCollegeId = text(appointment.collegeId);
+          if (walkInCollegeId) return assignedCollegeIdSet.has(walkInCollegeId);
+          const walkInDept = (text(appointment.department) || text(appointment.college)).toLocaleLowerCase("en-US");
+          return Boolean(walkInDept && allowedCollegeKeys.has(walkInDept));
+        }
         const owner = userById.get(text(appointment.userId));
         return owner ? userMatchesAllowedColleges(owner) : false;
       })
@@ -991,5 +1012,23 @@ export const getReportAnalytics = onCall(async (request) => {
       completedAppointments: yearReport.appointments.statusCounts.completed ?? 0,
     };
   }))).sort((a, b) => a.schoolYear.localeCompare(b.schoolYear));
+  if (!restrictByCollege) {
+    const auditBatch = db.batch();
+    writeAuditBatch(auditBatch, db, {
+      actorId: uid,
+      actorNameSnapshot: actorName(actor),
+      actorRoleSnapshot: String(actor.accessRole ?? "admin"),
+      action: "REPORT_ANALYTICS_VIEWED",
+      category: AUDIT_CATEGORIES.security,
+      targetType: "report",
+      targetId: schoolYear,
+      metadata: {
+        userCategory,
+        appointmentDepartment,
+        program,
+      },
+    });
+    await auditBatch.commit();
+  }
   return {report: result};
 });

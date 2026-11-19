@@ -43,11 +43,10 @@ export function expectedRevisionOf(value: unknown): number {
 }
 
 /**
- * Only a counselor entitled to the student's case history (verified-college
- * assignment or an assigned case) may read or write remarks. The
- * super-administrator's history access does not extend to remark text.
+ * Only a counselor serving the student's verified college may read or write
+ * remarks. The super-administrator's history access does not extend to remark text.
  */
-export function decideCaseRemarksAccess(input: Parameters<typeof decideCaseHistoryAccess>[0]): "college" | "assigned" {
+export function decideCaseRemarksAccess(input: Parameters<typeof decideCaseHistoryAccess>[0]): "college" {
   let basis: string;
   try {
     basis = decideCaseHistoryAccess(input);
@@ -55,7 +54,7 @@ export function decideCaseRemarksAccess(input: Parameters<typeof decideCaseHisto
     if (error instanceof CaseHistoryError) throw new CaseRemarksError("permission-denied", NOT_AUTHORIZED_REMARKS);
     throw error;
   }
-  if (basis !== "college" && basis !== "assigned") throw new CaseRemarksError("permission-denied", NOT_AUTHORIZED_REMARKS);
+  if (basis !== "college") throw new CaseRemarksError("permission-denied", NOT_AUTHORIZED_REMARKS);
   return basis;
 }
 

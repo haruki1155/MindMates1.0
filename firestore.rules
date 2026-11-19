@@ -122,7 +122,11 @@ service cloud.firestore {
       allow write: if false;
     }
     match /system_config/{documentId} {
-      allow read: if signedIn() && documentId == 'security';
+      // inquiry_sla holds the super-admin's response target (hours); it is set
+      // only by the setInquirySla callable.
+      allow read: if signedIn()
+        && (documentId == 'security'
+          || (documentId == 'inquiry_sla' && hasPortalAccess()));
       allow write: if false;
     }
 
@@ -182,6 +186,14 @@ service cloud.firestore {
     }
 
     match /admin_audit_logs/{auditId} {
+      allow read: if isSystemAdmin();
+      allow write: if false;
+    }
+
+    // Firestore managed-export job records. Written only by Cloud Functions;
+    // readable only by the configured super-administrator. They hold status,
+    // timestamps, counts and sanitised error codes, never document contents.
+    match /backup_jobs/{jobId} {
       allow read: if isSystemAdmin();
       allow write: if false;
     }
@@ -734,20 +746,47 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    function isAssignedCollegeCounselorForAppointmentData(data) {
+      return currentAccessRole() == 'counselor'
+        && hasClinicalAccess()
+        && data.studentVerificationStatus == 'verified'
+        && data.collegeId is string
+        && data.collegeId != ''
+        && data.collegeId in portalProfile().get('assignedCollegeIds', []);
+    }
+
+    function isLiveAssignedCollegeCounselorForStudent(studentId) {
+      return currentAccessRole() == 'counselor'
+        && hasClinicalAccess()
+        && studentId is string
+        && studentId != ''
+        && exists(/databases/$(database)/documents/users/$(studentId))
+        && get(/databases/$(database)/documents/users/$(studentId)).data.get('verificationStatus', '') == 'verified'
+        && get(/databases/$(database)/documents/users/$(studentId)).data.get('collegeId', '') is string
+        && get(/databases/$(database)/documents/users/$(studentId)).data.get('collegeId', '') != ''
+        && get(/databases/$(database)/documents/users/$(studentId)).data.get('collegeId', '') in portalProfile().get('assignedCollegeIds', []);
+    }
+
     match /appointments/{appointmentId} {
       // Appointment mutations are callable-only.  This prevents a student
       // from confirming/completing their own record or bypassing slot locks.
       allow create: if false;
-      allow read: if isOwner(resource.data.userId)
-        || hasClinicalAccess();
+      allow get: if isOwner(resource.data.userId)
+        || isSystemAdmin()
+        || isLiveAssignedCollegeCounselorForStudent(resource.data.userId);
+      allow list: if isOwner(resource.data.userId)
+        || isSystemAdmin()
+        || isAssignedCollegeCounselorForAppointmentData(resource.data);
       allow update, delete: if false;
       match /history/{historyId} {
         allow read: if isOwner(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId)
-          || hasClinicalAccess();
+          || isSystemAdmin()
+          || isLiveAssignedCollegeCounselorForStudent(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId);
         allow write: if false;
       }
       match /clinical_notes/{noteId} {
-        allow read: if hasClinicalAccess();
+        allow read: if isSystemAdmin()
+          || isLiveAssignedCollegeCounselorForStudent(get(/databases/$(database)/documents/appointments/$(appointmentId)).data.userId);
         allow write: if false;
       }
     }
@@ -803,14 +842,48 @@ service cloud.firestore {
         && request.resource.data.message.size() <= 4000
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt == request.time;
-      allow read: if isOwner(resource.data.userId) || hasPortalAccess();
-      // Portal accounts may only move the workflow status from the client.
-      // Content, ownership and assignment changes belong to audited server
-      // operations (acknowledgeInquiry today, routing/escalation later).
-      allow update: if hasPortalAccess()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
-        && request.resource.data.status in ['pending', 'in_progress', 'resolved'];
-      allow delete: if false;
+      // Raw inquiry documents carry student PII, messages and form responses.
+      // Read access is restricted strictly by `canReadInquiry`:
+      // 1) the owning student,
+      // 2) the verified, active configured super-administrator, and
+      // 3) an active, approved, verified counselor explicitly assigned to it
+      //    (`assigneeIds`, written only by Cloud Functions).
+      // Operational `portalStaff` must NEVER read raw inquiries or replies,
+      // even if their UID appears in a legacy `assigneeIds` array; they read
+      // sanitized operational projections under `inquiry_statuses/{inquiryId}`.
+      allow read: if canReadInquiry(resource.data);
+      // Acknowledge, status, escalation and reassignment are audited
+      // callables (functions/src/inquiry_routing_service.ts).
+      allow update, delete: if false;
+
+      // Authored replies follow their inquiry's clinical visibility and are
+      // written only by the replyToInquiry callable.
+      match /replies/{replyId} {
+        allow read: if canReadInquiry(get(/databases/$(database)/documents/inquiries/$(inquiryId)).data);
+        allow write: if false;
+      }
+    }
+
+    function canReadInquiry(inquiry) {
+      return isOwner(inquiry.userId)
+        || isSystemAdmin()
+        || (currentAccessRole() == 'counselor'
+          && hasClinicalAccess()
+          && request.auth.uid in inquiry.get('assigneeIds', []));
+    }
+
+    // Server-managed, staff-safe operational status projection for inquiries.
+    // Excludes student UID, email, name, message, user-authored subject,
+    // formData and free-text escalation reasons.
+    match /inquiry_statuses/{inquiryId} {
+      allow read: if isSystemAdmin()
+        || (currentAccessRole() == 'portalStaff'
+          && hasPortalAccess()
+          && request.auth.uid in resource.data.get('monitoringStaffIds', []))
+        || (currentAccessRole() == 'counselor'
+          && hasClinicalAccess()
+          && request.auth.uid in resource.data.get('assigneeIds', []));
+      allow write: if false;
     }
 
     match /appointment_slots/{slotId} {

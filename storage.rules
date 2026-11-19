@@ -24,45 +24,92 @@ service firebase.storage {
       allow delete: if isOwner(userId);
     }
 
-    // Task #10: confidential counselor interview files.
-    function isVerifiedClinician() {
-      return signedIn()
-        && request.auth.token.email_verified == true
-        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('accessRole',
-             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('role', 'appUser')) in ['counselor', 'admin']
+    // Task #10 (Option A1): confidential counselor interview files.
+    // Every clinical authorization branch accesses at most 2 distinct Firestore documents:
+    //   - Super-admin viewing (`get` only): users/$(request.auth.uid) + system_config/security
+    //   - Assigned-college counselor (`get`, `create`, `delete`): users/$(request.auth.uid) + appointments/$(appointmentId)
+    function isVerifiedSignedIn() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function userDocExists() {
+      return firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function userDoc() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function effectiveRole() {
+      return userDoc().get('accessRole', userDoc().get('role', 'appUser'));
+    }
+
+    function hasActiveClinicalAccount(expectedRole) {
+      return isVerifiedSignedIn()
+        && userDocExists()
+        && effectiveRole() == expectedRole
+        && userDoc().get('accountStatus', 'active') == 'active'
         && (
-          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('accessRole', 'appUser') == 'admin'
-          || firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', null) == null
-          || (
-            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', '') == 'approved'
-            && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('accountStatus', '') == 'active'
-          )
+          expectedRole == 'admin'
+          || userDoc().get('staffAccountStatus', null) == null
+          || userDoc().get('staffAccountStatus', null) == 'approved'
         );
     }
-    function appointmentRecordExists(appointmentId) {
+
+    function isSystemAdmin() {
+      return hasActiveClinicalAccount('admin')
+        && firestore.exists(/databases/(default)/documents/system_config/security)
+        && request.auth.uid == firestore.get(/databases/(default)/documents/system_config/security).data.get('superAdminUid', '');
+    }
+
+    function appointmentExists(appointmentId) {
       return firestore.exists(/databases/(default)/documents/appointments/$(appointmentId));
     }
-    match /counseling_session_files/{appointmentId}/{uploaderUid}/{fileName} {
-      allow get: if isVerifiedClinician() && appointmentRecordExists(appointmentId);
-      allow list: if false;
-      allow create: if isVerifiedClinician()
+
+    function appointmentDoc(appointmentId) {
+      return firestore.get(/databases/(default)/documents/appointments/$(appointmentId)).data;
+    }
+
+    function isAssignedCollegeCounselor(appointmentId) {
+      return hasActiveClinicalAccount('counselor')
+        && appointmentExists(appointmentId)
+        && appointmentDoc(appointmentId).get('userId', '') is string
+        && appointmentDoc(appointmentId).get('userId', '') != ''
+        && appointmentDoc(appointmentId).get('studentVerificationStatus', '') == 'verified'
+        && appointmentDoc(appointmentId).get('collegeId', '') is string
+        && appointmentDoc(appointmentId).get('collegeId', '') != ''
+        && userDoc().get('assignedCollegeIds', []) is list
+        && appointmentDoc(appointmentId).get('collegeId', '') in userDoc().get('assignedCollegeIds', []);
+    }
+
+    function validClinicalAttachmentCreate(appointmentId, uploaderUid, fileName) {
+      return isVerifiedSignedIn()
         && request.auth.uid == uploaderUid
-        && appointmentRecordExists(appointmentId)
-        && firestore.get(/databases/(default)/documents/appointments/$(appointmentId)).data.status == 'confirmed'
         && fileName.matches('^[a-f0-9]{32}[.](jpg|jpeg|png|pdf|doc|docx)$')
+        && request.resource != null
         && request.resource.size > 0
         && request.resource.size <= 5 * 1024 * 1024
         && request.resource.contentType in [
           'image/jpeg', 'image/png', 'application/pdf', 'application/msword',
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
         ]
+        && request.resource.metadata != null
+        && 'uploadedBy' in request.resource.metadata
+        && 'appointmentId' in request.resource.metadata
         && request.resource.metadata.uploadedBy == uploaderUid
         && request.resource.metadata.appointmentId == appointmentId;
-      allow delete: if isVerifiedClinician()
+    }
+
+    match /counseling_session_files/{appointmentId}/{uploaderUid}/{fileName} {
+      allow get: if isSystemAdmin() || isAssignedCollegeCounselor(appointmentId);
+      allow list: if false;
+      allow create: if validClinicalAttachmentCreate(appointmentId, uploaderUid, fileName)
+        && isAssignedCollegeCounselor(appointmentId)
+        && appointmentDoc(appointmentId).get('status', '') == 'confirmed';
+      allow delete: if isVerifiedSignedIn()
         && request.auth.uid == uploaderUid
-        && appointmentRecordExists(appointmentId)
-        && firestore.get(/databases/(default)/documents/appointments/$(appointmentId)).data.status == 'confirmed';
+        && isAssignedCollegeCounselor(appointmentId)
+        && appointmentDoc(appointmentId).get('status', '') == 'confirmed';
       allow update: if false;
     }
 

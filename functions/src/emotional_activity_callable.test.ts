@@ -40,6 +40,7 @@ const collegeAName = `${prefix} College of Arts`;
 const collegeBName = `${prefix} College of Engineering`;
 
 const accounts: Record<string, {verified: boolean; profile: Record<string, unknown>}> = {
+  "super-admin": {verified: true, profile: {accessRole: "admin", accountStatus: "active"}},
   admin: {verified: true, profile: {accessRole: "admin", accountStatus: "active"}},
   "counselor-a": {
     verified: true,
@@ -73,8 +74,12 @@ async function rejects(promise: Promise<unknown>, code: string) {
   await assert.rejects(promise, (e: unknown) => e instanceof HttpsError && e.code === code);
 }
 
+let previousSuperAdmin: string | undefined;
+
 before(async () => {
   if (!emulated) return;
+  previousSuperAdmin = process.env.SUPER_ADMIN_UID;
+  process.env.SUPER_ADMIN_UID = uid("super-admin");
   await Promise.all([
     db.doc(`colleges/${collegeAId}`).set({name: collegeAName, code: "CAS", active: true}),
     db.doc(`colleges/${collegeBId}`).set({name: collegeBName, code: "COE", active: true}),
@@ -115,6 +120,7 @@ before(async () => {
     await db.doc(`users/${suid}`).set({
       accessRole: "appUser",
       populationRole: "student",
+      verificationStatus: "verified",
       collegeId: collegeAId,
       department: collegeAName,
     });
@@ -131,6 +137,7 @@ before(async () => {
     await db.doc(`users/${suid}`).set({
       accessRole: "appUser",
       populationRole: "student",
+      verificationStatus: "verified",
       collegeId: collegeBId,
       department: collegeBName,
     });
@@ -146,6 +153,8 @@ before(async () => {
 
 after(async () => {
   if (!emulated) return;
+  if (previousSuperAdmin === undefined) delete process.env.SUPER_ADMIN_UID;
+  else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
   await Promise.all(
     Object.keys(accounts).map((name) =>
       getAuth().deleteUser(uid(name)).catch(() => undefined),
@@ -158,7 +167,7 @@ test(
   {skip: !emulated},
   async () => {
     await rejects(fetchReport.run({data: {schoolYear: "2035-2036"}}), "unauthenticated");
-    for (const denied of ["student", "staff", "suspended-counselor"]) {
+    for (const denied of ["student", "staff", "suspended-counselor", "admin"]) {
       await rejects(
         fetchReport.run({auth: {uid: uid(denied)}, data: {schoolYear: "2035-2036"}}),
         "permission-denied",
@@ -200,9 +209,9 @@ test(
     });
     assert.equal(zeroApptCollegeRes.report.appointments.departmentScopeLabel, collegeAName);
 
-    // Admin querying small College B (<10 participants) gets suppressed result.
+    // Super-admin querying small College B (<10 participants) gets suppressed result.
     const adminBRes = await fetchReport.run({
-      auth: {uid: uid("admin")},
+      auth: {uid: uid("super-admin")},
       data: {
         schoolYear: "2035-2036",
         appointmentDepartment: collegeBName,

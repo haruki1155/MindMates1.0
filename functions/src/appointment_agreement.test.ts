@@ -7,6 +7,14 @@ import {ensureAuthUser} from "./test_auth_helper";
 type Input = Record<string, unknown>;
 const db = getFirestore();
 const staff = "agreement-clinician";
+// College-scoped approval (PR 6): this suite's student has no verified college,
+// so its staff actor exercises the super-admin triage path.
+const previousSuperAdmin = process.env.SUPER_ADMIN_UID;
+process.env.SUPER_ADMIN_UID = staff;
+test.after(() => {
+  if (previousSuperAdmin == null) delete process.env.SUPER_ADMIN_UID;
+  else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
+});
 const student = "agreement-student";
 function call(uid: string, data: Input): Promise<unknown> {
   const callable = (functions as unknown as Record<string, {run: (r: unknown) => Promise<unknown>}>).changeAppointmentAgreement;
@@ -170,4 +178,55 @@ test("counterproposal history preserves each target and staff context privately"
   assert.equal(history.some(h => h.proposedScheduledAt?.toMillis() === c && h.performedBy === student), true);
   const notes = await db.collection("notifications").where("appointmentId", "==", ref.id).get();
   assert.equal(JSON.stringify(notes.docs.map(d => d.data())).includes("PRIVATE"), false);
+});
+
+test("two-way agreement enforces assigned-college eligibility and super-admin exception privacy", async () => {
+  const prefix = `agreement-college-${Date.now()}`;
+  const college = `${prefix}-cite`;
+  const otherCollege = `${prefix}-cas`;
+  const cStudent = `${prefix}-student`;
+  const cAssigned = `${prefix}-counselor-a`;
+  const cWrong = `${prefix}-counselor-b`;
+  const day = new Date(Date.now() + 47 * 86400000);
+  while ([0, 6].includes(day.getUTCDay())) day.setUTCDate(day.getUTCDate() + 1);
+  const a = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 1);
+  const b = a + 3600000;
+  const c = a + 7200000;
+  await Promise.all([
+    ensureAuthUser(cAssigned, true),
+    ensureAuthUser(cWrong, true),
+    ensureAuthUser(staff, true),
+    db.doc(`colleges/${college}`).set({name: "CITE", code: "CITE", active: true}),
+    db.doc(`colleges/${otherCollege}`).set({name: "CAS", code: "CAS", active: true}),
+    db.doc(`users/${cStudent}`).set({accessRole: "appUser", verificationStatus: "verified", collegeId: college}),
+    db.doc(`users/${cAssigned}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [college]}),
+    db.doc(`users/${cWrong}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [otherCollege]}),
+    db.doc(`users/${staff}`).set({accessRole: "admin", accountStatus: "active"}),
+  ]);
+  const apptId = `${prefix}-appt`;
+  await db.doc(`appointments/${apptId}`).set({userId: cStudent, status: "confirmed", scheduledAt: Timestamp.fromMillis(a), scheduledTime: "09:00 AM", scheduleRevision: 0, concern: "PRIVATE CONCERN"});
+  await db.doc(`appointment_slots/pacc_${a}`).set({appointmentId: apptId});
+  await db.doc(`appointment_user_locks/${cStudent}`).set({appointmentId: apptId});
+  const base = {appointmentId: apptId, expectedScheduledAt: a, expectedScheduleRevision: 0, expectedProposalRevision: 0};
+
+  // Wrong-college counselor cannot propose schedule changes.
+  await assert.rejects(call(cWrong, {...base, action: "propose", scheduledAt: b, requestId: `${prefix}_wrong`}), {code: "permission-denied"});
+
+  // Assigned-college counselor can propose and student accepts.
+  await call(cAssigned, {...base, action: "propose", scheduledAt: b, requestId: `${prefix}_assigned`});
+  await call(cStudent, {...base, expectedProposalRevision: 1, action: "accept", requestId: `${prefix}_student_accept`});
+
+  // Student counter-proposes; super-admin requires exceptionReason to override a staffed college,
+  // and keeps exceptionReason out of student-readable history.
+  await call(cStudent, {appointmentId: apptId, expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 2, action: "propose", scheduledAt: c, requestId: `${prefix}_student_counter`});
+  await assert.rejects(
+    call(staff, {appointmentId: apptId, expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 3, action: "accept", requestId: `${prefix}_admin_no_reason`}),
+    {code: "failed-precondition"},
+  );
+  await call(staff, {appointmentId: apptId, expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 3, action: "accept", requestId: `${prefix}_admin_override`, exceptionReason: "Assigned counselor unavailable"});
+  const history = (await db.collection(`appointments/${apptId}/history`).get()).docs.map((d) => d.data());
+  const overrideEntry = history.find((entry) => entry.approvalMode === "admin_override");
+  assert.ok(overrideEntry);
+  assert.equal(overrideEntry.approvalExceptionReason, undefined);
+  assert.ok(!JSON.stringify(overrideEntry).includes("counselor unavailable"));
 });

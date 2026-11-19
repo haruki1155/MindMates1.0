@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
+import 'dart:math';
 
 import '../database/firestore_collections.dart';
 import '../models/academic_import_models.dart';
@@ -23,7 +24,10 @@ import '../models/pacc_availability_model.dart';
 import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
 import '../features/admin/domain/admin_management_models.dart';
+import '../features/admin/domain/appointment_approvals.dart';
+import '../features/admin/domain/backup_job.dart';
 import '../features/admin/domain/inquiry_scope.dart';
+import '../features/admin/domain/inquiry_sla.dart';
 import '../features/admin/domain/report_generation_models.dart';
 import '../services/firebase/firebase_callable_router.dart';
 import '../services/firebase/firestore_service.dart';
@@ -182,6 +186,16 @@ class PortalAccessEvaluation {
 
 /// Invokes a callable by name and returns its response data. Injectable so
 /// tests can fake the catalogue import callables.
+/// Idempotency key for a reply: a retried call with the same key returns the
+/// reply it already created instead of posting a second one.
+String newInquiryRequestId() {
+  const alphabet =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  final random = Random.secure();
+  return List.generate(24, (_) => alphabet[random.nextInt(alphabet.length)])
+      .join();
+}
+
 typedef AdminCallableInvoker =
     Future<Object?> Function(String name, Map<String, Object?> data);
 
@@ -445,6 +459,7 @@ class AdminPortalRepository {
   }
 
   User? get currentAuthUser => FirebaseAuth.instance.currentUser;
+  String? get currentUserId => currentAuthUser?.uid;
   Stream<User?> get authStateChanges =>
       FirebaseAuth.instance.authStateChanges();
 
@@ -637,6 +652,41 @@ class AdminPortalRepository {
               ..sort((a, b) => a.name.compareTo(b.name)),
       );
 
+  /// Firestore managed-export job history. Only the configured
+  /// super-administrator may read `backup_jobs`; everyone else gets an
+  /// error stream so the page shows "not authorized", never "no backups".
+  Stream<List<BackupJob>> watchBackupJobs() {
+    if (!isSuperAdmin) {
+      return Stream.error(
+        StateError(
+          'Backup history requires the configured super-administrator account.',
+        ),
+      );
+    }
+    return _firestoreService
+        .watchDocuments(
+          FirestoreCollections.backupJobs,
+          orderBy: 'requestedAt',
+          descending: true,
+          limit: 50,
+        )
+        .map(
+          (items) => items
+              .map((item) => BackupJob.fromJson(item, id: item['id']?.toString()))
+              .toList(),
+        );
+  }
+
+  /// Starts one managed Firestore export. Server-side authorization only.
+  Future<String> requestFirestoreBackup() async {
+    final result = await _callCallable('requestFirestoreBackup', {});
+    final data = result is Map ? Map<String, dynamic>.from(result) : const {};
+    return data['jobId']?.toString() ?? '';
+  }
+
+  Future<void> refreshBackupJobStatus(String jobId) =>
+      _callCallable('refreshFirestoreBackupStatus', {'jobId': jobId});
+
   Stream<List<AdminAuditEvent>> watchAdminAudit(String userId) =>
       _firestoreService
           .watchDocuments(
@@ -778,45 +828,187 @@ class AdminPortalRepository {
                   ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
           );
 
-  Stream<List<AppointmentModel>> watchAppointments() => _firestoreService
-      .watchDocuments(FirestoreCollections.appointments)
-      .map(
-        (items) =>
-            items
-                .map(
-                  (item) => AppointmentModel.fromJson(
-                    item,
-                    id: item['id']?.toString(),
-                  ),
-                )
-                .toList()
-              ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
-      );
+  List<AppointmentModel> _mapAppointments(List<Map<String, dynamic>> items) =>
+      items
+          .map(
+            (item) =>
+                AppointmentModel.fromJson(item, id: item['id']?.toString()),
+          )
+          .toList()
+        ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt));
 
-  /// The counselor's assigned caseload is an explicit secondary scope. The
-  /// primary appointment stream is organization-wide for clinical staff.
+  Stream<List<AppointmentModel>> _watchCollegeScopedAppointments({
+    Map<String, Object?> extraWhereEquals = const {},
+    required bool errorWhenUnauthorized,
+  }) {
+    final uid = currentUserId;
+    final role = currentAccessRole;
+    if (extraWhereEquals.isEmpty && isSuperAdmin) {
+      return _firestoreService
+          .watchDocuments(FirestoreCollections.appointments)
+          .map(_mapAppointments);
+    }
+    if (role != AccessRole.counselor || uid == null || uid.trim().isEmpty) {
+      if (errorWhenUnauthorized) {
+        return Stream<List<AppointmentModel>>.error(
+          StateError(
+            'Appointments are visible only to assigned counselors and the super-administrator.',
+          ),
+        );
+      }
+      return Stream.value(const <AppointmentModel>[]);
+    }
+
+    late final StreamController<List<AppointmentModel>> controller;
+    StreamSubscription<Map<String, dynamic>?>? profileSub;
+    final querySubs = <StreamSubscription<List<Map<String, dynamic>>>>[];
+    var chunkResults = <int, List<Map<String, dynamic>>>{};
+    String? activeScopeKey;
+    var hasResolvedScope = false;
+
+    Future<void> cancelQuerySubs() async {
+      final subs = List<StreamSubscription<List<Map<String, dynamic>>>>.from(
+        querySubs,
+      );
+      querySubs.clear();
+      chunkResults = <int, List<Map<String, dynamic>>>{};
+      for (final sub in subs) {
+        await sub.cancel();
+      }
+    }
+
+    void emitMerged() {
+      if (controller.isClosed) return;
+      final byId = <String, Map<String, dynamic>>{};
+      for (final list in chunkResults.values) {
+        for (final item in list) {
+          final id = item['id']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            byId[id] = item;
+          }
+        }
+      }
+      controller.add(_mapAppointments(byId.values.toList(growable: false)));
+    }
+
+    controller = StreamController<List<AppointmentModel>>(
+      onListen: () {
+        profileSub = _firestoreService
+            .watchDocument(FirestoreCollections.users, uid)
+            .listen(
+              (profile) async {
+                if (controller.isClosed) return;
+                final accessRole = profile?['accessRole']?.toString().trim();
+                final accountStatus = profile?['accountStatus']
+                    ?.toString()
+                    .trim();
+                final staffStatus = profile?['staffAccountStatus']
+                    ?.toString()
+                    .trim();
+                final isActiveCounselor =
+                    profile != null &&
+                    (accessRole == null ||
+                        accessRole.isEmpty ||
+                        accessRole == 'counselor') &&
+                    (accountStatus == null ||
+                        accountStatus.isEmpty ||
+                        accountStatus == 'active') &&
+                    (staffStatus == null ||
+                        staffStatus.isEmpty ||
+                        staffStatus == 'approved');
+                final rawColleges = profile?['assignedCollegeIds'];
+                final collegeIds = isActiveCounselor && rawColleges is List
+                    ? (rawColleges
+                          .whereType<String>()
+                          .map((id) => id.trim())
+                          .where((id) => id.isNotEmpty)
+                          .toSet()
+                          .toList()
+                        ..sort())
+                    : <String>[];
+
+                final nextScopeKey = isActiveCounselor
+                    ? collegeIds.join('\u0000')
+                    : null;
+                if (hasResolvedScope &&
+                    nextScopeKey == activeScopeKey &&
+                    (collegeIds.isEmpty || querySubs.isNotEmpty)) {
+                  return;
+                }
+                hasResolvedScope = true;
+                activeScopeKey = nextScopeKey;
+                await cancelQuerySubs();
+                if (controller.isClosed) return;
+                if (collegeIds.isEmpty) {
+                  controller.add(const <AppointmentModel>[]);
+                  return;
+                }
+
+                const chunkSize = 30;
+                final chunks = <List<String>>[
+                  for (var i = 0; i < collegeIds.length; i += chunkSize)
+                    collegeIds.sublist(
+                      i,
+                      min(i + chunkSize, collegeIds.length),
+                    ),
+                ];
+                for (var index = 0; index < chunks.length; index++) {
+                  final chunk = chunks[index];
+                  final sub = _firestoreService
+                      .watchDocuments(
+                        FirestoreCollections.appointments,
+                        whereEquals: {
+                          ...extraWhereEquals,
+                          'studentVerificationStatus': 'verified',
+                        },
+                        whereIn: {'collegeId': chunk},
+                      )
+                      .listen(
+                        (items) {
+                          chunkResults[index] = items;
+                          if (chunkResults.length == chunks.length) {
+                            emitMerged();
+                          }
+                        },
+                        onError: (Object error, StackTrace stackTrace) {
+                          if (!controller.isClosed) {
+                            controller.addError(error, stackTrace);
+                          }
+                        },
+                      );
+                  querySubs.add(sub);
+                }
+              },
+              onError: (Object error, StackTrace stackTrace) {
+                if (!controller.isClosed) {
+                  controller.addError(error, stackTrace);
+                }
+              },
+            );
+      },
+      onCancel: () async {
+        await profileSub?.cancel();
+        await cancelQuerySubs();
+      },
+    );
+    return controller.stream;
+  }
+
+  /// College-scoped appointments for counselors (verified students in
+  /// `assignedCollegeIds`), or all appointments for the super-administrator.
+  Stream<List<AppointmentModel>> watchAppointments() =>
+      _watchCollegeScopedAppointments(errorWhenUnauthorized: true);
+
+  /// The counselor's assigned caseload within their currently assigned colleges.
   Stream<List<AppointmentModel>> watchMyAssignedAppointments() {
-    final userId = currentAuthUser?.uid;
+    final userId = currentUserId;
     if (currentAccessRole != AccessRole.counselor || userId == null) {
       return Stream.value(const <AppointmentModel>[]);
     }
-    return _firestoreService
-        .watchDocuments(
-          FirestoreCollections.appointments,
-          whereEquals: {'assignedStaffId': userId},
-        )
-        .map(
-          (items) =>
-              items
-                  .map(
-                    (item) => AppointmentModel.fromJson(
-                      item,
-                      id: item['id']?.toString(),
-                    ),
-                  )
-                  .toList()
-                ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)),
-        );
+    return _watchCollegeScopedAppointments(
+      extraWhereEquals: {'assignedStaffId': userId},
+      errorWhenUnauthorized: false,
+    );
   }
 
   /// Explicitly backfill the staff-safe queue from canonical appointments.
@@ -1330,24 +1522,78 @@ class AdminPortalRepository {
     );
   }
 
-  /// Counselors see the unassigned pool plus their own assignments; see
-  /// [scopeInquiriesForRole]. Access itself is enforced by Firestore rules.
-  Stream<List<AdminInquiryModel>> watchInquiries() => _firestoreService
-      .watchDocuments(FirestoreCollections.inquiries)
-      .map(
-        (items) => scopeInquiriesForRole(
-          items
-              .map(
-                (item) => AdminInquiryModel.fromJson(
-                  item,
-                  id: item['id']?.toString(),
-                ),
-              )
-              .toList(),
-          role: currentAccessRole,
-          uid: currentAuthUser?.uid,
-        )..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+  /// Raw inquiry details visible to this session. Firestore rules restrict raw
+  /// inquiries strictly to the super-administrator (all) and assigned
+  /// counselors (`assigneeIds array-contains uid`). Operational portalStaff must
+  /// use [watchInquiryStatuses] instead and never fall back to raw reads.
+  Stream<List<AdminInquiryModel>> watchInquiries() {
+    final uid = currentUserId;
+    final role = currentAccessRole;
+    if (!isSuperAdmin && (role != AccessRole.counselor || uid == null)) {
+      return Stream.error(
+        StateError(
+          'Raw inquiries are visible only to assigned counselors and the super-administrator.',
+        ),
       );
+    }
+    return _firestoreService
+        .watchDocuments(
+          FirestoreCollections.inquiries,
+          whereArrayContains: isSuperAdmin ? const {} : {'assigneeIds': uid},
+        )
+        .map(
+          (items) => scopeInquiriesForRole(
+            items
+                .map(
+                  (item) => AdminInquiryModel.fromJson(
+                    item,
+                    id: item['id']?.toString(),
+                  ),
+                )
+                .toList(),
+            role: role,
+            uid: uid,
+            isSuperAdmin: isSuperAdmin,
+          )..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+        );
+  }
+
+  /// Sanitized operational inquiry status projection for operational
+  /// monitoring staff (`monitoringStaffIds array-contains uid`) and the
+  /// super-administrator. Never queries raw `inquiries` as a fallback.
+  Stream<List<AdminInquiryModel>> watchInquiryStatuses() {
+    final uid = currentUserId;
+    final role = currentAccessRole;
+    if (!isSuperAdmin && (role != AccessRole.portalStaff || uid == null)) {
+      return Stream.error(
+        StateError(
+          'Operational inquiry statuses are visible only to assigned monitoring staff and the super-administrator.',
+        ),
+      );
+    }
+    return _firestoreService
+        .watchDocuments(
+          FirestoreCollections.inquiryStatuses,
+          whereArrayContains: isSuperAdmin
+              ? const {}
+              : {'monitoringStaffIds': uid},
+        )
+        .map(
+          (items) => scopeInquiriesForRole(
+            items
+                .map(
+                  (item) => AdminInquiryModel.fromOperationalProjection(
+                    item,
+                    id: item['id']?.toString(),
+                  ),
+                )
+                .toList(),
+            role: role,
+            uid: uid,
+            isSuperAdmin: isSuperAdmin,
+          )..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+        );
+  }
 
   Stream<List<AdminActivityAnalyticsModel>> watchActivityAnalytics() =>
       _firestoreService
@@ -1367,35 +1613,98 @@ class AdminPortalRepository {
                   ..sort((a, b) => b.dateKey.compareTo(a.dateKey)),
           );
 
+  /// Clinical appointment callables keep their existing transport; tests may
+  /// inject [AdminCallableInvoker] instead.
+  Future<Object?> _clinicalAppointmentCallable(
+    String name,
+    Map<String, Object?> data,
+  ) async {
+    final invoker = _callableInvoker;
+    if (invoker != null) return invoker(name, data);
+    final result = await FirebaseFunctions.instance
+        .httpsCallable(name)
+        .call<Object?>(data);
+    return result.data;
+  }
+
+  /// [exceptionReason] is the super-administrator's written reason for acting
+  /// on an appointment a college counselor is assigned to.
   Future<void> initializeAppointmentScheduleRevision({
     required String appointmentId,
     required DateTime scheduledAt,
     required String status,
+    String? exceptionReason,
   }) async {
-    await FirebaseFunctions.instance
-        .httpsCallable('initializeAppointmentScheduleRevision')
-        .call({
-          'appointmentId': appointmentId,
-          'expectedScheduledAt': scheduledAt.millisecondsSinceEpoch,
-          'expectedStatus': status,
-        });
+    await _clinicalAppointmentCallable(
+      'initializeAppointmentScheduleRevision',
+      {
+        'appointmentId': appointmentId,
+        'expectedScheduledAt': scheduledAt.millisecondsSinceEpoch,
+        'expectedStatus': status,
+        'exceptionReason': ?exceptionReason,
+      },
+    );
   }
 
   Future<void> changeAppointmentAgreement(
     AppointmentModel appointment,
     String action,
-    String requestId,
-  ) async {
-    await FirebaseFunctions.instance
-        .httpsCallable('changeAppointmentAgreement')
-        .call({
-          'appointmentId': appointment.id,
-          'action': action,
-          'requestId': requestId,
-          'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
-          'expectedScheduleRevision': appointment.scheduleRevision,
-          'expectedProposalRevision': appointment.proposalRevision,
-        });
+    String requestId, {
+    String? exceptionReason,
+  }) async {
+    await _clinicalAppointmentCallable('changeAppointmentAgreement', {
+      'appointmentId': appointment.id,
+      'action': action,
+      'requestId': requestId,
+      'expectedScheduledAt': appointment.scheduledAt.millisecondsSinceEpoch,
+      'expectedScheduleRevision': appointment.scheduleRevision,
+      'expectedProposalRevision': appointment.proposalRevision,
+      'exceptionReason': ?exceptionReason,
+    });
+  }
+
+  /// "My College's Approvals" for counselors; approval exceptions for the
+  /// super-administrator. Server-computed from live college assignments with
+  /// cursor-based pagination.
+  Future<AppointmentApprovalsPage> listAppointmentApprovalsPage({
+    String? cursor,
+    int limit = 50,
+  }) async {
+    final payload = <String, Object?>{
+      'limit': limit,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+    };
+    final result = await _callCallable('listAppointmentApprovals', payload);
+    final data = result is Map
+        ? Map<String, dynamic>.from(result)
+        : const <String, dynamic>{};
+    return AppointmentApprovalsPage.fromJson(data);
+  }
+
+  /// Convenience wrapper returning the first page of approvals.
+  Future<List<AppointmentApprovalItem>> listAppointmentApprovals() async =>
+      (await listAppointmentApprovalsPage()).items;
+
+  /// Fetches an authorized single pending appointment record via the
+  /// server-enforced `getAppointmentForApproval` callable when an item in the
+  /// paginated approvals queue is outside the currently streamed local list.
+  Future<AppointmentModel?> fetchAppointmentById(String appointmentId) async {
+    final id = appointmentId.trim();
+    if (id.isEmpty) return null;
+    if (currentAccessRole != AccessRole.counselor &&
+        !(currentAccessRole == AccessRole.admin && isSuperAdmin)) {
+      return null;
+    }
+    final result = await _callCallable('getAppointmentForApproval', {
+      'appointmentId': id,
+    });
+    if (result is! Map) return null;
+    final payload = Map<String, dynamic>.from(result);
+    if (payload['available'] != true) return null;
+    final raw = payload['appointment'];
+    if (raw is! Map) return null;
+    final data = Map<String, dynamic>.from(raw);
+    return AppointmentModel.fromJson(data, id: id);
   }
 
   Future<SessionEvidenceRecord?> getClinicalSessionEvidence(
@@ -1430,11 +1739,19 @@ class AdminPortalRepository {
     required String appointmentId,
     required List<PendingSessionEvidenceFile> files,
   }) async {
+    if (currentAccessRole != AccessRole.counselor || isSuperAdmin) {
+      throw StateError(
+        'Clinical session attachment uploads are restricted to assigned college counselors.',
+      );
+    }
+    if (files.isEmpty) return const [];
     if (files.length > maxSessionEvidenceFiles) {
       throw const FormatException('Choose no more than five files.');
     }
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) throw StateError('Sign in again to upload attachments.');
+    final uid = currentUserId;
+    if (uid == null || uid.trim().isEmpty) {
+      throw StateError('Sign in again to upload attachments.');
+    }
     final attachments = <SessionEvidenceAttachment>[];
     for (final file in files) {
       final mime = sessionEvidenceMimeType(file.name);
@@ -1485,8 +1802,9 @@ class AdminPortalRepository {
     List<SessionEvidenceAttachment> attachments = const [],
     bool offerFollowUp = false,
     String? followUpMessage,
+    String? exceptionReason,
   }) async {
-    final data = <String, dynamic>{
+    final data = <String, Object?>{
       'appointmentId': appointmentId,
       'action': action,
       'reply': reply,
@@ -1510,9 +1828,8 @@ class AdminPortalRepository {
     }
     if (offerFollowUp) data['offerFollowUp'] = true;
     if (followUpMessage != null) data['followUpMessage'] = followUpMessage;
-    await FirebaseFunctions.instance
-        .httpsCallable('reviewAppointment')
-        .call(data);
+    if (exceptionReason != null) data['exceptionReason'] = exceptionReason;
+    await _clinicalAppointmentCallable('reviewAppointment', data);
   }
 
   Future<void> reviewProfileVerification({
@@ -1696,15 +2013,138 @@ class AdminPortalRepository {
     );
   }
 
-  Future<void> updateInquiryStatus(String id, InquiryStatus status) =>
-      _firestoreService.updateDocument(FirestoreCollections.inquiries, id, {
-        'status': status.storedValue,
-        'updatedAt': FieldValue.serverTimestamp(),
+  /// Status changes are audited server-side; clients cannot write inquiries.
+  /// Pass [expectedRevision] to reject the change if someone acted first.
+  Future<void> updateInquiryStatus(
+    String id,
+    InquiryStatus status, {
+    int? expectedRevision,
+  }) => _callCallable('setInquiryStatus', {
+    'inquiryId': id,
+    'status': status.storedValue,
+    'expectedRevision': ?expectedRevision,
+  });
+
+  /// Assignee or super-administrator posts an authored reply; returns the
+  /// new revision. [requestId] makes retries return the original reply.
+  Future<int> replyToInquiry(
+    String id, {
+    required String message,
+    required int expectedRevision,
+    required String requestId,
+  }) async {
+    final result = await _callCallable('replyToInquiry', {
+      'inquiryId': id,
+      'message': message,
+      'expectedRevision': expectedRevision,
+      'requestId': requestId,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Super-administrator takes over an unresolved inquiry.
+  Future<int> takeOverInquiry(
+    String id, {
+    required int expectedRevision,
+    required String reason,
+  }) async {
+    final result = await _callCallable('takeOverInquiry', {
+      'inquiryId': id,
+      'expectedRevision': expectedRevision,
+      'reason': reason,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Super-administrator chooses the response target (24, 48 or 72 hours).
+  Future<void> setInquirySla(int hours) =>
+      _callCallable('setInquirySla', {'hours': hours});
+
+  /// The configured response target; unset until the super-admin chooses one.
+  Stream<InquirySla> watchInquirySla() => _firestoreService
+      .watchDocument('system_config', 'inquiry_sla')
+      .map(InquirySla.fromJson);
+
+  /// Reply timeline, oldest first. Rules limit it to the inquiry's readers.
+  Stream<List<InquiryReply>> watchInquiryReplies(String inquiryId) =>
+      _firestoreService
+          .watchDocuments(
+            '${FirestoreCollections.inquiries}/$inquiryId/replies',
+            orderBy: 'createdAt',
+            descending: false,
+          )
+          .map(
+            (items) => items
+                .map(
+                  (item) => InquiryReply.fromJson(
+                    item,
+                    id: item['id']?.toString() ?? '',
+                  ),
+                )
+                .toList(),
+          );
+
+  /// Pass [expectedRevision] so the server rejects a stale view.
+  Future<void> acknowledgeInquiry(String id, {int? expectedRevision}) =>
+      _callCallable('acknowledgeInquiry', {
+        'inquiryId': id,
+        'expectedRevision': ?expectedRevision,
       });
 
-  Future<void> acknowledgeInquiry(String id) => FirebaseFunctions.instance
-      .httpsCallable('acknowledgeInquiry')
-      .call({'inquiryId': id});
+  /// Assignee asks the super-administrator to review the inquiry.
+  Future<void> escalateInquiry(
+    String id, {
+    required String reason,
+    int? expectedRevision,
+  }) => _callCallable('escalateInquiry', {
+    'inquiryId': id,
+    'reason': reason,
+    'expectedRevision': ?expectedRevision,
+  });
+
+  /// Super-administrator replaces the clinical counselors (and optionally
+  /// operational monitoring staff); returns the new revision.
+  Future<int> reassignInquiry(
+    String id, {
+    required List<String> assigneeIds,
+    List<String>? monitoringStaffIds,
+    required int expectedRevision,
+    required String reason,
+  }) async {
+    final result = await _callCallable('reassignInquiry', {
+      'inquiryId': id,
+      'assigneeIds': assigneeIds,
+      'monitoringStaffIds': ?monitoringStaffIds,
+      'expectedRevision': expectedRevision,
+      'reason': reason,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Super-administrator routes inquiries created before college routing,
+  /// one bounded batch per call. Resume with the returned cursor until done.
+  Future<InquiryRoutingBackfillResult> routeExistingInquiries({
+    int limit = 100,
+    String? cursor,
+  }) async {
+    final result = await _callCallable('routeExistingInquiries', {
+      'limit': limit,
+      'cursor': ?cursor,
+    });
+    final data = result is Map ? result : const {};
+    int count(String key) => (data[key] as num?)?.toInt() ?? 0;
+    final next = data['nextCursor']?.toString();
+    return InquiryRoutingBackfillResult(
+      routed: count('routed'),
+      needsTriage: count('needsTriage'),
+      // Absent or malformed responses are never treated as finished.
+      done: data['done'] == true,
+      nextCursor: next == null || next.isEmpty ? null : next,
+    );
+  }
 
   Stream<PaccAvailabilityModel?> watchPaccAvailability() =>
       _paccAvailabilityRepository.watchCurrent();

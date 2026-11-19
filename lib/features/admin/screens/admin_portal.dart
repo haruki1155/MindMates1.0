@@ -30,6 +30,7 @@ import 'academic_structure_page.dart';
 import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
 import '../../announcements/screens/manage_announcements_page.dart';
+import 'backup_data_page.dart';
 import 'staff_operations_dashboard.dart';
 import 'staff_appointments_page.dart';
 import 'counselor_operations_dashboard.dart';
@@ -39,6 +40,9 @@ import '../../../services/inquiry_pdf_service.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../../counseling/widgets/student_personal_info_sheet.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/appointment_approvals_panel.dart';
+import '../widgets/inquiry_oversight.dart';
+import '../widgets/inquiry_routing_panel.dart';
 import '../widgets/pacc_schedule_editor_widgets.dart';
 import '../widgets/clinical_interview_widgets.dart';
 import '../widgets/counselor_inquiry_workspace.dart';
@@ -71,6 +75,7 @@ enum AdminPortalPage {
   availability,
   inquiries,
   assessments,
+  backupData,
   profile,
 }
 
@@ -91,6 +96,7 @@ extension on AdminPortalPage {
     AdminPortalPage.availability => 'Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
     AdminPortalPage.assessments => 'Assessment',
+    AdminPortalPage.backupData => 'Back-up Data',
     AdminPortalPage.profile => 'Profile',
   };
 
@@ -117,6 +123,7 @@ extension on AdminPortalPage {
     AdminPortalPage.availability => Icons.storefront_outlined,
     AdminPortalPage.inquiries => Icons.chat_bubble_outline_rounded,
     AdminPortalPage.assessments => Icons.assignment_outlined,
+    AdminPortalPage.backupData => Icons.backup_outlined,
     AdminPortalPage.profile => Icons.account_circle_outlined,
   };
 }
@@ -634,6 +641,12 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       initialSection: _initialInquirySection,
     ),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
+    AdminPortalPage.backupData =>
+      _repository.isSuperAdmin
+          ? BackupDataPage(repository: _repository)
+          : const Center(
+              child: Text('Super-administrator access is required.'),
+            ),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
   };
 }
@@ -676,14 +689,18 @@ class PortalWorkspaceNavigation extends StatelessWidget {
     AdminPortalPage.profiling => isSuperAdmin,
     AdminPortalPage.cases ||
     AdminPortalPage.followUps => accessRole == AccessRole.counselor,
-    AdminPortalPage.reports => accessRole.canAccessClinicalData,
+    AdminPortalPage.reports =>
+      accessRole == AccessRole.counselor || isSuperAdmin,
     AdminPortalPage.academicYear => accessRole == AccessRole.admin,
     // Notifications are opened from the persistent header bell instead of
     // duplicating the destination in the workspace navigation.
     AdminPortalPage.notifications => false,
     AdminPortalPage.assessments => accessRole.canAccessClinicalData,
+    AdminPortalPage.backupData => isSuperAdmin,
     AdminPortalPage.inquiries =>
-      accessRole == AccessRole.counselor || accessRole == AccessRole.admin,
+      accessRole == AccessRole.counselor ||
+          accessRole == AccessRole.portalStaff ||
+          accessRole == AccessRole.admin,
     AdminPortalPage.appointments =>
       accessRole.canUsePortal || accessRole == AccessRole.admin,
     AdminPortalPage.availability => canShowScheduleNavigation(accessRole),
@@ -711,7 +728,10 @@ class PortalWorkspaceNavigation extends StatelessWidget {
         AdminPortalPage.reports,
         AdminPortalPage.academicYear,
       ]),
-      const _NavSection('System', [AdminPortalPage.profile]),
+      const _NavSection('System', [
+        AdminPortalPage.backupData,
+        AdminPortalPage.profile,
+      ]),
     ];
     return Material(
       color: AdminColors.surface,
@@ -2090,6 +2110,20 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            AppointmentApprovalsPanel(
+              repository: widget.repository,
+              appointments: records,
+              onOpen: (appointment) => _AppointmentCard(
+                item: appointment,
+                repository: widget.repository,
+                selected: false,
+                archiving: false,
+                onSelected: null,
+                onArchive: null,
+                now: DateTime.now(),
+              )._showReviewDialog(context),
+            ),
+            const SizedBox(height: 14),
             SegmentedButton<bool>(
               segments: const [
                 ButtonSegment(
@@ -3017,6 +3051,9 @@ class _AppointmentCard extends StatelessWidget {
   Future<void> _showReviewDialog(BuildContext context) async {
     final currentStatus = item.lifecycleStatus;
     final canReview = canReviewAppointment(item, DateTime.now());
+    final canUploadClinicalAttachments =
+        repository.currentAccessRole == AccessRole.counselor &&
+        !repository.isSuperAdmin;
     final future = item.scheduledAt.isAfter(DateTime.now());
     final pendingStudent =
         item.hasPendingScheduleChange && item.proposedBy == 'student';
@@ -3039,6 +3076,14 @@ class _AppointmentCard extends StatelessWidget {
     final selectedClinicalFiles = <PendingSessionEvidenceFile>[];
     List<SessionEvidenceAttachment>? uploadedClinicalFiles;
     final followUpMessage = TextEditingController();
+    // Required by the server when the super-admin acts on an appointment that
+    // a college counselor is assigned to (college-scoped approval).
+    final exceptionReason = TextEditingController();
+    String? exceptionReasonValue() {
+      final text = exceptionReason.text.trim();
+      return repository.isSuperAdmin && text.isNotEmpty ? text : null;
+    }
+
     var offerFollowUp = false;
     DateTime? proposedDate;
     List<AppointmentSlot> proposedSlots = const [];
@@ -3048,606 +3093,647 @@ class _AppointmentCard extends StatelessWidget {
     String? proposedSlotsMessage;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 24,
-          ),
-          titlePadding: const EdgeInsets.fromLTRB(28, 26, 28, 0),
-          contentPadding: const EdgeInsets.fromLTRB(28, 20, 28, 8),
-          actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                canReview ? 'Review appointment' : 'Appointment details',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 5),
-              Text(
-                item.fullName,
-                style: const TextStyle(
-                  color: AdminColors.muted,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+      builder: (dialogContext) => _DialogControllerScope(
+        controllers: [
+          customReason,
+          sessionSummary,
+          followUpMessage,
+          exceptionReason,
+        ],
+        child: StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 24,
+            ),
+            titlePadding: const EdgeInsets.fromLTRB(28, 26, 28, 0),
+            contentPadding: const EdgeInsets.fromLTRB(28, 20, 28, 8),
+            actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  canReview ? 'Review appointment' : 'Appointment details',
+                  style: Theme.of(context).textTheme.headlineSmall,
                 ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: SizedBox(
-              width: 660,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (item.hasPendingScheduleChange) ...[
-                    Text(
-                      item.hasVerifiedPendingScheduleChange
-                          ? 'Current reserved time'
-                          : 'Current recorded time',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    Text('${item.scheduledAt} - ${item.scheduledTime}'),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Proposed time: ${item.proposedScheduledAt} - ${item.proposedScheduledTime ?? ''}',
-                    ),
-                    Text(
-                      !item.hasVerifiedPendingScheduleChange
-                          ? 'Older proposal: verify its current reservation before proposing another time.'
-                          : pendingStudent
-                          ? 'Student is awaiting your agreement. The current time remains reserved.'
-                          : 'Awaiting student agreement. The current time remains reserved.',
-                    ),
-                    const Divider(height: 28),
-                  ],
-                  const _AppointmentSectionHeader(
-                    icon: Icons.person_outline,
-                    title: 'Client information',
+                const SizedBox(height: 5),
+                Text(
+                  item.fullName,
+                  style: const TextStyle(
+                    color: AdminColors.muted,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
                   ),
-                  const SizedBox(height: 12),
-                  _AppointmentFieldGrid(
-                    fields: [
-                      _AppointmentFieldData('Email address', item.email),
-                      _AppointmentFieldData(
-                        'Contact number',
-                        item.contactNumber,
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: SizedBox(
+                width: 660,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (item.hasPendingScheduleChange) ...[
+                      Text(
+                        item.hasVerifiedPendingScheduleChange
+                            ? 'Current reserved time'
+                            : 'Current recorded time',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      _AppointmentFieldData(
-                        'Course and year',
-                        '${item.course ?? 'Not provided'} • ${item.yearLevel ?? 'Not provided'}',
+                      Text('${item.scheduledAt} - ${item.scheduledTime}'),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Proposed time: ${item.proposedScheduledAt} - ${item.proposedScheduledTime ?? ''}',
                       ),
-                      _AppointmentFieldData(
-                        'Preferred contact',
-                        item.preferredContactMethod,
+                      Text(
+                        !item.hasVerifiedPendingScheduleChange
+                            ? 'Older proposal: verify its current reservation before proposing another time.'
+                            : pendingStudent
+                            ? 'Student is awaiting your agreement. The current time remains reserved.'
+                            : 'Awaiting student agreement. The current time remains reserved.',
                       ),
-                      _AppointmentFieldData(
-                        'Previous counseling',
-                        item.therapyBefore ?? 'Not provided',
-                      ),
+                      const Divider(height: 28),
                     ],
-                  ),
-                  const Divider(height: 34),
-                  const _AppointmentSectionHeader(
-                    icon: Icons.event_note_outlined,
-                    title: 'Request details',
-                  ),
-                  const SizedBox(height: 12),
-                  _AppointmentField(
-                    label: 'Primary concern',
-                    value: item.concern,
-                    prominent: true,
-                  ),
-                  const SizedBox(height: 12),
-                  _AppointmentFieldGrid(
-                    fields: [
-                      _AppointmentFieldData(
-                        'Requested schedule',
-                        '${_date(item.scheduledAt)} • ${item.scheduledTime}',
-                      ),
-                      _AppointmentFieldData(
-                        'Current status',
-                        _formalLabel(item.status),
-                      ),
-                      if ((item.staffReply ?? '').isNotEmpty)
-                        _AppointmentFieldData(
-                          'Decision reason',
-                          item.staffReply!,
-                        ),
-                      if (item.proposedScheduledAt != null)
-                        _AppointmentFieldData(
-                          'Legacy schedule update',
-                          '${_date(item.proposedScheduledAt)} • ${item.proposedScheduledTime ?? ''}',
-                        ),
-                    ],
-                  ),
-                  if (!canReview) ...[
-                    const SizedBox(height: 22),
-                    _AppointmentNotice(
-                      icon: Icons.lock_outline,
-                      message: item.isArchived
-                          ? 'This appointment is archived. Details are read-only.'
-                          : currentStatus == AppointmentStatus.confirmed
-                          ? 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.'
-                          : 'This appointment has been finalized. The recorded decision is read-only.',
+                    const _AppointmentSectionHeader(
+                      icon: Icons.person_outline,
+                      title: 'Client information',
                     ),
-                    if (currentStatus == AppointmentStatus.completed)
-                      ClinicalInterviewRecordViewer(
-                        repository: repository,
-                        appointmentId: item.id,
-                      ),
-                  ] else ...[
+                    const SizedBox(height: 12),
+                    _AppointmentFieldGrid(
+                      fields: [
+                        _AppointmentFieldData('Email address', item.email),
+                        _AppointmentFieldData(
+                          'Contact number',
+                          item.contactNumber,
+                        ),
+                        _AppointmentFieldData(
+                          'Course and year',
+                          '${item.course ?? 'Not provided'} • ${item.yearLevel ?? 'Not provided'}',
+                        ),
+                        _AppointmentFieldData(
+                          'Preferred contact',
+                          item.preferredContactMethod,
+                        ),
+                        _AppointmentFieldData(
+                          'Previous counseling',
+                          item.therapyBefore ?? 'Not provided',
+                        ),
+                      ],
+                    ),
                     const Divider(height: 34),
                     const _AppointmentSectionHeader(
-                      icon: Icons.fact_check_outlined,
-                      title: 'PACC decision',
+                      icon: Icons.event_note_outlined,
+                      title: 'Request details',
                     ),
-                    const SizedBox(height: 14),
-                    DropdownButtonFormField<String>(
-                      initialValue: action,
-                      decoration: const InputDecoration(labelText: 'Action'),
-                      items: [
-                        if (pendingStudent)
-                          const DropdownMenuItem(
-                            value: 'accept',
-                            child: Text('Accept student proposed time'),
-                          ),
-                        if (!item.hasPendingScheduleChange &&
-                            currentStatus != AppointmentStatus.confirmed &&
-                            currentStatus !=
-                                AppointmentStatus.rescheduleProposed)
-                          const DropdownMenuItem(
-                            value: 'confirmed',
-                            child: Text('Confirm appointment'),
-                          ),
-                        const DropdownMenuItem(
-                          value: 'rescheduled',
-                          child: Text('Re-schedule appointment'),
+                    const SizedBox(height: 12),
+                    _AppointmentField(
+                      label: 'Primary concern',
+                      value: item.concern,
+                      prominent: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _AppointmentFieldGrid(
+                      fields: [
+                        _AppointmentFieldData(
+                          'Requested schedule',
+                          '${_date(item.scheduledAt)} • ${item.scheduledTime}',
                         ),
-                        if (currentStatus == AppointmentStatus.confirmed &&
-                            !future) ...[
-                          const DropdownMenuItem(
-                            value: 'completed',
-                            child: Text('Mark session as completed'),
+                        _AppointmentFieldData(
+                          'Current status',
+                          _formalLabel(item.status),
+                        ),
+                        if ((item.staffReply ?? '').isNotEmpty)
+                          _AppointmentFieldData(
+                            'Decision reason',
+                            item.staffReply!,
                           ),
+                        if (item.proposedScheduledAt != null)
+                          _AppointmentFieldData(
+                            'Legacy schedule update',
+                            '${_date(item.proposedScheduledAt)} • ${item.proposedScheduledTime ?? ''}',
+                          ),
+                      ],
+                    ),
+                    if (!canReview) ...[
+                      const SizedBox(height: 22),
+                      _AppointmentNotice(
+                        icon: Icons.lock_outline,
+                        message: item.isArchived
+                            ? 'This appointment is archived. Details are read-only.'
+                            : currentStatus == AppointmentStatus.confirmed
+                            ? 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.'
+                            : 'This appointment has been finalized. The recorded decision is read-only.',
+                      ),
+                      if (currentStatus == AppointmentStatus.completed)
+                        ClinicalInterviewRecordViewer(
+                          repository: repository,
+                          appointmentId: item.id,
+                        ),
+                    ] else ...[
+                      const Divider(height: 34),
+                      const _AppointmentSectionHeader(
+                        icon: Icons.fact_check_outlined,
+                        title: 'PACC decision',
+                      ),
+                      const SizedBox(height: 14),
+                      DropdownButtonFormField<String>(
+                        initialValue: action,
+                        decoration: const InputDecoration(labelText: 'Action'),
+                        items: [
+                          if (pendingStudent)
+                            const DropdownMenuItem(
+                              value: 'accept',
+                              child: Text('Accept student proposed time'),
+                            ),
+                          if (!item.hasPendingScheduleChange &&
+                              currentStatus != AppointmentStatus.confirmed &&
+                              currentStatus !=
+                                  AppointmentStatus.rescheduleProposed)
+                            const DropdownMenuItem(
+                              value: 'confirmed',
+                              child: Text('Confirm appointment'),
+                            ),
                           const DropdownMenuItem(
-                            value: 'no_show',
-                            child: Text('Mark as Did Not Attend'),
+                            value: 'rescheduled',
+                            child: Text('Re-schedule appointment'),
+                          ),
+                          if (currentStatus == AppointmentStatus.confirmed &&
+                              !future) ...[
+                            const DropdownMenuItem(
+                              value: 'completed',
+                              child: Text('Mark session as completed'),
+                            ),
+                            const DropdownMenuItem(
+                              value: 'no_show',
+                              child: Text('Mark as Did Not Attend'),
+                            ),
+                          ],
+                        ],
+                        onChanged: submitting
+                            ? null
+                            : (value) => setDialogState(() {
+                                action = value!;
+                                reason = _appointmentReasons(action).first;
+                              }),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        key: ValueKey('reason-$action'),
+                        initialValue: reason,
+                        decoration: const InputDecoration(
+                          labelText: 'Decision reason',
+                        ),
+                        items: _appointmentReasons(action)
+                            .map(
+                              (value) => DropdownMenuItem(
+                                value: value,
+                                child: Text(value),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: submitting
+                            ? null
+                            : (value) => setDialogState(() => reason = value!),
+                      ),
+                      if (repository.isSuperAdmin) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: exceptionReason,
+                          enabled: !submitting,
+                          maxLength: 500,
+                          decoration: const InputDecoration(
+                            labelText: 'Administrator exception reason',
+                            helperText:
+                                'Required when a counselor is assigned to this '
+                                "student's college.",
+                          ),
+                        ),
+                      ],
+                      if (action == 'rescheduled') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: customReason,
+                          maxLength: 500,
+                          decoration: InputDecoration(
+                            labelText: reason == 'Other'
+                                ? 'Custom reschedule reason (required)'
+                                : 'Additional reschedule context (optional)',
+                          ),
+                        ),
+                      ],
+                      if (action == 'rescheduled') ...[
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                final picked = await showDatePicker(
+                                  context: dialogContext,
+                                  initialDate: DateTime.now().add(
+                                    const Duration(days: 1),
+                                  ),
+                                  firstDate: DateTime.now(),
+                                  lastDate: DateTime.now().add(
+                                    const Duration(days: 365),
+                                  ),
+                                );
+                                if (picked != null) {
+                                  setDialogState(() {
+                                    proposedDate = picked;
+                                    proposedSlot = null;
+                                    proposedSlots = const [];
+                                    proposedSlotsMessage = null;
+                                    loadingProposedSlots = true;
+                                  });
+                                  try {
+                                    final slots = await repository
+                                        .getAvailableAppointmentSlots(picked);
+                                    if (dialogContext.mounted) {
+                                      setDialogState(() {
+                                        proposedSlots = slots;
+                                        loadingProposedSlots = false;
+                                        proposedSlotsMessage = slots.isEmpty
+                                            ? 'No available appointment times for this date.'
+                                            : null;
+                                      });
+                                    }
+                                  } catch (_) {
+                                    if (dialogContext.mounted) {
+                                      setDialogState(() {
+                                        loadingProposedSlots = false;
+                                        proposedSlotsMessage =
+                                            'Unable to load available appointment times.';
+                                      });
+                                    }
+                                  }
+                                }
+                              },
+                              icon: const Icon(Icons.calendar_today_outlined),
+                              label: Text(
+                                proposedDate == null
+                                    ? 'Select a date'
+                                    : _date(proposedDate),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 260,
+                              child: DropdownButtonFormField<AppointmentSlot>(
+                                initialValue: proposedSlot,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Available times',
+                                ),
+                                hint: Text(
+                                  proposedDate == null
+                                      ? 'Select a date first'
+                                      : loadingProposedSlots
+                                      ? 'Loading available times...'
+                                      : 'Select an available time',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                items: proposedSlots
+                                    .map(
+                                      (slot) => DropdownMenuItem(
+                                        value: slot,
+                                        child: Text(slot.label),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged:
+                                    loadingProposedSlots ||
+                                        proposedSlots.isEmpty
+                                    ? null
+                                    : (slot) => setDialogState(
+                                        () => proposedSlot = slot,
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (proposedSlotsMessage != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            proposedSlotsMessage!,
+                            style: const TextStyle(
+                              color: AdminColors.muted,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ],
-                      onChanged: submitting
-                          ? null
-                          : (value) => setDialogState(() {
-                              action = value!;
-                              reason = _appointmentReasons(action).first;
-                            }),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey('reason-$action'),
-                      initialValue: reason,
-                      decoration: const InputDecoration(
-                        labelText: 'Decision reason',
-                      ),
-                      items: _appointmentReasons(action)
-                          .map(
-                            (value) => DropdownMenuItem(
-                              value: value,
-                              child: Text(value),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: submitting
-                          ? null
-                          : (value) => setDialogState(() => reason = value!),
-                    ),
-                    if (action == 'rescheduled') ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: customReason,
-                        maxLength: 500,
-                        decoration: InputDecoration(
-                          labelText: reason == 'Other'
-                              ? 'Custom reschedule reason (required)'
-                              : 'Additional reschedule context (optional)',
+                      if (action == 'completed') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: sessionSummary,
+                          minLines: 3,
+                          maxLines: 8,
+                          maxLength: 2000,
+                          enabled: !submitting,
+                          decoration: const InputDecoration(
+                            labelText: 'Session summary (internal)',
+                            helperText:
+                                'Visible only to authorized clinical staff.',
+                          ),
                         ),
-                      ),
-                    ],
-                    if (action == 'rescheduled') ...[
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: () async {
-                              final picked = await showDatePicker(
-                                context: dialogContext,
-                                initialDate: DateTime.now().add(
-                                  const Duration(days: 1),
-                                ),
-                                firstDate: DateTime.now(),
-                                lastDate: DateTime.now().add(
-                                  const Duration(days: 365),
-                                ),
-                              );
-                              if (picked != null) {
-                                setDialogState(() {
-                                  proposedDate = picked;
-                                  proposedSlot = null;
-                                  proposedSlots = const [];
-                                  proposedSlotsMessage = null;
-                                  loadingProposedSlots = true;
-                                });
-                                try {
-                                  final slots = await repository
-                                      .getAvailableAppointmentSlots(picked);
-                                  if (dialogContext.mounted) {
-                                    setDialogState(() {
-                                      proposedSlots = slots;
-                                      loadingProposedSlots = false;
-                                      proposedSlotsMessage = slots.isEmpty
-                                          ? 'No available appointment times for this date.'
-                                          : null;
-                                    });
+                        if (canUploadClinicalAttachments)
+                          ClinicalInterviewEditor(
+                            files: selectedClinicalFiles,
+                            busy: submitting,
+                            onRemoveFile: (index) => setDialogState(() {
+                              selectedClinicalFiles.removeAt(index);
+                              uploadedClinicalFiles = null;
+                            }),
+                            onChooseFiles: () async {
+                              try {
+                                final chosen = await openFiles(
+                                  acceptedTypeGroups: [
+                                    const XTypeGroup(
+                                      label: 'Interview materials',
+                                      extensions: [
+                                        'jpg',
+                                        'jpeg',
+                                        'png',
+                                        'pdf',
+                                        'doc',
+                                        'docx',
+                                      ],
+                                    ),
+                                  ],
+                                );
+                                if (!dialogContext.mounted || chosen.isEmpty) {
+                                  return;
+                                }
+                                if (selectedClinicalFiles.length +
+                                        chosen.length >
+                                    maxSessionEvidenceFiles) {
+                                  throw const FormatException(
+                                    'Choose no more than five files.',
+                                  );
+                                }
+                                final incoming = <PendingSessionEvidenceFile>[];
+                                for (final file in chosen) {
+                                  final name = file.name;
+                                  final type = sessionEvidenceMimeType(name);
+                                  final length = await file.length();
+                                  if (!validSessionEvidenceFileName(name) ||
+                                      type == null ||
+                                      length == 0 ||
+                                      length > maxSessionEvidenceFileBytes) {
+                                    throw const FormatException(
+                                      'Only PNG, JPG, PDF, DOC or DOCX files up to 5 MB are allowed.',
+                                    );
                                   }
-                                } catch (_) {
-                                  if (dialogContext.mounted) {
-                                    setDialogState(() {
-                                      loadingProposedSlots = false;
-                                      proposedSlotsMessage =
-                                          'Unable to load available appointment times.';
-                                    });
+                                  final bytes = await file.readAsBytes();
+                                  if (bytes.length != length) {
+                                    throw const FormatException(
+                                      'File size changed during selection.',
+                                    );
                                   }
+                                  incoming.add(
+                                    PendingSessionEvidenceFile(
+                                      name: name,
+                                      contentType: type,
+                                      bytes: bytes,
+                                    ),
+                                  );
+                                }
+                                if (dialogContext.mounted) {
+                                  setDialogState(() {
+                                    selectedClinicalFiles.addAll(incoming);
+                                    uploadedClinicalFiles = null;
+                                  });
+                                }
+                              } catch (_) {
+                                if (dialogContext.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Unable to add files. Use PNG, JPG, PDF, DOC or DOCX up to 5 MB each (max five).',
+                                      ),
+                                    ),
+                                  );
                                 }
                               }
                             },
-                            icon: const Icon(Icons.calendar_today_outlined),
-                            label: Text(
-                              proposedDate == null
-                                  ? 'Select a date'
-                                  : _date(proposedDate),
+                          )
+                        else
+                          const Padding(
+                            padding: EdgeInsets.only(top: 12, bottom: 4),
+                            child: Text(
+                              'Session attachments can only be uploaded by an assigned college counselor.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AdminColors.muted,
+                              ),
                             ),
                           ),
-                          SizedBox(
-                            width: 260,
-                            child: DropdownButtonFormField<AppointmentSlot>(
-                              initialValue: proposedSlot,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Available times',
-                              ),
-                              hint: Text(
-                                proposedDate == null
-                                    ? 'Select a date first'
-                                    : loadingProposedSlots
-                                    ? 'Loading available times...'
-                                    : 'Select an available time',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              items: proposedSlots
-                                  .map(
-                                    (slot) => DropdownMenuItem(
-                                      value: slot,
-                                      child: Text(slot.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged:
-                                  loadingProposedSlots || proposedSlots.isEmpty
-                                  ? null
-                                  : (slot) => setDialogState(
-                                      () => proposedSlot = slot,
-                                    ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (proposedSlotsMessage != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          proposedSlotsMessage!,
-                          style: const TextStyle(
-                            color: AdminColors.muted,
-                            fontSize: 12,
-                          ),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: offerFollowUp,
+                          onChanged: submitting
+                              ? null
+                              : (value) => setDialogState(
+                                  () => offerFollowUp = value ?? false,
+                                ),
+                          title: const Text('Offer a follow-up session'),
                         ),
+                        if (offerFollowUp)
+                          TextField(
+                            controller: followUpMessage,
+                            minLines: 2,
+                            maxLines: 5,
+                            maxLength: 1000,
+                            decoration: const InputDecoration(
+                              labelText: 'Client message',
+                            ),
+                          ),
                       ],
                     ],
-                    if (action == 'completed') ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: sessionSummary,
-                        minLines: 3,
-                        maxLines: 8,
-                        maxLength: 2000,
-                        enabled: !submitting,
-                        decoration: const InputDecoration(
-                          labelText: 'Session summary (internal)',
-                          helperText:
-                              'Visible only to authorized clinical staff.',
-                        ),
-                      ),
-                      ClinicalInterviewEditor(
-                        files: selectedClinicalFiles,
-                        busy: submitting,
-                        onRemoveFile: (index) => setDialogState(() {
-                          selectedClinicalFiles.removeAt(index);
-                          uploadedClinicalFiles = null;
-                        }),
-                        onChooseFiles: () async {
-                          try {
-                            final chosen = await openFiles(
-                              acceptedTypeGroups: [
-                                const XTypeGroup(
-                                  label: 'Interview materials',
-                                  extensions: [
-                                    'jpg',
-                                    'jpeg',
-                                    'png',
-                                    'pdf',
-                                    'doc',
-                                    'docx',
-                                  ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: submitting
+                    ? null
+                    : () => Navigator.pop(dialogContext),
+                child: Text(canReview ? 'Cancel' : 'Close'),
+              ),
+              if (canReview)
+                FilledButton(
+                  onPressed: submitting
+                      ? null
+                      : () async {
+                          if (submitting) return;
+                          final rescheduleReason = action == 'rescheduled'
+                              ? [
+                                  if (reason != 'Other') reason,
+                                  customReason.text.trim(),
+                                ].where((part) => part.isNotEmpty).join(': ')
+                              : null;
+                          if (action == 'rescheduled' &&
+                              (rescheduleReason == null ||
+                                  rescheduleReason.trim().length < 3)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter a reschedule reason of at least 3 characters.',
                                 ),
-                              ],
+                              ),
                             );
-                            if (!dialogContext.mounted || chosen.isEmpty) {
-                              return;
-                            }
-                            if (selectedClinicalFiles.length + chosen.length >
-                                maxSessionEvidenceFiles) {
-                              throw const FormatException(
-                                'Choose no more than five files.',
-                              );
-                            }
-                            final incoming = <PendingSessionEvidenceFile>[];
-                            for (final file in chosen) {
-                              final name = file.name;
-                              final type = sessionEvidenceMimeType(name);
-                              final length = await file.length();
-                              if (!validSessionEvidenceFileName(name) ||
-                                  type == null ||
-                                  length == 0 ||
-                                  length > maxSessionEvidenceFileBytes) {
-                                throw const FormatException(
-                                  'Only PNG, JPG, PDF, DOC or DOCX files up to 5 MB are allowed.',
-                                );
-                              }
-                              final bytes = await file.readAsBytes();
-                              if (bytes.length != length) {
-                                throw const FormatException(
-                                  'File size changed during selection.',
-                                );
-                              }
-                              incoming.add(
-                                PendingSessionEvidenceFile(
-                                  name: name,
-                                  contentType: type,
-                                  bytes: bytes,
+                            return;
+                          }
+                          if (action == 'completed' &&
+                              sessionSummary.text.trim().length < 3) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter an internal session summary of at least 3 characters.',
                                 ),
-                              );
-                            }
-                            if (dialogContext.mounted) {
-                              setDialogState(() {
-                                selectedClinicalFiles.addAll(incoming);
-                                uploadedClinicalFiles = null;
-                              });
-                            }
-                          } catch (_) {
-                            if (dialogContext.mounted) {
+                              ),
+                            );
+                            return;
+                          }
+                          if (action == 'completed' &&
+                              offerFollowUp &&
+                              followUpMessage.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter a client follow-up message.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          if (action == 'rescheduled' &&
+                              (proposedDate == null || proposedSlot == null)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter a reply and choose an available appointment time.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          setDialogState(() => submitting = true);
+                          try {
+                            if (!item.hasScheduleRevision) {
+                              await repository
+                                  .initializeAppointmentScheduleRevision(
+                                    appointmentId: item.id,
+                                    scheduledAt: item.scheduledAt,
+                                    status: item.lifecycleStatus.value,
+                                    exceptionReason: exceptionReasonValue(),
+                                  );
+                              if (!context.mounted) return;
+                              Navigator.of(context).pop();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text(
-                                    'Unable to add files. Use PNG, JPG, PDF, DOC or DOCX up to 5 MB each (max five).',
+                                    'Appointment prepared. Refresh and review it before confirming.',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            if (action == 'accept') {
+                              await repository.changeAppointmentAgreement(
+                                item,
+                                'accept',
+                                agreementRequestId,
+                                exceptionReason: exceptionReasonValue(),
+                              );
+                            } else {
+                              // Upload evidence only after the legacy schedule guard.
+                              // Reuse the uploaded manifest if a callable retry is needed.
+                              if (action == 'completed' &&
+                                  canUploadClinicalAttachments &&
+                                  uploadedClinicalFiles == null) {
+                                uploadedClinicalFiles = await repository
+                                    .uploadClinicalEvidenceFiles(
+                                      appointmentId: item.id,
+                                      files: selectedClinicalFiles,
+                                    );
+                              }
+                              await repository.reviewAppointment(
+                                appointmentId: item.id,
+                                expectedScheduledAt:
+                                    item.scheduledAt.millisecondsSinceEpoch,
+                                expectedScheduleRevision: item.scheduleRevision,
+                                expectedProposalRevision: item.proposalRevision,
+                                expectedStatus: item.lifecycleStatus.value,
+                                action: action,
+                                reply: action == 'completed'
+                                    ? 'Appointment completed.'
+                                    : rescheduleReason ?? reason,
+                                proposedScheduledAt: proposedSlot?.start,
+                                proposedScheduledTime: proposedSlot?.label,
+                                rescheduleReason: rescheduleReason,
+                                sessionSummary: action == 'completed'
+                                    ? sessionSummary.text.trim()
+                                    : null,
+                                attachments:
+                                    action == 'completed' &&
+                                        canUploadClinicalAttachments
+                                    ? uploadedClinicalFiles ?? const []
+                                    : const [],
+                                offerFollowUp:
+                                    action == 'completed' && offerFollowUp,
+                                followUpMessage:
+                                    action == 'completed' && offerFollowUp
+                                    ? followUpMessage.text.trim()
+                                    : null,
+                                exceptionReason: exceptionReasonValue(),
+                              );
+                            }
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                            }
+                          } catch (error) {
+                            if (dialogContext.mounted) {
+                              setDialogState(() => submitting = false);
+                            }
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    FirebaseErrorMessage.describe(
+                                      error,
+                                      fallback:
+                                          'Unable to update the appointment.',
+                                    ),
                                   ),
                                 ),
                               );
                             }
                           }
                         },
-                      ),
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: offerFollowUp,
-                        onChanged: submitting
-                            ? null
-                            : (value) => setDialogState(
-                                () => offerFollowUp = value ?? false,
-                              ),
-                        title: const Text('Offer a follow-up session'),
-                      ),
-                      if (offerFollowUp)
-                        TextField(
-                          controller: followUpMessage,
-                          minLines: 2,
-                          maxLines: 5,
-                          maxLength: 1000,
-                          decoration: const InputDecoration(
-                            labelText: 'Client message',
-                          ),
-                        ),
-                    ],
-                  ],
-                ],
-              ),
-            ),
+                  child: submitting
+                      ? const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            SizedBox(width: 8),
+                            Text('Sending decision…'),
+                          ],
+                        )
+                      : const Text('Send decision'),
+                ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: submitting ? null : () => Navigator.pop(dialogContext),
-              child: Text(canReview ? 'Cancel' : 'Close'),
-            ),
-            if (canReview)
-              FilledButton(
-                onPressed: submitting
-                    ? null
-                    : () async {
-                        if (submitting) return;
-                        final rescheduleReason = action == 'rescheduled'
-                            ? [
-                                if (reason != 'Other') reason,
-                                customReason.text.trim(),
-                              ].where((part) => part.isNotEmpty).join(': ')
-                            : null;
-                        if (action == 'rescheduled' &&
-                            (rescheduleReason == null ||
-                                rescheduleReason.trim().length < 3)) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Enter a reschedule reason of at least 3 characters.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-                        if (action == 'completed' &&
-                            sessionSummary.text.trim().length < 3) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Enter an internal session summary of at least 3 characters.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-                        if (action == 'completed' &&
-                            offerFollowUp &&
-                            followUpMessage.text.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Enter a client follow-up message.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-                        if (action == 'rescheduled' &&
-                            (proposedDate == null || proposedSlot == null)) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Enter a reply and choose an available appointment time.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-                        setDialogState(() => submitting = true);
-                        try {
-                          if (!item.hasScheduleRevision) {
-                            await repository
-                                .initializeAppointmentScheduleRevision(
-                                  appointmentId: item.id,
-                                  scheduledAt: item.scheduledAt,
-                                  status: item.lifecycleStatus.value,
-                                );
-                            if (!context.mounted) return;
-                            Navigator.of(context).pop();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Appointment prepared. Refresh and review it before confirming.',
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-                          if (action == 'accept') {
-                            await repository.changeAppointmentAgreement(
-                              item,
-                              'accept',
-                              agreementRequestId,
-                            );
-                          } else {
-                            // Upload evidence only after the legacy schedule guard.
-                            // Reuse the uploaded manifest if a callable retry is needed.
-                            if (action == 'completed' &&
-                                uploadedClinicalFiles == null) {
-                              uploadedClinicalFiles = await repository
-                                  .uploadClinicalEvidenceFiles(
-                                    appointmentId: item.id,
-                                    files: selectedClinicalFiles,
-                                  );
-                            }
-                            await repository.reviewAppointment(
-                              appointmentId: item.id,
-                              expectedScheduledAt:
-                                  item.scheduledAt.millisecondsSinceEpoch,
-                              expectedScheduleRevision: item.scheduleRevision,
-                              expectedProposalRevision: item.proposalRevision,
-                              expectedStatus: item.lifecycleStatus.value,
-                              action: action,
-                              reply: action == 'completed'
-                                  ? 'Appointment completed.'
-                                  : rescheduleReason ?? reason,
-                              proposedScheduledAt: proposedSlot?.start,
-                              proposedScheduledTime: proposedSlot?.label,
-                              rescheduleReason: rescheduleReason,
-                              sessionSummary: action == 'completed'
-                                  ? sessionSummary.text.trim()
-                                  : null,
-                              attachments: action == 'completed'
-                                  ? uploadedClinicalFiles ?? const []
-                                  : const [],
-                              offerFollowUp:
-                                  action == 'completed' && offerFollowUp,
-                              followUpMessage:
-                                  action == 'completed' && offerFollowUp
-                                  ? followUpMessage.text.trim()
-                                  : null,
-                            );
-                          }
-                          if (dialogContext.mounted) {
-                            Navigator.pop(dialogContext);
-                          }
-                        } catch (error) {
-                          if (dialogContext.mounted) {
-                            setDialogState(() => submitting = false);
-                          }
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  FirebaseErrorMessage.describe(
-                                    error,
-                                    fallback:
-                                        'Unable to update the appointment.',
-                                  ),
-                                ),
-                              ),
-                            );
-                          }
-                        }
-                      },
-                child: submitting
-                    ? const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          SizedBox(width: 8),
-                          Text('Sending decision…'),
-                        ],
-                      )
-                    : const Text('Send decision'),
-              ),
-          ],
         ),
       ),
     );
-    customReason.dispose();
-    sessionSummary.dispose();
-    followUpMessage.dispose();
   }
 
   static List<String> _appointmentReasons(String action) => switch (action) {
@@ -5358,11 +5444,36 @@ class _InquiriesPage extends StatefulWidget {
 class _InquiriesPageState extends State<_InquiriesPage> {
   String status = 'All Status';
   String category = 'All Categories';
+  int _streamEpoch = 0;
+
+  bool get _isOperationalStaff =>
+      !widget.repository.isSuperAdmin &&
+      widget.repository.currentAccessRole == AccessRole.portalStaff;
+
+  Stream<List<AdminInquiryModel>> _watchForRole() {
+    if (widget.repository.isSuperAdmin ||
+        widget.repository.currentAccessRole == AccessRole.counselor) {
+      return widget.repository.watchInquiries();
+    }
+    if (widget.repository.currentAccessRole == AccessRole.portalStaff) {
+      return widget.repository.watchInquiryStatuses();
+    }
+    return Stream.error(
+      StateError('Inquiry access is limited to authorized PACC staff.'),
+    );
+  }
+
+  static bool _isUnauthorizedError(Object? error) {
+    if (error == null) return false;
+    if (error is StateError) return true;
+    final code = FirebaseErrorMessage.codeOf(error);
+    return code == 'permission-denied' || code == 'unauthenticated';
+  }
 
   void _openInquiry(AdminInquiryModel inquiry) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _InquiryDetailScreen(
+        builder: (_) => InquiryDetailScreen(
           inquiry: inquiry,
           repository: widget.repository,
         ),
@@ -5378,6 +5489,8 @@ class _InquiriesPageState extends State<_InquiriesPage> {
           widget.repository.currentAccessRole,
         )
         ? 'Student messages and other PACC service inquiries.'
+        : _isOperationalStaff
+        ? 'Monitor assigned operational inquiry status and escalate items when needed.'
         : 'Review, acknowledge, and resolve submitted inquiries.',
     child:
         canShowCounselorMessagingInInquiries(
@@ -5391,85 +5504,122 @@ class _InquiriesPageState extends State<_InquiriesPage> {
         : _buildServiceInquiries(),
   );
 
-  Widget _buildServiceInquiries() => StreamBuilder<List<AdminInquiryModel>>(
-    stream: widget.repository.watchInquiries(),
-    builder: (context, snapshot) {
-      if (snapshot.hasError) return const _AccessPanel();
-      final all = snapshot.data ?? const <AdminInquiryModel>[];
-      final categories = [
-        'All Categories',
-        ...{for (final item in all) item.category},
-      ];
-      final items = all
-          .where(
-            (i) =>
-                (status == 'All Status' || i.status.label == status) &&
-                (category == 'All Categories' || i.category == category),
-          )
-          .toList();
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _CompactSummaryStrip(
-            values: {
-              'Total': all.length,
-              'Pending': all
-                  .where((item) => item.status == InquiryStatus.pending)
-                  .length,
-              'In progress': all
-                  .where((item) => item.status == InquiryStatus.inProgress)
-                  .length,
-              'Resolved': all
-                  .where((item) => item.status == InquiryStatus.resolved)
-                  .length,
-            },
-          ),
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: _box,
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.end,
-              children: [
-                _FilterField(
-                  label: 'Status',
-                  value: status,
-                  values: const [
-                    'All Status',
-                    'Pending',
-                    'In Progress',
-                    'Resolved',
-                  ],
-                  onChanged: (value) => setState(() => status = value!),
-                ),
-                _FilterField(
-                  label: 'Category',
-                  value: category,
-                  values: categories,
-                  onChanged: (value) => setState(() => category = value!),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    '${items.length} ${items.length == 1 ? 'inquiry' : 'inquiries'} shown',
-                    style: const TextStyle(
-                      color: AdminColors.muted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+  Widget _buildServiceInquiries() => KeyedSubtree(
+    key: ValueKey(_streamEpoch),
+    child: StreamBuilder<List<AdminInquiryModel>>(
+      stream: _watchForRole(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          if (_isUnauthorizedError(snapshot.error)) {
+            return const _AccessPanel();
+          }
+          return _InquiryUnavailablePanel(
+            title: 'Inquiries could not be loaded',
+            message: FirebaseErrorMessage.describe(
+              snapshot.error!,
+              fallback: 'Unable to load inquiry statuses right now.',
+            ),
+            onRetry: () => setState(() => _streamEpoch++),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+        final all = snapshot.data ?? const <AdminInquiryModel>[];
+        final categories = [
+          'All Categories',
+          ...{for (final item in all) item.category},
+        ];
+        final items = all
+            .where(
+              (i) =>
+                  (status == 'All Status' || i.status.label == status) &&
+                  (category == 'All Categories' || i.category == category),
+            )
+            .toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InquiryBackfillButton(repository: widget.repository),
+            const SizedBox(height: 10),
+            InquiryOverduePanel(
+              repository: widget.repository,
+              inquiries: all,
+              onOpen: _openInquiry,
+            ),
+            const SizedBox(height: 10),
+            _CompactSummaryStrip(
+              values: {
+                'Total': all.length,
+                'Pending': all
+                    .where((item) => item.status == InquiryStatus.pending)
+                    .length,
+                'In progress': all
+                    .where((item) => item.status == InquiryStatus.inProgress)
+                    .length,
+                'Resolved': all
+                    .where((item) => item.status == InquiryStatus.resolved)
+                    .length,
+              },
+            ),
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: _box,
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.end,
+                children: [
+                  _FilterField(
+                    label: 'Status',
+                    value: status,
+                    values: const [
+                      'All Status',
+                      'Pending',
+                      'In Progress',
+                      'Resolved',
+                    ],
+                    onChanged: (value) => setState(() => status = value!),
+                  ),
+                  _FilterField(
+                    label: 'Category',
+                    value: category,
+                    values: categories,
+                    onChanged: (value) => setState(() => category = value!),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      '${items.length} ${items.length == 1 ? 'inquiry' : 'inquiries'} shown',
+                      style: const TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-          _InquiryList(items: items, selected: null, onSelect: _openInquiry),
-        ],
-      );
-    },
+            const SizedBox(height: 14),
+            _InquiryList(
+              items: items,
+              selected: null,
+              onSelect: _openInquiry,
+              operationalEmpty: _isOperationalStaff && all.isEmpty,
+            ),
+          ],
+        );
+      },
+    ),
   );
 }
 
@@ -5478,16 +5628,20 @@ class _InquiryList extends StatelessWidget {
     required this.items,
     required this.selected,
     required this.onSelect,
+    this.operationalEmpty = false,
   });
   final List<AdminInquiryModel> items;
   final AdminInquiryModel? selected;
   final ValueChanged<AdminInquiryModel> onSelect;
+  final bool operationalEmpty;
 
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) {
-      return const _EmptyPanel(
-        message: 'No inquiries match the selected filters.',
+      return _EmptyPanel(
+        message: operationalEmpty
+            ? 'No inquiry status items are currently assigned to you for monitoring.'
+            : 'No inquiries match the selected filters.',
       );
     }
     return Container(
@@ -5560,7 +5714,11 @@ class _InquiryQueueRow extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            item.subject,
+                            item.isOperationalProjection
+                                ? (item.operationalLabel.isNotEmpty
+                                      ? item.operationalLabel
+                                      : item.typeLabel)
+                                : item.subject,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -5581,7 +5739,11 @@ class _InquiryQueueRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      item.displayName,
+                      item.isOperationalProjection
+                          ? (item.collegeId.isEmpty
+                                ? 'College: Pending triage'
+                                : 'College: ${item.collegeId}')
+                          : item.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -5591,9 +5753,11 @@ class _InquiryQueueRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      item.message.trim().isEmpty
-                          ? 'No message provided.'
-                          : item.message,
+                      item.isOperationalProjection
+                          ? 'Operational status only — student identity, message, and form responses are restricted.'
+                          : (item.message.trim().isEmpty
+                                ? 'No message provided.'
+                                : item.message),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 12, height: 1.4),
@@ -5611,6 +5775,7 @@ class _InquiryQueueRow extends StatelessWidget {
                           label: item.category,
                           color: AdminColors.surfaceMuted,
                         ),
+                        InquiryRoutingBadge(inquiry: item),
                       ],
                     ),
                   ],
@@ -5628,11 +5793,62 @@ class _InquiryQueueRow extends StatelessWidget {
   );
 }
 
-class _InquiryDetailScreen extends StatelessWidget {
-  const _InquiryDetailScreen({required this.inquiry, required this.repository});
+class InquiryDetailScreen extends StatefulWidget {
+  const InquiryDetailScreen({
+    super.key,
+    required this.inquiry,
+    required this.repository,
+  });
 
   final AdminInquiryModel inquiry;
   final AdminPortalRepository repository;
+
+  @override
+  State<InquiryDetailScreen> createState() => _InquiryDetailScreenState();
+}
+
+class _InquiryDetailScreenState extends State<InquiryDetailScreen> {
+  int _streamEpoch = 0;
+
+  bool get _isOperationalStaff =>
+      !widget.repository.isSuperAdmin &&
+      widget.repository.currentAccessRole == AccessRole.portalStaff;
+
+  Stream<List<AdminInquiryModel>> _watchForRole() {
+    if (widget.repository.isSuperAdmin ||
+        widget.repository.currentAccessRole == AccessRole.counselor) {
+      return widget.repository.watchInquiries();
+    }
+    if (widget.repository.currentAccessRole == AccessRole.portalStaff) {
+      return widget.repository.watchInquiryStatuses();
+    }
+    return Stream.error(
+      StateError('Inquiry access is restricted to assigned PACC staff.'),
+    );
+  }
+
+  static bool _isUnauthorizedError(Object? error) {
+    if (error == null) return false;
+    if (error is StateError) return true;
+    final code = FirebaseErrorMessage.codeOf(error);
+    return code == 'permission-denied' || code == 'unauthenticated';
+  }
+
+  bool get _hasInitialAccess {
+    if (widget.repository.isSuperAdmin) return true;
+    final role = widget.repository.currentAccessRole;
+    final uid = widget.repository.currentUserId;
+    if (uid == null) return false;
+    if (role == AccessRole.counselor) {
+      return !widget.inquiry.isOperationalProjection &&
+          widget.inquiry.assigneeIds.contains(uid);
+    }
+    if (role == AccessRole.portalStaff) {
+      return widget.inquiry.isOperationalProjection &&
+          widget.inquiry.monitoringStaffIds.contains(uid);
+    }
+    return false;
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -5642,13 +5858,17 @@ class _InquiryDetailScreen extends StatelessWidget {
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Inquiry details',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          Text(
+            _isOperationalStaff
+                ? 'Operational inquiry status'
+                : 'Inquiry details',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 2),
           Text(
-            'Review the submitted message, form responses, and case status.',
+            _isOperationalStaff
+                ? 'Review sanitized operational status, acknowledgment, and escalation actions.'
+                : 'Review the submitted message, form responses, and case status.',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -5660,32 +5880,174 @@ class _InquiryDetailScreen extends StatelessWidget {
         ],
       ),
     ),
-    body: StreamBuilder<List<AdminInquiryModel>>(
-      stream: repository.watchInquiries(),
-      builder: (context, snapshot) {
-        var current = inquiry;
-        for (final item in snapshot.data ?? const <AdminInquiryModel>[]) {
-          if (item.id == inquiry.id) {
-            current = item;
-            break;
-          }
-        }
-        return SingleChildScrollView(
-          padding: EdgeInsets.all(
-            MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
-          ),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1080),
-              child: _InquiryDetails(
+    body: KeyedSubtree(
+      key: ValueKey(_streamEpoch),
+      child: StreamBuilder<List<AdminInquiryModel>>(
+        stream: _watchForRole(),
+        builder: (context, snapshot) {
+          Widget? body;
+          if (snapshot.hasError) {
+            if (_isUnauthorizedError(snapshot.error)) {
+              body = const _InquiryAccessRevokedPanel(
+                title: 'Unable to access this inquiry',
+                message:
+                    'You do not have permission to view this inquiry or your session access changed.',
+              );
+            } else {
+              body = _InquiryUnavailablePanel(
+                title: 'Inquiry status unavailable',
+                message: FirebaseErrorMessage.describe(
+                  snapshot.error!,
+                  fallback: 'Unable to load this inquiry right now.',
+                ),
+                onRetry: () => setState(() => _streamEpoch++),
+              );
+            }
+          } else if (snapshot.hasData) {
+            AdminInquiryModel? current;
+            for (final item in snapshot.data!) {
+              if (item.id == widget.inquiry.id) {
+                current = item;
+                break;
+              }
+            }
+            if (current == null) {
+              body = const _InquiryAccessRevokedPanel(
+                title: 'Inquiry no longer assigned to you',
+                message:
+                    'This inquiry was reassigned or removed from your queue. Details and case actions are hidden.',
+              );
+            } else {
+              body = _InquiryDetails(
                 item: current,
-                repository: repository,
+                repository: widget.repository,
                 onUpdated: () {},
+              );
+            }
+          } else if (!_hasInitialAccess) {
+            body = const _InquiryAccessRevokedPanel(
+              title: 'Inquiry access restricted',
+              message:
+                  'Only assigned PACC staff and the super-administrator may view this inquiry.',
+            );
+          } else {
+            body = _InquiryDetails(
+              item: widget.inquiry,
+              repository: widget.repository,
+              onUpdated: () {},
+            );
+          }
+          return SingleChildScrollView(
+            padding: EdgeInsets.all(
+              MediaQuery.sizeOf(context).width < 600 ? 16 : 28,
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1080),
+                child: body,
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
+    ),
+  );
+}
+
+class _InquiryUnavailablePanel extends StatelessWidget {
+  const _InquiryUnavailablePanel({
+    required this.title,
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String title;
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(24),
+    decoration: _box,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.cloud_off_outlined, color: AdminColors.muted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          message,
+          style: const TextStyle(color: AdminColors.muted, height: 1.45),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Retry'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _InquiryAccessRevokedPanel extends StatelessWidget {
+  const _InquiryAccessRevokedPanel({
+    required this.title,
+    required this.message,
+  });
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(24),
+    decoration: _box,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.lock_outline, color: AdminColors.muted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          message,
+          style: const TextStyle(color: AdminColors.muted, height: 1.45),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => Navigator.maybePop(context),
+          icon: const Icon(Icons.arrow_back),
+          label: const Text('Back to inquiries'),
+        ),
+      ],
     ),
   );
 }
@@ -5718,6 +6080,14 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
         message: 'Select an inquiry to view its details.',
       );
     }
+    final isOperationalOnly =
+        item.isOperationalProjection ||
+        (!widget.repository.isSuperAdmin &&
+            widget.repository.currentAccessRole == AccessRole.portalStaff);
+    final canUpdateClinicalStatus =
+        widget.repository.isSuperAdmin ||
+        (widget.repository.currentAccessRole == AccessRole.counselor &&
+            !item.isTakenOver);
     return Container(
       padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 18 : 22),
       decoration: _box,
@@ -5746,80 +6116,125 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
           ),
           const SizedBox(height: 16),
           Text(
-            item.subject,
+            isOperationalOnly
+                ? (item.operationalLabel.isNotEmpty
+                      ? item.operationalLabel
+                      : item.typeLabel)
+                : item.subject,
             style: Theme.of(
               context,
             ).textTheme.headlineSmall?.copyWith(fontSize: 20),
           ),
           const SizedBox(height: 16),
-          _InquirySender(item: item),
-          const Divider(height: 34),
-          const _InquirySectionHeading(
-            icon: Icons.chat_bubble_outline,
-            title: 'Message',
-          ),
-          const SizedBox(height: 10),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(15),
-            decoration: BoxDecoration(
-              color: AdminColors.canvas,
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(color: AdminColors.border),
-            ),
-            child: SelectableText(
-              item.message.trim().isEmpty
-                  ? 'No message was provided.'
-                  : item.message,
-              style: const TextStyle(fontSize: 14, height: 1.55),
-            ),
-          ),
-          if (item.isFormSubmission) ...[
+          if (isOperationalOnly)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AdminColors.surfaceMuted,
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: AdminColors.border),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.shield_outlined,
+                    size: 18,
+                    color: AdminColors.muted,
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Sanitized operational view. Student identity, submitted message, form responses, escalation notes, and PDF export are restricted to assigned counselors and the super-administrator.',
+                      style: TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 12,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            _InquirySender(item: item),
             const Divider(height: 34),
             const _InquirySectionHeading(
-              icon: Icons.description_outlined,
-              title: 'Form responses',
+              icon: Icons.chat_bubble_outline,
+              title: 'Message',
             ),
-            const SizedBox(height: 12),
-            _InquiryResponseGrid(responses: item.formData),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _previewingPdf || _downloadingPdf
-                      ? null
-                      : _previewPdf,
-                  icon: _previewingPdf
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.preview_outlined),
-                  label: Text(
-                    _previewingPdf ? 'Preparing preview…' : 'PDF preview',
-                  ),
-                ),
-                FilledButton.icon(
-                  onPressed: _previewingPdf || _downloadingPdf
-                      ? null
-                      : _downloadPdf,
-                  icon: _downloadingPdf
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.download_outlined),
-                  label: Text(
-                    _downloadingPdf ? 'Preparing PDF…' : 'Download PDF',
-                  ),
-                ),
-              ],
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(15),
+              decoration: BoxDecoration(
+                color: AdminColors.canvas,
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: AdminColors.border),
+              ),
+              child: SelectableText(
+                item.message.trim().isEmpty
+                    ? 'No message was provided.'
+                    : item.message,
+                style: const TextStyle(fontSize: 14, height: 1.55),
+              ),
             ),
+            if (item.isFormSubmission) ...[
+              const Divider(height: 34),
+              const _InquirySectionHeading(
+                icon: Icons.description_outlined,
+                title: 'Form responses',
+              ),
+              const SizedBox(height: 12),
+              _InquiryResponseGrid(responses: item.formData),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _previewingPdf || _downloadingPdf
+                        ? null
+                        : _previewPdf,
+                    icon: _previewingPdf
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.preview_outlined),
+                    label: Text(
+                      _previewingPdf ? 'Preparing preview…' : 'PDF preview',
+                    ),
+                  ),
+                  FilledButton.icon(
+                    onPressed: _previewingPdf || _downloadingPdf
+                        ? null
+                        : _downloadPdf,
+                    icon: _downloadingPdf
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.download_outlined),
+                    label: Text(
+                      _downloadingPdf ? 'Preparing PDF…' : 'Download PDF',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const Divider(height: 34),
+            InquiryReplyThread(inquiry: item, repository: widget.repository),
           ],
+          const Divider(height: 34),
+          InquiryRoutingPanel(
+            inquiry: item,
+            repository: widget.repository,
+            onChanged: widget.onUpdated,
+          ),
           const Divider(height: 34),
           const _InquirySectionHeading(
             icon: Icons.task_alt_outlined,
@@ -5831,7 +6246,11 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
             runSpacing: 10,
             children: [
               OutlinedButton.icon(
-                onPressed: item.isAcknowledged || _acknowledging
+                onPressed:
+                    item.isAcknowledged ||
+                        item.status == InquiryStatus.resolved ||
+                        (item.isTakenOver && !widget.repository.isSuperAdmin) ||
+                        _acknowledging
                     ? null
                     : () => _acknowledge(context),
                 icon: Icon(
@@ -5842,16 +6261,19 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                 label: Text(
                   item.isAcknowledged
                       ? 'Receipt acknowledged'
+                      : item.status == InquiryStatus.resolved
+                      ? 'Resolved'
                       : _acknowledging
                       ? 'Acknowledging…'
                       : 'Acknowledge receipt',
                 ),
               ),
-              _InquiryStatusMenu(
-                current: item.status,
-                enabled: !_updatingStatus && !_acknowledging,
-                onSelected: (next) => _updateStatus(context, next),
-              ),
+              if (canUpdateClinicalStatus && !isOperationalOnly)
+                _InquiryStatusMenu(
+                  current: item.status,
+                  enabled: !_updatingStatus && !_acknowledging,
+                  onSelected: (next) => _updateStatus(context, next),
+                ),
             ],
           ),
         ],
@@ -5863,7 +6285,10 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     if (_acknowledging) return;
     setState(() => _acknowledging = true);
     try {
-      await widget.repository.acknowledgeInquiry(widget.item!.id);
+      await widget.repository.acknowledgeInquiry(
+        widget.item!.id,
+        expectedRevision: widget.item!.routingRevision,
+      );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Receipt notification sent.')),
@@ -5872,7 +6297,9 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     } catch (error) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to acknowledge inquiry: $error')),
+          SnackBar(
+            content: Text(_inquiryActionError(error, 'acknowledge inquiry')),
+          ),
         );
       }
     } finally {
@@ -5884,7 +6311,11 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     if (_updatingStatus || next == widget.item!.status) return;
     setState(() => _updatingStatus = true);
     try {
-      await widget.repository.updateInquiryStatus(widget.item!.id, next);
+      await widget.repository.updateInquiryStatus(
+        widget.item!.id,
+        next,
+        expectedRevision: widget.item!.routingRevision,
+      );
       widget.onUpdated();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -5896,13 +6327,16 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     } catch (error) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to update inquiry: $error')),
+          SnackBar(content: Text(_inquiryActionError(error, 'update inquiry'))),
         );
       }
     } finally {
       if (mounted) setState(() => _updatingStatus = false);
     }
   }
+
+  String _inquiryActionError(Object error, String action) =>
+      FirebaseErrorMessage.describe(error, fallback: 'Unable to $action.');
 
   Future<void> _previewPdf() async {
     if (_previewingPdf || _downloadingPdf) return;
@@ -6588,3 +7022,29 @@ final _box = BoxDecoration(
   borderRadius: BorderRadius.circular(10),
   border: Border.all(color: AdminColors.border),
 );
+
+class _DialogControllerScope extends StatefulWidget {
+  const _DialogControllerScope({
+    required this.controllers,
+    required this.child,
+  });
+
+  final List<TextEditingController> controllers;
+  final Widget child;
+
+  @override
+  State<_DialogControllerScope> createState() => _DialogControllerScopeState();
+}
+
+class _DialogControllerScopeState extends State<_DialogControllerScope> {
+  @override
+  void dispose() {
+    for (final controller in widget.controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}

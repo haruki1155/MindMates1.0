@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../../../models/app_notification_model.dart';
 import '../../../providers/appointment_provider.dart';
+import '../../../repositories/inquiry_repository.dart';
 import '../../../repositories/notification_repository.dart';
+import '../../counseling/screens/student_inquiries_screen.dart';
 import '../../counseling/widgets/appointment_details_sheet.dart';
 
 // Feature-only colors, aligned with the Appointment V2 surfaces.
@@ -17,10 +19,16 @@ class _NotificationV2Palette {
 }
 
 class NotificationsScreen extends StatelessWidget {
-  const NotificationsScreen({required this.userId, super.key, this.repository});
+  const NotificationsScreen({
+    required this.userId,
+    super.key,
+    this.repository,
+    this.inquiryRepository,
+  });
 
   final String userId;
   final NotificationRepository? repository;
+  final InquiryRepository? inquiryRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -171,8 +179,22 @@ class NotificationsScreen extends StatelessWidget {
                   ),
                   onTap: () async {
                     if (!item.isRead) await source.markRead(item.id);
+                    if (!context.mounted) return;
+                    final inquiryId = item.inquiryId?.trim();
+                    if (inquiryId != null && inquiryId.isNotEmpty) {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => StudentInquiryDetailScreen(
+                            inquiryId: inquiryId,
+                            userId: userId,
+                            repository: inquiryRepository,
+                          ),
+                        ),
+                      );
+                      return;
+                    }
                     final appointmentId = item.appointmentId;
-                    if (!context.mounted || appointmentId == null) return;
+                    if (appointmentId == null) return;
                     final appointment = context
                         .read<AppointmentProvider>()
                         .appointments
@@ -241,6 +263,9 @@ class _NotificationEmptyState extends StatelessWidget {
 
 IconData _notificationIcon(AppNotificationModel item) {
   final type = item.type.toLowerCase();
+  if (type == 'inquiry' || type.contains('inquiry')) {
+    return Icons.mark_email_unread_outlined;
+  }
   if (type.contains('reschedule')) return Icons.event_repeat_outlined;
   if (type.contains('cancel')) return Icons.event_busy_outlined;
   if (type.contains('reminder')) return Icons.alarm_outlined;
@@ -250,6 +275,9 @@ IconData _notificationIcon(AppNotificationModel item) {
 
 Color _notificationColor(AppNotificationModel item) {
   final type = item.type.toLowerCase();
+  if (type == 'inquiry' || type.contains('inquiry')) {
+    return const Color(0xFFA17720);
+  }
   if (type.contains('reschedule')) return const Color(0xFFAD6700);
   if (type.contains('cancel')) return const Color(0xFFB3261E);
   if (type.contains('reminder')) return const Color(0xFF496A9B);

@@ -5,6 +5,10 @@ import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {requireAdmin, requireUid, roleOf} from "./access";
 import {canonicalLoginId} from "./account_recovery";
+import {
+  applyStudentAppointmentsCollegeScopeInTransaction,
+  readStudentAppointmentsForScopeSyncInTransaction,
+} from "./appointment_approval_service";
 import {AUDIT_CATEGORIES, actorName, writeAudit, writeAuditBatch} from "./audit";
 import {
   AcademicIndex, OfficialFields, RosterRowInput, StoredActivationCode, generateActivationCode, hashActivationCode,
@@ -16,9 +20,18 @@ if (!getApps().length) initializeApp();
 const MAX_ROWS = 1000;
 const GET_ALL_CHUNK = 300;
 const batchLimit = 450;
+const IMPORT_TIME_BUDGET_MS = 450_000;
+const MAX_FINALIZE_ATTEMPTS = 3;
 
-/** Test seam only: shrink batches and run code after classification. */
-export const rosterTestHooks: {batchLimit?: number; afterClassify?: () => Promise<void>} = {};
+/** Test seam only: shrink batches, cap time budget, and inject step/finalize hooks. */
+export const rosterTestHooks: {
+  batchLimit?: number;
+  afterClassify?: () => Promise<void>;
+  timeBudgetMs?: number;
+  beforeFinalize?: (attempt: number) => Promise<void>;
+  afterStep?: (stepIndex: number) => Promise<void>;
+  onCodeMinted?: (studentNo: string) => void;
+} = {};
 
 export type IssuedCode = {studentNo: string; name: string; college: string; course: string; yearLevel: string;
   code: string; expiresAt: string};
@@ -32,6 +45,7 @@ type Classified = {
   kind: PreviewRow["kind"];
   value?: OfficialFields;
   existing?: Doc;
+  existingUpdateTime?: Timestamp;
   linkUid?: string;
   linkUser?: Doc;
   personalInfoExists?: boolean;
@@ -97,16 +111,19 @@ async function classify(rows: RosterRowInput[]): Promise<Classified[]> {
   const reservedUids = reservationSnaps.map((s) => (s.exists ? String(s.data()?.userId ?? "") : ""));
   const userRefs = reservedUids.filter(Boolean).map((uid) => db.collection("users").doc(uid));
   const infoRefs = reservedUids.filter(Boolean).map((uid) => db.collection("student_personal_info").doc(uid));
-  const userSnaps = new Map((await getAllChunked(userRefs)).map((s) => [s.id, s]));
-  const infoSnaps = new Map((await getAllChunked(infoRefs)).map((s) => [s.id, s]));
+  const [userList, infoList] = await Promise.all([getAllChunked(userRefs), getAllChunked(infoRefs)]);
+  const userSnaps = new Map(userList.map((s) => [s.id, s]));
+  const infoSnaps = new Map(infoList.map((s) => [s.id, s]));
 
   const byIndex = new Map<number, Classified>();
   valid.forEach((r, i) => {
     const {value} = r;
-    const existing = rosterSnaps[i].exists ? rosterSnaps[i].data() : undefined;
+    const rosterSnap = rosterSnaps[i];
+    const existing = rosterSnap.exists ? rosterSnap.data() : undefined;
+    const existingUpdateTime = rosterSnap.exists ? rosterSnap.updateTime : undefined;
     const reserved = reservationSnaps[i].exists;
     const uid = reservedUids[i];
-    const base = {index: r.index, studentNo: value.studentNo, value, existing};
+    const base = {index: r.index, studentNo: value.studentNo, value, existing, existingUpdateTime};
     if (existing && existing.activated === true) {
       byIndex.set(r.index, {...base, kind: "update", changes: diff(value, existing)});
     } else if (reserved) {
@@ -250,10 +267,133 @@ function userAcademicFields(v: OfficialFields): Record<string, unknown> {
   return {
     schoolId: v.studentNo,
     dateOfBirth: Timestamp.fromDate(new Date(`${v.dateOfBirthKey}T00:00:00Z`)), dateOfBirthKey: v.dateOfBirthKey,
-    collegeId: v.collegeId, courseId: v.courseId, departmentId: v.departmentId,
+    college: v.college, collegeId: v.collegeId, courseId: v.courseId, departmentId: v.departmentId,
     department: v.department, course: v.course, yearLevel: v.yearLevel,
     populationRole: "student", updatedAt: FieldValue.serverTimestamp(),
   };
+}
+
+function classifyImportStepError(error: unknown): {code: string; message: string} {
+  const grpcCode = typeof error === "object" && error !== null && "code" in error
+    ? (error as {code?: unknown}).code
+    : undefined;
+  const msg = error instanceof Error ? error.message : String(error ?? "");
+  if (
+    grpcCode === "resource-exhausted" ||
+    grpcCode === 8 ||
+    /too many appointments|appointment.*limit|overflow/i.test(msg)
+  ) {
+    return {
+      code: "appointment-sync-overflow",
+      message: "Import stopped because a linked student has too many appointments for one transaction.",
+    };
+  }
+  if (
+    grpcCode === "failed-precondition" ||
+    grpcCode === "aborted" ||
+    grpcCode === "already-exists" ||
+    grpcCode === 9 ||
+    grpcCode === 10 ||
+    grpcCode === 6 ||
+    /FAILED_PRECONDITION|ABORTED|ALREADY_EXISTS|precondition/i.test(msg)
+  ) {
+    return {
+      code: "concurrent-conflict",
+      message: "Import stopped because a roster or student record changed concurrently. Re-import the remaining rows.",
+    };
+  }
+  return {
+    code: "step-commit-failed",
+    message: "Import stopped partway while saving roster updates. Fix any failing rows and re-import the rest.",
+  };
+}
+
+async function finalizeStudentRosterImport(
+  db: FirebaseFirestore.Firestore,
+  params: {
+    importRef: FirebaseFirestore.DocumentReference;
+    partial: boolean;
+    counts: {new: number; updated: number; linked: number};
+    failedRows: {index: number; studentNo: string}[];
+    failureCode?: string;
+    auditEvent: {
+      actorId: string;
+      actorNameSnapshot: string;
+      actorRoleSnapshot: string;
+      action: string;
+      category: string;
+      targetType: string;
+      targetId: string;
+      metadata: Record<string, unknown>;
+    };
+  },
+): Promise<void> {
+  const {importRef, partial, counts, failedRows, failureCode, auditEvent} = params;
+  const auditRef = db.collection("admin_audit_logs").doc(`student_roster_import_${importRef.id}`);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_FINALIZE_ATTEMPTS; attempt++) {
+    try {
+      if (rosterTestHooks.beforeFinalize) {
+        await rosterTestHooks.beforeFinalize(attempt);
+      }
+      await db.runTransaction(async (tx) => {
+        const [importSnap, auditSnap] = await tx.getAll(importRef, auditRef);
+        if (!importSnap.exists) {
+          throw new HttpsError("not-found", "Import record missing during finalization.");
+        }
+        tx.update(importRef, {
+          status: partial ? "partial" : "complete",
+          counts,
+          ...(partial ? {failedRows} : {}),
+          ...(failureCode ? {failureCode} : {}),
+          completedAt: FieldValue.serverTimestamp(),
+        });
+        if (!auditSnap.exists) {
+          tx.create(auditRef, {
+            actorId: auditEvent.actorId,
+            actorNameSnapshot: auditEvent.actorNameSnapshot,
+            actorRoleSnapshot: auditEvent.actorRoleSnapshot,
+            action: auditEvent.action,
+            category: auditEvent.category,
+            targetType: auditEvent.targetType,
+            targetId: auditEvent.targetId,
+            metadata: auditEvent.metadata,
+            sessionId: null,
+            timestamp: FieldValue.serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
+            targetUserId: null,
+          });
+        }
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  try {
+    await importRef.update({
+      status: "partial",
+      counts,
+      ...(partial ? {failedRows} : {}),
+      failureCode: "finalization-failed",
+      completedAt: FieldValue.serverTimestamp(),
+    });
+  } catch {
+    // Best-effort status downgrade only; surface the aborted HttpsError below.
+  }
+  console.error("student_roster_import_finalize_failed", {
+    importId: importRef.id,
+    attempts: MAX_FINALIZE_ATTEMPTS,
+    failureCode: "finalization-failed",
+    counts,
+    remainingRows: failedRows.length,
+    partialBeforeFinalize: partial,
+    errorCode: classifyImportStepError(lastError).code,
+  });
+  throw new HttpsError(
+    "aborted",
+    "Roster records were updated, but finalizing the import log failed. Check Import History before retrying.",
+  );
 }
 
 // The linked account's own values, snapshotted before the roster row takes over. The identity fields
@@ -261,10 +401,157 @@ function userAcademicFields(v: OfficialFields): Record<string, unknown> {
 const PREVIOUS_FIELDS = ["schoolId", "firstName", "middleName", "lastName", "name", "dateOfBirthKey", "collegeId", "courseId",
   "departmentId", "department", "course", "yearLevel", "populationRole"];
 
-type Unit = {ops: ((b: WriteBatch) => void)[]; kind: "new" | "updated" | "linked"; index: number; studentNo: string;
-  code?: IssuedCode; previous?: Record<string, unknown>};
+type NewBatchUnit = {
+  mode: "batch";
+  kind: "new";
+  index: number;
+  studentNo: string;
+  rosterRef: FirebaseFirestore.DocumentReference;
+  v: OfficialFields;
+  opsCount: 1;
+};
+type UpdateBatchUnit = {
+  mode: "batch";
+  ops: ((b: WriteBatch) => void)[];
+  kind: "updated";
+  index: number;
+  studentNo: string;
+  opsCount: number;
+};
+type BatchUnit = NewBatchUnit | UpdateBatchUnit;
+type TxUnit = {
+  mode: "tx";
+  kind: "updated" | "linked";
+  index: number;
+  studentNo: string;
+  run: () => Promise<Record<string, unknown> | undefined>;
+};
+type Unit = BatchUnit | TxUnit;
+type CommitStep =
+  | {mode: "batch"; units: BatchUnit[]}
+  | {mode: "tx"; unit: TxUnit};
 
-export const importStudentRoster = onCall(async (request) => {
+async function applyLinkedRosterRowInTransaction(
+  db: FirebaseFirestore.Firestore,
+  {
+    actorId,
+    importId,
+    studentKey,
+    uid,
+    v,
+    fallbackStatus,
+  }: {
+    actorId: string;
+    importId: string;
+    studentKey: string;
+    uid: string;
+    v: OfficialFields;
+    fallbackStatus: unknown;
+  },
+): Promise<Record<string, unknown>> {
+  const rosterRef = db.collection("student_roster").doc(studentKey);
+  const reservationRef = db.collection("student_id_reservations").doc(studentKey);
+  const userRef = db.collection("users").doc(uid);
+  const infoRef = db.collection("student_personal_info").doc(uid);
+
+  return db.runTransaction(async (transaction) => {
+    // Perform all transaction reads before any writes.
+    const [rosterSnap, reservationSnap, userSnap, infoSnap, apptsSnap] = await Promise.all([
+      transaction.get(rosterRef),
+      transaction.get(reservationRef),
+      transaction.get(userRef),
+      transaction.get(infoRef),
+      readStudentAppointmentsForScopeSyncInTransaction(transaction, uid),
+    ]);
+    const liveRoster = rosterSnap.data();
+    if (liveRoster?.activated === true) {
+      throw new HttpsError("failed-precondition", "Roster row was already activated.");
+    }
+    if (!reservationSnap.exists || String(reservationSnap.data()?.userId ?? "") !== uid || !userSnap.exists) {
+      throw new HttpsError("failed-precondition", "Student reservation or account is no longer linkable.");
+    }
+    const userData = userSnap.data() ?? {};
+    const previous = {
+      studentNo: v.studentNo,
+      userId: uid,
+      previous: Object.fromEntries(PREVIOUS_FIELDS.map((f) => [f, userData[f] === undefined ? null : userData[f]])),
+    };
+    await applyStudentAppointmentsCollegeScopeInTransaction(
+      transaction,
+      apptsSnap,
+      v.collegeId,
+      userData.verificationStatus,
+      {reservedWrites: 3},
+    );
+    transaction.set(rosterRef, {
+      ...officialFields(v),
+      status: liveRoster?.status ?? fallbackStatus ?? "active",
+      activated: true,
+      userId: uid,
+      activationCode: null,
+      linkedAt: FieldValue.serverTimestamp(),
+      importId,
+      ...(rosterSnap.exists ? {} : {createdBy: actorId, createdAt: FieldValue.serverTimestamp()}),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+    transaction.set(userRef, {
+      ...userAcademicFields(v),
+      rosterLinked: true,
+      personalInfoRequired: !infoSnap.exists,
+    }, {merge: true});
+    return previous;
+  });
+}
+
+async function applyActivatedRosterUpdateInTransaction(
+  db: FirebaseFirestore.Firestore,
+  {
+    importId,
+    studentKey,
+    uid,
+    v,
+  }: {
+    importId: string;
+    studentKey: string;
+    uid: string;
+    v: OfficialFields;
+  },
+): Promise<void> {
+  const rosterRef = db.collection("student_roster").doc(studentKey);
+  const userRef = db.collection("users").doc(uid);
+
+  await db.runTransaction(async (transaction) => {
+    // Perform all transaction reads before any writes.
+    const [rosterSnap, userSnap, apptsSnap] = await Promise.all([
+      transaction.get(rosterRef),
+      transaction.get(userRef),
+      readStudentAppointmentsForScopeSyncInTransaction(transaction, uid),
+    ]);
+    const liveRoster = rosterSnap.data();
+    if (!rosterSnap.exists || liveRoster?.activated !== true || String(liveRoster.userId ?? "") !== uid) {
+      throw new HttpsError("failed-precondition", "Roster row activation state changed concurrently.");
+    }
+    if (!userSnap.exists) {
+      throw new HttpsError("failed-precondition", "Linked student account no longer exists.");
+    }
+    await applyStudentAppointmentsCollegeScopeInTransaction(
+      transaction,
+      apptsSnap,
+      v.collegeId,
+      userSnap.data()?.verificationStatus,
+      {reservedWrites: 3},
+    );
+    transaction.set(userRef, userAcademicFields(v), {merge: true});
+    transaction.update(rosterRef, {
+      ...officialFields(v),
+      importId,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+}
+
+export const importStudentRoster = onCall({timeoutSeconds: 540, memory: "512MiB"}, async (request) => {
+  const startedAt = Date.now();
   const actorId = requireUid(request);
   const actor = await requireAdmin(actorId);
   const rows = readRows(request.data);
@@ -279,8 +566,6 @@ export const importStudentRoster = onCall(async (request) => {
 
   const db = database();
   const importRef = db.collection("student_roster_imports").doc();
-  const newRows = classified.filter((c) => c.kind === "new");
-  const minted = await Promise.all(newRows.map(() => mintCode()));
   const actorMeta = {actorNameSnapshot: String(actor.name ?? "") || (await actorSnapshot(actorId)).actorNameSnapshot,
     actorRoleSnapshot: roleOf(actor) || "admin"};
 
@@ -289,48 +574,98 @@ export const importStudentRoster = onCall(async (request) => {
     const rosterRef = db.collection("student_roster").doc(v.studentKey);
     const base = {index: c.index, studentNo: v.studentNo};
     if (c.kind === "new") {
-      const m = minted[newRows.indexOf(c)];
-      return {...base, kind: "new", code: issued(v as unknown as Doc, m), ops: [(b: WriteBatch) => b.create(rosterRef, {
-        ...officialFields(v), status: "active", activated: false, userId: null,
-        activationCode: storedCodeField(m.stored), importId: importRef.id,
-        createdBy: actorId, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
-      })]};
+      return {
+        ...base,
+        mode: "batch",
+        kind: "new",
+        rosterRef,
+        v,
+        opsCount: 1,
+      };
     }
     if (c.kind === "link") {
       const uid = c.linkUid as string;
-      const prev = c.linkUser ?? {};
-      return {...base, kind: "linked", previous: {studentNo: v.studentNo, userId: uid,
-        previous: Object.fromEntries(PREVIOUS_FIELDS.map((f) => [f, prev[f] === undefined ? null : prev[f]]))},
-      ops: [
-        (b: WriteBatch) => b.set(rosterRef, {
-          ...officialFields(v), status: c.existing?.status ?? "active", activated: true, userId: uid, activationCode: null,
-          linkedAt: FieldValue.serverTimestamp(), importId: importRef.id,
-          ...(c.existing ? {} : {createdBy: actorId, createdAt: FieldValue.serverTimestamp()}),
-          updatedAt: FieldValue.serverTimestamp(),
-        }, {merge: true}),
-        (b: WriteBatch) => b.set(db.collection("users").doc(uid), {
-          ...userAcademicFields(v), rosterLinked: true, personalInfoRequired: !c.personalInfoExists,
-        }, {merge: true}),
-      ]};
+      return {
+        ...base,
+        mode: "tx",
+        kind: "linked",
+        run: () => applyLinkedRosterRowInTransaction(db, {
+          actorId,
+          importId: importRef.id,
+          studentKey: v.studentKey,
+          uid,
+          v,
+          fallbackStatus: c.existing?.status,
+        }),
+      };
     }
-    const uid = c.existing?.activated === true ? String(c.existing.userId ?? "") : "";
-    return {...base, kind: "updated", ops: [
-      (b: WriteBatch) => b.update(rosterRef, {...officialFields(v), importId: importRef.id, updatedAt: FieldValue.serverTimestamp()}),
-      ...(uid ? [(b: WriteBatch) => b.set(db.collection("users").doc(uid), userAcademicFields(v), {merge: true})] : []),
-    ]};
+    if (c.existing?.activated === true) {
+      const uid = String(c.existing.userId ?? "").trim();
+      if (!uid) {
+        return {
+          ...base,
+          mode: "tx",
+          kind: "updated",
+          run: async () => {
+            throw new HttpsError("failed-precondition", "Activated roster row is missing a linked user account.");
+          },
+        };
+      }
+      return {
+        ...base,
+        mode: "tx",
+        kind: "updated",
+        run: async () => {
+          await applyActivatedRosterUpdateInTransaction(db, {
+            importId: importRef.id,
+            studentKey: v.studentKey,
+            uid,
+            v,
+          });
+          return undefined;
+        },
+      };
+    }
+    const updateTime = c.existingUpdateTime;
+    return {
+      ...base,
+      mode: "batch",
+      kind: "updated",
+      opsCount: 1,
+      ops: [
+        (b: WriteBatch) => {
+          // Reject concurrent activation or edits between classify() and batch commit.
+          if (!updateTime) {
+            throw new HttpsError("failed-precondition", "Roster row version unavailable for batch update.");
+          }
+          b.update(
+            rosterRef,
+            {...officialFields(v), importId: importRef.id, updatedAt: FieldValue.serverTimestamp()},
+            {lastUpdateTime: updateTime},
+          );
+        },
+      ],
+    };
   });
 
-  // Never split a row across batches.
+  // Never split a row across batches; run linked-student updates via per-student transactions.
   const limit = rosterTestHooks.batchLimit ?? batchLimit;
-  const groups: Unit[][] = [];
+  const steps: CommitStep[] = [];
   let size = 0;
   for (const u of units) {
-    if (!groups.length || size + u.ops.length > limit) {
-      groups.push([]);
+    if (u.mode === "tx") {
+      steps.push({mode: "tx", unit: u});
       size = 0;
+      continue;
     }
-    groups[groups.length - 1].push(u);
-    size += u.ops.length;
+    const last = steps[steps.length - 1];
+    if (!last || last.mode !== "batch" || size + u.opsCount > limit) {
+      steps.push({mode: "batch", units: [u]});
+      size = u.opsCount;
+    } else {
+      last.units.push(u);
+      size += u.opsCount;
+    }
   }
 
   await importRef.create({fileName, status: "pending", rowCount: rows.length, actorId,
@@ -340,35 +675,126 @@ export const importStudentRoster = onCall(async (request) => {
   const codes: IssuedCode[] = [];
   const previous: Record<string, unknown>[] = [];
   let failedRows: {index: number; studentNo: string}[] = [];
-  for (let g = 0; g < groups.length; g++) {
-    const batch = db.batch();
-    for (const u of groups[g]) for (const op of u.ops) op(batch);
-    try {
-      await batch.commit();
-    } catch {
-      failedRows = groups.slice(g).flat().map((u) => ({index: u.index, studentNo: u.studentNo}));
+  let failureCode: string | undefined;
+  let failureMessage: string | undefined;
+  const stepUnits = (step: CommitStep): Unit[] => (step.mode === "batch" ? step.units : [step.unit]);
+
+  for (let s = 0; s < steps.length; s++) {
+    const timeBudgetMs = rosterTestHooks.timeBudgetMs ?? IMPORT_TIME_BUDGET_MS;
+    if (Date.now() - startedAt >= timeBudgetMs) {
+      failureCode = "time-budget-exceeded";
+      failureMessage = "Import stopped within its execution time budget. Rows saved so far are listed; re-import remaining rows to resume.";
+      failedRows = steps.slice(s).flatMap(stepUnits).map((u) => ({index: u.index, studentNo: u.studentNo}));
+      console.warn("student_roster_import_time_budget_reached", {
+        importId: importRef.id,
+        stepIndex: s,
+        elapsedMs: Date.now() - startedAt,
+        timeBudgetMs,
+        remainingRows: failedRows.length,
+      });
       break;
     }
-    for (const u of groups[g]) {
-      counts[u.kind] += 1;
-      if (u.code) codes.push(u.code);
-      if (u.previous) previous.push(u.previous);
+    const step = steps[s];
+    if (step.mode === "batch") {
+      const batchCodes: IssuedCode[] = [];
+      try {
+        const newUnits = step.units.filter((u): u is NewBatchUnit => u.kind === "new");
+        const mintedList = newUnits.length
+          ? await Promise.all(
+              newUnits.map(async (u) => {
+                const m = await mintCode();
+                rosterTestHooks.onCodeMinted?.(u.studentNo);
+                return m;
+              }),
+            )
+          : [];
+        const batch = db.batch();
+        let mintIdx = 0;
+        for (const u of step.units) {
+          if (u.kind === "new") {
+            const m = mintedList[mintIdx++];
+            batchCodes.push(issued(u.v as unknown as Doc, m));
+            batch.create(u.rosterRef, {
+              ...officialFields(u.v), status: "active", activated: false, userId: null,
+              activationCode: storedCodeField(m.stored), importId: importRef.id,
+              createdBy: actorId, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+            });
+          } else {
+            for (const op of u.ops) op(batch);
+          }
+        }
+        await batch.commit();
+      } catch (error) {
+        batchCodes.length = 0;
+        const classifiedError = classifyImportStepError(error);
+        failureCode = classifiedError.code;
+        failureMessage = classifiedError.message;
+        failedRows = steps.slice(s).flatMap(stepUnits).map((u) => ({index: u.index, studentNo: u.studentNo}));
+        console.error("student_roster_import_step_failed", {
+          importId: importRef.id,
+          stepIndex: s,
+          mode: "batch",
+          failureCode,
+          remainingRows: failedRows.length,
+        });
+        break;
+      }
+      for (const u of step.units) counts[u.kind] += 1;
+      codes.push(...batchCodes);
+      if (rosterTestHooks.afterStep) await rosterTestHooks.afterStep(s);
+      continue;
     }
+    try {
+      const prev = await step.unit.run();
+      counts[step.unit.kind] += 1;
+      if (prev) previous.push(prev);
+    } catch (error) {
+      const classifiedError = classifyImportStepError(error);
+      failureCode = classifiedError.code;
+      failureMessage = classifiedError.message;
+      failedRows = steps.slice(s).flatMap(stepUnits).map((u) => ({index: u.index, studentNo: u.studentNo}));
+      console.error("student_roster_import_step_failed", {
+        importId: importRef.id,
+        stepIndex: s,
+        mode: "tx",
+        failureCode,
+        remainingRows: failedRows.length,
+      });
+      break;
+    }
+    if (rosterTestHooks.afterStep) await rosterTestHooks.afterStep(s);
   }
 
   const partial = failedRows.length > 0;
-  const final = db.batch();
-  final.update(importRef, {status: partial ? "partial" : "complete", counts, ...(partial ? {failedRows} : {}),
-    completedAt: FieldValue.serverTimestamp()});
-  writeAuditBatch(final, db, {
-    actorId, ...actorMeta, action: "STUDENT_ROSTER_IMPORTED", category: AUDIT_CATEGORIES.userManagement,
-    targetType: "student_roster_import", targetId: importRef.id,
-    metadata: {fileName, counts, rowCount: rows.length, linkedPreviousValues: previous, ...(partial ? {partial: true} : {})},
+  await finalizeStudentRosterImport(db, {
+    importRef,
+    partial,
+    counts,
+    failedRows,
+    failureCode,
+    auditEvent: {
+      actorId, ...actorMeta, action: "STUDENT_ROSTER_IMPORTED", category: AUDIT_CATEGORIES.userManagement,
+      targetType: "student_roster_import", targetId: importRef.id,
+      metadata: {
+        fileName,
+        counts,
+        rowCount: rows.length,
+        linkedPreviousValues: previous,
+        ...(partial ? {partial: true} : {}),
+        ...(failureCode ? {failureCode} : {}),
+      },
+    },
   });
-  await final.commit();
   if (partial) {
-    return {status: "partial", importId: importRef.id, counts, codes, failedRows,
-      message: "Import stopped partway. Rows saved so far are listed; fix the file and re-import the rest."};
+    return {
+      status: "partial",
+      importId: importRef.id,
+      counts,
+      codes,
+      failedRows,
+      ...(failureCode ? {failureCode} : {}),
+      message: failureMessage ?? "Import stopped partway. Rows saved so far are listed; fix the file and re-import the rest.",
+    };
   }
   return {status: "complete", importId: importRef.id, counts, codes};
 });
@@ -599,10 +1025,24 @@ export const updateStudentRosterRecord = onCall(async (request) => {
     const v = result.value;
     const uid = live.activated === true && typeof live.userId === "string" ? live.userId : "";
     const userRef = uid ? db.collection("users").doc(uid) : null;
-    const user = userRef ? await transaction.get(userRef) : null;
+    const [user, apptsSnap] = userRef
+      ? await Promise.all([
+        transaction.get(userRef),
+        readStudentAppointmentsForScopeSyncInTransaction(transaction, uid),
+      ])
+      : [null, null];
     const changes = diff(v, live);
+    if (userRef && user?.exists) {
+      await applyStudentAppointmentsCollegeScopeInTransaction(
+        transaction,
+        apptsSnap,
+        v.collegeId,
+        user.data()?.verificationStatus,
+        {reservedWrites: 3},
+      );
+      transaction.set(userRef, userAcademicFields(v), {merge: true});
+    }
     transaction.update(rosterRef, {...officialFields(v), updatedAt: FieldValue.serverTimestamp(), updatedBy: actorId});
-    if (userRef && user?.exists) transaction.set(userRef, userAcademicFields(v), {merge: true});
     writeAudit(transaction, db, {
       actorId, ...adminMeta(actor), action: "STUDENT_ROSTER_RECORD_UPDATED", category: AUDIT_CATEGORIES.userManagement,
       targetType: "student_roster", targetId: key, metadata: {studentNo: v.studentNo, userId: uid || null, changes},
@@ -668,6 +1108,14 @@ export const resetStudentActivationLock = onCall(async (request) => {
   return {ok: true};
 });
 
+const IMPORT_HISTORY_STATUSES = new Set(["complete", "partial", "pending"]);
+
+function safeNonNegativeInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.trunc(value)
+    : undefined;
+}
+
 export const listStudentRosterImports = onCall(async (request) => {
   await requireAdmin(requireUid(request));
   const db = database();
@@ -678,8 +1126,21 @@ export const listStudentRosterImports = onCall(async (request) => {
   return {imports: snap.docs.map((d) => {
     const data = d.data();
     const counts = (data.counts ?? {}) as Record<string, unknown>;
+    const rawStatus = typeof data.status === "string" ? data.status.trim() : "";
+    const status = IMPORT_HISTORY_STATUSES.has(rawStatus) ? rawStatus : "unknown";
+    const rowCount = safeNonNegativeInt(data.rowCount);
+    const rawFailureCode = typeof data.failureCode === "string" ? data.failureCode.trim() : "";
+    const failureCode = /^[a-z0-9-]{1,64}$/i.test(rawFailureCode) ? rawFailureCode : "";
+    const failedRowCount = Array.isArray(data.failedRows)
+      ? data.failedRows.length
+      : safeNonNegativeInt(data.failedRowCount) ?? (status === "complete" ? 0 : undefined);
     return {
-      id: d.id, fileName: String(data.fileName ?? ""),
+      id: d.id,
+      fileName: String(data.fileName ?? ""),
+      status,
+      ...(rowCount !== undefined ? {rowCount} : {}),
+      ...(failedRowCount !== undefined ? {failedRowCount} : {}),
+      ...(failureCode ? {failureCode} : {}),
       counts: {new: Number(counts.new ?? 0), updated: Number(counts.updated ?? 0), linked: Number(counts.linked ?? 0)},
       importedByName: actors.get(String(data.actorId ?? "")) ?? "Administrator",
       importedAt: isoOf(data.createdAt),

@@ -8,11 +8,13 @@ import 'package:mind_mates/repositories/admin_portal_repository.dart';
 class _ReportRepository extends AdminPortalRepository {
   _ReportRepository({
     this.role = AccessRole.admin,
+    bool? superAdmin,
     this.statusOverride,
     this.customYears,
-  });
+  }) : superAdmin = superAdmin ?? (role == AccessRole.admin);
 
   final AccessRole role;
+  final bool superAdmin;
   final String? statusOverride;
   final List<Map<String, dynamic>>? customYears;
   final requestedYears = <String>[];
@@ -20,6 +22,9 @@ class _ReportRepository extends AdminPortalRepository {
 
   @override
   AccessRole get currentAccessRole => role;
+
+  @override
+  bool get isSuperAdmin => superAdmin;
 
   @override
   Future<AdminReportAnalytics> fetchReportAnalytics({
@@ -290,10 +295,38 @@ void main() {
     await tester.tap(find.text('Counseling appointments'));
     await tester.pumpAndSettle();
     expect(find.text('Appointment results · 2026-2027'), findsOneWidget);
+    expect(find.text('Bulk import'), findsOneWidget);
     expect(find.text('Report setup'), findsNothing);
     expect(find.text('Student population setup'), findsNothing);
     expect(find.text('Imported files'), findsNothing);
   });
+
+  testWidgets(
+    'non-super administrators are denied report analytics and restricted controls',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ReportGenerationPage(
+              repository: _ReportRepository(
+                role: AccessRole.admin,
+                superAdmin: false,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Super-administrator access is required.'),
+        findsOneWidget,
+      );
+      expect(find.text('Bulk import'), findsNothing);
+      expect(find.text('Report setup'), findsNothing);
+      expect(find.text('Student population setup'), findsNothing);
+      expect(find.text('Imported files'), findsNothing);
+    },
+  );
 
   testWidgets(
     'academic year dropdown hides voided and unknown years and separates Current from Planned and Upcoming',

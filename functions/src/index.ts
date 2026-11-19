@@ -1,5 +1,25 @@
 import {handleAppointmentAgreement} from "./appointment_agreement";
 export {saveAnnouncement, previewAnnouncementLink} from "./announcements_callable";
+export {acknowledgeInquiry, escalateInquiry, reassignInquiry, routeExistingInquiries, setInquiryStatus} from "./inquiry_routing_service";
+import {routeInquiry, syncInquiryStatusProjection} from "./inquiry_routing_service";
+export {replyToInquiry, setInquirySla, takeOverInquiry} from "./inquiry_sla_service";
+export {
+  backfillAppointmentCollegeScope,
+  getAppointmentForApproval,
+  listAppointmentApprovals,
+} from "./appointment_approval_service";
+import {
+  appointmentPortalRecipients,
+  applyStudentAppointmentsCollegeScopeInTransaction,
+  approvalHistoryFields,
+  approvalMetadata,
+  authorizeAppointmentApproval,
+  authorizeAppointmentApprovalInTransaction,
+  readStudentAppointmentsForScopeSyncInTransaction,
+  resolveApprovalScope,
+  syncStudentAppointmentsCollegeScopeFromUserProfile,
+} from "./appointment_approval_service";
+export {requestFirestoreBackup, refreshFirestoreBackupStatus, scheduledFirestoreBackup} from "./backup_management";
 export {
   reassignCollegeCounselor,
   setStaffCollegeAssignments,
@@ -790,8 +810,13 @@ export const reviewProfileVerification = onCall(async (request) => {
   const target = db.collection("users").doc(targetUserId);
   const audit = db.collection("role_audit_logs").doc();
   await db.runTransaction(async (transaction) => {
-    const before = await transaction.get(target);
+    const [before, apptsSnap] = await Promise.all([
+      transaction.get(target),
+      readStudentAppointmentsForScopeSyncInTransaction(transaction, targetUserId),
+    ]);
     if (!before.exists) throw new HttpsError("not-found", "User profile not found.");
+    const collegeId = String(before.data()?.collegeId ?? "");
+    await applyStudentAppointmentsCollegeScopeInTransaction(transaction, apptsSnap, collegeId, decision, {reservedWrites: 2});
     transaction.update(target, {
       verificationStatus: decision,
       verifiedAt: decision === "verified" ? FieldValue.serverTimestamp() : null,
@@ -834,17 +859,20 @@ export const reviewRoleCorrection = onCall(async (request) => {
       throw new HttpsError("permission-denied", "You cannot approve your own role change.");
     }
     const target = db.collection("users").doc(targetUserId);
-    const before = await transaction.get(target);
+    const [before, apptsSnap] = await Promise.all([
+      transaction.get(target),
+      approve ? readStudentAppointmentsForScopeSyncInTransaction(transaction, targetUserId) : Promise.resolve(null),
+    ]);
     if (!before.exists) throw new HttpsError("not-found", "User profile not found.");
     const requestedRole = String(correction.data()?.requestedRole ?? "");
-    transaction.update(requestRef, {
-      status: approve ? "approved" : "rejected",
-      reviewReason: reason,
-      reviewedBy: actorId,
-      reviewedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
     if (approve) {
+      await applyStudentAppointmentsCollegeScopeInTransaction(
+        transaction,
+        apptsSnap,
+        String(before.data()?.collegeId ?? ""),
+        "verified",
+        {reservedWrites: 3},
+      );
       transaction.update(target, {
         populationRole: requestedRole,
         declaredRole: requestedRole,
@@ -855,6 +883,13 @@ export const reviewRoleCorrection = onCall(async (request) => {
         updatedAt: FieldValue.serverTimestamp(),
       });
     }
+    transaction.update(requestRef, {
+      status: approve ? "approved" : "rejected",
+      reviewReason: reason,
+      reviewedBy: actorId,
+      reviewedAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
     transaction.create(audit, {
       targetUserId,
       actorId,
@@ -1380,14 +1415,22 @@ async function notifyClinicalStaff(
   kind: PortalNotificationKind,
   recordId: string,
 ): Promise<void> {
-  const staff = await db.collection("users")
-    .where("accessRole", "in", ["portalStaff", "counselor", "admin"])
-    .get();
-  await Promise.all(staff.docs.map(async (recipient) => {
-    const notificationId = `portal_${kind}_${recordId}_${recipient.id}`;
+  let recipientIds: string[];
+  if (kind === "appointment") {
+    const appt = await db.doc(`appointments/${recordId}`).get();
+    if (!appt.exists) return;
+    recipientIds = await appointmentPortalRecipients(String(appt.data()?.userId ?? ""));
+  } else {
+    const staff = await db.collection("users")
+      .where("accessRole", "in", ["portalStaff", "counselor", "admin"])
+      .get();
+    recipientIds = staff.docs.map((recipient) => recipient.id);
+  }
+  await Promise.all(recipientIds.map(async (recipientId) => {
+    const notificationId = `portal_${kind}_${recordId}_${recipientId}`;
     try {
       await db.collection("notifications").doc(notificationId).create(
-        portalNotificationPayload(kind, recipient.id, recordId),
+        portalNotificationPayload(kind, recipientId, recordId),
       );
     } catch (error: unknown) {
       const code = typeof error === "object" && error !== null && "code" in error ?
@@ -1471,6 +1514,26 @@ export const syncPortalAppointmentQueue = onDocumentWritten(
   },
 );
 
+// Eventual-consistency fallback for authorized out-of-band `users/{userId}` edits.
+// Callable-driven profile/roster updates sync appointment projections atomically
+// inside the same transaction; this async trigger reconciles from the live
+// `users/{userId}` document inside a transaction so delayed or out-of-order
+// events can never overwrite newer profile or revocation state.
+export const syncStudentAppointmentCollegeScope = onDocumentWritten(
+  {document: "users/{userId}", retry: true},
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!after) return;
+    const beforeCollege = typeof before?.collegeId === "string" ? before.collegeId.trim() : "";
+    const afterCollege = typeof after.collegeId === "string" ? after.collegeId.trim() : "";
+    const beforeStatus = typeof before?.verificationStatus === "string" ? before.verificationStatus.trim() : "";
+    const afterStatus = typeof after.verificationStatus === "string" ? after.verificationStatus.trim() : "";
+    if (before && beforeCollege === afterCollege && beforeStatus === afterStatus) return;
+    await syncStudentAppointmentsCollegeScopeFromUserProfile(event.params.userId);
+  },
+);
+
 export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
   {document: "appointments/{appointmentId}", retry: true},
   async (event) => {
@@ -1486,9 +1549,9 @@ export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
     const acceptedCounselorProposal = beforeStatus === "reschedule_proposed" && before.proposedBy === "counselor" && afterStatus === "confirmed";
     if (!isStudentProposal && !isStudentCancellation && !acceptedCounselorProposal && !isStudentScheduleEdit) return;
     const label = isStudentProposal || isStudentScheduleEdit ? "Schedule change requested" : isStudentCancellation ? "Appointment cancelled by student" : "Schedule change accepted";
-    const staff = await db.collection("users").where("accessRole", "in", ["portalStaff", "counselor", "admin"]).get();
-    await Promise.all(staff.docs.map(async (recipient) => {
-      const ref = db.collection("notifications").doc(`portal_appointment_action_${event.params.appointmentId}_${isStudentScheduleEdit ? after.studentScheduleRequestId : afterStatus}_${recipient.id}`);
+    const recipientIds = await appointmentPortalRecipients(String(after.userId ?? ""));
+    await Promise.all(recipientIds.map(async (recipientId) => {
+      const ref = db.collection("notifications").doc(`portal_appointment_action_${event.params.appointmentId}_${isStudentScheduleEdit ? after.studentScheduleRequestId : afterStatus}_${recipientId}`);
       await db.runTransaction(async (tx) => {
         const current = await tx.get(db.doc(`appointments/${event.params.appointmentId}`));
         const existing = await tx.get(ref);
@@ -1498,7 +1561,7 @@ export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
             data.studentScheduleRequestId !== after.studentScheduleRequestId ||
             !(data.scheduledAt instanceof Timestamp) || !(after.scheduledAt instanceof Timestamp) ||
             !data.scheduledAt.isEqual(after.scheduledAt)) return;
-        tx.create(ref, {userId: recipient.id, audience: "portal", type: "appointment", appointmentId: current.id,
+        tx.create(ref, {userId: recipientId, audience: "portal", type: "appointment", appointmentId: current.id,
           title: label, body: "An appointment schedule was updated. Open the current appointment to review its latest status.",
           scheduleRevision: data.scheduleRevision ?? null, scheduledAt: data.scheduledAt,
           expectedStatus: afterStatus, studentScheduleRequestId: data.studentScheduleRequestId ?? null,
@@ -1508,9 +1571,21 @@ export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
   },
 );
 
+// New inquiries are routed to the staff assigned to the student's verified
+// college (or to super-admin triage) instead of notifying every portal
+// account. The export name is kept so the deployed trigger is replaced in place.
 export const notifyPortalOfInquiry = onDocumentCreated(
-  {document: "inquiries/{inquiryId}", retry: true},
-  async (event) => notifyClinicalStaff("inquiry", event.params.inquiryId),
+  {document: "inquiries/{inquiryId}", region: "asia-east1", retry: true},
+  async (event) => {
+    await routeInquiry(event.params.inquiryId);
+  },
+);
+
+export const syncInquiryStatusOnWrite = onDocumentWritten(
+  {document: "inquiries/{inquiryId}", region: "asia-east1", retry: true},
+  async (event) => {
+    await syncInquiryStatusProjection(event.params.inquiryId);
+  },
 );
 
 export const scheduleReadNotificationArchive = onDocumentUpdated(
@@ -1811,9 +1886,23 @@ export const savePaccAvailability = onCall(async (request) => {
         conflictsConfirmed: confirmConflicts,
       },
     });
-    return {ok: true, revision: newRevision, conflicts};
+    const studentByAppointment = new Map(appointments.docs.map((snapshot) => [snapshot.id, String(snapshot.data().userId ?? "")]));
+    return {ok: true as const, revision: newRevision, conflicts, studentByAppointment};
   });
-  return result;
+  let visibleConflicts = result.conflicts;
+  if (actor.accessRole === "counselor" && visibleConflicts.length > 0) {
+    const served = Array.isArray(actor.assignedCollegeIds) ? actor.assignedCollegeIds as string[] : [];
+    const scopeCache = new Map<string, ReturnType<typeof resolveApprovalScope>>();
+    const collegeCache = new Map();
+    const checks = await Promise.all(visibleConflicts.map(async (conflict) => {
+      const studentId = result.studentByAppointment.get(conflict.appointmentId) ?? "";
+      if (!scopeCache.has(studentId)) scopeCache.set(studentId, resolveApprovalScope(studentId, collegeCache));
+      const scope = await scopeCache.get(studentId)!;
+      return scope.scope === "college" && served.includes(scope.collegeId);
+    }));
+    visibleConflicts = visibleConflicts.filter((_, idx) => checks[idx]);
+  }
+  return {ok: true, revision: result.revision, conflicts: visibleConflicts};
 });
 
 function manilaSlotMillis(date: string, minutes: number): number {
@@ -1902,12 +1991,12 @@ export const createAppointmentRequest = onCall(async (request) => {
   const bookingRequest = requestId
     ? db.collection("appointment_booking_requests").doc(`${userId}_${requestId}`)
     : null;
-  const profile = await db.collection("users").doc(userId).get();
   let appointmentId = appointment.id;
   let idempotentReplay = false;
   await db.runTransaction(async (transaction) => {
     const parent = parentAppointmentId ? db.collection("appointments").doc(parentAppointmentId) : null;
-    const [occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, activeLockSnapshot, parentSnapshot, bookingRequestSnapshot] = await Promise.all([
+    const [profile, occupied, availabilitySnapshot, policySnapshot, existingAppointments, rateLimitSnapshot, activeLockSnapshot, parentSnapshot, bookingRequestSnapshot] = await Promise.all([
+      transaction.get(db.collection("users").doc(userId)),
       transaction.get(slot),
       transaction.get(availability),
       transaction.get(policyDocument),
@@ -1996,10 +2085,14 @@ export const createAppointmentRequest = onCall(async (request) => {
         createdAt: FieldValue.serverTimestamp(),
       });
     }
+    const studentCollegeId = typeof source.collegeId === "string" ? source.collegeId.trim() : "";
+    const studentVerificationStatus = typeof source.verificationStatus === "string" ? source.verificationStatus.trim() : "";
     transaction.create(appointment, {
       // Profile-derived identity wins over client payloads. Contact fields stay
       // editable by design, with a profile value only as the initial fallback.
       userId, fullName: boundedText(profileName || input.fullName, "Full name", 160),
+      collegeId: studentCollegeId,
+      studentVerificationStatus,
       contactNumber: appointmentPhone(input.contactNumber ?? source.phone), email: appointmentEmail(source.email ?? input.email),
       preferredContactMethod: boundedText(input.preferredContactMethod, "Preferred contact method", 64), concern,
       bestTime: boundedText(input.bestTime, "Preferred time", 120), location: boundedText(input.location ?? "PACC Office, 2nd Floor, Main Building", "Location", 200),
@@ -2028,6 +2121,9 @@ export const initializeAppointmentScheduleRevision = onCall(async (request) => {
   const id = String(input.appointmentId ?? "").trim();
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !Number.isSafeInteger(input.expectedScheduledAt) || typeof input.expectedStatus !== "string") throw new HttpsError("invalid-argument", "Refresh the appointment before initialization.");
   const ref = db.collection("appointments").doc(id);
+  const target = await ref.get();
+  if (!target.exists) throw new HttpsError("failed-precondition", "The appointment is unavailable or changed. Refresh it.");
+  await authorizeAppointmentApproval(staffId, target.data()!, input.exceptionReason);
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const data = snap.data();
@@ -2037,31 +2133,62 @@ export const initializeAppointmentScheduleRevision = onCall(async (request) => {
     if (!uid) throw new HttpsError("failed-precondition", "Appointment owner unavailable.");
     const [slot, lock] = await Promise.all([tx.get(db.collection("appointment_slots").doc(appointmentSlotId(data.scheduledAt))), tx.get(db.collection("appointment_user_locks").doc(uid))]);
     if (slot.data()?.appointmentId !== id || lock.data()?.appointmentId !== id) throw new HttpsError("failed-precondition", "Appointment reservation requires review.");
+    const verifiedStaff = await authorizeAppointmentApprovalInTransaction(tx, staffId, uid, input.exceptionReason);
     tx.update(ref, {scheduleRevision: 0, updatedAt: FieldValue.serverTimestamp()});
+    writeAudit(tx, db, {
+      actorId: staffId,
+      actorNameSnapshot: actorName(verifiedStaff),
+      actorRoleSnapshot: verifiedStaff.accessRole,
+      action: "APPOINTMENT_SCHEDULE_REVISION_INITIALIZED",
+      category: AUDIT_CATEGORIES.appointments,
+      targetType: "appointment",
+      targetId: id,
+      metadata: {
+        before: {status: canonicalAppointmentStatus(data.status), scheduleRevision: null},
+        after: {status: canonicalAppointmentStatus(data.status), scheduleRevision: 0},
+        ...approvalMetadata(verifiedStaff.approvalAuthority),
+      },
+    });
   });
   return {ok: true, refreshRequired: true};
 });
 
+const authorizeAgreementStaff = (uid: string, appointment: FirebaseFirestore.DocumentData, input: Record<string, unknown>) =>
+  authorizeAppointmentApproval(uid, appointment, input.exceptionReason);
+
+const authorizeAgreementStaffInTx = (
+  tx: FirebaseFirestore.Transaction,
+  uid: string,
+  appointment: FirebaseFirestore.DocumentData,
+  input: Record<string, unknown>,
+) => authorizeAppointmentApprovalInTransaction(tx, uid, String(appointment.userId ?? ""), input.exceptionReason);
+
 export const changeAppointmentAgreement = onCall(async (request) => handleAppointmentAgreement(
-  requireAuthenticatedUser(request), (request.data ?? {}) as Record<string, unknown>, requireClinicalAppointmentStaff,
+  requireAuthenticatedUser(request), (request.data ?? {}) as Record<string, unknown>, authorizeAgreementStaff, authorizeAgreementStaffInTx,
 ));
 
 export const rescheduleStudentAppointment = onCall(async (request) => handleAppointmentAgreement(
-  requireAuthenticatedUser(request), {...(request.data ?? {}), action: "propose"}, requireClinicalAppointmentStaff,
+  requireAuthenticatedUser(request), {...(request.data ?? {}), action: "propose"}, authorizeAgreementStaff, authorizeAgreementStaffInTx,
 ));
 
 export const respondToAppointment = onCall(async (request) => handleAppointmentAgreement(
-  requireAuthenticatedUser(request), {...(request.data ?? {}), action: request.data?.action === "accept_reschedule" ? "accept" : request.data?.action}, requireClinicalAppointmentStaff,
+  requireAuthenticatedUser(request), {...(request.data ?? {}), action: request.data?.action === "accept_reschedule" ? "accept" : request.data?.action}, authorizeAgreementStaff, authorizeAgreementStaffInTx,
 ));
 
 export const reviewAppointment = onCall(async (request) => {
   const staffId = request.auth?.uid;
   if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
-  const staff = await requireClinicalAppointmentStaff(staffId);
+  await requireClinicalAppointmentStaff(staffId);
+  const reviewedId = String((request.data as Record<string, unknown> | undefined)?.appointmentId ?? "").trim();
+  const reviewed = /^[A-Za-z0-9_-]{1,128}$/.test(reviewedId) ? await db.collection("appointments").doc(reviewedId).get() : null;
+  if (!reviewed?.exists) throw new HttpsError("not-found", "Appointment not found.");
+  // College-scoped approval: only a counselor serving the student's verified
+  // college, or the super-admin for exceptions / reasoned overrides.
+  await authorizeAppointmentApproval(staffId, reviewed.data()!, (request.data as Record<string, unknown>).exceptionReason);
   if (request.data?.action === "rescheduled") {
     const input = request.data as Record<string, unknown>;
     const schedule = staffProposalTimestamp(input);
-    return handleAppointmentAgreement(staffId, {...input, action: "propose", scheduledAt: schedule.millis, requestId: input.requestId ?? `staff_${createHash("sha256").update(JSON.stringify([staffId, input.appointmentId, input.expectedScheduledAt, input.expectedScheduleRevision, input.expectedProposalRevision ?? 0, schedule.millis])).digest("hex")}`}, requireClinicalAppointmentStaff);
+    return handleAppointmentAgreement(staffId, {...input, action: "propose", scheduledAt: schedule.millis, requestId: input.requestId ?? `staff_${createHash("sha256").update(JSON.stringify([staffId, input.appointmentId, input.expectedScheduledAt, input.expectedScheduleRevision, input.expectedProposalRevision ?? 0, schedule.millis])).digest("hex")}`}, authorizeAgreementStaff, authorizeAgreementStaffInTx);
   }
 
   const input = request.data as Record<string, unknown>;
@@ -2126,9 +2253,10 @@ export const reviewAppointment = onCall(async (request) => {
     }
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Appointment has no student.");
+    const verifiedStaff = await authorizeAppointmentApprovalInTransaction(transaction, staffId, userId, input.exceptionReason);
     const userActiveAppointmentLock = db.collection("appointment_user_locks").doc(userId);
     const activeLockSnapshot = await transaction.get(userActiveAppointmentLock);
-    const staffName = String(staff.name ?? staff.email ?? "Counseling staff");
+    const staffName = String(verifiedStaff.name ?? verifiedStaff.email ?? "Counseling staff");
     if (proposal) {
       try {
         validatePaccAppointmentAvailability(
@@ -2199,7 +2327,7 @@ export const reviewAppointment = onCall(async (request) => {
         attachments: sessionEvidence!.attachments,
         authorId: staffId,
         authorNameSnapshot: staffName,
-        authorRoleSnapshot: staff.accessRole,
+        authorRoleSnapshot: verifiedStaff.accessRole,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
@@ -2219,6 +2347,7 @@ export const reviewAppointment = onCall(async (request) => {
       } : {}),
       staffId,
       staffName,
+      ...approvalHistoryFields(verifiedStaff.approvalAuthority),
       createdAt: FieldValue.serverTimestamp(),
     });
     const title = action === "rescheduled" ? "Appointment rescheduled" : action === "confirmed" ? "PACC Appointment Confirmed" : action === "completed" ? "Appointment completed" : action === "no_show" ? "Appointment marked as Did Not Attend" : "Appointment update";
@@ -2237,8 +2366,8 @@ export const reviewAppointment = onCall(async (request) => {
           : "APPOINTMENT_RESCHEDULED";
     writeAudit(transaction, db, {
       actorId: staffId,
-      actorNameSnapshot: actorName(staff),
-      actorRoleSnapshot: staff.accessRole,
+      actorNameSnapshot: actorName(verifiedStaff),
+      actorRoleSnapshot: verifiedStaff.accessRole,
       action: auditAction,
       category: AUDIT_CATEGORIES.appointments,
       targetType: "appointment",
@@ -2252,6 +2381,7 @@ export const reviewAppointment = onCall(async (request) => {
             time: proposal!.scheduledTime,
           } : {}),
         },
+        ...approvalMetadata(verifiedStaff.approvalAuthority),
       },
     });
   });
@@ -2260,14 +2390,19 @@ export const reviewAppointment = onCall(async (request) => {
 
 export const archiveAppointments = onCall(async (request) => {
   const actorId = requireAuthenticatedUser(request);
-  const actor = await requireStaff(actorId);
+  await requireClinicalAppointmentStaff(actorId);
   const rawIds = Array.isArray(request.data?.appointmentIds) ? request.data.appointmentIds : [];
-  const appointmentIds: string[] = Array.from(new Set<string>(rawIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)));
+  const appointmentIds: string[] = Array.from(new Set<string>(rawIds.filter((value: unknown): value is string => typeof value === "string").map((value: string) => value.trim()).filter((value: string) => value.length > 0)));
   const archived = request.data?.archived === true;
   if (appointmentIds.length < 1 || appointmentIds.length > 200) throw new HttpsError("invalid-argument", "Select between 1 and 200 appointments.");
+  if (appointmentIds.some((id) => !/^[A-Za-z0-9_-]{1,128}$/.test(id))) {
+    throw new HttpsError("invalid-argument", "One or more appointment IDs are invalid.");
+  }
+  const exceptionReason = (request.data as Record<string, unknown> | undefined)?.exceptionReason;
   const refs = appointmentIds.map((id) => db.collection("appointments").doc(id));
   await db.runTransaction(async (transaction) => {
     const snapshots = await Promise.all(refs.map((ref) => transaction.get(ref)));
+    const prepared: Array<{snapshot: FirebaseFirestore.DocumentSnapshot; studentId: string; status: string}> = [];
     for (const snapshot of snapshots) {
       if (!snapshot.exists) throw new HttpsError("not-found", "One or more appointments could not be found.");
       const data = snapshot.data() ?? {};
@@ -2275,8 +2410,25 @@ export const archiveAppointments = onCall(async (request) => {
       const terminal = ["completed", "complete", "declined", "cancelled", "canceled", "no_show", "noshow", "expired"].includes(status);
       if (!archived && !data.archivedAt) throw new HttpsError("failed-precondition", "Only archived appointments can be restored.");
       if (archived && !terminal) throw new HttpsError("failed-precondition", "Only finished appointments can be moved to history.");
+      prepared.push({snapshot, studentId: String(data.userId ?? ""), status});
+    }
+    const authByStudent = new Map<string, Awaited<ReturnType<typeof authorizeAppointmentApprovalInTransaction>>>();
+    for (const studentId of new Set(prepared.map((item) => item.studentId))) {
+      authByStudent.set(studentId, await authorizeAppointmentApprovalInTransaction(transaction, actorId, studentId, exceptionReason));
+    }
+    for (const {snapshot, studentId, status} of prepared) {
+      const verifiedStaff = authByStudent.get(studentId)!;
       transaction.update(snapshot.ref, {archivedAt: archived ? FieldValue.serverTimestamp() : FieldValue.delete(), archivedBy: archived ? actorId : FieldValue.delete(), updatedAt: FieldValue.serverTimestamp()});
-      writeAudit(transaction, db, {actorId, actorNameSnapshot: actorName(actor), actorRoleSnapshot: actor.accessRole, action: archived ? "APPOINTMENT_MOVED_TO_HISTORY" : "APPOINTMENT_RESTORED_FROM_HISTORY", category: AUDIT_CATEGORIES.appointments, targetType: "appointment", targetId: snapshot.id, metadata: {status, bulk: appointmentIds.length > 1}});
+      writeAudit(transaction, db, {
+        actorId,
+        actorNameSnapshot: actorName(verifiedStaff),
+        actorRoleSnapshot: verifiedStaff.accessRole,
+        action: archived ? "APPOINTMENT_MOVED_TO_HISTORY" : "APPOINTMENT_RESTORED_FROM_HISTORY",
+        category: AUDIT_CATEGORIES.appointments,
+        targetType: "appointment",
+        targetId: snapshot.id,
+        metadata: {status, bulk: appointmentIds.length > 1, ...approvalMetadata(verifiedStaff.approvalAuthority)},
+      });
     }
   });
   return {ok: true, affected: appointmentIds.length};
@@ -2413,42 +2565,6 @@ export const sendAppointmentNotification = onDocumentCreated(
     await Promise.all(invalid.map((token) => db.collection("user_devices").doc(userId).collection("tokens").doc(token).delete()));
   },
 );
-
-export const acknowledgeInquiry = onCall(async (request) => {
-  const staffId = request.auth?.uid;
-  if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
-  const staff = await requireStaff(staffId);
-  const inquiryId = String(request.data?.inquiryId ?? "").trim();
-  if (!inquiryId) throw new HttpsError("invalid-argument", "Inquiry ID is required.");
-  const inquiry = db.collection("inquiries").doc(inquiryId);
-  await db.runTransaction(async (transaction) => {
-    const current = await transaction.get(inquiry);
-    if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
-    const data = current.data()!;
-    if (data.acknowledgedAt) {
-      throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
-    }
-    const userId = String(data.userId ?? "");
-    if (!userId) throw new HttpsError("failed-precondition", "Inquiry has no sender.");
-    transaction.update(inquiry, {
-      status: "in_progress",
-      acknowledgedAt: FieldValue.serverTimestamp(),
-      acknowledgedBy: staffId,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    transaction.create(db.collection("notifications").doc(), {
-      userId,
-      inquiryId,
-      type: "inquiry",
-      title: "Form received",
-      body: `PACC received your ${String(data.subject ?? "form")}. Our staff will review it.`,
-      staffName: String(staff.name ?? staff.email ?? "PACC staff"),
-      createdAt: FieldValue.serverTimestamp(),
-      readAt: null,
-    });
-  });
-  return {ok: true};
-});
 
 const REMINDER_WINDOWS: Array<{key: "twentyFourHour" | "oneHour"; minutes: number}> = [
   {key: "twentyFourHour", minutes: 24 * 60},

@@ -287,4 +287,142 @@ void main() {
     });
     expect((await repo.listLegacyNotInRoster()).single.schoolId, 's');
   });
+
+  test('commitImport sets extended timeout without altering unrelated callables', () async {
+    final recorded = <(String name, HttpsCallableOptions? options)>[];
+    final repo = StudentRosterRepository(
+      functions: _RecordingFirebaseFunctions((name, options) {
+        recorded.add((name, options));
+        if (name == 'importStudentRoster') {
+          return _m({'status': 'complete', 'importId': 'imp-1', 'counts': _m({'new': 1}), 'codes': <Object?>[]});
+        }
+        return _m({'imports': <Object?>[]});
+      }),
+    );
+
+    final result = await repo.commitImport('roster.xlsx', [{'studentNo': '1'}]);
+    expect(result.status, RosterImportStatus.complete);
+    expect(recorded.single.$1, 'importStudentRoster');
+    expect(recorded.single.$2?.timeout, const Duration(minutes: 10));
+
+    await repo.listImports();
+    expect(recorded.last.$1, 'listStudentRosterImports');
+    expect(recorded.last.$2, isNull);
+  });
+
+  test('RosterImportRecord.fromJson parses known statuses and tolerates legacy or malformed fields', () {
+    final complete = RosterImportRecord.fromJson(_m({
+      'id': 'imp-complete',
+      'fileName': 'complete.xlsx',
+      'status': 'complete',
+      'rowCount': 10,
+      'failedRowCount': 0,
+      'counts': _m({'new': 10, 'updated': 0, 'linked': 0}),
+      'importedByName': 'Admin A',
+      'importedAt': '2026-11-01T08:00:00.000Z',
+    }));
+    expect(complete.status, RosterImportHistoryStatus.complete);
+    expect(complete.rowCount, 10);
+    expect(complete.failedRowCount, 0);
+    expect(complete.failureCode, isNull);
+
+    final partial = RosterImportRecord.fromJson(_m({
+      'id': 'imp-partial',
+      'fileName': 'partial.xlsx',
+      'status': 'partial',
+      'rowCount': 12,
+      'failedRowCount': 4,
+      'failureCode': 'time-budget-exceeded',
+      'counts': _m({'new': 5, 'updated': 3, 'linked': 0}),
+      'importedByName': 'Admin A',
+      'importedAt': '2026-11-01T09:00:00.000Z',
+    }));
+    expect(partial.status, RosterImportHistoryStatus.partial);
+    expect(partial.rowCount, 12);
+    expect(partial.failedRowCount, 4);
+    expect(partial.failureCode, 'time-budget-exceeded');
+
+    final pending = RosterImportRecord.fromJson(_m({
+      'id': 'imp-pending',
+      'fileName': 'pending.xlsx',
+      'status': 'pending',
+      'rowCount': 50,
+      'counts': _m({'new': 0, 'updated': 0, 'linked': 0}),
+      'importedByName': 'Admin A',
+      'importedAt': '2026-11-01T10:00:00.000Z',
+    }));
+    expect(pending.status, RosterImportHistoryStatus.pending);
+    expect(pending.rowCount, 50);
+    expect(pending.failedRowCount, isNull);
+
+    final finFail = RosterImportRecord.fromJson(_m({
+      'id': 'imp-finfail',
+      'fileName': 'finfail.xlsx',
+      'status': 'partial',
+      'rowCount': 20,
+      'failedRowCount': 0,
+      'failureCode': 'finalization-failed',
+      'counts': _m({'new': 20, 'updated': 0, 'linked': 0}),
+      'importedByName': 'Admin A',
+      'importedAt': '2026-11-01T11:00:00.000Z',
+    }));
+    expect(finFail.status, RosterImportHistoryStatus.partial);
+    expect(finFail.failureCode, 'finalization-failed');
+    expect(finFail.needsAttention, isTrue);
+
+    final legacy = RosterImportRecord.fromJson(_m({
+      'id': 'imp-legacy',
+      'fileName': 'legacy.xlsx',
+      'counts': _m({'new': 3, 'updated': 1, 'linked': 0}),
+      'importedByName': 'Admin A',
+      'importedAt': '2026-10-01T08:00:00.000Z',
+    }));
+    expect(legacy.status, RosterImportHistoryStatus.unknown);
+    expect(legacy.rowCount, isNull);
+    expect(legacy.failedRowCount, isNull);
+    expect(legacy.failureCode, isNull);
+
+    final malformed = RosterImportRecord.fromJson(_m({
+      'id': 'imp-bad',
+      'fileName': 'bad.xlsx',
+      'status': 'corrupted-status',
+      'rowCount': -3,
+      'failedRowCount': 'NaN',
+      'failureCode': '',
+      'counts': 'not-a-map',
+      'importedByName': 42,
+      'importedAt': 'invalid-date',
+    }));
+    expect(malformed.status, RosterImportHistoryStatus.unknown);
+    expect(malformed.rowCount, isNull);
+    expect(malformed.failedRowCount, isNull);
+    expect(malformed.failureCode, isNull);
+  });
+}
+
+class _RecordingFirebaseFunctions extends Fake implements FirebaseFunctions {
+  _RecordingFirebaseFunctions(this._handler);
+
+  final Object? Function(String name, HttpsCallableOptions? options) _handler;
+
+  @override
+  HttpsCallable httpsCallable(String name, {HttpsCallableOptions? options}) =>
+      _RecordingHttpsCallable(() => _handler(name, options));
+}
+
+class _RecordingHttpsCallable extends Fake implements HttpsCallable {
+  _RecordingHttpsCallable(this._onCall);
+
+  final Object? Function() _onCall;
+
+  @override
+  Future<HttpsCallableResult<T>> call<T>([dynamic parameters]) async =>
+      _FakeCallableResult<T>(_onCall() as T);
+}
+
+class _FakeCallableResult<T> extends Fake implements HttpsCallableResult<T> {
+  _FakeCallableResult(this.data);
+
+  @override
+  final T data;
 }
