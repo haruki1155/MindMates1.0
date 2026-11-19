@@ -1739,6 +1739,12 @@ class AdminPortalRepository {
     required String appointmentId,
     required List<PendingSessionEvidenceFile> files,
   }) async {
+    if (isSuperAdmin || currentAccessRole == AccessRole.admin) {
+      throw StateError(
+        'Clinical session attachment uploads are restricted to assigned college counselors.',
+      );
+    }
+    if (files.isEmpty) return const [];
     if (files.length > maxSessionEvidenceFiles) {
       throw const FormatException('Choose no more than five files.');
     }

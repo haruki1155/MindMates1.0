@@ -641,9 +641,12 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       initialSection: _initialInquirySection,
     ),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
-    AdminPortalPage.backupData => _repository.isSuperAdmin
-        ? BackupDataPage(repository: _repository)
-        : const Center(child: Text('Super-administrator access is required.')),
+    AdminPortalPage.backupData =>
+      _repository.isSuperAdmin
+          ? BackupDataPage(repository: _repository)
+          : const Center(
+              child: Text('Super-administrator access is required.'),
+            ),
     AdminPortalPage.profile => _ProfilePage(repository: _repository),
   };
 }
@@ -3048,6 +3051,9 @@ class _AppointmentCard extends StatelessWidget {
   Future<void> _showReviewDialog(BuildContext context) async {
     final currentStatus = item.lifecycleStatus;
     final canReview = canReviewAppointment(item, DateTime.now());
+    final canUploadClinicalAttachments =
+        !repository.isSuperAdmin &&
+        repository.currentAccessRole != AccessRole.admin;
     final future = item.scheduledAt.isAfter(DateTime.now());
     final pendingStudent =
         item.hasPendingScheduleChange && item.proposedBy == 'student';
@@ -3077,6 +3083,7 @@ class _AppointmentCard extends StatelessWidget {
       final text = exceptionReason.text.trim();
       return repository.isSuperAdmin && text.isNotEmpty ? text : null;
     }
+
     var offerFollowUp = false;
     DateTime? proposedDate;
     List<AppointmentSlot> proposedSlots = const [];
@@ -3086,624 +3093,647 @@ class _AppointmentCard extends StatelessWidget {
     String? proposedSlotsMessage;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 24,
-          ),
-          titlePadding: const EdgeInsets.fromLTRB(28, 26, 28, 0),
-          contentPadding: const EdgeInsets.fromLTRB(28, 20, 28, 8),
-          actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                canReview ? 'Review appointment' : 'Appointment details',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 5),
-              Text(
-                item.fullName,
-                style: const TextStyle(
-                  color: AdminColors.muted,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+      builder: (dialogContext) => _DialogControllerScope(
+        controllers: [
+          customReason,
+          sessionSummary,
+          followUpMessage,
+          exceptionReason,
+        ],
+        child: StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 24,
+            ),
+            titlePadding: const EdgeInsets.fromLTRB(28, 26, 28, 0),
+            contentPadding: const EdgeInsets.fromLTRB(28, 20, 28, 8),
+            actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 18),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  canReview ? 'Review appointment' : 'Appointment details',
+                  style: Theme.of(context).textTheme.headlineSmall,
                 ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: SizedBox(
-              width: 660,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (item.hasPendingScheduleChange) ...[
-                    Text(
-                      item.hasVerifiedPendingScheduleChange
-                          ? 'Current reserved time'
-                          : 'Current recorded time',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    Text('${item.scheduledAt} - ${item.scheduledTime}'),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Proposed time: ${item.proposedScheduledAt} - ${item.proposedScheduledTime ?? ''}',
-                    ),
-                    Text(
-                      !item.hasVerifiedPendingScheduleChange
-                          ? 'Older proposal: verify its current reservation before proposing another time.'
-                          : pendingStudent
-                          ? 'Student is awaiting your agreement. The current time remains reserved.'
-                          : 'Awaiting student agreement. The current time remains reserved.',
-                    ),
-                    const Divider(height: 28),
-                  ],
-                  const _AppointmentSectionHeader(
-                    icon: Icons.person_outline,
-                    title: 'Client information',
+                const SizedBox(height: 5),
+                Text(
+                  item.fullName,
+                  style: const TextStyle(
+                    color: AdminColors.muted,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
                   ),
-                  const SizedBox(height: 12),
-                  _AppointmentFieldGrid(
-                    fields: [
-                      _AppointmentFieldData('Email address', item.email),
-                      _AppointmentFieldData(
-                        'Contact number',
-                        item.contactNumber,
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: SizedBox(
+                width: 660,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (item.hasPendingScheduleChange) ...[
+                      Text(
+                        item.hasVerifiedPendingScheduleChange
+                            ? 'Current reserved time'
+                            : 'Current recorded time',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      _AppointmentFieldData(
-                        'Course and year',
-                        '${item.course ?? 'Not provided'} • ${item.yearLevel ?? 'Not provided'}',
+                      Text('${item.scheduledAt} - ${item.scheduledTime}'),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Proposed time: ${item.proposedScheduledAt} - ${item.proposedScheduledTime ?? ''}',
                       ),
-                      _AppointmentFieldData(
-                        'Preferred contact',
-                        item.preferredContactMethod,
+                      Text(
+                        !item.hasVerifiedPendingScheduleChange
+                            ? 'Older proposal: verify its current reservation before proposing another time.'
+                            : pendingStudent
+                            ? 'Student is awaiting your agreement. The current time remains reserved.'
+                            : 'Awaiting student agreement. The current time remains reserved.',
                       ),
-                      _AppointmentFieldData(
-                        'Previous counseling',
-                        item.therapyBefore ?? 'Not provided',
-                      ),
+                      const Divider(height: 28),
                     ],
-                  ),
-                  const Divider(height: 34),
-                  const _AppointmentSectionHeader(
-                    icon: Icons.event_note_outlined,
-                    title: 'Request details',
-                  ),
-                  const SizedBox(height: 12),
-                  _AppointmentField(
-                    label: 'Primary concern',
-                    value: item.concern,
-                    prominent: true,
-                  ),
-                  const SizedBox(height: 12),
-                  _AppointmentFieldGrid(
-                    fields: [
-                      _AppointmentFieldData(
-                        'Requested schedule',
-                        '${_date(item.scheduledAt)} • ${item.scheduledTime}',
-                      ),
-                      _AppointmentFieldData(
-                        'Current status',
-                        _formalLabel(item.status),
-                      ),
-                      if ((item.staffReply ?? '').isNotEmpty)
-                        _AppointmentFieldData(
-                          'Decision reason',
-                          item.staffReply!,
-                        ),
-                      if (item.proposedScheduledAt != null)
-                        _AppointmentFieldData(
-                          'Legacy schedule update',
-                          '${_date(item.proposedScheduledAt)} • ${item.proposedScheduledTime ?? ''}',
-                        ),
-                    ],
-                  ),
-                  if (!canReview) ...[
-                    const SizedBox(height: 22),
-                    _AppointmentNotice(
-                      icon: Icons.lock_outline,
-                      message: item.isArchived
-                          ? 'This appointment is archived. Details are read-only.'
-                          : currentStatus == AppointmentStatus.confirmed
-                          ? 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.'
-                          : 'This appointment has been finalized. The recorded decision is read-only.',
+                    const _AppointmentSectionHeader(
+                      icon: Icons.person_outline,
+                      title: 'Client information',
                     ),
-                    if (currentStatus == AppointmentStatus.completed)
-                      ClinicalInterviewRecordViewer(
-                        repository: repository,
-                        appointmentId: item.id,
-                      ),
-                  ] else ...[
+                    const SizedBox(height: 12),
+                    _AppointmentFieldGrid(
+                      fields: [
+                        _AppointmentFieldData('Email address', item.email),
+                        _AppointmentFieldData(
+                          'Contact number',
+                          item.contactNumber,
+                        ),
+                        _AppointmentFieldData(
+                          'Course and year',
+                          '${item.course ?? 'Not provided'} • ${item.yearLevel ?? 'Not provided'}',
+                        ),
+                        _AppointmentFieldData(
+                          'Preferred contact',
+                          item.preferredContactMethod,
+                        ),
+                        _AppointmentFieldData(
+                          'Previous counseling',
+                          item.therapyBefore ?? 'Not provided',
+                        ),
+                      ],
+                    ),
                     const Divider(height: 34),
                     const _AppointmentSectionHeader(
-                      icon: Icons.fact_check_outlined,
-                      title: 'PACC decision',
+                      icon: Icons.event_note_outlined,
+                      title: 'Request details',
                     ),
-                    const SizedBox(height: 14),
-                    DropdownButtonFormField<String>(
-                      initialValue: action,
-                      decoration: const InputDecoration(labelText: 'Action'),
-                      items: [
-                        if (pendingStudent)
-                          const DropdownMenuItem(
-                            value: 'accept',
-                            child: Text('Accept student proposed time'),
-                          ),
-                        if (!item.hasPendingScheduleChange &&
-                            currentStatus != AppointmentStatus.confirmed &&
-                            currentStatus !=
-                                AppointmentStatus.rescheduleProposed)
-                          const DropdownMenuItem(
-                            value: 'confirmed',
-                            child: Text('Confirm appointment'),
-                          ),
-                        const DropdownMenuItem(
-                          value: 'rescheduled',
-                          child: Text('Re-schedule appointment'),
+                    const SizedBox(height: 12),
+                    _AppointmentField(
+                      label: 'Primary concern',
+                      value: item.concern,
+                      prominent: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _AppointmentFieldGrid(
+                      fields: [
+                        _AppointmentFieldData(
+                          'Requested schedule',
+                          '${_date(item.scheduledAt)} • ${item.scheduledTime}',
                         ),
-                        if (currentStatus == AppointmentStatus.confirmed &&
-                            !future) ...[
-                          const DropdownMenuItem(
-                            value: 'completed',
-                            child: Text('Mark session as completed'),
+                        _AppointmentFieldData(
+                          'Current status',
+                          _formalLabel(item.status),
+                        ),
+                        if ((item.staffReply ?? '').isNotEmpty)
+                          _AppointmentFieldData(
+                            'Decision reason',
+                            item.staffReply!,
                           ),
+                        if (item.proposedScheduledAt != null)
+                          _AppointmentFieldData(
+                            'Legacy schedule update',
+                            '${_date(item.proposedScheduledAt)} • ${item.proposedScheduledTime ?? ''}',
+                          ),
+                      ],
+                    ),
+                    if (!canReview) ...[
+                      const SizedBox(height: 22),
+                      _AppointmentNotice(
+                        icon: Icons.lock_outline,
+                        message: item.isArchived
+                            ? 'This appointment is archived. Details are read-only.'
+                            : currentStatus == AppointmentStatus.confirmed
+                            ? 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.'
+                            : 'This appointment has been finalized. The recorded decision is read-only.',
+                      ),
+                      if (currentStatus == AppointmentStatus.completed)
+                        ClinicalInterviewRecordViewer(
+                          repository: repository,
+                          appointmentId: item.id,
+                        ),
+                    ] else ...[
+                      const Divider(height: 34),
+                      const _AppointmentSectionHeader(
+                        icon: Icons.fact_check_outlined,
+                        title: 'PACC decision',
+                      ),
+                      const SizedBox(height: 14),
+                      DropdownButtonFormField<String>(
+                        initialValue: action,
+                        decoration: const InputDecoration(labelText: 'Action'),
+                        items: [
+                          if (pendingStudent)
+                            const DropdownMenuItem(
+                              value: 'accept',
+                              child: Text('Accept student proposed time'),
+                            ),
+                          if (!item.hasPendingScheduleChange &&
+                              currentStatus != AppointmentStatus.confirmed &&
+                              currentStatus !=
+                                  AppointmentStatus.rescheduleProposed)
+                            const DropdownMenuItem(
+                              value: 'confirmed',
+                              child: Text('Confirm appointment'),
+                            ),
                           const DropdownMenuItem(
-                            value: 'no_show',
-                            child: Text('Mark as Did Not Attend'),
+                            value: 'rescheduled',
+                            child: Text('Re-schedule appointment'),
+                          ),
+                          if (currentStatus == AppointmentStatus.confirmed &&
+                              !future) ...[
+                            const DropdownMenuItem(
+                              value: 'completed',
+                              child: Text('Mark session as completed'),
+                            ),
+                            const DropdownMenuItem(
+                              value: 'no_show',
+                              child: Text('Mark as Did Not Attend'),
+                            ),
+                          ],
+                        ],
+                        onChanged: submitting
+                            ? null
+                            : (value) => setDialogState(() {
+                                action = value!;
+                                reason = _appointmentReasons(action).first;
+                              }),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        key: ValueKey('reason-$action'),
+                        initialValue: reason,
+                        decoration: const InputDecoration(
+                          labelText: 'Decision reason',
+                        ),
+                        items: _appointmentReasons(action)
+                            .map(
+                              (value) => DropdownMenuItem(
+                                value: value,
+                                child: Text(value),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: submitting
+                            ? null
+                            : (value) => setDialogState(() => reason = value!),
+                      ),
+                      if (repository.isSuperAdmin) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: exceptionReason,
+                          enabled: !submitting,
+                          maxLength: 500,
+                          decoration: const InputDecoration(
+                            labelText: 'Administrator exception reason',
+                            helperText:
+                                'Required when a counselor is assigned to this '
+                                "student's college.",
+                          ),
+                        ),
+                      ],
+                      if (action == 'rescheduled') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: customReason,
+                          maxLength: 500,
+                          decoration: InputDecoration(
+                            labelText: reason == 'Other'
+                                ? 'Custom reschedule reason (required)'
+                                : 'Additional reschedule context (optional)',
+                          ),
+                        ),
+                      ],
+                      if (action == 'rescheduled') ...[
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                final picked = await showDatePicker(
+                                  context: dialogContext,
+                                  initialDate: DateTime.now().add(
+                                    const Duration(days: 1),
+                                  ),
+                                  firstDate: DateTime.now(),
+                                  lastDate: DateTime.now().add(
+                                    const Duration(days: 365),
+                                  ),
+                                );
+                                if (picked != null) {
+                                  setDialogState(() {
+                                    proposedDate = picked;
+                                    proposedSlot = null;
+                                    proposedSlots = const [];
+                                    proposedSlotsMessage = null;
+                                    loadingProposedSlots = true;
+                                  });
+                                  try {
+                                    final slots = await repository
+                                        .getAvailableAppointmentSlots(picked);
+                                    if (dialogContext.mounted) {
+                                      setDialogState(() {
+                                        proposedSlots = slots;
+                                        loadingProposedSlots = false;
+                                        proposedSlotsMessage = slots.isEmpty
+                                            ? 'No available appointment times for this date.'
+                                            : null;
+                                      });
+                                    }
+                                  } catch (_) {
+                                    if (dialogContext.mounted) {
+                                      setDialogState(() {
+                                        loadingProposedSlots = false;
+                                        proposedSlotsMessage =
+                                            'Unable to load available appointment times.';
+                                      });
+                                    }
+                                  }
+                                }
+                              },
+                              icon: const Icon(Icons.calendar_today_outlined),
+                              label: Text(
+                                proposedDate == null
+                                    ? 'Select a date'
+                                    : _date(proposedDate),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 260,
+                              child: DropdownButtonFormField<AppointmentSlot>(
+                                initialValue: proposedSlot,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: 'Available times',
+                                ),
+                                hint: Text(
+                                  proposedDate == null
+                                      ? 'Select a date first'
+                                      : loadingProposedSlots
+                                      ? 'Loading available times...'
+                                      : 'Select an available time',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                items: proposedSlots
+                                    .map(
+                                      (slot) => DropdownMenuItem(
+                                        value: slot,
+                                        child: Text(slot.label),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged:
+                                    loadingProposedSlots ||
+                                        proposedSlots.isEmpty
+                                    ? null
+                                    : (slot) => setDialogState(
+                                        () => proposedSlot = slot,
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (proposedSlotsMessage != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            proposedSlotsMessage!,
+                            style: const TextStyle(
+                              color: AdminColors.muted,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ],
-                      onChanged: submitting
-                          ? null
-                          : (value) => setDialogState(() {
-                              action = value!;
-                              reason = _appointmentReasons(action).first;
+                      if (action == 'completed') ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: sessionSummary,
+                          minLines: 3,
+                          maxLines: 8,
+                          maxLength: 2000,
+                          enabled: !submitting,
+                          decoration: const InputDecoration(
+                            labelText: 'Session summary (internal)',
+                            helperText:
+                                'Visible only to authorized clinical staff.',
+                          ),
+                        ),
+                        if (canUploadClinicalAttachments)
+                          ClinicalInterviewEditor(
+                            files: selectedClinicalFiles,
+                            busy: submitting,
+                            onRemoveFile: (index) => setDialogState(() {
+                              selectedClinicalFiles.removeAt(index);
+                              uploadedClinicalFiles = null;
                             }),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey('reason-$action'),
-                      initialValue: reason,
-                      decoration: const InputDecoration(
-                        labelText: 'Decision reason',
-                      ),
-                      items: _appointmentReasons(action)
-                          .map(
-                            (value) => DropdownMenuItem(
-                              value: value,
-                              child: Text(value),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: submitting
-                          ? null
-                          : (value) => setDialogState(() => reason = value!),
-                    ),
-                    if (repository.isSuperAdmin) ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: exceptionReason,
-                        enabled: !submitting,
-                        maxLength: 500,
-                        decoration: const InputDecoration(
-                          labelText: 'Administrator exception reason',
-                          helperText:
-                              'Required when a counselor is assigned to this '
-                              "student's college.",
-                        ),
-                      ),
-                    ],
-                    if (action == 'rescheduled') ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: customReason,
-                        maxLength: 500,
-                        decoration: InputDecoration(
-                          labelText: reason == 'Other'
-                              ? 'Custom reschedule reason (required)'
-                              : 'Additional reschedule context (optional)',
-                        ),
-                      ),
-                    ],
-                    if (action == 'rescheduled') ...[
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: () async {
-                              final picked = await showDatePicker(
-                                context: dialogContext,
-                                initialDate: DateTime.now().add(
-                                  const Duration(days: 1),
-                                ),
-                                firstDate: DateTime.now(),
-                                lastDate: DateTime.now().add(
-                                  const Duration(days: 365),
-                                ),
-                              );
-                              if (picked != null) {
-                                setDialogState(() {
-                                  proposedDate = picked;
-                                  proposedSlot = null;
-                                  proposedSlots = const [];
-                                  proposedSlotsMessage = null;
-                                  loadingProposedSlots = true;
-                                });
-                                try {
-                                  final slots = await repository
-                                      .getAvailableAppointmentSlots(picked);
-                                  if (dialogContext.mounted) {
-                                    setDialogState(() {
-                                      proposedSlots = slots;
-                                      loadingProposedSlots = false;
-                                      proposedSlotsMessage = slots.isEmpty
-                                          ? 'No available appointment times for this date.'
-                                          : null;
-                                    });
+                            onChooseFiles: () async {
+                              try {
+                                final chosen = await openFiles(
+                                  acceptedTypeGroups: [
+                                    const XTypeGroup(
+                                      label: 'Interview materials',
+                                      extensions: [
+                                        'jpg',
+                                        'jpeg',
+                                        'png',
+                                        'pdf',
+                                        'doc',
+                                        'docx',
+                                      ],
+                                    ),
+                                  ],
+                                );
+                                if (!dialogContext.mounted || chosen.isEmpty) {
+                                  return;
+                                }
+                                if (selectedClinicalFiles.length +
+                                        chosen.length >
+                                    maxSessionEvidenceFiles) {
+                                  throw const FormatException(
+                                    'Choose no more than five files.',
+                                  );
+                                }
+                                final incoming = <PendingSessionEvidenceFile>[];
+                                for (final file in chosen) {
+                                  final name = file.name;
+                                  final type = sessionEvidenceMimeType(name);
+                                  final length = await file.length();
+                                  if (!validSessionEvidenceFileName(name) ||
+                                      type == null ||
+                                      length == 0 ||
+                                      length > maxSessionEvidenceFileBytes) {
+                                    throw const FormatException(
+                                      'Only PNG, JPG, PDF, DOC or DOCX files up to 5 MB are allowed.',
+                                    );
                                   }
-                                } catch (_) {
-                                  if (dialogContext.mounted) {
-                                    setDialogState(() {
-                                      loadingProposedSlots = false;
-                                      proposedSlotsMessage =
-                                          'Unable to load available appointment times.';
-                                    });
+                                  final bytes = await file.readAsBytes();
+                                  if (bytes.length != length) {
+                                    throw const FormatException(
+                                      'File size changed during selection.',
+                                    );
                                   }
+                                  incoming.add(
+                                    PendingSessionEvidenceFile(
+                                      name: name,
+                                      contentType: type,
+                                      bytes: bytes,
+                                    ),
+                                  );
+                                }
+                                if (dialogContext.mounted) {
+                                  setDialogState(() {
+                                    selectedClinicalFiles.addAll(incoming);
+                                    uploadedClinicalFiles = null;
+                                  });
+                                }
+                              } catch (_) {
+                                if (dialogContext.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Unable to add files. Use PNG, JPG, PDF, DOC or DOCX up to 5 MB each (max five).',
+                                      ),
+                                    ),
+                                  );
                                 }
                               }
                             },
-                            icon: const Icon(Icons.calendar_today_outlined),
-                            label: Text(
-                              proposedDate == null
-                                  ? 'Select a date'
-                                  : _date(proposedDate),
+                          )
+                        else
+                          const Padding(
+                            padding: EdgeInsets.only(top: 12, bottom: 4),
+                            child: Text(
+                              'Session attachments can only be uploaded by an assigned college counselor.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AdminColors.muted,
+                              ),
                             ),
                           ),
-                          SizedBox(
-                            width: 260,
-                            child: DropdownButtonFormField<AppointmentSlot>(
-                              initialValue: proposedSlot,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Available times',
-                              ),
-                              hint: Text(
-                                proposedDate == null
-                                    ? 'Select a date first'
-                                    : loadingProposedSlots
-                                    ? 'Loading available times...'
-                                    : 'Select an available time',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              items: proposedSlots
-                                  .map(
-                                    (slot) => DropdownMenuItem(
-                                      value: slot,
-                                      child: Text(slot.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged:
-                                  loadingProposedSlots || proposedSlots.isEmpty
-                                  ? null
-                                  : (slot) => setDialogState(
-                                      () => proposedSlot = slot,
-                                    ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (proposedSlotsMessage != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          proposedSlotsMessage!,
-                          style: const TextStyle(
-                            color: AdminColors.muted,
-                            fontSize: 12,
-                          ),
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: offerFollowUp,
+                          onChanged: submitting
+                              ? null
+                              : (value) => setDialogState(
+                                  () => offerFollowUp = value ?? false,
+                                ),
+                          title: const Text('Offer a follow-up session'),
                         ),
+                        if (offerFollowUp)
+                          TextField(
+                            controller: followUpMessage,
+                            minLines: 2,
+                            maxLines: 5,
+                            maxLength: 1000,
+                            decoration: const InputDecoration(
+                              labelText: 'Client message',
+                            ),
+                          ),
                       ],
                     ],
-                    if (action == 'completed') ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: sessionSummary,
-                        minLines: 3,
-                        maxLines: 8,
-                        maxLength: 2000,
-                        enabled: !submitting,
-                        decoration: const InputDecoration(
-                          labelText: 'Session summary (internal)',
-                          helperText:
-                              'Visible only to authorized clinical staff.',
-                        ),
-                      ),
-                      ClinicalInterviewEditor(
-                        files: selectedClinicalFiles,
-                        busy: submitting,
-                        onRemoveFile: (index) => setDialogState(() {
-                          selectedClinicalFiles.removeAt(index);
-                          uploadedClinicalFiles = null;
-                        }),
-                        onChooseFiles: () async {
-                          try {
-                            final chosen = await openFiles(
-                              acceptedTypeGroups: [
-                                const XTypeGroup(
-                                  label: 'Interview materials',
-                                  extensions: [
-                                    'jpg',
-                                    'jpeg',
-                                    'png',
-                                    'pdf',
-                                    'doc',
-                                    'docx',
-                                  ],
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: submitting
+                    ? null
+                    : () => Navigator.pop(dialogContext),
+                child: Text(canReview ? 'Cancel' : 'Close'),
+              ),
+              if (canReview)
+                FilledButton(
+                  onPressed: submitting
+                      ? null
+                      : () async {
+                          if (submitting) return;
+                          final rescheduleReason = action == 'rescheduled'
+                              ? [
+                                  if (reason != 'Other') reason,
+                                  customReason.text.trim(),
+                                ].where((part) => part.isNotEmpty).join(': ')
+                              : null;
+                          if (action == 'rescheduled' &&
+                              (rescheduleReason == null ||
+                                  rescheduleReason.trim().length < 3)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter a reschedule reason of at least 3 characters.',
                                 ),
-                              ],
+                              ),
                             );
-                            if (!dialogContext.mounted || chosen.isEmpty) {
-                              return;
-                            }
-                            if (selectedClinicalFiles.length + chosen.length >
-                                maxSessionEvidenceFiles) {
-                              throw const FormatException(
-                                'Choose no more than five files.',
-                              );
-                            }
-                            final incoming = <PendingSessionEvidenceFile>[];
-                            for (final file in chosen) {
-                              final name = file.name;
-                              final type = sessionEvidenceMimeType(name);
-                              final length = await file.length();
-                              if (!validSessionEvidenceFileName(name) ||
-                                  type == null ||
-                                  length == 0 ||
-                                  length > maxSessionEvidenceFileBytes) {
-                                throw const FormatException(
-                                  'Only PNG, JPG, PDF, DOC or DOCX files up to 5 MB are allowed.',
-                                );
-                              }
-                              final bytes = await file.readAsBytes();
-                              if (bytes.length != length) {
-                                throw const FormatException(
-                                  'File size changed during selection.',
-                                );
-                              }
-                              incoming.add(
-                                PendingSessionEvidenceFile(
-                                  name: name,
-                                  contentType: type,
-                                  bytes: bytes,
+                            return;
+                          }
+                          if (action == 'completed' &&
+                              sessionSummary.text.trim().length < 3) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter an internal session summary of at least 3 characters.',
                                 ),
-                              );
-                            }
-                            if (dialogContext.mounted) {
-                              setDialogState(() {
-                                selectedClinicalFiles.addAll(incoming);
-                                uploadedClinicalFiles = null;
-                              });
-                            }
-                          } catch (_) {
-                            if (dialogContext.mounted) {
+                              ),
+                            );
+                            return;
+                          }
+                          if (action == 'completed' &&
+                              offerFollowUp &&
+                              followUpMessage.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter a client follow-up message.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          if (action == 'rescheduled' &&
+                              (proposedDate == null || proposedSlot == null)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter a reply and choose an available appointment time.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+                          setDialogState(() => submitting = true);
+                          try {
+                            if (!item.hasScheduleRevision) {
+                              await repository
+                                  .initializeAppointmentScheduleRevision(
+                                    appointmentId: item.id,
+                                    scheduledAt: item.scheduledAt,
+                                    status: item.lifecycleStatus.value,
+                                    exceptionReason: exceptionReasonValue(),
+                                  );
+                              if (!context.mounted) return;
+                              Navigator.of(context).pop();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text(
-                                    'Unable to add files. Use PNG, JPG, PDF, DOC or DOCX up to 5 MB each (max five).',
+                                    'Appointment prepared. Refresh and review it before confirming.',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            if (action == 'accept') {
+                              await repository.changeAppointmentAgreement(
+                                item,
+                                'accept',
+                                agreementRequestId,
+                                exceptionReason: exceptionReasonValue(),
+                              );
+                            } else {
+                              // Upload evidence only after the legacy schedule guard.
+                              // Reuse the uploaded manifest if a callable retry is needed.
+                              if (action == 'completed' &&
+                                  canUploadClinicalAttachments &&
+                                  uploadedClinicalFiles == null) {
+                                uploadedClinicalFiles = await repository
+                                    .uploadClinicalEvidenceFiles(
+                                      appointmentId: item.id,
+                                      files: selectedClinicalFiles,
+                                    );
+                              }
+                              await repository.reviewAppointment(
+                                appointmentId: item.id,
+                                expectedScheduledAt:
+                                    item.scheduledAt.millisecondsSinceEpoch,
+                                expectedScheduleRevision: item.scheduleRevision,
+                                expectedProposalRevision: item.proposalRevision,
+                                expectedStatus: item.lifecycleStatus.value,
+                                action: action,
+                                reply: action == 'completed'
+                                    ? 'Appointment completed.'
+                                    : rescheduleReason ?? reason,
+                                proposedScheduledAt: proposedSlot?.start,
+                                proposedScheduledTime: proposedSlot?.label,
+                                rescheduleReason: rescheduleReason,
+                                sessionSummary: action == 'completed'
+                                    ? sessionSummary.text.trim()
+                                    : null,
+                                attachments:
+                                    action == 'completed' &&
+                                        canUploadClinicalAttachments
+                                    ? uploadedClinicalFiles ?? const []
+                                    : const [],
+                                offerFollowUp:
+                                    action == 'completed' && offerFollowUp,
+                                followUpMessage:
+                                    action == 'completed' && offerFollowUp
+                                    ? followUpMessage.text.trim()
+                                    : null,
+                                exceptionReason: exceptionReasonValue(),
+                              );
+                            }
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                            }
+                          } catch (error) {
+                            if (dialogContext.mounted) {
+                              setDialogState(() => submitting = false);
+                            }
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    FirebaseErrorMessage.describe(
+                                      error,
+                                      fallback:
+                                          'Unable to update the appointment.',
+                                    ),
                                   ),
                                 ),
                               );
                             }
                           }
                         },
-                      ),
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: offerFollowUp,
-                        onChanged: submitting
-                            ? null
-                            : (value) => setDialogState(
-                                () => offerFollowUp = value ?? false,
-                              ),
-                        title: const Text('Offer a follow-up session'),
-                      ),
-                      if (offerFollowUp)
-                        TextField(
-                          controller: followUpMessage,
-                          minLines: 2,
-                          maxLines: 5,
-                          maxLength: 1000,
-                          decoration: const InputDecoration(
-                            labelText: 'Client message',
-                          ),
-                        ),
-                    ],
-                  ],
-                ],
-              ),
-            ),
+                  child: submitting
+                      ? const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            SizedBox(width: 8),
+                            Text('Sending decision…'),
+                          ],
+                        )
+                      : const Text('Send decision'),
+                ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: submitting ? null : () => Navigator.pop(dialogContext),
-              child: Text(canReview ? 'Cancel' : 'Close'),
-            ),
-            if (canReview)
-              FilledButton(
-                onPressed: submitting
-                    ? null
-                    : () async {
-                        if (submitting) return;
-                        final rescheduleReason = action == 'rescheduled'
-                            ? [
-                                if (reason != 'Other') reason,
-                                customReason.text.trim(),
-                              ].where((part) => part.isNotEmpty).join(': ')
-                            : null;
-                        if (action == 'rescheduled' &&
-                            (rescheduleReason == null ||
-                                rescheduleReason.trim().length < 3)) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Enter a reschedule reason of at least 3 characters.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-                        if (action == 'completed' &&
-                            sessionSummary.text.trim().length < 3) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Enter an internal session summary of at least 3 characters.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-                        if (action == 'completed' &&
-                            offerFollowUp &&
-                            followUpMessage.text.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Enter a client follow-up message.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-                        if (action == 'rescheduled' &&
-                            (proposedDate == null || proposedSlot == null)) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Enter a reply and choose an available appointment time.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-                        setDialogState(() => submitting = true);
-                        try {
-                          if (!item.hasScheduleRevision) {
-                            await repository
-                                .initializeAppointmentScheduleRevision(
-                                  appointmentId: item.id,
-                                  scheduledAt: item.scheduledAt,
-                                  status: item.lifecycleStatus.value,
-                                  exceptionReason: exceptionReasonValue(),
-                                );
-                            if (!context.mounted) return;
-                            Navigator.of(context).pop();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Appointment prepared. Refresh and review it before confirming.',
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-                          if (action == 'accept') {
-                            await repository.changeAppointmentAgreement(
-                              item,
-                              'accept',
-                              agreementRequestId,
-                              exceptionReason: exceptionReasonValue(),
-                            );
-                          } else {
-                            // Upload evidence only after the legacy schedule guard.
-                            // Reuse the uploaded manifest if a callable retry is needed.
-                            if (action == 'completed' &&
-                                uploadedClinicalFiles == null) {
-                              uploadedClinicalFiles = await repository
-                                  .uploadClinicalEvidenceFiles(
-                                    appointmentId: item.id,
-                                    files: selectedClinicalFiles,
-                                  );
-                            }
-                            await repository.reviewAppointment(
-                              appointmentId: item.id,
-                              expectedScheduledAt:
-                                  item.scheduledAt.millisecondsSinceEpoch,
-                              expectedScheduleRevision: item.scheduleRevision,
-                              expectedProposalRevision: item.proposalRevision,
-                              expectedStatus: item.lifecycleStatus.value,
-                              action: action,
-                              reply: action == 'completed'
-                                  ? 'Appointment completed.'
-                                  : rescheduleReason ?? reason,
-                              proposedScheduledAt: proposedSlot?.start,
-                              proposedScheduledTime: proposedSlot?.label,
-                              rescheduleReason: rescheduleReason,
-                              sessionSummary: action == 'completed'
-                                  ? sessionSummary.text.trim()
-                                  : null,
-                              attachments: action == 'completed'
-                                  ? uploadedClinicalFiles ?? const []
-                                  : const [],
-                              offerFollowUp:
-                                  action == 'completed' && offerFollowUp,
-                              followUpMessage:
-                                  action == 'completed' && offerFollowUp
-                                  ? followUpMessage.text.trim()
-                                  : null,
-                              exceptionReason: exceptionReasonValue(),
-                            );
-                          }
-                          if (dialogContext.mounted) {
-                            Navigator.pop(dialogContext);
-                          }
-                        } catch (error) {
-                          if (dialogContext.mounted) {
-                            setDialogState(() => submitting = false);
-                          }
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  FirebaseErrorMessage.describe(
-                                    error,
-                                    fallback:
-                                        'Unable to update the appointment.',
-                                  ),
-                                ),
-                              ),
-                            );
-                          }
-                        }
-                      },
-                child: submitting
-                    ? const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          SizedBox(width: 8),
-                          Text('Sending decision…'),
-                        ],
-                      )
-                    : const Text('Send decision'),
-              ),
-          ],
         ),
       ),
     );
-    customReason.dispose();
-    sessionSummary.dispose();
-    followUpMessage.dispose();
-    exceptionReason.dispose();
   }
 
   static List<String> _appointmentReasons(String action) => switch (action) {
@@ -5829,7 +5859,9 @@ class _InquiryDetailScreenState extends State<InquiryDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _isOperationalStaff ? 'Operational inquiry status' : 'Inquiry details',
+            _isOperationalStaff
+                ? 'Operational inquiry status'
+                : 'Inquiry details',
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 2),
@@ -6106,12 +6138,20 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
               child: const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.shield_outlined, size: 18, color: AdminColors.muted),
+                  Icon(
+                    Icons.shield_outlined,
+                    size: 18,
+                    color: AdminColors.muted,
+                  ),
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Sanitized operational view. Student identity, submitted message, form responses, escalation notes, and PDF export are restricted to assigned counselors and the super-administrator.',
-                      style: TextStyle(color: AdminColors.muted, fontSize: 12, height: 1.45),
+                      style: TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 12,
+                        height: 1.45,
+                      ),
                     ),
                   ),
                 ],
@@ -6982,3 +7022,29 @@ final _box = BoxDecoration(
   borderRadius: BorderRadius.circular(10),
   border: Border.all(color: AdminColors.border),
 );
+
+class _DialogControllerScope extends StatefulWidget {
+  const _DialogControllerScope({
+    required this.controllers,
+    required this.child,
+  });
+
+  final List<TextEditingController> controllers;
+  final Widget child;
+
+  @override
+  State<_DialogControllerScope> createState() => _DialogControllerScopeState();
+}
+
+class _DialogControllerScopeState extends State<_DialogControllerScope> {
+  @override
+  void dispose() {
+    for (final controller in widget.controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}

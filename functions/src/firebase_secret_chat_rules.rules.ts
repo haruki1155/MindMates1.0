@@ -264,3 +264,19 @@ test("profile images are signed-in readable and owner deletable", async () => {
   await assertFails(environment.authenticatedContext("other").storage().ref(path).delete());
   await assertSucceeds(environment.authenticatedContext("owner").storage().ref(path).delete());
 });
+
+test("Storage profile_images rules preserve owner-only upload/delete and signed-in read", async () => {
+  const image = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  const ownerStorage = environment.authenticatedContext("owner").storage();
+  const otherStorage = environment.authenticatedContext("other").storage();
+  const path = "profile_images/owner/avatar.jpg";
+
+  await assertSucceeds(upload(ownerStorage.ref(path), image, "image/jpeg"));
+  await assertSucceeds(otherStorage.ref(path).getDownloadURL());
+  await assertFails(environment.unauthenticatedContext().storage().ref(path).getDownloadURL());
+  await assertFails(upload(otherStorage.ref("profile_images/owner/avatar.png"), image, "image/png"));
+  await assertFails(upload(ownerStorage.ref("profile_images/owner/custom.jpg"), image, "image/jpeg"));
+  await assertFails(upload(ownerStorage.ref("profile_images/owner/avatar.png"), new Uint8Array(5 * 1024 * 1024 + 1), "image/png"));
+  await assertFails(otherStorage.ref(path).delete());
+  await assertSucceeds(ownerStorage.ref(path).delete());
+});
