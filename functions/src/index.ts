@@ -1575,14 +1575,14 @@ export const notifyPortalOfStudentAppointmentAction = onDocumentUpdated(
 // college (or to super-admin triage) instead of notifying every portal
 // account. The export name is kept so the deployed trigger is replaced in place.
 export const notifyPortalOfInquiry = onDocumentCreated(
-  {document: "inquiries/{inquiryId}", retry: true},
+  {document: "inquiries/{inquiryId}", region: "asia-east1", retry: true},
   async (event) => {
     await routeInquiry(event.params.inquiryId);
   },
 );
 
 export const syncInquiryStatusOnWrite = onDocumentWritten(
-  {document: "inquiries/{inquiryId}", retry: true},
+  {document: "inquiries/{inquiryId}", region: "asia-east1", retry: true},
   async (event) => {
     await syncInquiryStatusProjection(event.params.inquiryId);
   },

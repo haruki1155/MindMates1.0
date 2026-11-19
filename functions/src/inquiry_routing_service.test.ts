@@ -4,7 +4,7 @@ import {getAuth} from "firebase-admin/auth";
 import {getFirestore} from "firebase-admin/firestore";
 import {HttpsError} from "firebase-functions/v2/https";
 
-import "./index";
+import {notifyPortalOfInquiry, syncInquiryStatusOnWrite} from "./index";
 import {
   acknowledgeInquiry,
   escalateInquiry,
@@ -20,6 +20,12 @@ import {
 
 // Auth + Firestore emulators. Real callables and the real routing handler.
 const emulated = Boolean(process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST);
+test("inquiry document triggers use asia-east1, matching the existing staging trigger", () => {
+  for (const trigger of [notifyPortalOfInquiry, syncInquiryStatusOnWrite]) {
+    const endpoint = (trigger as unknown as {__endpoint: {region?: string[]}}).__endpoint;
+    assert.deepEqual(endpoint.region, ["asia-east1"]);
+  }
+});
 const p = `inq-${Date.now()}`;
 const uid = (name: string) => `${p}-${name}`;
 const college = (name: string) => `${p}-${name}`;
