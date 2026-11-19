@@ -1739,7 +1739,7 @@ class AdminPortalRepository {
     required String appointmentId,
     required List<PendingSessionEvidenceFile> files,
   }) async {
-    if (isSuperAdmin || currentAccessRole == AccessRole.admin) {
+    if (currentAccessRole != AccessRole.counselor || isSuperAdmin) {
       throw StateError(
         'Clinical session attachment uploads are restricted to assigned college counselors.',
       );
@@ -1748,8 +1748,10 @@ class AdminPortalRepository {
     if (files.length > maxSessionEvidenceFiles) {
       throw const FormatException('Choose no more than five files.');
     }
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) throw StateError('Sign in again to upload attachments.');
+    final uid = currentUserId;
+    if (uid == null || uid.trim().isEmpty) {
+      throw StateError('Sign in again to upload attachments.');
+    }
     final attachments = <SessionEvidenceAttachment>[];
     for (final file in files) {
       final mime = sessionEvidenceMimeType(file.name);

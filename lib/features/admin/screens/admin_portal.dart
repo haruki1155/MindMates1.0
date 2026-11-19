@@ -3052,8 +3052,8 @@ class _AppointmentCard extends StatelessWidget {
     final currentStatus = item.lifecycleStatus;
     final canReview = canReviewAppointment(item, DateTime.now());
     final canUploadClinicalAttachments =
-        !repository.isSuperAdmin &&
-        repository.currentAccessRole != AccessRole.admin;
+        repository.currentAccessRole == AccessRole.counselor &&
+        !repository.isSuperAdmin;
     final future = item.scheduledAt.isAfter(DateTime.now());
     final pendingStudent =
         item.hasPendingScheduleChange && item.proposedBy == 'student';

@@ -14,11 +14,13 @@ class _Repository extends AdminPortalRepository {
     this.records, {
     this.role = AccessRole.appUser,
     this.superAdmin = false,
+    this.uid,
   });
 
   final List<AppointmentModel> records;
   final AccessRole role;
   final bool superAdmin;
+  final String? uid;
   String? agreementAction;
   int? agreementRevision;
   bool uploadCalled = false;
@@ -29,6 +31,9 @@ class _Repository extends AdminPortalRepository {
 
   @override
   bool get isSuperAdmin => superAdmin;
+
+  @override
+  String? get currentUserId => uid;
 
   @override
   Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId, {String? exceptionReason}) async { agreementAction = action; agreementRevision = appointment.proposalRevision; }
@@ -68,6 +73,8 @@ class _Repository extends AdminPortalRepository {
       'action': action,
       'sessionSummary': sessionSummary,
       'attachments': attachments,
+      'offerFollowUp': offerFollowUp,
+      'followUpMessage': followUpMessage,
       'exceptionReason': exceptionReason,
     };
   }
@@ -111,7 +118,8 @@ void main() {
     );
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: AdminAppointmentsPage(
-        repository: _Repository([record]), onOpenAssessments: null,
+        repository: _Repository([record], role: AccessRole.counselor),
+        onOpenAssessments: null,
       )),
     ));
     await tester.pumpAndSettle();
@@ -316,6 +324,12 @@ void main() {
         find.widgetWithText(TextField, 'Session summary (internal)'),
         'Super-admin triage summary',
       );
+      await tester.tap(find.text('Offer a follow-up session'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Client message'),
+        'Follow-up check-in',
+      );
       await tester.tap(find.text('Send decision'));
       await tester.pumpAndSettle();
 
@@ -324,6 +338,11 @@ void main() {
       expect(
         repo.reviewedSubmission?['sessionSummary'],
         'Super-admin triage summary',
+      );
+      expect(repo.reviewedSubmission?['offerFollowUp'], isTrue);
+      expect(
+        repo.reviewedSubmission?['followUpMessage'],
+        'Follow-up check-in',
       );
       expect(repo.reviewedSubmission?['attachments'], isEmpty);
 
@@ -376,27 +395,106 @@ void main() {
     },
   );
 
+  for (final roleCase in const [
+    (label: 'ordinary admin', role: AccessRole.admin, superAdmin: false),
+    (
+      label: 'PACC operational staff',
+      role: AccessRole.portalStaff,
+      superAdmin: false,
+    ),
+  ]) {
+    testWidgets(
+      '${roleCase.label} does not see attachment upload control while preserving summary and follow-up',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(1440, 1200));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final record = _appointment(
+          'confirmed',
+          DateTime.now().subtract(const Duration(days: 1)),
+          'Scoped Student',
+        );
+        final repo = _Repository(
+          [record],
+          role: roleCase.role,
+          superAdmin: roleCase.superAdmin,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: AdminAppointmentsPage(
+                repository: repo,
+                onOpenAssessments: null,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Review'));
+        await tester.pumpAndSettle();
+        expect(find.text('Session summary (internal)'), findsOneWidget);
+        expect(find.text('Offer a follow-up session'), findsOneWidget);
+        expect(
+          find.text(
+            'Session attachments can only be uploaded by an assigned college counselor.',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Add images / documents'), findsNothing);
+      },
+    );
+  }
+
   test(
-    'AdminPortalRepository rejects clinical attachment uploads from super-admin and admin accounts',
+    'AdminPortalRepository restricts clinical attachment uploads to authenticated counselors',
     () async {
       final adminRepo = AdminPortalRepository();
-      final testRepo = _Repository(
-        const [],
-        role: AccessRole.admin,
-        superAdmin: true,
-      );
       final file = PendingSessionEvidenceFile(
         name: 'notes.pdf',
         contentType: 'application/pdf',
         bytes: Uint8List.fromList([1, 2, 3]),
       );
 
+      for (final unauthorized in [
+        _Repository(const [], role: AccessRole.admin, superAdmin: true),
+        _Repository(const [], role: AccessRole.admin, superAdmin: false),
+        _Repository(const [], role: AccessRole.portalStaff, superAdmin: false),
+        _Repository(const [], role: AccessRole.appUser, superAdmin: false),
+      ]) {
+        expect(
+          () => unauthorized.uploadClinicalEvidenceFiles(
+            appointmentId: 'apt-1',
+            files: [file],
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              'Clinical session attachment uploads are restricted to assigned college counselors.',
+            ),
+          ),
+        );
+      }
+
+      final unauthenticatedCounselor = _Repository(
+        const [],
+        role: AccessRole.counselor,
+        superAdmin: false,
+        uid: null,
+      );
       expect(
-        () => testRepo.uploadClinicalEvidenceFiles(
+        () => unauthenticatedCounselor.uploadClinicalEvidenceFiles(
           appointmentId: 'apt-1',
           files: [file],
         ),
-        throwsStateError,
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            'Sign in again to upload attachments.',
+          ),
+        ),
       );
       expect(adminRepo.isSuperAdmin, isFalse);
     },
