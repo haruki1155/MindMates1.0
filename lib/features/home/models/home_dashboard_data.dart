@@ -96,12 +96,6 @@ class HomeDashboardData {
           iconAssetName: '+.png',
         ),
         HomeInsightData.photo(
-          title: 'Time for a wellness check?',
-          subtitle: 'Check your mood',
-          imageName: 'Rectangle 254.png',
-          iconAssetName: 'Good Quality.png',
-        ),
-        HomeInsightData.photo(
           title: 'Mindful breathing',
           subtitle: '5 min session',
           imageName: 'Rectangle 255.png',

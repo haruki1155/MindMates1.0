@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/app_assets.dart';
 import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../../routes/route_names.dart';
-import 'pacc_counseling_screen.dart';
 import 'service_detail_screen.dart';
-import 'student_inquiries_screen.dart';
 
 class ServicesScreen extends StatelessWidget {
   const ServicesScreen({super.key});
@@ -342,13 +340,6 @@ class ServicesScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 18),
                   ],
-                  _AnimatedServicesSection(
-                    delay: 420,
-                    child: _SupportServicesCard(
-                      onSetAppointment: () => _openPaccCounseling(context),
-                      onOpenInquiries: () => _openMyInquiries(context),
-                    ),
-                  ),
                 ]),
               ),
             ),
@@ -380,18 +371,6 @@ class ServicesScreen extends StatelessWidget {
       return;
     }
     navigator.pushNamedAndRemoveUntil(RouteNames.home, (route) => false);
-  }
-
-  static void _openPaccCounseling(BuildContext context) {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const PaccCounselingScreen()));
-  }
-
-  static void _openMyInquiries(BuildContext context) {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const MyInquiriesScreen()));
   }
 }
 
@@ -569,156 +548,6 @@ class _ServiceCard extends StatelessWidget {
   }
 }
 
-class _SupportServicesCard extends StatelessWidget {
-  const _SupportServicesCard({
-    required this.onSetAppointment,
-    required this.onOpenInquiries,
-  });
-
-  final VoidCallback onSetAppointment;
-  final VoidCallback onOpenInquiries;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        const Positioned(top: 22, right: -28, child: _SupportBubble(size: 54)),
-        const Positioned(
-          bottom: -25,
-          left: -30,
-          child: _SupportBubble(size: 44),
-        ),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'PACC Support Service',
-              style: _ServicesText.supportTitle,
-            ),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 26),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border.all(color: _ServicesColors.sun, width: 1.5),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Column(
-                children: [
-                  const Row(
-                    children: [
-                      _ServicesAssetImage(
-                        assetName: 'Yellow Heart.png',
-                        width: 42,
-                        height: 32,
-                      ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Need Immediate Help?',
-                          style: _ServicesText.helpTitle,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'PACC counselors are available to support you. Contact us for appointments or urgent assistance.',
-                    style: _ServicesText.helpBody,
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: _RoundedYellowButton(
-                      label: 'Set Appointment',
-                      onTap: onSetAppointment,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: onOpenInquiries,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.black,
-                        side: const BorderSide(
-                          color: _ServicesColors.sun,
-                          width: 1.5,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      icon: const Icon(Icons.mark_email_read_outlined, size: 18),
-                      label: const Text(
-                        'View My Inquiries',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _SupportBubble extends StatelessWidget {
-  const _SupportBubble({required this.size});
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: const BoxDecoration(
-        shape: BoxShape.circle,
-        color: Color(0xFFFFF4D8),
-      ),
-    );
-  }
-}
-
-class _RoundedYellowButton extends StatelessWidget {
-  const _RoundedYellowButton({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: _ServicesColors.sun,
-      borderRadius: BorderRadius.circular(20),
-      elevation: 4,
-      shadowColor: const Color(0x33000000),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 13),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            style: _ServicesText.contactButton,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ServicesAssetImage extends StatelessWidget {
   const _ServicesAssetImage({
     required this.assetName,
@@ -842,31 +671,6 @@ class _ServicesText {
     fontSize: 11,
     height: 1.25,
     fontWeight: FontWeight.w500,
-  );
-
-  static const supportTitle = TextStyle(
-    color: Colors.black,
-    fontSize: 16,
-    fontWeight: FontWeight.w900,
-  );
-
-  static const helpTitle = TextStyle(
-    color: Colors.black,
-    fontSize: 16,
-    fontWeight: FontWeight.w900,
-  );
-
-  static const helpBody = TextStyle(
-    color: Colors.black,
-    fontSize: 16,
-    height: 1.35,
-    fontWeight: FontWeight.w500,
-  );
-
-  static const contactButton = TextStyle(
-    color: Colors.white,
-    fontSize: 12,
-    fontWeight: FontWeight.w900,
   );
 }
 

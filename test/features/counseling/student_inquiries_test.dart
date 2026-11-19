@@ -492,7 +492,7 @@ void main() {
     );
 
     testWidgets(
-      'ServicesScreen View My Inquiries button opens MyInquiriesScreen',
+      'ServicesScreen no longer renders the PACC Support Service inquiry button',
       (tester) async {
         await tester.binding.setSurfaceSize(const Size(430, 3200));
         addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -505,15 +505,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        final button = find.text('View My Inquiries');
-        expect(button, findsOneWidget);
-        await tester.ensureVisible(button);
-        await tester.pumpAndSettle();
-        await tester.tap(button);
-        await tester.pumpAndSettle();
-
-        expect(find.byType(MyInquiriesScreen), findsOneWidget);
-        expect(find.text('My Inquiries'), findsOneWidget);
+        expect(find.text('PACC Support Service'), findsNothing);
+        expect(find.text('Set Appointment'), findsNothing);
+        expect(find.text('View My Inquiries'), findsNothing);
       },
     );
   });
