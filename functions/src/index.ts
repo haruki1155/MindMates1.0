@@ -20,6 +20,7 @@ import {
   syncStudentAppointmentsCollegeScopeFromUserProfile,
 } from "./appointment_approval_service";
 export {requestFirestoreBackup, refreshFirestoreBackupStatus, scheduledFirestoreBackup} from "./backup_management";
+export {exportFirestoreBackupPage} from "./backup_export";
 export {
   reassignCollegeCounselor,
   setStaffCollegeAssignments,

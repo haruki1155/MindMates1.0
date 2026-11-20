@@ -1,6 +1,11 @@
+import 'dart:convert';
+
+import 'package:archive/archive.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:excel_plus/excel_plus.dart' as excel;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/admin/domain/backup_export.dart';
 import 'package:mind_mates/features/admin/domain/backup_job.dart';
 import 'package:mind_mates/features/admin/screens/backup_data_page.dart';
 import 'package:mind_mates/repositories/admin_portal_repository.dart';
@@ -30,10 +35,15 @@ BackupJob _job(
 );
 
 class _Repo extends AdminPortalRepository {
-  _Repo(this.jobs, {this.requestError});
+  _Repo(this.jobs, {this.requestError, this.exportHandler});
 
   final Stream<List<BackupJob>> jobs;
   final Object? requestError;
+  final Future<BackupExportDataset> Function(
+    BackupExportFormat format,
+    void Function(BackupExportProgress)? onProgress,
+  )?
+  exportHandler;
   int requests = 0;
   final refreshed = <String>[];
 
@@ -53,15 +63,61 @@ class _Repo extends AdminPortalRepository {
   @override
   Future<void> refreshBackupJobStatus(String jobId) async =>
       refreshed.add(jobId);
+
+  @override
+  Future<BackupExportDataset> fetchCompleteFirestoreBackup({
+    required BackupExportFormat format,
+    int pageSize = 200,
+    void Function(BackupExportProgress progress)? onProgress,
+  }) async {
+    final handler = exportHandler;
+    if (handler != null) {
+      return handler(format, onProgress);
+    }
+    return BackupExportDataset(
+      exportId: 'exp-default',
+      exportedAt: DateTime.utc(2026, 11, 20, 8, 0, 0),
+      collections: const [
+        BackupCollectionDataset(
+          collectionKey: 'users',
+          collectionPaths: ['users'],
+          documents: [
+            BackupDocumentRecord(
+              documentId: 'u1',
+              documentPath: 'users/u1',
+              collectionPath: 'users',
+              collectionKey: 'users',
+              fields: {'name': 'Admin'},
+            ),
+          ],
+        ),
+        BackupCollectionDataset(
+          collectionKey: 'empty_col',
+          collectionPaths: ['empty_col'],
+          documents: [],
+        ),
+      ],
+    );
+  }
 }
 
-Future<void> _pump(WidgetTester tester, _Repo repo) async {
+Future<void> _pump(
+  WidgetTester tester,
+  _Repo repo, {
+  void Function(String fileName, List<int> bytes, String mimeType)?
+  onDownload,
+}) async {
   tester.view.physicalSize = const Size(1440, 1200);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     MaterialApp(
-      home: Scaffold(body: BackupDataPage(repository: repo)),
+      home: Scaffold(
+        body: BackupDataPage(
+          repository: repo,
+          downloadFile: onDownload ?? (_, _, _) {},
+        ),
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -191,5 +247,104 @@ void main() {
   testWidgets('no bucket locations are rendered', (tester) async {
     await _pump(tester, _Repo(Stream.value([_job('done')])));
     expect(find.textContaining('gs://'), findsNothing);
+  });
+
+  testWidgets('a stream error hides download buttons for unauthorized users', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      _Repo(Stream<List<BackupJob>>.error(StateError('permission-denied'))),
+    );
+    expect(find.text('Download CSV (.zip)'), findsNothing);
+    expect(find.text('Download Excel (.xlsx)'), findsNothing);
+  });
+
+  testWidgets('Download CSV (.zip) builds a complete ZIP with per-collection CSVs', (
+    tester,
+  ) async {
+    final downloads = <({String name, List<int> bytes, String mime})>[];
+    final repo = _Repo(Stream.value([_job('done')]));
+    await _pump(
+      tester,
+      repo,
+      onDownload: (name, bytes, mime) =>
+          downloads.add((name: name, bytes: bytes, mime: mime)),
+    );
+
+    await tester.tap(find.text('Download CSV (.zip)'));
+    await tester.pumpAndSettle();
+
+    expect(downloads.length, 1);
+    expect(downloads.single.name, 'mindmate-firestore-backup-20261120-080000.zip');
+    expect(downloads.single.mime, 'application/zip');
+    final archive = ZipDecoder().decodeBytes(downloads.single.bytes);
+    expect(archive.files.map((f) => f.name), ['users.csv', 'empty_col.csv']);
+    final usersCsv = utf8.decode(
+      archive.findFile('users.csv')!.content as List<int>,
+    );
+    expect(usersCsv, contains('u1,users/u1,users'));
+    expect(
+      find.textContaining('2 collections, 1 documents'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Download Excel (.xlsx) builds a multi-sheet workbook', (
+    tester,
+  ) async {
+    final downloads = <({String name, List<int> bytes, String mime})>[];
+    final repo = _Repo(Stream.value([_job('done')]));
+    await _pump(
+      tester,
+      repo,
+      onDownload: (name, bytes, mime) =>
+          downloads.add((name: name, bytes: bytes, mime: mime)),
+    );
+
+    await tester.tap(find.text('Download Excel (.xlsx)'));
+    await tester.pumpAndSettle();
+
+    expect(downloads.length, 1);
+    expect(downloads.single.name, 'mindmate-firestore-backup-20261120-080000.xlsx');
+    final book = excel.Excel.decodeBytes(downloads.single.bytes);
+    expect(
+      book.tables.keys,
+      containsAll(['Backup_Summary', 'users', 'empty_col']),
+    );
+    expect(
+      find.textContaining('2 collections, 1 documents'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('failed or incomplete export never triggers a file download', (
+    tester,
+  ) async {
+    var downloadCount = 0;
+    final repo = _Repo(
+      Stream.value([_job('done')]),
+      exportHandler: (_, _) async {
+        throw FirebaseFunctionsException(
+          code: 'permission-denied',
+          message: 'Super-administrator access is required.',
+        );
+      },
+    );
+    await _pump(
+      tester,
+      repo,
+      onDownload: (_, _, _) => downloadCount++,
+    );
+
+    await tester.tap(find.text('Download CSV (.zip)'));
+    await tester.pumpAndSettle();
+
+    expect(downloadCount, 0);
+    expect(
+      find.textContaining('Backup download failed (permission-denied)'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('No backup file was created.'), findsOneWidget);
   });
 }

@@ -1,5 +1,5 @@
 export 'admin_file_download_stub.dart'
-    if (dart.library.html) 'admin_file_download_web.dart';
+    if (dart.library.js_interop) 'admin_file_download_web.dart';
 
 /// Signature shared by the real downloader and test fakes.
 typedef AdminFileDownloader =

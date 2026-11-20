@@ -25,6 +25,7 @@ import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
 import '../features/admin/domain/admin_management_models.dart';
 import '../features/admin/domain/appointment_approvals.dart';
+import '../features/admin/domain/backup_export.dart';
 import '../features/admin/domain/backup_job.dart';
 import '../features/admin/domain/inquiry_scope.dart';
 import '../features/admin/domain/inquiry_sla.dart';
@@ -686,6 +687,166 @@ class AdminPortalRepository {
 
   Future<void> refreshBackupJobStatus(String jobId) =>
       _callCallable('refreshFirestoreBackupStatus', {'jobId': jobId});
+
+  /// Retrieves the complete Firestore backup snapshot via paginated
+  /// super-admin-authorized Cloud Function calls. Throws if any page fails
+  /// or pagination ends without a complete cursor cycle so partial exports are
+  /// never returned.
+  Future<BackupExportDataset> fetchCompleteFirestoreBackup({
+    required BackupExportFormat format,
+    int pageSize = 200,
+    void Function(BackupExportProgress progress)? onProgress,
+  }) async {
+    if (!isSuperAdmin) {
+      throw StateError(
+        'Backup export requires the configured super-administrator account.',
+      );
+    }
+
+    String? exportId;
+    DateTime? exportedAt;
+    Map<String, Object?>? cursor;
+    String? previousCursorKey;
+    var pagesLoaded = 0;
+    var totalDocs = 0;
+
+    final collectionPathsByKey = <String, Set<String>>{};
+    final docsByKey = <String, List<BackupDocumentRecord>>{};
+    final seenDocPaths = <String>{};
+
+    while (true) {
+      final raw = await _callCallable('exportFirestoreBackupPage', {
+        'format': format.wireName,
+        'pageSize': pageSize,
+        'exportId': ?exportId,
+        'cursor': ?cursor,
+      });
+      if (raw is! Map) {
+        throw const FormatException(
+          'Incomplete backup export: unexpected server response.',
+        );
+      }
+      final payload = Map<String, dynamic>.from(raw);
+      final pageExportId = payload['exportId']?.toString().trim() ?? '';
+      if (pageExportId.isEmpty) {
+        throw const FormatException(
+          'Incomplete backup export: missing export identifier.',
+        );
+      }
+      if (exportId == null) {
+        exportId = pageExportId;
+      } else if (exportId != pageExportId) {
+        throw StateError(
+          'Incomplete backup export: mismatched export session.',
+        );
+      }
+
+      if (exportedAt == null) {
+        final rawAt = payload['exportedAt']?.toString();
+        exportedAt = rawAt == null
+            ? DateTime.now().toUtc()
+            : DateTime.parse(rawAt).toUtc();
+      }
+
+      final visited = payload['visitedCollections'];
+      if (visited is! List) {
+        throw const FormatException(
+          'Incomplete backup export: missing visited collections metadata.',
+        );
+      }
+      for (final entry in visited) {
+        if (entry is! Map) {
+          throw const FormatException(
+            'Incomplete backup export: malformed collection metadata.',
+          );
+        }
+        final map = Map<String, dynamic>.from(entry);
+        final key = map['collectionKey']?.toString().trim() ?? '';
+        final path = map['collectionPath']?.toString().trim() ?? '';
+        if (key.isEmpty || path.isEmpty) {
+          throw const FormatException(
+            'Incomplete backup export: empty collection metadata.',
+          );
+        }
+        collectionPathsByKey.putIfAbsent(key, () => <String>{}).add(path);
+        docsByKey.putIfAbsent(key, () => <BackupDocumentRecord>[]);
+      }
+
+      final rawDocs = payload['documents'];
+      if (rawDocs is! List) {
+        throw const FormatException(
+          'Incomplete backup export: missing documents list.',
+        );
+      }
+      for (final item in rawDocs) {
+        if (item is! Map) {
+          throw const FormatException(
+            'Incomplete backup export: malformed document payload.',
+          );
+        }
+        final record = BackupDocumentRecord.fromJson(
+          Map<String, dynamic>.from(item),
+        );
+        collectionPathsByKey
+            .putIfAbsent(record.collectionKey, () => <String>{})
+            .add(record.collectionPath);
+        if (seenDocPaths.add(record.documentPath)) {
+          docsByKey
+              .putIfAbsent(record.collectionKey, () => <BackupDocumentRecord>[])
+              .add(record);
+          totalDocs++;
+        }
+      }
+
+      pagesLoaded++;
+      onProgress?.call(
+        BackupExportProgress(
+          pagesLoaded: pagesLoaded,
+          documentsLoaded: totalDocs,
+          collectionsDiscovered: collectionPathsByKey.length,
+        ),
+      );
+
+      final hasMore = payload['hasMore'] == true;
+      if (!hasMore) break;
+
+      final nextRaw = payload['nextCursor'];
+      if (nextRaw is! Map || nextRaw.isEmpty) {
+        throw StateError(
+          'Incomplete backup export: server indicated more data without a cursor.',
+        );
+      }
+      final nextCursor = Map<String, Object?>.from(
+        nextRaw.map((k, v) => MapEntry(k.toString(), v)),
+      );
+      final nextKey =
+          '${nextCursor['currentCollection']}|${nextCursor['afterDocId']}|${nextCursor['queue']}';
+      if (previousCursorKey != null && nextKey == previousCursorKey) {
+        throw StateError(
+          'Incomplete backup export: pagination cursor did not advance.',
+        );
+      }
+      previousCursorKey = nextKey;
+      cursor = nextCursor;
+    }
+
+    final sortedKeys = collectionPathsByKey.keys.toList()..sort();
+    final collections = <BackupCollectionDataset>[
+      for (final key in sortedKeys)
+        BackupCollectionDataset(
+          collectionKey: key,
+          collectionPaths: collectionPathsByKey[key]!.toList()..sort(),
+          documents: (docsByKey[key] ?? const <BackupDocumentRecord>[])
+            ..sort((a, b) => a.documentPath.compareTo(b.documentPath)),
+        ),
+    ];
+
+    return BackupExportDataset(
+      exportId: exportId,
+      exportedAt: exportedAt,
+      collections: collections,
+    );
+  }
 
   Stream<List<AdminAuditEvent>> watchAdminAudit(String userId) =>
       _firestoreService
