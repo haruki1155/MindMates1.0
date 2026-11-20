@@ -1,6 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/admin/domain/backup_export.dart';
 import 'package:mind_mates/features/admin/domain/backup_job.dart';
 import 'package:mind_mates/repositories/admin_portal_repository.dart';
+
+class _SuperAdminTestRepository extends AdminPortalRepository {
+  _SuperAdminTestRepository({super.callableInvoker});
+
+  @override
+  bool get isSuperAdmin => true;
+}
 
 Map<String, dynamic> _job(String id, {Map<String, dynamic> over = const {}}) =>
     {
@@ -127,5 +135,132 @@ void main() {
     ]);
     expect(calls[0].$2, isEmpty);
     expect(calls[1].$2, {'jobId': 'j1'});
+  });
+
+  test('non-super-admin repository cannot fetch complete backup export', () async {
+    var called = false;
+    final repository = AdminPortalRepository(
+      callableInvoker: (name, data) async {
+        called = true;
+        return null;
+      },
+    );
+    await expectLater(
+      repository.fetchCompleteFirestoreBackup(format: BackupExportFormat.csv),
+      throwsStateError,
+    );
+    expect(called, isFalse);
+  });
+
+  test('fetchCompleteFirestoreBackup paginates all collections and reports progress', () async {
+    final pages = [
+      {
+        'exportId': 'exp-1',
+        'exportedAt': '2026-11-20T00:00:00.000Z',
+        'visitedCollections': [
+          {'collectionKey': 'users', 'collectionPath': 'users'},
+          {'collectionKey': 'empty_col', 'collectionPath': 'empty_col'},
+        ],
+        'documents': [
+          {
+            'documentId': 'u1',
+            'documentPath': 'users/u1',
+            'collectionPath': 'users',
+            'collectionKey': 'users',
+            'fields': {'name': 'Alice'},
+          },
+        ],
+        'hasMore': true,
+        'nextCursor': {
+          'currentCollection': 'appointments/a1/history',
+          'afterDocId': null,
+          'queue': <String>[],
+        },
+      },
+      {
+        'exportId': 'exp-1',
+        'exportedAt': '2026-11-20T00:00:01.000Z',
+        'visitedCollections': [
+          {
+            'collectionKey': 'appointments__history',
+            'collectionPath': 'appointments/a1/history',
+          },
+        ],
+        'documents': [
+          {
+            'documentId': 'h1',
+            'documentPath': 'appointments/a1/history/h1',
+            'collectionPath': 'appointments/a1/history',
+            'collectionKey': 'appointments__history',
+            'parentCollection': 'appointments',
+            'parentDocumentId': 'a1',
+            'fields': {'action': 'created'},
+          },
+        ],
+        'hasMore': false,
+        'nextCursor': null,
+      },
+    ];
+    var callIndex = 0;
+    final progressUpdates = <BackupExportProgress>[];
+    final repository = _SuperAdminTestRepository(
+      callableInvoker: (name, data) async {
+        expect(name, 'exportFirestoreBackupPage');
+        return pages[callIndex++];
+      },
+    );
+
+    final dataset = await repository.fetchCompleteFirestoreBackup(
+      format: BackupExportFormat.xlsx,
+      onProgress: progressUpdates.add,
+    );
+
+    expect(dataset.exportId, 'exp-1');
+    expect(dataset.totalCollections, 3);
+    expect(dataset.totalDocuments, 2);
+    expect(
+      dataset.collections.map((c) => c.collectionKey).toList(),
+      ['appointments__history', 'empty_col', 'users'],
+    );
+    expect(progressUpdates.length, 2);
+    expect(progressUpdates.last.documentsLoaded, 2);
+  });
+
+  test('fetchCompleteFirestoreBackup rejects incomplete or stalled pagination', () async {
+    final missingCursorRepo = _SuperAdminTestRepository(
+      callableInvoker: (_, _) async => {
+        'exportId': 'exp-bad',
+        'exportedAt': '2026-11-20T00:00:00.000Z',
+        'visitedCollections': const [],
+        'documents': const [],
+        'hasMore': true,
+        'nextCursor': null,
+      },
+    );
+    await expectLater(
+      missingCursorRepo.fetchCompleteFirestoreBackup(
+        format: BackupExportFormat.csv,
+      ),
+      throwsStateError,
+    );
+
+    final stalledRepo = _SuperAdminTestRepository(
+      callableInvoker: (_, _) async => {
+        'exportId': 'exp-stalled',
+        'exportedAt': '2026-11-20T00:00:00.000Z',
+        'visitedCollections': const [],
+        'documents': const [],
+        'hasMore': true,
+        'nextCursor': {
+          'currentCollection': 'users',
+          'afterDocId': 'u1',
+          'queue': const <String>[],
+        },
+      },
+    );
+    await expectLater(
+      stalledRepo.fetchCompleteFirestoreBackup(format: BackupExportFormat.csv),
+      throwsStateError,
+    );
   });
 }

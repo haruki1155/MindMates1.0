@@ -2,18 +2,27 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../../../repositories/admin_portal_repository.dart';
+import '../domain/backup_export.dart';
 import '../domain/backup_job.dart';
+import '../services/admin_file_download.dart';
+import '../services/backup_export_formatter.dart';
 import '../theme/admin_theme.dart';
 
-/// Super-administrator view of Firestore managed-export backup jobs.
+/// Super-administrator view of Firestore managed-export backup jobs and
+/// fail-closed administrative data exports (CSV ZIP and Excel `.xlsx`).
 ///
-/// Shows job status, timing, counts and sanitised error codes only. It never
-/// renders bucket paths, signed URLs or document contents, and it cannot
-/// download or restore anything.
+/// Managed-export job rows show status, timing, counts and sanitised error
+/// codes only, never bucket paths or signed URLs. Administrative Data Export
+/// covers only explicitly allowlisted non-clinical administrative collections.
 class BackupDataPage extends StatefulWidget {
-  const BackupDataPage({super.key, required this.repository});
+  const BackupDataPage({
+    super.key,
+    required this.repository,
+    this.downloadFile = downloadAdminFile,
+  });
 
   final AdminPortalRepository repository;
+  final AdminFileDownloader downloadFile;
 
   @override
   State<BackupDataPage> createState() => _BackupDataPageState();
@@ -22,6 +31,8 @@ class BackupDataPage extends StatefulWidget {
 class _BackupDataPageState extends State<BackupDataPage> {
   late Stream<List<BackupJob>> _jobs;
   bool _busy = false;
+  BackupExportFormat? _downloadingFormat;
+  BackupExportProgress? _exportProgress;
   String? _notice;
 
   @override
@@ -97,6 +108,63 @@ class _BackupDataPageState extends State<BackupDataPage> {
     }
   }
 
+  Future<void> _downloadBackup(BackupExportFormat format) async {
+    if (_downloadingFormat != null || !widget.repository.isSuperAdmin) return;
+    setState(() {
+      _downloadingFormat = format;
+      _exportProgress = null;
+      _notice = null;
+    });
+    try {
+      final dataset = await widget.repository.fetchCompleteFirestoreBackup(
+        format: format,
+        onProgress: (progress) {
+          if (!mounted) return;
+          setState(() => _exportProgress = progress);
+        },
+      );
+      final bytes = switch (format) {
+        BackupExportFormat.csv => buildBackupCsvZipBytes(dataset),
+        BackupExportFormat.xlsx => buildBackupExcelBytes(dataset),
+      };
+      final fileName = buildBackupFileName(format, dataset.exportedAt);
+      widget.downloadFile(fileName, bytes, format.mimeType);
+      if (!mounted) return;
+      setState(
+        () => _notice =
+            'Downloaded $fileName (${dataset.totalCollections} collections, '
+            '${dataset.totalDocuments} documents).',
+      );
+    } on FirebaseFunctionsException catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _notice =
+            'Backup download failed (${error.code}). '
+            'No backup file was created.',
+      );
+    } on UnsupportedError catch (error) {
+      if (!mounted) return;
+      setState(
+        () => _notice =
+            'Backup download failed: ${error.message ?? 'unsupported platform.'}',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _notice =
+            'Backup download failed: incomplete or unavailable export. '
+            'No backup file was created.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _downloadingFormat = null;
+          _exportProgress = null;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
     padding: const EdgeInsets.fromLTRB(28, 28, 28, 40),
@@ -117,8 +185,10 @@ class _BackupDataPageState extends State<BackupDataPage> {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Managed Firestore exports into a private Google Cloud '
-                  'Storage bucket. Nothing is downloaded to this browser.',
+                  'Complete Firestore backups are exported server-side into a '
+                  'private Google Cloud Storage bucket. Administrative Data '
+                  'Export below downloads approved non-clinical administrative '
+                  'collections as CSV (ZIP) or Excel (.xlsx).',
                   style: TextStyle(color: AdminColors.muted),
                 ),
                 const SizedBox(height: 20),
@@ -136,6 +206,15 @@ class _BackupDataPageState extends State<BackupDataPage> {
                     summary: summary,
                     busy: _busy,
                     onRequest: _request,
+                  ),
+                  const SizedBox(height: 16),
+                  _DownloadCard(
+                    downloadingFormat: _downloadingFormat,
+                    progress: _exportProgress,
+                    enabled: widget.repository.isSuperAdmin,
+                    onDownloadCsv: () => _downloadBackup(BackupExportFormat.csv),
+                    onDownloadExcel: () =>
+                        _downloadBackup(BackupExportFormat.xlsx),
                   ),
                   if (_notice != null) ...[
                     const SizedBox(height: 12),
@@ -254,6 +333,117 @@ class _SummaryRow extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _DownloadCard extends StatelessWidget {
+  const _DownloadCard({
+    required this.downloadingFormat,
+    required this.progress,
+    required this.enabled,
+    required this.onDownloadCsv,
+    required this.onDownloadExcel,
+  });
+
+  final BackupExportFormat? downloadingFormat;
+  final BackupExportProgress? progress;
+  final bool enabled;
+  final VoidCallback onDownloadCsv;
+  final VoidCallback onDownloadExcel;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDownloading = downloadingFormat != null;
+    final canDownload = enabled && !isDownloading;
+    const description = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Administrative Data Export',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        SizedBox(height: 4),
+        Text(
+          'Downloads explicitly allowlisted administrative, directory, '
+          'audit, and non-clinical operational collections with sensitive '
+          'credential fields redacted. Clinical notes, assessments, private '
+          'conversations, and anonymity mappings remain excluded.',
+          style: TextStyle(color: AdminColors.muted),
+        ),
+      ],
+    );
+    final buttons = Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: [
+        OutlinedButton.icon(
+          onPressed: canDownload ? onDownloadCsv : null,
+          icon: downloadingFormat == BackupExportFormat.csv
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.folder_zip_outlined),
+          label: Text(
+            downloadingFormat == BackupExportFormat.csv
+                ? 'Preparing CSV…'
+                : 'Download CSV (.zip)',
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed: canDownload ? onDownloadExcel : null,
+          icon: downloadingFormat == BackupExportFormat.xlsx
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.table_chart_outlined),
+          label: Text(
+            downloadingFormat == BackupExportFormat.xlsx
+                ? 'Preparing Excel…'
+                : 'Download Excel (.xlsx)',
+          ),
+        ),
+      ],
+    );
+
+    return _Panel(
+      child: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (constraints.maxWidth < 760) ...[
+              description,
+              const SizedBox(height: 12),
+              buttons,
+            ] else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Expanded(child: description),
+                  const SizedBox(width: 16),
+                  buttons,
+                ],
+              ),
+            if (isDownloading) ...[
+              const SizedBox(height: 12),
+              const LinearProgressIndicator(),
+              const SizedBox(height: 6),
+              Text(
+                progress == null
+                    ? 'Fetching authorized Firestore collections…'
+                    : 'Fetched page ${progress!.pagesLoaded}: '
+                          '${progress!.documentsLoaded} documents across '
+                          '${progress!.collectionsDiscovered} collections…',
+                style: const TextStyle(color: AdminColors.muted, fontSize: 12),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _JobTable extends StatelessWidget {
