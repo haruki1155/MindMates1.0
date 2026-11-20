@@ -271,6 +271,8 @@ void main() {
           final academicYearY = tester.getTopLeft(academicYearFinder).dy;
           expect(academicYearY, greaterThan(reportsY));
           expect(academicYearY - reportsY, lessThan(80));
+          await tester.ensureVisible(academicYearFinder);
+          await tester.pumpAndSettle();
           await tester.tap(academicYearFinder);
           await tester.pumpAndSettle();
           expect(selected, AdminPortalPage.academicYear);
