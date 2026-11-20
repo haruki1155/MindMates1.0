@@ -141,6 +141,34 @@ test("counselors read assigned-college verified appointments only; cross-college
   )));
 });
 
+test("counselors list verified assigned-college appointments without assignedStaffId while cross-college counselors are denied", async () => {
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "appointments/appointment-no-staff"), {
+      userId: "student",
+      collegeId: "cite",
+      studentVerificationStatus: "verified",
+      concern: "Synthetic concern without assignedStaffId",
+    });
+  });
+
+  const citeCounselor = environment.authenticatedContext("counselor", verified).firestore();
+  const casCounselor = environment.authenticatedContext("other-counselor", verified).firestore();
+
+  const snapshot = await assertSucceeds(getDocs(query(
+    collection(citeCounselor, "appointments"),
+    where("studentVerificationStatus", "==", "verified"),
+    where("collegeId", "in", ["cite"]),
+  )));
+  assert.ok(snapshot.docs.some((d) => d.id === "appointment-no-staff"));
+
+  await assertFails(getDoc(doc(casCounselor, "appointments/appointment-no-staff")));
+  await assertFails(getDocs(query(
+    collection(casCounselor, "appointments"),
+    where("studentVerificationStatus", "==", "verified"),
+    where("collegeId", "in", ["cite"]),
+  )));
+});
+
 test("losing college assignment or student college/verification change immediately revokes counselor access", async () => {
   const counselor = environment.authenticatedContext("counselor", verified).firestore();
   await assertSucceeds(getDoc(doc(counselor, "appointments/appointment-1")));

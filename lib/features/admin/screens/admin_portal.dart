@@ -27,6 +27,8 @@ import 'report_generation_page.dart';
 import 'admin_notifications_page.dart';
 import 'admin_change_password_screen.dart';
 import 'academic_structure_page.dart';
+import 'admin_college_assignments_page.dart';
+import 'counselor_assigned_colleges_page.dart';
 import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
 import '../../announcements/screens/manage_announcements_page.dart';
@@ -65,6 +67,7 @@ enum AdminPortalPage {
   users,
   studentRoster,
   academicStructure,
+  collegeAssignments,
   profiling,
   appointments,
   cases,
@@ -86,6 +89,7 @@ extension on AdminPortalPage {
     AdminPortalPage.users => 'User Management',
     AdminPortalPage.studentRoster => 'Student Roster',
     AdminPortalPage.academicStructure => 'Academic Structure',
+    AdminPortalPage.collegeAssignments => 'College Assignments',
     AdminPortalPage.profiling => 'Profiling Management',
     AdminPortalPage.appointments => 'Appointments',
     AdminPortalPage.cases => 'My Cases',
@@ -113,6 +117,7 @@ extension on AdminPortalPage {
     AdminPortalPage.users => Icons.group_outlined,
     AdminPortalPage.studentRoster => Icons.school_outlined,
     AdminPortalPage.academicStructure => Icons.account_tree_outlined,
+    AdminPortalPage.collegeAssignments => Icons.assignment_ind_outlined,
     AdminPortalPage.profiling => Icons.badge_outlined,
     AdminPortalPage.appointments => Icons.calendar_month_outlined,
     AdminPortalPage.cases => Icons.folder_shared_outlined,
@@ -589,6 +594,14 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
     AdminPortalPage.academicStructure => AcademicStructurePage(
       repository: _repository,
     ),
+    AdminPortalPage.collegeAssignments =>
+      _repository.isSuperAdmin
+          ? AdminCollegeAssignmentsPage(repository: _repository)
+          : _repository.currentAccessRole == AccessRole.counselor
+          ? CounselorAssignedCollegesPage(repository: _repository)
+          : const Center(
+              child: Text('College assignments are unavailable for this role.'),
+            ),
     AdminPortalPage.profiling => ProfileManagementPage(repository: _repository),
     AdminPortalPage.appointments =>
       _repository.currentAccessRole == AccessRole.portalStaff
@@ -684,6 +697,8 @@ class PortalWorkspaceNavigation extends StatelessWidget {
     AdminPortalPage.users => isSuperAdmin,
     AdminPortalPage.studentRoster => isSuperAdmin,
     AdminPortalPage.academicStructure => isSuperAdmin,
+    AdminPortalPage.collegeAssignments =>
+      accessRole == AccessRole.counselor || isSuperAdmin,
     // Counselor case/profile access must come through an assigned-case
     // surface. The legacy organization-wide profiling screen is admin-only.
     AdminPortalPage.profiling => isSuperAdmin,
@@ -716,6 +731,7 @@ class PortalWorkspaceNavigation extends StatelessWidget {
         AdminPortalPage.studentRoster,
         AdminPortalPage.profiling,
         AdminPortalPage.academicStructure,
+        AdminPortalPage.collegeAssignments,
       ]),
       const _NavSection('Counseling', [
         AdminPortalPage.appointments,

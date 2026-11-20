@@ -112,11 +112,16 @@ class CounselorWorkflowPage extends StatelessWidget {
   );
 
   static List<AppointmentModel> _cases(List<AppointmentModel> values) {
+    final ordered = values.where((item) => item.userId.isNotEmpty).toList()
+      ..sort((a, b) {
+        final bySchedule = b.scheduledAt.compareTo(a.scheduledAt);
+        if (bySchedule != 0) return bySchedule;
+        final byCreated = b.createdAt.compareTo(a.createdAt);
+        if (byCreated != 0) return byCreated;
+        return a.id.compareTo(b.id);
+      });
     final seen = <String>{};
-    return values
-        .where((item) => item.userId.isNotEmpty && seen.add(item.userId))
-        .toList()
-      ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt));
+    return ordered.where((item) => seen.add(item.userId)).toList();
   }
 
   static List<AppointmentModel> _followUps(List<AppointmentModel> values) =>
@@ -307,14 +312,16 @@ class _EmptyState extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          followUps ? 'No follow-ups due' : 'No active cases',
+          followUps
+              ? 'No follow-ups due'
+              : 'No cases in your assigned colleges',
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
         const SizedBox(height: 6),
         Text(
           followUps
               ? "You're up to date with your assigned follow-up work."
-              : 'No counseling cases are currently assigned to you.',
+              : 'No counseling cases were found for your assigned colleges.',
           style: const TextStyle(color: AdminColors.muted),
         ),
         const SizedBox(height: 14),

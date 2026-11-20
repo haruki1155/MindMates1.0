@@ -1098,11 +1098,15 @@ class AdminPortalRepository {
                 }
                 hasResolvedScope = true;
                 activeScopeKey = nextScopeKey;
+                final hadActiveSubscriptions = querySubs.isNotEmpty;
                 await cancelQuerySubs();
                 if (controller.isClosed) return;
                 if (collegeIds.isEmpty) {
                   controller.add(const <AppointmentModel>[]);
                   return;
+                }
+                if (hadActiveSubscriptions) {
+                  controller.add(const <AppointmentModel>[]);
                 }
 
                 const chunkSize = 30;
@@ -1160,16 +1164,16 @@ class AdminPortalRepository {
   Stream<List<AppointmentModel>> watchAppointments() =>
       _watchCollegeScopedAppointments(errorWhenUnauthorized: true);
 
-  /// The counselor's assigned caseload within their currently assigned colleges.
+  /// The counselor's college-scoped caseload within their currently assigned colleges.
   Stream<List<AppointmentModel>> watchMyAssignedAppointments() {
     final userId = currentUserId;
-    if (currentAccessRole != AccessRole.counselor || userId == null) {
+    if (currentAccessRole != AccessRole.counselor ||
+        isSuperAdmin ||
+        userId == null ||
+        userId.trim().isEmpty) {
       return Stream.value(const <AppointmentModel>[]);
     }
-    return _watchCollegeScopedAppointments(
-      extraWhereEquals: {'assignedStaffId': userId},
-      errorWhenUnauthorized: false,
-    );
+    return _watchCollegeScopedAppointments(errorWhenUnauthorized: false);
   }
 
   /// Explicitly backfill the staff-safe queue from canonical appointments.
