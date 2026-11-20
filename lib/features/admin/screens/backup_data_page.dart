@@ -9,10 +9,11 @@ import '../services/backup_export_formatter.dart';
 import '../theme/admin_theme.dart';
 
 /// Super-administrator view of Firestore managed-export backup jobs and
-/// authorized full-database downloads (CSV ZIP and Excel `.xlsx`).
+/// fail-closed administrative data exports (CSV ZIP and Excel `.xlsx`).
 ///
 /// Managed-export job rows show status, timing, counts and sanitised error
-/// codes only, never bucket paths or signed URLs.
+/// codes only, never bucket paths or signed URLs. Administrative Data Export
+/// covers only explicitly allowlisted non-clinical administrative collections.
 class BackupDataPage extends StatefulWidget {
   const BackupDataPage({
     super.key,
@@ -184,9 +185,10 @@ class _BackupDataPageState extends State<BackupDataPage> {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Managed Firestore exports into a private Google Cloud '
-                  'Storage bucket, or download a complete authorized Firestore '
-                  'snapshot as CSV (ZIP) or Excel (.xlsx).',
+                  'Complete Firestore backups are exported server-side into a '
+                  'private Google Cloud Storage bucket. Administrative Data '
+                  'Export below downloads approved non-clinical administrative '
+                  'collections as CSV (ZIP) or Excel (.xlsx).',
                   style: TextStyle(color: AdminColors.muted),
                 ),
                 const SizedBox(height: 20),
@@ -356,14 +358,15 @@ class _DownloadCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Download complete backup',
+          'Administrative Data Export',
           style: TextStyle(fontWeight: FontWeight.w900),
         ),
         SizedBox(height: 4),
         Text(
-          'Exports every Firestore collection and subcollection covered by '
-          'the authorized backup, preserving document IDs, references, '
-          'timestamps, and parent relationships.',
+          'Downloads explicitly allowlisted administrative, directory, '
+          'audit, and non-clinical operational collections with sensitive '
+          'credential fields redacted. Clinical notes, assessments, private '
+          'conversations, and anonymity mappings remain excluded.',
           style: TextStyle(color: AdminColors.muted),
         ),
       ],

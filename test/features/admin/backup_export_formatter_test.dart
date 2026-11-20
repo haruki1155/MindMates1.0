@@ -438,4 +438,100 @@ void main() {
       expect(totalMoodRows, 60);
     },
   );
+
+  test(
+    'CSV ZIP and Excel contain the exact same authorized collections and document records',
+    () {
+      final dataset = BackupExportDataset(
+        exportId: 'exp-parity',
+        exportedAt: DateTime.utc(2026, 11, 20, 8, 30, 0),
+        collections: const [
+          BackupCollectionDataset(
+            collectionKey: 'colleges',
+            collectionPaths: ['colleges'],
+            documents: [
+              BackupDocumentRecord(
+                documentId: 'cas',
+                documentPath: 'colleges/cas',
+                collectionPath: 'colleges',
+                collectionKey: 'colleges',
+                createTime: '2026-11-01T00:00:00.000Z',
+                fields: {'name': 'College of Arts and Sciences', 'active': true},
+              ),
+            ],
+          ),
+          BackupCollectionDataset(
+            collectionKey: 'counseling_population',
+            collectionPaths: ['counseling_population'],
+            documents: [
+              BackupDocumentRecord(
+                documentId: '2026-2027',
+                documentPath: 'counseling_population/2026-2027',
+                collectionPath: 'counseling_population',
+                collectionKey: 'counseling_population',
+                fields: {'status': 'open', 'targetCount': 1200},
+              ),
+            ],
+          ),
+          BackupCollectionDataset(
+            collectionKey: 'counseling_population__void_history',
+            collectionPaths: ['counseling_population/2026-2027/void_history'],
+            documents: [
+              BackupDocumentRecord(
+                documentId: 'v1',
+                documentPath: 'counseling_population/2026-2027/void_history/v1',
+                collectionPath: 'counseling_population/2026-2027/void_history',
+                collectionKey: 'counseling_population__void_history',
+                parentCollection: 'counseling_population',
+                parentDocumentId: '2026-2027',
+                fields: {'reason': 'Correction'},
+              ),
+            ],
+          ),
+        ],
+      );
+
+      final archive = ZipDecoder().decodeBytes(buildBackupCsvZipBytes(dataset));
+      final book = excel.Excel.decodeBytes(buildBackupExcelBytes(dataset));
+
+      final csvCollections = archive.files
+          .map((f) => f.name.replaceFirst(RegExp(r'\.csv$'), ''))
+          .toList();
+      expect(csvCollections, [
+        'colleges',
+        'counseling_population',
+        'counseling_population__void_history',
+      ]);
+
+      final summaryRows = book.tables['Backup_Summary']!.rows;
+      final sheetByCollection = <String, String>{
+        for (final row in summaryRows.skip(1))
+          row[2]!.value.toString(): row[5]!.value.toString(),
+      };
+
+      // Every CSV collection has a matching Excel worksheet with the same row count and document IDs.
+      for (final collection in dataset.collections) {
+        final csvLines = utf8
+            .decode(
+              archive.findFile('${collection.collectionKey}.csv')!.content
+                  as List<int>,
+            )
+            .trim()
+            .split('\r\n');
+        final sheetName = sheetByCollection[collection.collectionKey]!;
+        final sheetRows = book.tables[sheetName]!.rows;
+        expect(csvLines.length, sheetRows.length);
+
+        final csvDocIds = csvLines
+            .skip(1)
+            .map((line) => line.split(',').first)
+            .toList();
+        final excelDocIds = sheetRows
+            .skip(1)
+            .map((row) => row.first!.value.toString())
+            .toList();
+        expect(csvDocIds, excelDocIds);
+      }
+    },
+  );
 }

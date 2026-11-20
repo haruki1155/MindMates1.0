@@ -272,6 +272,9 @@ void main() {
           downloads.add((name: name, bytes: bytes, mime: mime)),
     );
 
+    expect(find.text('Administrative Data Export'), findsOneWidget);
+    expect(find.text('Request backup now'), findsOneWidget);
+
     await tester.tap(find.text('Download CSV (.zip)'));
     await tester.pumpAndSettle();
 

@@ -63,91 +63,142 @@ const SUBCOLLECTION_CONCURRENCY = 20;
 const GET_ALL_BATCH_SIZE = 250;
 const MAX_QUEUE_LENGTH = 100000;
 
-// Internal server-only operational state, device push credentials, and
-// counselor-exclusive case remarks (not accessible to super-admin per
-// case_remarks.ts) are excluded from browser-downloaded backup exports.
-const EXCLUDED_ROOT_COLLECTIONS = new Set([
-  "employee_id_reservations",
-  "pending_registration_cancellations",
-  "public_user_id_reservations",
-  "student_activation_attempts",
-  "student_id_reservations",
-  "user_devices",
-  "user_public_ids",
-]);
+// Fail-closed explicit allowlist for Administrative Data Export.
+// Only explicitly approved, low-risk administrative, directory, catalog,
+// configuration, audit, and non-clinical operational collections may be
+// exported to browser CSV/Excel downloads. Unknown collections, clinical
+// notes/remarks, assessment responses, private conversations, anonymity
+// mappings, and internal lock/credential collections are automatically excluded.
+const ALLOWED_ROOT_COLLECTIONS = [
+  "academic_catalogue_imports",
+  "admin_audit_logs",
+  "admin_status_summaries",
+  "analytics_daily",
+  "announcements",
+  "appointment_policy",
+  "appointment_queue",
+  "backup_jobs",
+  "colleges",
+  "counseling_population",
+  "courses",
+  "departments",
+  "inquiry_statuses",
+  "insight_categories",
+  "insight_content",
+  "insight_rules",
+  "mind_aid_analytics_daily",
+  "mind_aid_config",
+  "pacc_availability",
+  "recommendations",
+  "role_audit_logs",
+  "role_correction_requests",
+  "staffAccessRequests",
+  "student_correction_requests",
+  "student_roster",
+  "student_roster_imports",
+  "system_config",
+  "users",
+  "walk_in_imports",
+] as const;
 
-const EXCLUDED_SUBCOLLECTION_NAMES = new Set([
-  "case_remarks",
-]);
+const ALLOWED_ROOT_SET = new Set<string>(ALLOWED_ROOT_COLLECTIONS);
 
-const REDACTED_CREDENTIAL_FIELDS = new Set([
-  "fcmToken",
-  "passwordHash",
-  "privateKey",
+// Exact parent-root -> allowed subcollection name mapping. Any subcollection
+// outside this explicit map is automatically excluded (fail-closed).
+const ALLOWED_SUBCOLLECTIONS_BY_ROOT: Record<string, ReadonlySet<string>> = {
+  analytics_daily: new Set(["users"]),
+  counseling_population: new Set(["reinstate_history", "void_history"]),
+};
+
+const ALLOWED_SUBCOLLECTION_PATTERNS = [
+  "analytics_daily/*/users",
+  "counseling_population/*/reinstate_history",
+  "counseling_population/*/void_history",
+] as const;
+
+const REDACTED_FIELD_KEYS_LOWER = new Set([
+  "accesstoken",
+  "apikey",
+  "authtoken",
+  "devicetoken",
+  "devicetokens",
+  "fcmtoken",
+  "fcmtokens",
+  "hash",
+  "idtoken",
+  "password",
+  "passwordhash",
+  "privatekey",
+  "pushtoken",
+  "pushtokens",
+  "refreshtoken",
+  "salt",
+  "secret",
+  "secretkey",
+  "sessiontoken",
 ]);
 
 /**
- * Explicit approved export scope for MindMate Backup Data downloads:
- * includes all Firestore domain collections and subcollections while
- * excluding internal server-only state, device push credentials, and
- * counselor-exclusive case remarks, and redacting credential hashes/salts.
+ * Explicit fail-closed export scope for Administrative Data Export downloads.
+ * Complete whole-database disaster recovery backups remain isolated in
+ * server-managed GCS exports (`requestFirestoreBackup` in backup_management.ts).
  */
 export const BACKUP_EXPORT_SCOPE = {
-  mode: "all-firestore-excluding-internal-and-credentials",
-  excludedRootCollections: [...EXCLUDED_ROOT_COLLECTIONS].sort(),
-  excludedSubcollections: [...EXCLUDED_SUBCOLLECTION_NAMES].sort(),
-  excludedPrefix: "_",
-  redactedFields: [
-    "activationCode.hash",
-    "activationCode.salt",
-    "consumedActivationCode.hash",
-    "consumedActivationCode.salt",
-    "fcmToken",
-    "passwordHash",
-    "privateKey",
-  ],
+  mode: "explicit-allowlist-fail-closed",
+  allowedRootCollections: [...ALLOWED_ROOT_COLLECTIONS],
+  allowedSubcollections: [...ALLOWED_SUBCOLLECTION_PATTERNS],
+  redactedFieldKeys: [...REDACTED_FIELD_KEYS_LOWER].sort(),
 } as const;
 
-export function isExcludedBackupCollectionPath(collectionPath: string): boolean {
+export function isAllowedBackupCollectionPath(collectionPath: string): boolean {
   const segments = collectionPath.split("/").filter(Boolean);
-  if (segments.length === 0 || segments.length % 2 !== 1) return true;
-  if (EXCLUDED_ROOT_COLLECTIONS.has(segments[0])) return true;
-  for (let i = 0; i < segments.length; i += 2) {
-    const colSegment = segments[i];
-    if (colSegment.startsWith("_")) return true;
-    if (i > 0 && EXCLUDED_SUBCOLLECTION_NAMES.has(colSegment)) return true;
+  if (segments.length === 0 || segments.length % 2 !== 1) return false;
+  if (segments.some((segment) => segment.startsWith("_"))) return false;
+  const root = segments[0];
+  if (!ALLOWED_ROOT_SET.has(root)) return false;
+  if (segments.length === 1) return true;
+  if (segments.length === 3) {
+    const allowedSubs = ALLOWED_SUBCOLLECTIONS_BY_ROOT[root];
+    return allowedSubs != null && allowedSubs.has(segments[2]);
   }
   return false;
 }
 
-function redactActivationCodeRecord(value: unknown): unknown {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
-  const copy = {...(value as Record<string, unknown>)};
-  if ("hash" in copy && copy.hash != null) copy.hash = "[REDACTED]";
-  if ("salt" in copy && copy.salt != null) copy.salt = "[REDACTED]";
-  return copy;
+function redactValueRecursive(value: unknown, collectionKey: string): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => redactValueRecursive(item, collectionKey));
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
+      const lower = key.toLowerCase();
+      if (REDACTED_FIELD_KEYS_LOWER.has(lower) && entryValue != null) {
+        out[key] = "[REDACTED]";
+        continue;
+      }
+      if (
+        collectionKey === "student_roster" &&
+        (key === "activationCode" || key === "consumedActivationCode") &&
+        entryValue &&
+        typeof entryValue === "object" &&
+        !Array.isArray(entryValue)
+      ) {
+        out[key] = redactValueRecursive(entryValue, collectionKey);
+        continue;
+      }
+      out[key] = redactValueRecursive(entryValue, collectionKey);
+    }
+    return out;
+  }
+  return value;
 }
 
 export function redactSensitiveBackupFields(
   collectionKey: string,
   fields: Record<string, unknown>,
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (REDACTED_CREDENTIAL_FIELDS.has(key) && value != null) {
-      out[key] = "[REDACTED]";
-      continue;
-    }
-    if (
-      collectionKey === "student_roster" &&
-      (key === "activationCode" || key === "consumedActivationCode")
-    ) {
-      out[key] = redactActivationCodeRecord(value);
-      continue;
-    }
-    out[key] = value;
-  }
-  return out;
+  return redactValueRecursive(fields, collectionKey) as Record<string, unknown>;
 }
 
 export function compareUtf8(a: string, b: string): number {
@@ -206,7 +257,7 @@ function parseCursor(raw: unknown): BackupExportCursor | null {
     throw new HttpsError("invalid-argument", "Invalid export cursor.");
   }
   const record = raw as Record<string, unknown>;
-  if (!isValidCollectionPath(record.currentCollection) || isExcludedBackupCollectionPath(record.currentCollection)) {
+  if (!isValidCollectionPath(record.currentCollection) || !isAllowedBackupCollectionPath(record.currentCollection)) {
     throw new HttpsError("invalid-argument", "Invalid export cursor collection.");
   }
   let afterDocId: string | null = null;
@@ -225,7 +276,7 @@ function parseCursor(raw: unknown): BackupExportCursor | null {
   }
   const queue: string[] = [];
   for (const item of record.queue) {
-    if (!isValidCollectionPath(item) || isExcludedBackupCollectionPath(item)) {
+    if (!isValidCollectionPath(item) || !isAllowedBackupCollectionPath(item)) {
       throw new HttpsError("invalid-argument", "Invalid export cursor queued collection.");
     }
     queue.push(item);
@@ -324,15 +375,20 @@ async function getAllInBatches(
 }
 
 async function discoverSubcollectionPaths(
+  currentCollectionPath: string,
   refs: FirebaseFirestore.DocumentReference[],
 ): Promise<string[]> {
+  const root = currentCollectionPath.split("/")[0] ?? "";
+  if (!ALLOWED_SUBCOLLECTIONS_BY_ROOT[root]) {
+    return [];
+  }
   const found: string[] = [];
   for (let i = 0; i < refs.length; i += SUBCOLLECTION_CONCURRENCY) {
     const slice = refs.slice(i, i + SUBCOLLECTION_CONCURRENCY);
     const results = await Promise.all(slice.map((ref) => ref.listCollections()));
     for (const cols of results) {
       for (const col of cols) {
-        if (!isExcludedBackupCollectionPath(col.path)) {
+        if (isAllowedBackupCollectionPath(col.path)) {
           found.push(col.path);
         }
       }
@@ -382,10 +438,10 @@ export async function exportBackupPage(
 
   if (parsedCursor === null) {
     const rootCollections = await deps.db.listCollections();
-    queue = rootCollections
+    const discoveredAllowed = rootCollections
       .map((col) => col.path)
-      .filter((colPath) => !isExcludedBackupCollectionPath(colPath))
-      .sort(compareUtf8);
+      .filter((colPath) => isAllowedBackupCollectionPath(colPath));
+    queue = [...new Set([...ALLOWED_ROOT_COLLECTIONS, ...discoveredAllowed])].sort(compareUtf8);
     currentCollection = queue.shift() ?? null;
     afterDocId = null;
     await writeExportAudit(deps.db, actor, "BACKUP_EXPORT_STARTED", exportId, {
@@ -450,7 +506,7 @@ export async function exportBackupPage(
     const processedRefs = batchRefs.slice(0, processedCount);
     if (processedRefs.length > 0) {
       inspectedRefs += processedRefs.length;
-      const subPaths = await discoverSubcollectionPaths(processedRefs);
+      const subPaths = await discoverSubcollectionPaths(currentCollection, processedRefs);
       if (subPaths.length > 0) {
         queue.push(...subPaths);
       }

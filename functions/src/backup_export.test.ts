@@ -11,7 +11,7 @@ import {
   collectionKeyForPath,
   exportBackupPage,
   exportFirestoreBackupPage,
-  isExcludedBackupCollectionPath,
+  isAllowedBackupCollectionPath,
   redactSensitiveBackupFields,
   serializeFirestoreValue,
 } from "./backup_export";
@@ -20,6 +20,7 @@ const emulated = Boolean(process.env.FIRESTORE_EMULATOR_HOST && process.env.FIRE
 const prefix = `backup-export-${Date.now()}`;
 const adminUid = `${prefix}-admin`;
 const counselorUid = `${prefix}-counselor`;
+const portalStaffUid = `${prefix}-staff`;
 const actor = {uid: adminUid, name: "Export Admin", role: "admin"};
 
 // --- Pure unit tests (no emulator required) ---
@@ -109,41 +110,96 @@ function makeMockDb(
 }
 
 test("collectionKeyForPath maps root and nested subcollections deterministically", () => {
-  assert.equal(collectionKeyForPath("users"), "users");
-  assert.equal(collectionKeyForPath("appointments/appt-1/history"), "appointments__history");
-  assert.equal(collectionKeyForPath("appointments/appt-1/clinical_notes"), "appointments__clinical_notes");
-  assert.equal(collectionKeyForPath("a/1/b/2/c"), "a__b__c");
+  assert.equal(collectionKeyForPath("colleges"), "colleges");
+  assert.equal(collectionKeyForPath("counseling_population/2026-2027/void_history"), "counseling_population__void_history");
+  assert.equal(collectionKeyForPath("analytics_daily/2026-11-20/users"), "analytics_daily__users");
 });
 
-test("isExcludedBackupCollectionPath and redactSensitiveBackupFields block sensitive internal, credential, and case_remarks data", () => {
-  assert.equal(BACKUP_EXPORT_SCOPE.mode, "all-firestore-excluding-internal-and-credentials");
-  assert.equal(BACKUP_EXPORT_SCOPE.excludedPrefix, "_");
-  assert.deepEqual(BACKUP_EXPORT_SCOPE.excludedSubcollections, ["case_remarks"]);
-  assert.ok(BACKUP_EXPORT_SCOPE.excludedRootCollections.includes("user_devices"));
-  assert.ok(BACKUP_EXPORT_SCOPE.excludedRootCollections.includes("pending_registration_cancellations"));
+test("fail-closed allowlist allows approved admin collections and rejects unknown, clinical, chat, and internal paths", () => {
+  assert.equal(BACKUP_EXPORT_SCOPE.mode, "explicit-allowlist-fail-closed");
 
-  assert.equal(isExcludedBackupCollectionPath("users"), false);
-  assert.equal(isExcludedBackupCollectionPath("appointments/a1/history"), false);
-  assert.equal(isExcludedBackupCollectionPath("appointments/a1/clinical_notes"), false);
-  assert.equal(isExcludedBackupCollectionPath("student_roster"), false);
+  // Explicitly authorized root collections & subcollections
+  for (const allowed of [
+    "colleges",
+    "departments",
+    "courses",
+    "announcements",
+    "admin_audit_logs",
+    "student_roster",
+    "users",
+    "counseling_population",
+    "counseling_population/2026-2027/void_history",
+    "counseling_population/2026-2027/reinstate_history",
+    "analytics_daily",
+    "analytics_daily/2026-11-20/users",
+  ]) {
+    assert.equal(isAllowedBackupCollectionPath(allowed), true, `Expected allowed: ${allowed}`);
+  }
 
-  assert.equal(isExcludedBackupCollectionPath("_analytics_events"), true);
-  assert.equal(isExcludedBackupCollectionPath("_mind_aid_rate_limits"), true);
-  assert.equal(isExcludedBackupCollectionPath("pending_registration_cancellations"), true);
-  assert.equal(isExcludedBackupCollectionPath("student_activation_attempts"), true);
-  assert.equal(isExcludedBackupCollectionPath("user_devices"), true);
-  assert.equal(isExcludedBackupCollectionPath("user_devices/u1/tokens"), true);
-  assert.equal(isExcludedBackupCollectionPath("appointments/a1/case_remarks"), true);
-  assert.equal(isExcludedBackupCollectionPath("appointments/a1/case_remarks/current/versions"), true);
+  // Unknown, internal, clinical, assessment, conversation, and anonymity collections MUST be rejected (fail-closed)
+  for (const deniedPath of [
+    "unknown_future_collection",
+    "secret_tokens",
+    "_analytics_events",
+    "_mind_aid_rate_limits",
+    "pending_registration_cancellations",
+    "student_activation_attempts",
+    "user_devices",
+    "user_devices/u1/tokens",
+    "appointment_user_locks",
+    "appointment_booking_requests",
+    "appointment_slots",
+    "assessment_limits",
+    "appointments",
+    "appointments/a1/clinical_notes",
+    "appointments/a1/case_remarks",
+    "appointments/a1/case_remarks/current/versions",
+    "assessments",
+    "inquiries",
+    "inquiries/i1/replies",
+    "counselor_threads",
+    "counselor_threads/u1/messages",
+    "counselor_inbox_reads",
+    "counselor_inbox_reads/c1/threads",
+    "mind_aid_messages",
+    "mind_aid_dialogue_state",
+    "mind_aid_dialogue_state/u1/conversations",
+    "mind_aid_emergency_alerts",
+    "secret_chat_profiles",
+    "secret_chat_aliases",
+    "secret_chats",
+    "student_personal_info",
+    "counseling_population/2026-2027/unknown_sub",
+    "users/u1/private_tokens",
+    "colleges/cas/nested/too/deep",
+  ]) {
+    assert.equal(isAllowedBackupCollectionPath(deniedPath), false, `Expected denied: ${deniedPath}`);
+  }
+});
 
+test("redactSensitiveBackupFields recursively redacts credentials at any depth", () => {
   const redacted = redactSensitiveBackupFields("student_roster", {
     studentNo: "2026-0001",
     activated: false,
-    activationCode: {hash: "secret-hash", salt: "secret-salt", issuedAt: "2026-11-20T00:00:00.000Z"},
-    consumedActivationCode: {hash: "old-hash", salt: "old-salt", userId: "u1"},
-    fcmToken: "live-token-123",
+    activationCode: {
+      hash: "secret-hash",
+      salt: "secret-salt",
+      issuedAt: "2026-11-20T00:00:00.000Z",
+    },
+    consumedActivationCode: {
+      hash: "old-hash",
+      salt: "old-salt",
+      userId: "u1",
+    },
+    nested: {
+      device: {fcmToken: "nested-token", os: "android"},
+      history: [{accessToken: "tok-1", note: "kept"}],
+    },
+    privateKey: "pem-key",
   });
+
   assert.equal(redacted.studentNo, "2026-0001");
+  assert.equal(redacted.privateKey, "[REDACTED]");
   assert.deepEqual(redacted.activationCode, {
     hash: "[REDACTED]",
     salt: "[REDACTED]",
@@ -154,7 +210,10 @@ test("isExcludedBackupCollectionPath and redactSensitiveBackupFields block sensi
     salt: "[REDACTED]",
     userId: "u1",
   });
-  assert.equal(redacted.fcmToken, "[REDACTED]");
+  assert.deepEqual(redacted.nested, {
+    device: {fcmToken: "[REDACTED]", os: "android"},
+    history: [{accessToken: "[REDACTED]", note: "kept"}],
+  });
 });
 
 test("serializeFirestoreValue preserves timestamps, references, geopoints, bytes, and nested maps", () => {
@@ -177,30 +236,54 @@ test("serializeFirestoreValue preserves timestamps, references, geopoints, bytes
   });
 });
 
-test("exportBackupPage paginates all collections, subcollections, phantom parents, and empty collections", async () => {
+test("exportBackupPage exports only allowlisted collections/subcollections and excludes unknown, clinical, and conversation data", async () => {
   const {db, audits} = makeMockDb(
-    ["users", "empty_col", "counselor_threads", "appointments", "user_devices"],
+    [
+      "users",
+      "counseling_population",
+      "analytics_daily",
+      "appointments",
+      "assessments",
+      "counselor_threads",
+      "mind_aid_messages",
+      "secret_chat_profiles",
+      "unknown_collection",
+    ],
     {
-      empty_col: [],
       users: ["u2", "u1", "u3"],
-      counselor_threads: ["u1"],
-      "counselor_threads/u1/messages": ["msg-1"],
+      counseling_population: ["2026-2027"],
+      "counseling_population/2026-2027/void_history": ["v1"],
+      "counseling_population/2026-2027/unexpected_sub": ["x1"],
+      analytics_daily: ["2026-11-20"],
+      "analytics_daily/2026-11-20/users": ["u1"],
       appointments: ["a1"],
-      "appointments/a1/history": ["h1", "h2"],
-      user_devices: ["u1"],
-      "user_devices/u1/tokens": ["tok-1"],
+      "appointments/a1/clinical_notes": ["cn1"],
+      "appointments/a1/case_remarks": ["cr1"],
+      assessments: ["as1"],
+      counselor_threads: ["u1"],
+      "counselor_threads/u1/messages": ["m1"],
+      mind_aid_messages: ["ma1"],
+      secret_chat_profiles: ["u1"],
+      unknown_collection: ["unk1"],
     },
     {
       "users/u1": {exists: true, data: {name: "Alice"}, createTime: new Date("2026-11-01T00:00:00Z")},
       "users/u2": {exists: true, data: {name: "Bob"}},
       "users/u3": {exists: true, data: {name: "Carol"}},
+      "counseling_population/2026-2027": {exists: true, data: {status: "open"}, subcollections: ["void_history", "unexpected_sub"]},
+      "counseling_population/2026-2027/void_history/v1": {exists: true, data: {reason: "Correction"}},
+      "counseling_population/2026-2027/unexpected_sub/x1": {exists: true, data: {secret: "nope"}},
+      "analytics_daily/2026-11-20": {exists: false, subcollections: ["users"]},
+      "analytics_daily/2026-11-20/users/u1": {exists: true, data: {logins: 2}},
+      "appointments/a1": {exists: true, data: {concern: "Sensitive"}, subcollections: ["clinical_notes", "case_remarks"]},
+      "appointments/a1/clinical_notes/cn1": {exists: true, data: {note: "CLINICAL"}},
+      "appointments/a1/case_remarks/cr1": {exists: true, data: {text: "REMARK"}},
+      "assessments/as1": {exists: true, data: {score: 99}},
       "counselor_threads/u1": {exists: false, subcollections: ["messages"]},
-      "counselor_threads/u1/messages/msg-1": {exists: true, data: {text: "hello"}},
-      "appointments/a1": {exists: true, data: {status: "confirmed"}, subcollections: ["history"]},
-      "appointments/a1/history/h1": {exists: true, data: {event: "created"}},
-      "appointments/a1/history/h2": {exists: true, data: {event: "confirmed"}},
-      "user_devices/u1": {exists: false, subcollections: ["tokens"]},
-      "user_devices/u1/tokens/tok-1": {exists: true, data: {fcmToken: "fcm-1"}},
+      "counselor_threads/u1/messages/m1": {exists: true, data: {text: "PRIVATE"}},
+      "mind_aid_messages/ma1": {exists: true, data: {text: "AI PRIVATE"}},
+      "secret_chat_profiles/u1": {exists: true, data: {alias: "BlueJay"}},
+      "unknown_collection/unk1": {exists: true, data: {foo: "bar"}},
     },
   );
 
@@ -241,21 +324,33 @@ test("exportBackupPage paginates all collections, subcollections, phantom parent
   }
 
   assert.ok(pages > 1);
-  assert.deepEqual([...visited].sort(), [
+  assert.ok(visited.has("users"));
+  assert.ok(visited.has("counseling_population"));
+  assert.ok(visited.has("counseling_population__void_history"));
+  assert.ok(visited.has("analytics_daily__users"));
+
+  // Disallowed / unknown / clinical / conversation / anonymity collections never appear.
+  for (const forbidden of [
     "appointments",
-    "appointments__history",
+    "appointments__clinical_notes",
+    "appointments__case_remarks",
+    "assessments",
     "counselor_threads",
     "counselor_threads__messages",
-    "empty_col",
-    "users",
-  ]);
+    "mind_aid_messages",
+    "secret_chat_profiles",
+    "unknown_collection",
+    "counseling_population__unexpected_sub",
+  ]) {
+    assert.equal(visited.has(forbidden), false, `Forbidden collection visited: ${forbidden}`);
+  }
+
   assert.deepEqual(
     allDocs.map((d) => `${d.collectionKey}:${d.parentDocumentId ?? ""}:${d.documentId}`).sort(),
     [
-      "appointments::a1",
-      "appointments__history:a1:h1",
-      "appointments__history:a1:h2",
-      "counselor_threads__messages:u1:msg-1",
+      "analytics_daily__users:2026-11-20:u1",
+      "counseling_population::2026-2027",
+      "counseling_population__void_history:2026-2027:v1",
       "users::u1",
       "users::u2",
       "users::u3",
@@ -269,12 +364,12 @@ test("exportBackupPage paginates all collections, subcollections, phantom parent
 
 test("exportBackupPage respects maxResponseBytes without skipping or duplicating documents", async () => {
   const {db} = makeMockDb(
-    ["notes"],
-    {notes: ["n1", "n2", "n3"]},
+    ["announcements"],
+    {announcements: ["n1", "n2", "n3"]},
     {
-      "notes/n1": {exists: true, data: {body: "x".repeat(400)}},
-      "notes/n2": {exists: true, data: {body: "y".repeat(400)}},
-      "notes/n3": {exists: true, data: {body: "z".repeat(400)}},
+      "announcements/n1": {exists: true, data: {body: "x".repeat(400)}},
+      "announcements/n2": {exists: true, data: {body: "y".repeat(400)}},
+      "announcements/n3": {exists: true, data: {body: "z".repeat(400)}},
     },
   );
 
@@ -295,16 +390,16 @@ test("exportBackupPage respects maxResponseBytes without skipping or duplicating
     if (!page.hasMore) break;
     cursor = page.nextCursor;
   }
-  assert.equal(pages, 3);
+  assert.equal(pages >= 3, true);
   assert.deepEqual(ids, ["n1", "n2", "n3"]);
 });
 
-test("exportBackupPage rejects invalid arguments and propagates collection read failures", async () => {
+test("exportBackupPage rejects invalid arguments, tampered cursors, and propagates read failures", async () => {
   const {db} = makeMockDb(
-    ["broken"],
-    {broken: []},
+    ["colleges"],
+    {colleges: []},
     {},
-    {failCollection: "broken"},
+    {failCollection: "colleges"},
   );
   const deps: BackupExportDeps = {
     db,
@@ -320,8 +415,19 @@ test("exportBackupPage rejects invalid arguments and propagates collection read 
     exportBackupPage(deps, actor, {pageSize: 0}),
     (e: unknown) => e instanceof HttpsError && e.code === "invalid-argument",
   );
+  // Attempting to resume a cursor pointing at a disallowed or unknown collection fails closed.
   await assert.rejects(
-    exportBackupPage(deps, actor, {cursor: {currentCollection: "users/u1", afterDocId: null, queue: []}, exportId: "e1"}),
+    exportBackupPage(deps, actor, {
+      cursor: {currentCollection: "appointments/a1/clinical_notes", afterDocId: null, queue: []},
+      exportId: "e1",
+    }),
+    (e: unknown) => e instanceof HttpsError && e.code === "invalid-argument",
+  );
+  await assert.rejects(
+    exportBackupPage(deps, actor, {
+      cursor: {currentCollection: "colleges", afterDocId: null, queue: ["unknown_collection"]},
+      exportId: "e1",
+    }),
     (e: unknown) => e instanceof HttpsError && e.code === "invalid-argument",
   );
   await assert.rejects(
@@ -342,8 +448,10 @@ before(async () => {
   if (!emulated) return;
   await getAuth().createUser({uid: adminUid, email: `${adminUid}@example.invalid`, emailVerified: true});
   await getAuth().createUser({uid: counselorUid, email: `${counselorUid}@example.invalid`, emailVerified: true});
+  await getAuth().createUser({uid: portalStaffUid, email: `${portalStaffUid}@example.invalid`, emailVerified: true});
   await emuDb.doc(`users/${adminUid}`).set({accessRole: "admin", accountStatus: "active", name: "Export Admin"});
   await emuDb.doc(`users/${counselorUid}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active"});
+  await emuDb.doc(`users/${portalStaffUid}`).set({accessRole: "portalStaff", staffAccountStatus: "approved", accountStatus: "active"});
 });
 
 after(async () => {
@@ -351,15 +459,18 @@ after(async () => {
   await Promise.all([
     emuDb.doc(`users/${adminUid}`).delete().catch(() => undefined),
     emuDb.doc(`users/${counselorUid}`).delete().catch(() => undefined),
+    emuDb.doc(`users/${portalStaffUid}`).delete().catch(() => undefined),
     getAuth().deleteUser(adminUid).catch(() => undefined),
     getAuth().deleteUser(counselorUid).catch(() => undefined),
+    getAuth().deleteUser(portalStaffUid).catch(() => undefined),
   ]);
 });
 
-test("exportFirestoreBackupPage enforces super-admin authorization and prevents audit forging", {skip: !emulated}, async () => {
+test("exportFirestoreBackupPage enforces fail-closed allowlist, super-admin authorization, and redaction on emulators", {skip: !emulated}, async () => {
   const callable = exportFirestoreBackupPage as unknown as {
     run: (req: {auth?: {uid: string} | null; data?: unknown}) => Promise<{
       exportId: string;
+      scope: typeof BACKUP_EXPORT_SCOPE;
       documents: Array<{
         documentId: string;
         documentPath: string;
@@ -382,6 +493,7 @@ test("exportFirestoreBackupPage enforces super-admin authorization and prevents 
   try {
     await denied(callable.run({auth: null, data: {}}), "unauthenticated");
     await denied(callable.run({auth: {uid: counselorUid}, data: {}}), "permission-denied");
+    await denied(callable.run({auth: {uid: portalStaffUid}, data: {}}), "permission-denied");
     await denied(callable.run({auth: {uid: otherAdminUid}, data: {}}), "permission-denied");
 
     await getAuth().updateUser(adminUid, {emailVerified: false});
@@ -392,22 +504,32 @@ test("exportFirestoreBackupPage enforces super-admin authorization and prevents 
     await denied(callable.run({auth: {uid: adminUid}, data: {}}), "permission-denied");
     await emuDb.doc(`users/${adminUid}`).update({accountStatus: "active"});
 
-    // Seed synthetic staging-like records + sensitive records that must be excluded/redacted.
+    // Seed authorized administrative fixtures + disallowed sensitive/unknown records.
     await Promise.all([
-      emuDb.doc(`colleges/${prefix}-cas`).set({name: "CAS", active: true}),
-      emuDb.doc(`appointments/${prefix}-appt-1`).set({
-        userRef: emuDb.doc(`users/${adminUid}`),
-        scheduledAt: Timestamp.fromDate(new Date("2026-11-21T09:00:00Z")),
-        status: "confirmed",
+      emuDb.doc(`colleges/${prefix}-cas`).set({
+        name: "CAS",
+        active: true,
+        updatedAt: Timestamp.fromDate(new Date("2026-11-20T01:00:00Z")),
       }),
-      emuDb.doc(`appointments/${prefix}-appt-1/history/h1`).set({action: "created"}),
-      emuDb.doc(`appointments/${prefix}-appt-1/case_remarks/current`).set({text: "COUNSELOR ONLY REMARK"}),
-      emuDb.doc(`user_devices/${adminUid}/tokens/t1`).set({fcmToken: "secret-fcm-token"}),
-      emuDb.doc(`_analytics_events/${prefix}-ev-1`).set({internal: true}),
+      emuDb.doc(`counseling_population/${prefix}-2026`).set({status: "open", target: 500}),
+      emuDb.doc(`counseling_population/${prefix}-2026/void_history/v1`).set({reason: "Typo"}),
+      emuDb.doc(`counseling_population/${prefix}-2026/unknown_sub/s1`).set({hidden: true}),
       emuDb.doc(`student_roster/${prefix}-sr-1`).set({
         studentNo: "2026-9999",
         activationCode: {hash: "hash-val", salt: "salt-val"},
+        nestedMeta: {pushToken: "secret-push"},
       }),
+      // Disallowed collections that must never be exported:
+      emuDb.doc(`appointments/${prefix}-appt-1`).set({concern: "Private concern"}),
+      emuDb.doc(`appointments/${prefix}-appt-1/clinical_notes/session`).set({note: "CLINICAL NOTE"}),
+      emuDb.doc(`appointments/${prefix}-appt-1/case_remarks/current`).set({text: "COUNSELOR ONLY REMARK"}),
+      emuDb.doc(`assessments/${prefix}-assess-1`).set({answers: [1, 2, 3]}),
+      emuDb.doc(`counselor_threads/${adminUid}/messages/m1`).set({body: "PRIVATE CHAT"}),
+      emuDb.doc(`mind_aid_messages/${prefix}-ma-1`).set({body: "AI CHAT"}),
+      emuDb.doc(`secret_chat_profiles/${adminUid}`).set({alias: "HiddenOwl"}),
+      emuDb.doc(`user_devices/${adminUid}/tokens/t1`).set({fcmToken: "secret-fcm-token"}),
+      emuDb.doc(`_analytics_events/${prefix}-ev-1`).set({internal: true}),
+      emuDb.doc(`unknown_future_collection/${prefix}-u-1`).set({secret: "should-not-export"}),
     ]);
 
     const allDocs: Array<{documentPath: string; collectionKey: string; parentDocumentId: string | null; fields: Record<string, unknown>}> = [];
@@ -423,35 +545,50 @@ test("exportFirestoreBackupPage enforces super-admin authorization and prevents 
         data: {format: "xlsx", pageSize: 2, exportId, cursor},
       });
       exportId ??= res.exportId;
+      assert.equal(res.scope.mode, "explicit-allowlist-fail-closed");
       for (const v of res.visitedCollections) visitedKeys.add(v.collectionKey);
       allDocs.push(...res.documents);
       if (!res.hasMore) break;
       cursor = res.nextCursor;
     }
 
-    assert.ok(pages >= 2);
+    assert.ok(pages >= 3);
     assert.ok(visitedKeys.has("colleges"));
-    assert.ok(visitedKeys.has("appointments"));
-    assert.ok(visitedKeys.has("appointments__history"));
+    assert.ok(visitedKeys.has("counseling_population"));
+    assert.ok(visitedKeys.has("counseling_population__void_history"));
     assert.ok(visitedKeys.has("student_roster"));
 
-    // Sensitive internal, device credential, and counselor-exclusive collections are excluded.
-    assert.equal(visitedKeys.has("appointments__case_remarks"), false);
-    assert.equal(visitedKeys.has("user_devices"), false);
-    assert.equal(visitedKeys.has("user_devices__tokens"), false);
-    assert.equal(visitedKeys.has("_analytics_events"), false);
+    // All sensitive, clinical, conversation, anonymity, and unknown collections are excluded.
+    for (const forbidden of [
+      "appointments",
+      "appointments__clinical_notes",
+      "appointments__case_remarks",
+      "assessments",
+      "counselor_threads",
+      "counselor_threads__messages",
+      "mind_aid_messages",
+      "secret_chat_profiles",
+      "user_devices",
+      "user_devices__tokens",
+      "_analytics_events",
+      "unknown_future_collection",
+      "counseling_population__unknown_sub",
+    ]) {
+      assert.equal(visitedKeys.has(forbidden), false, `Forbidden collection exported: ${forbidden}`);
+    }
 
-    const apptDoc = allDocs.find((d) => d.documentPath === `appointments/${prefix}-appt-1`)!;
-    assert.equal(apptDoc.fields.userRef, `ref:users/${adminUid}`);
-    assert.equal(apptDoc.fields.scheduledAt, "2026-11-21T09:00:00.000Z");
+    const collegeDoc = allDocs.find((d) => d.documentPath === `colleges/${prefix}-cas`)!;
+    assert.equal(collegeDoc.fields.updatedAt, "2026-11-20T01:00:00.000Z");
 
-    const histDoc = allDocs.find((d) => d.documentPath === `appointments/${prefix}-appt-1/history/h1`)!;
-    assert.equal(histDoc.parentDocumentId, `${prefix}-appt-1`);
+    const voidDoc = allDocs.find(
+      (d) => d.documentPath === `counseling_population/${prefix}-2026/void_history/v1`,
+    )!;
+    assert.equal(voidDoc.parentDocumentId, `${prefix}-2026`);
 
     const rosterDoc = allDocs.find((d) => d.documentPath === `student_roster/${prefix}-sr-1`)!;
     assert.deepEqual(rosterDoc.fields.activationCode, {hash: "[REDACTED]", salt: "[REDACTED]"});
+    assert.deepEqual(rosterDoc.fields.nestedMeta, {pushToken: "[REDACTED]"});
 
-    // Server-side audit logs recorded start + completion.
     const audits = await emuDb.collection("admin_audit_logs").where("targetId", "==", exportId).get();
     assert.deepEqual(
       audits.docs.map((d) => d.data().action).sort(),
@@ -473,12 +610,20 @@ test("exportFirestoreBackupPage enforces super-admin authorization and prevents 
   } finally {
     await Promise.all([
       emuDb.doc(`colleges/${prefix}-cas`).delete().catch(() => undefined),
-      emuDb.doc(`appointments/${prefix}-appt-1/history/h1`).delete().catch(() => undefined),
+      emuDb.doc(`counseling_population/${prefix}-2026/void_history/v1`).delete().catch(() => undefined),
+      emuDb.doc(`counseling_population/${prefix}-2026/unknown_sub/s1`).delete().catch(() => undefined),
+      emuDb.doc(`counseling_population/${prefix}-2026`).delete().catch(() => undefined),
+      emuDb.doc(`student_roster/${prefix}-sr-1`).delete().catch(() => undefined),
+      emuDb.doc(`appointments/${prefix}-appt-1/clinical_notes/session`).delete().catch(() => undefined),
       emuDb.doc(`appointments/${prefix}-appt-1/case_remarks/current`).delete().catch(() => undefined),
       emuDb.doc(`appointments/${prefix}-appt-1`).delete().catch(() => undefined),
+      emuDb.doc(`assessments/${prefix}-assess-1`).delete().catch(() => undefined),
+      emuDb.doc(`counselor_threads/${adminUid}/messages/m1`).delete().catch(() => undefined),
+      emuDb.doc(`mind_aid_messages/${prefix}-ma-1`).delete().catch(() => undefined),
+      emuDb.doc(`secret_chat_profiles/${adminUid}`).delete().catch(() => undefined),
       emuDb.doc(`user_devices/${adminUid}/tokens/t1`).delete().catch(() => undefined),
       emuDb.doc(`_analytics_events/${prefix}-ev-1`).delete().catch(() => undefined),
-      emuDb.doc(`student_roster/${prefix}-sr-1`).delete().catch(() => undefined),
+      emuDb.doc(`unknown_future_collection/${prefix}-u-1`).delete().catch(() => undefined),
       emuDb.doc(`users/${otherAdminUid}`).delete().catch(() => undefined),
       getAuth().deleteUser(otherAdminUid).catch(() => undefined),
       getAuth().updateUser(adminUid, {emailVerified: true}).catch(() => undefined),
