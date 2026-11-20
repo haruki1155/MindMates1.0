@@ -239,8 +239,8 @@ class _AdminAssessmentResultsPageState
                       ),
                       const SizedBox(height: 5),
                       const Text(
-                        'Unique people in the selected records (not submissions). '
-                        'Small groups are suppressed for privacy.',
+                        'Each person is counted once. For privacy, groups with '
+                        'fewer than 5 people are shown as a range.',
                         style: TextStyle(
                           color: AdminColors.muted,
                           fontSize: 12,
@@ -407,7 +407,7 @@ class _CategoryBars extends StatelessWidget {
                   flex: 6,
                   child: group.value < minPrivacyGroup
                       ? const Text(
-                          'Suppressed (<5)',
+                          '1–4 participants',
                           style: TextStyle(
                             fontSize: 12,
                             color: AdminColors.muted,
@@ -431,11 +431,13 @@ class _CategoryBars extends StatelessWidget {
                 const SizedBox(width: 12),
                 SizedBox(
                   width: 42,
-                  child: Text(
-                    group.value < minPrivacyGroup ? '<5' : '${group.value}',
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
+                  child: group.value < minPrivacyGroup
+                      ? null
+                      : Text(
+                          '${group.value}',
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                 ),
               ],
             ),
