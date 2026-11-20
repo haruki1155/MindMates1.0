@@ -229,7 +229,7 @@
 - Verified Auth UID without linked student profile: sign out/retry safely; no student reservation is deleted unless it belongs to that UID and an authenticated server transaction validates cancellation.
 - Existing code-activated students keep Student Number/password and Forgot Password behavior. Never delete another account or revoke a staff registration through student cancellation.
 
-- [ ] **Step 1: Write failing tests** for typo correction, expired/wrong-device link, cancel-before-claim, interrupted Auth-without-profile, same-email existing student, staff-email conflict, and old student password recovery.
+- [ ] **Step 1: Write failing tests** for typo correction, expired link, cross-device completion after re-entering the matching email, cancel-before-claim, interrupted Auth-without-profile, same-email existing student, staff-email conflict, and old student password recovery.
 - [ ] **Step 2: Verify RED** — run functions account_integrity and account_recovery tests in auth/firestore emulator; run focused Flutter verification/provider tests.
 - [ ] **Step 3: Implement** bounded unlinked-session cleanup/cancellation and recovery routing while preserving the current staff cancellation semantics. Do not automatically delete verified UIDs with unrelated profiles.
 - [ ] **Step 4: Verify GREEN** — rerun the exact Task 9 tests and the existing email_verification_screen_test.dart suite.
@@ -262,7 +262,7 @@
 
 **Interfaces:**
 - New public start, authenticated session check, and final claim names remain stable and present in production and staging (Dev aliases only as existing convention).
-- Old activateStudentAccount, issueStudentActivationCodes, resetStudentActivationLock, and code-returning revoke are no longer callable or linked from the new UI at cutover.
+- Old activateStudentAccount, issueStudentActivationCodes, resetStudentActivationLock, and code-returning revoke are removed from the new Functions exports and UI at cutover. Existing hosted functions require a separately authorized deployment/deletion; removing source exports alone does not delete already deployed endpoints.
 - Keep existing student login/recovery, PACC import partial state and all role-based access behavior.
 
 - [ ] **Step 1: Write failing cutover tests** that assert old activation endpoints and UI actions are absent; old student records remain accessible to existing owners; new accounts complete end-to-end without an activation code; wrong email, duplicate claim and retries do not corrupt reservations.
@@ -279,6 +279,7 @@
 - Do not silently relax a test or omit a failed suite. Keep partial implementation checkpoints rather than claiming completion.
 - STOP if verified email links cannot return to the configured Android package, if a UID can read another UID's private data, if a new claim can change a staff account, or if the exact hosting/Auth settings are unknown. Ask the owner to supply the missing configuration/authority.
 - No live project mutation, bulk account creation, external email sending, or production deployment is authorized by this plan alone.
+- Existing functions that have been deployed remain hosted until explicitly removed in a separately authorized deployment; source-level removal is not proof that an endpoint is unavailable.
 
 ## Execution Handoff
 
