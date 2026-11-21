@@ -135,6 +135,28 @@ extension on AdminPortalPage {
   };
 }
 
+Route<void> _adminAuthRoute(BuildContext context, Widget page) {
+  final reducedMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+  return PageRouteBuilder<void>(
+    transitionDuration: reducedMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 220),
+    reverseTransitionDuration: reducedMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 180),
+    pageBuilder: (_, _, _) => page,
+    transitionsBuilder: (_, animation, _, child) => reducedMotion
+        ? child
+        : FadeTransition(
+            opacity: CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            ),
+            child: child,
+          ),
+  );
+}
+
 class AdminLoginScreen extends StatefulWidget {
   const AdminLoginScreen({super.key, this.repository});
   final AdminPortalRepository? repository;
@@ -157,6 +179,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   }
 
   Future<void> _signIn() async {
+    if (_submitting) return;
     if (_schoolId.text.trim().isEmpty || _password.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter your School ID and password.')),
@@ -173,8 +196,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       if (!mounted) return;
       if (!access.isGranted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => PortalAccessStatusScreen(
+          _adminAuthRoute(
+            context,
+            PortalAccessStatusScreen(
               repository: repository,
               evaluation: access,
             ),
@@ -183,8 +207,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         return;
       }
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => repository.mustChangePassword
+        _adminAuthRoute(
+          context,
+          repository.mustChangePassword
               ? AdminChangePasswordScreen(repository: repository)
               : AdminPortalHome(repository: repository),
         ),
@@ -288,9 +313,41 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                         width: double.infinity,
                         child: FilledButton(
                           onPressed: _submitting ? null : _signIn,
-                          child: Text(
-                            _submitting ? 'Signing in...' : 'Sign in',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          child: AnimatedSwitcher(
+                            duration:
+                                (MediaQuery.maybeDisableAnimationsOf(context) ??
+                                        false)
+                                    ? Duration.zero
+                                    : const Duration(milliseconds: 180),
+                            child: _submitting
+                                ? const Row(
+                                    key: ValueKey('signing-in'),
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      SizedBox(width: 10),
+                                      Text(
+                                        'Signing in…',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : const Text(
+                                    'Sign in',
+                                    key: ValueKey('sign-in'),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                           ),
                         ),
                       ),
@@ -1005,45 +1062,120 @@ class _PortalHeader extends StatelessWidget {
           const SizedBox(width: 4),
           if (showIdentity) _HeaderIdentity(repository: repository),
           if (showIdentity) const SizedBox(width: 10),
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: () async {
-              final confirmed = await showDialog<bool>(
-                context: context,
-                builder: (dialogContext) => AlertDialog(
-                  title: const Text('Sign out?'),
-                  content: const Text(
-                    'Are you sure you want to sign out of the MindMate Admin Portal?',
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(dialogContext, false),
-                      child: const Text('Cancel'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(dialogContext, true),
-                      child: const Text('Sign out'),
-                    ),
-                  ],
-                ),
-              );
-              if (confirmed != true) return;
-              if (!context.mounted) return;
-              if (!await confirmLeave(context)) return;
-              await repository.signOut();
-              if (context.mounted) {
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (_) => AdminLoginScreen(repository: repository),
-                  ),
-                  (_) => false,
-                );
-              }
-            },
-            icon: const Icon(Icons.logout),
+          _HeaderSignOutButton(
+            repository: repository,
+            confirmLeave: confirmLeave,
           ),
         ],
       ),
+    );
+  }
+}
+
+class _HeaderSignOutButton extends StatefulWidget {
+  const _HeaderSignOutButton({
+    required this.repository,
+    required this.confirmLeave,
+  });
+
+  final AdminPortalRepository repository;
+  final Future<bool> Function(BuildContext context) confirmLeave;
+
+  @override
+  State<_HeaderSignOutButton> createState() => _HeaderSignOutButtonState();
+}
+
+class _HeaderSignOutButtonState extends State<_HeaderSignOutButton> {
+  bool _signingOut = false;
+
+  Future<void> _handleSignOut() async {
+    if (_signingOut) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+          'Are you sure you want to sign out of the MindMate Admin Portal?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    if (!await widget.confirmLeave(context) || !mounted) return;
+    setState(() => _signingOut = true);
+    try {
+      await widget.repository.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        _adminAuthRoute(
+          context,
+          AdminLoginScreen(repository: widget.repository),
+        ),
+        (_) => false,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            FirebaseErrorMessage.describe(
+              error,
+              fallback: 'Could not sign out right now. Please try again.',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _signingOut = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reducedMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    return AnimatedSwitcher(
+      duration: reducedMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
+      child: _signingOut
+          ? const Padding(
+              key: ValueKey('signing-out'),
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Signing out…',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AdminColors.muted,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : IconButton(
+              key: const ValueKey('sign-out-button'),
+              tooltip: 'Sign out',
+              onPressed: _handleSignOut,
+              icon: const Icon(Icons.logout),
+            ),
     );
   }
 }
@@ -2695,14 +2827,33 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
   }
 
   Future<void> _signOut() async {
-    await widget.repository.signOut();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => AdminLoginScreen(repository: widget.repository),
-      ),
-      (_) => false,
-    );
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      await widget.repository.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        _adminAuthRoute(
+          context,
+          AdminLoginScreen(repository: widget.repository),
+        ),
+        (_) => false,
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = FirebaseErrorMessage.describe(
+            error,
+            fallback: 'Could not sign out right now. Please try again.',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
