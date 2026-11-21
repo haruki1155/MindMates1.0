@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/mindmate_bottom_navigation.dart';
@@ -217,8 +219,9 @@ class _SecretChatScreenState extends State<SecretChatScreen>
   }
 
   Future<void> _openCommentsSheet(SecretChatModel post) async {
-    await widget.onPostOpened?.call(post.id);
-    if (!mounted) return;
+    // The read receipt is incidental bookkeeping: it must never delay or
+    // block opening the thread, so it runs alongside the navigation.
+    unawaited(_recordPostOpened(post.id));
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => SecretChatThreadScreen(
@@ -232,6 +235,14 @@ class _SecretChatScreenState extends State<SecretChatScreen>
         ),
       ),
     );
+  }
+
+  Future<void> _recordPostOpened(String postId) async {
+    try {
+      await widget.onPostOpened?.call(postId);
+    } catch (_) {
+      // A read receipt that cannot be saved must not break the thread.
+    }
   }
 
   Future<void> _confirmDeletePost(SecretChatModel post) async {

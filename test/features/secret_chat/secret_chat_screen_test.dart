@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/secret_chat/screens/secret_chat_screen.dart';
@@ -45,6 +47,43 @@ void main() {
 
   testWidgets('tapping comments opens full thread screen', (tester) async {
     await tester.pumpWidget(_app(posts: [_post()]));
+
+    await tester.tap(find.byIcon(Icons.mode_comment_outlined));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(find.text('Anonymous Thread'), findsOneWidget);
+    expect(find.text('You are not alone in this.'), findsOneWidget);
+  });
+
+  testWidgets('thread opens even when the read receipt fails', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        posts: [_post()],
+        onPostOpened: (_) async => throw Exception('read receipt rejected'),
+      ),
+    );
+
+    await tester.tap(find.byIcon(Icons.mode_comment_outlined));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(find.text('Anonymous Thread'), findsOneWidget);
+    expect(find.text('You are not alone in this.'), findsOneWidget);
+  });
+
+  testWidgets('thread opens without waiting for a stalled read receipt', (
+    tester,
+  ) async {
+    final stalled = Completer<void>();
+    addTearDown(() {
+      if (!stalled.isCompleted) stalled.complete();
+    });
+    await tester.pumpWidget(
+      _app(posts: [_post()], onPostOpened: (_) => stalled.future),
+    );
 
     await tester.tap(find.byIcon(Icons.mode_comment_outlined));
     await tester.pump();
@@ -153,6 +192,7 @@ Widget _app({
   AddSecretComment? onAddComment,
   VoidCallback? onProfile,
   Future<void> Function(String postId)? onDeletePost,
+  Future<void> Function(String postId)? onPostOpened,
 }) {
   return MaterialApp(
     home: SecretChatScreen(
@@ -184,6 +224,7 @@ Widget _app({
       onAddComment:
           onAddComment ?? ({required postId, required message}) async {},
       onRetry: () {},
+      onPostOpened: onPostOpened,
       onProfile: onProfile,
       onDeletePost: onDeletePost,
     ),
