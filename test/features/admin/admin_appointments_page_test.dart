@@ -276,7 +276,7 @@ void main() {
   );
 
   testWidgets(
-    'super-admin disables attachment upload while preserving summary, follow-up, and attachment viewing',
+    'super-admin appointment review is read-only while preserving session documentation viewing',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1440, 1200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -310,46 +310,18 @@ void main() {
 
       await tester.tap(find.text('Review'));
       await tester.pumpAndSettle();
-      expect(find.text('Session summary (internal)'), findsOneWidget);
-      expect(find.text('Offer a follow-up session'), findsOneWidget);
-      expect(
-        find.text(
-          'Session attachments can only be uploaded by an assigned college counselor.',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('PACC decision'), findsNothing);
+      expect(find.text('Send decision'), findsNothing);
       expect(find.text('Add images / documents'), findsNothing);
+      expect(find.text('Close'), findsOneWidget);
 
-      await tester.enterText(
-        find.widgetWithText(TextField, 'Session summary (internal)'),
-        'Super-admin triage summary',
-      );
-      await tester.tap(find.text('Offer a follow-up session'));
+      await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
-      await tester.enterText(
-        find.widgetWithText(TextField, 'Client message'),
-        'Follow-up check-in',
-      );
-      await tester.tap(find.text('Send decision'));
-      await tester.pumpAndSettle();
-
-      expect(repo.uploadCalled, isFalse);
-      expect(repo.reviewedSubmission?['action'], 'completed');
-      expect(
-        repo.reviewedSubmission?['sessionSummary'],
-        'Super-admin triage summary',
-      );
-      expect(repo.reviewedSubmission?['offerFollowUp'], isTrue);
-      expect(
-        repo.reviewedSubmission?['followUpMessage'],
-        'Follow-up check-in',
-      );
-      expect(repo.reviewedSubmission?['attachments'], isEmpty);
 
       await tester.ensureVisible(find.text('Completed 1'));
       await tester.tap(find.text('Completed 1'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('View'));
+      await tester.tap(find.text('Review'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('View session documentation'));
       await tester.pumpAndSettle();
@@ -404,7 +376,7 @@ void main() {
     ),
   ]) {
     testWidgets(
-      '${roleCase.label} does not see attachment upload control while preserving summary and follow-up',
+      '${roleCase.label} opens read-only appointment details without decision controls',
       (tester) async {
         await tester.binding.setSurfaceSize(const Size(1440, 1200));
         addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -431,17 +403,13 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('Review'));
+        final buttonLabel = roleCase.role == AccessRole.admin ? 'Review' : 'View';
+        await tester.tap(find.text(buttonLabel));
         await tester.pumpAndSettle();
-        expect(find.text('Session summary (internal)'), findsOneWidget);
-        expect(find.text('Offer a follow-up session'), findsOneWidget);
-        expect(
-          find.text(
-            'Session attachments can only be uploaded by an assigned college counselor.',
-          ),
-          findsOneWidget,
-        );
+        expect(find.text('PACC decision'), findsNothing);
+        expect(find.text('Send decision'), findsNothing);
         expect(find.text('Add images / documents'), findsNothing);
+        expect(find.text('Close'), findsOneWidget);
       },
     );
   }

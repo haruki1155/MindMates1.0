@@ -2043,6 +2043,7 @@ class AdminAppointmentsPage extends StatefulWidget {
 class _AppointmentsPageState extends State<AdminAppointmentsPage> {
   String filter = 'Needs action';
   String departmentFilter = 'All departments';
+  String appointmentTypeFilter = 'All appointments';
   bool showHistory = false;
   final Set<String> selectedIds = <String>{};
   final Set<String> _archivingIds = <String>{};
@@ -2090,7 +2091,14 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
         );
         final query = _search.text.trim().toLowerCase();
         final items = categoryRecords.where((a) {
-          return (query.isEmpty ||
+          final isFollowUp = (a.parentAppointmentId ?? '').trim().isNotEmpty;
+          final matchesType = switch (appointmentTypeFilter) {
+            'Follow-up' => isFollowUp,
+            'Initial' => !isFollowUp,
+            _ => true,
+          };
+          return matchesType &&
+              (query.isEmpty ||
                   a.fullName.toLowerCase().contains(query) ||
                   a.userId.toLowerCase().contains(query)) &&
               (departmentFilter == 'All departments' ||
@@ -2246,11 +2254,42 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                     ),
                   ),
                 ),
-                if (query.isNotEmpty || departmentFilter != 'All departments')
+                SizedBox(
+                  width: 210,
+                  child: DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    key: ValueKey('type-$appointmentTypeFilter'),
+                    initialValue: appointmentTypeFilter,
+                    decoration: const InputDecoration(
+                      labelText: 'Appointment type',
+                    ),
+                    items: const [
+                      'All appointments',
+                      'Initial',
+                      'Follow-up',
+                    ]
+                        .map(
+                          (t) => DropdownMenuItem(
+                            value: t,
+                            child: Text(t, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setState(
+                      () => appointmentTypeFilter = v ?? 'All appointments',
+                    ),
+                  ),
+                ),
+                if (query.isNotEmpty ||
+                    departmentFilter != 'All departments' ||
+                    appointmentTypeFilter != 'All appointments')
                   TextButton(
                     onPressed: () {
                       _search.clear();
-                      setState(() => departmentFilter = 'All departments');
+                      setState(() {
+                        departmentFilter = 'All departments';
+                        appointmentTypeFilter = 'All appointments';
+                      });
                     },
                     child: const Text('Clear filters'),
                   ),
@@ -2987,17 +3026,48 @@ class _AppointmentCard extends StatelessWidget {
             style: const TextStyle(fontSize: 12),
           ),
         );
-        final canReview = canReviewAppointment(item, now);
+        final isAdminRole =
+            repository.isSuperAdmin ||
+            repository.currentAccessRole == AccessRole.admin;
+        final isReadOnlyRole =
+            isAdminRole ||
+            repository.currentAccessRole == AccessRole.portalStaff;
+        final canReview = !isReadOnlyRole && canReviewAppointment(item, now);
+        final isFollowUp = (item.parentAppointmentId ?? '').trim().isNotEmpty;
+        final statusBadges = Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (isFollowUp)
+              AdminStatusBadge.fromStatus(
+                domain: AdminStatusDomain.appointmentType,
+                status: 'follow_up',
+                compact: true,
+              ),
+            AdminStatusBadge.fromStatus(
+              domain: AdminStatusDomain.appointment,
+              status: item.status,
+              labelOverride: _formalLabel(item.status),
+              compact: true,
+            ),
+          ],
+        );
         final action = TextButton.icon(
           onPressed: () => _showReviewDialog(context),
           icon: Icon(
-            !canReview ? Icons.visibility_outlined : Icons.rate_review_outlined,
+            isAdminRole || canReview
+                ? Icons.rate_review_outlined
+                : Icons.visibility_outlined,
             size: 17,
           ),
-          label: Text(canReview ? 'Review' : 'View'),
+          label: Text(isAdminRole || canReview ? 'Review' : 'View'),
         );
         final historyAction =
-            item.isFinalized && !item.isArchived && onArchive != null
+            !isAdminRole &&
+                item.isFinalized &&
+                !item.isArchived &&
+                onArchive != null
             ? IconButton(
                 tooltip: 'Move to history',
                 onPressed: archiving ? null : onArchive,
@@ -3016,7 +3086,7 @@ class _AppointmentCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  if (onSelected != null)
+                  if (onSelected != null && !isAdminRole)
                     Checkbox(
                       value: selected,
                       onChanged: (value) => onSelected!(value ?? false),
@@ -3030,19 +3100,13 @@ class _AppointmentCard extends StatelessWidget {
               const SizedBox(height: 10),
               Row(children: [schedule, department]),
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: _Tag(
-                  label: _formalLabel(item.status),
-                  color: _statusColor(item.status),
-                ),
-              ),
+              Align(alignment: Alignment.centerLeft, child: statusBadges),
             ],
           );
         }
         return Row(
           children: [
-            if (onSelected != null)
+            if (onSelected != null && !isAdminRole)
               Checkbox(
                 value: selected,
                 onChanged: (value) => onSelected!(value ?? false),
@@ -3053,10 +3117,7 @@ class _AppointmentCard extends StatelessWidget {
             const SizedBox(width: 16),
             department,
             const SizedBox(width: 12),
-            _Tag(
-              label: _formalLabel(item.status),
-              color: _statusColor(item.status),
-            ),
+            statusBadges,
             const SizedBox(width: 8),
             historyAction,
             action,
@@ -3068,7 +3129,12 @@ class _AppointmentCard extends StatelessWidget {
 
   Future<void> _showReviewDialog(BuildContext context) async {
     final currentStatus = item.lifecycleStatus;
-    final canReview = canReviewAppointment(item, DateTime.now());
+    final isReadOnlyRole =
+        repository.isSuperAdmin ||
+        repository.currentAccessRole == AccessRole.admin ||
+        repository.currentAccessRole == AccessRole.portalStaff;
+    final canReview =
+        !isReadOnlyRole && canReviewAppointment(item, DateTime.now());
     final canUploadClinicalAttachments =
         repository.currentAccessRole == AccessRole.counselor &&
         !repository.isSuperAdmin;
