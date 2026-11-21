@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import '../database/firestore_collections.dart';
@@ -1885,17 +1886,52 @@ class AdminPortalRepository {
     return data == null ? null : SessionEvidenceRecord.fromJson(data);
   }
 
-  /// No public Storage download token is produced. The authenticated SDK
-  /// checks Storage rules for every file read.
-  Future<Uint8List> getClinicalEvidenceBytes(String path) async {
-    if (!path.startsWith('counseling_session_files/')) {
+  static final RegExp _clinicalEvidencePathPattern = RegExp(
+    r'^counseling_session_files/([A-Za-z0-9_-]{1,120})/([A-Za-z0-9_-]{1,120})/([a-f0-9]{32}\.(jpg|jpeg|png|pdf|doc|docx))$',
+  );
+
+  /// Downloads private session evidence through the server-authorized callable.
+  /// No public Storage download token or signed URL is produced.
+  Future<Uint8List> getClinicalEvidenceBytes(
+    String path, {
+    String? appointmentId,
+  }) async {
+    if (path.contains('..') ||
+        path.contains('\\') ||
+        path.contains('%') ||
+        RegExp(r'[\x00-\x1f]').hasMatch(path)) {
       throw const FormatException('Not a clinical attachment path.');
     }
-    final data = await FirebaseStorage.instance
-        .ref(path)
-        .getData(maxSessionEvidenceFileBytes);
-    if (data == null) throw StateError('Attachment unavailable.');
-    return data;
+    final match = _clinicalEvidencePathPattern.firstMatch(path);
+    if (match == null) {
+      throw const FormatException('Not a clinical attachment path.');
+    }
+    final pathAppointmentId = match.group(1)!;
+    final resolvedAppointmentId = appointmentId == null
+        ? pathAppointmentId
+        : appointmentId.trim();
+    if (resolvedAppointmentId.isEmpty ||
+        resolvedAppointmentId != pathAppointmentId) {
+      throw const FormatException(
+        'Attachment does not belong to this appointment.',
+      );
+    }
+    final raw = await _callCallable('downloadClinicalSessionEvidence', {
+      'appointmentId': resolvedAppointmentId,
+      'path': path,
+    });
+    if (raw is! Map) {
+      throw StateError('Attachment unavailable.');
+    }
+    final encoded = raw['dataBase64'];
+    if (encoded is! String || encoded.trim().isEmpty) {
+      throw StateError('Attachment unavailable.');
+    }
+    final bytes = base64Decode(encoded.trim());
+    if (bytes.isEmpty || bytes.length > maxSessionEvidenceFileBytes) {
+      throw StateError('Attachment unavailable.');
+    }
+    return bytes;
   }
 
   /// Uploads are immutable and bound to the currently authenticated clinician.

@@ -42,4 +42,11 @@ void main() {
   test('does not rewrite an unknown callable', () {
     expect(FirebaseCallableRouter.name('unlistedCallable'), 'unlistedCallable');
   });
+
+  test('routes downloadClinicalSessionEvidence consistently across environments', () {
+    expect(
+      FirebaseCallableRouter.name('downloadClinicalSessionEvidence'),
+      'downloadClinicalSessionEvidence',
+    );
+  });
 }

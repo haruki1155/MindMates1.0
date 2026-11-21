@@ -1,10 +1,19 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import '../../../repositories/admin_portal_repository.dart';
+import '../../../services/firebase/firebase_error_message.dart';
 import '../domain/session_evidence.dart';
 import '../services/clinical_file_download_stub.dart'
     if (dart.library.js_interop) '../services/clinical_file_download_web.dart'
     as clinical_download;
+
+typedef ClinicalFileSaver =
+    Future<void> Function(Uint8List bytes, String fileName, String contentType);
 
 /// Display-only editor. The parent appointment review owns the draft and
 /// submits it to the server exclusively on a confirmed session completion.
@@ -72,10 +81,12 @@ class ClinicalInterviewRecordViewer extends StatefulWidget {
     super.key,
     required this.repository,
     required this.appointmentId,
+    this.saveFile,
   });
 
   final AdminPortalRepository repository;
   final String appointmentId;
+  final ClinicalFileSaver? saveFile;
 
   @override
   State<ClinicalInterviewRecordViewer> createState() =>
@@ -87,18 +98,100 @@ class _ClinicalInterviewRecordViewerState
   Future<SessionEvidenceRecord?>? _future;
   bool _downloading = false;
 
+  static final RegExp _unsafeTextPattern = RegExp(
+    r'counseling_session_files(?:/|\\|%2f|%5c|%252f|%255c)|gs(?::|%3a)(?://|%2f%2f)|https?(?::|%3a)(?://|%2f%2f)|token(?:=|%3d)|(?:firebase)?storage\.googleapis\.com',
+    caseSensitive: false,
+  );
+
+  String _sanitizeDownloadMessage(String candidate, String fallback) {
+    final trimmed = candidate.trim();
+    if (trimmed.isEmpty ||
+        trimmed.toUpperCase() == 'INTERNAL' ||
+        _unsafeTextPattern.hasMatch(trimmed)) {
+      return fallback;
+    }
+    return trimmed;
+  }
+
+  String _describeDownloadError(Object error) {
+    const fallback =
+        'Unable to download this private file right now. Please try again.';
+    if (error is UnsupportedError) {
+      return _sanitizeDownloadMessage(
+        error.message ?? '',
+        'Clinical file downloading is available in the Web portal.',
+      );
+    }
+    if (error is TimeoutException) {
+      return 'MindMate did not respond in time. Your request may still be processing; check your connection before trying again.';
+    }
+    if (error is FormatException || error is StateError) {
+      return 'This private file cannot be downloaded because it is invalid or exceeds the 5 MB limit.';
+    }
+    final code = FirebaseErrorMessage.codeOf(error);
+    switch (code) {
+      case 'permission-denied':
+      case 'unauthorized':
+        return 'You do not have permission to download this private file.';
+      case 'unauthenticated':
+        return 'Please sign in again to continue.';
+      case 'not-found':
+      case 'object-not-found':
+        return 'This private file is no longer available.';
+      case 'failed-precondition':
+      case 'invalid-argument':
+        return 'This private file cannot be downloaded because it is invalid or exceeds the 5 MB limit.';
+      case 'unavailable':
+      case 'network-request-failed':
+        return 'The connection to MindMates is unavailable. Check your internet connection and try again.';
+      case 'internal':
+      case 'already-exists':
+        return fallback;
+      default:
+        if (error is FirebaseFunctionsException || error is FirebaseException) {
+          return _sanitizeDownloadMessage(
+            FirebaseErrorMessage.describe(error, fallback: fallback),
+            fallback,
+          );
+        }
+        return fallback;
+    }
+  }
+
+  String _safeFileName(String rawName) {
+    final cleaned = rawName
+        .replaceAll(RegExp(r'[\x00-\x1f]'), '')
+        .replaceAll(RegExp(r'[/\\]'), '_')
+        .trim();
+    if (cleaned.isEmpty || RegExp(r'^[._\s]+$').hasMatch(cleaned)) {
+      return 'attachment';
+    }
+    return cleaned;
+  }
+
+  String _safeContentType(SessionEvidenceAttachment file, String safeName) {
+    final declared = file.contentType.trim();
+    if (declared.isNotEmpty) return declared;
+    return sessionEvidenceMimeType(safeName) ?? 'application/octet-stream';
+  }
+
   Future<void> _download(SessionEvidenceAttachment file) async {
     if (_downloading) return;
     setState(() => _downloading = true);
     try {
-      final bytes = await widget.repository.getClinicalEvidenceBytes(file.path);
-      await clinical_download.saveClinicalFileBytes(
-        bytes, file.name, file.contentType,
+      final bytes = await widget.repository.getClinicalEvidenceBytes(
+        file.path,
+        appointmentId: widget.appointmentId,
       );
-    } catch (_) {
+      final safeName = _safeFileName(file.name);
+      final safeContentType = _safeContentType(file, safeName);
+      final saver = widget.saveFile ?? clinical_download.saveClinicalFileBytes;
+      await saver(bytes, safeName, safeContentType);
+    } catch (error) {
       if (mounted) {
+        final message = _describeDownloadError(error);
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          const SnackBar(content: Text('Unable to download this private file.')),
+          SnackBar(content: Text(message)),
         );
       }
     } finally {

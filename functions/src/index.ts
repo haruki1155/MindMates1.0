@@ -93,7 +93,12 @@ import {
 import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
 import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_intake";
 import {canBookFollowUpFromParent, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
-import {validateSessionEvidence, verifySessionEvidenceObjects} from "./appointment_session_evidence";
+import {
+  downloadSessionEvidenceFile,
+  validateSessionEvidence,
+  validateSessionEvidenceDownloadRequest,
+  verifySessionEvidenceObjects,
+} from "./appointment_session_evidence";
 export {
   aggregateMindAidFeedback,
   sendMindAidMessage,
@@ -2394,6 +2399,12 @@ export const reviewAppointment = onCall(async (request) => {
     });
   });
   return {ok: true};
+});
+
+export const downloadClinicalSessionEvidence = onCall(async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  const {appointmentId, path} = validateSessionEvidenceDownloadRequest(request.data);
+  return downloadSessionEvidenceFile({actorId, appointmentId, path});
 });
 
 export const archiveAppointments = onCall(async (request) => {

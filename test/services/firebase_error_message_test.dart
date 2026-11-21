@@ -92,4 +92,29 @@ void main() {
       'Unable to save journal.',
     );
   });
+
+  test('maps Storage unauthorized and object-not-found safely without App Check confusion', () {
+    final unauthorized = FirebaseErrorMessage.describe(
+      FirebaseException(plugin: 'firebase_storage', code: 'unauthorized'),
+      fallback: 'Unable to download this private file.',
+    );
+    expect(unauthorized, 'You do not have permission to complete this action.');
+    expect(unauthorized, isNot(contains('App Check')));
+
+    final missing = FirebaseErrorMessage.describe(
+      FirebaseException(plugin: 'firebase_storage', code: 'object-not-found'),
+      fallback: 'Unable to download this private file.',
+    );
+    expect(missing, isNot(contains('App Check')));
+    expect(missing.toLowerCase(), anyOf(contains('not'), contains('unable')));
+  });
+
+  test('never exposes raw INTERNAL messages from FirebaseFunctionsException', () {
+    final message = FirebaseErrorMessage.describe(
+      FirebaseFunctionsException(code: 'internal', message: 'INTERNAL'),
+      fallback: 'Something went wrong. Please try again.',
+    );
+    expect(message, 'Something went wrong. Please try again.');
+    expect(message, isNot('INTERNAL'));
+  });
 }

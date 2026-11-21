@@ -359,13 +359,16 @@ test("unauthenticated, students, portal staff, ordinary admins, suspended super-
   // Unauthenticated access denied (get, create, delete).
   const unauth = env.unauthenticatedContext().storage();
   await assertFails(getMetadata(ref(unauth, path)));
+  await assertFails(getBytes(ref(unauth, path)));
   await assertFails(uploadBytes(ref(unauth, path.replace("0123", "2222")), payload, meta));
   await assertFails(deleteObject(ref(unauth, path)));
 
   // Unverified-email counselor and super-admin denied.
   await assertFails(getMetadata(ref(storageFor("counselor", false), path)));
+  await assertFails(getBytes(ref(storageFor("counselor", false), path)));
   await assertFails(uploadBytes(ref(storageFor("counselor", false), path.replace("0123", "3333")), payload, meta));
   await assertFails(getMetadata(ref(storageFor("admin", false), path)));
+  await assertFails(getBytes(ref(storageFor("admin", false), path)));
 
   for (const account of [
     "student",
@@ -381,6 +384,7 @@ test("unauthenticated, students, portal staff, ordinary admins, suspended super-
   ]) {
     const client = storageFor(account);
     await assertFails(getMetadata(ref(client, path)));
+    await assertFails(getBytes(ref(client, path)));
     await assertFails(deleteObject(ref(client, path)));
     await assertFails(
       uploadBytes(
@@ -568,4 +572,99 @@ test("clinical evidence becomes read-only after the session is completed", async
   await assertFails(deleteObject(ref(clinician, path)));
   const second = path.replace("0123456789abcdef", "fedcba9876543210");
   await assertFails(uploadBytes(ref(clinician, second), payload, meta));
+});
+
+test("denies list/listAll for non-clinical and ordinary-admin callers, rejected/missing users, missing security doc, and accessRole: null fail-closed", async () => {
+  const clinician = storageFor("counselor");
+  await assertSucceeds(uploadBytes(ref(clinician, path), payload, meta));
+
+  // list / listAll denials across portal-staff, student, other-admin, unauth
+  for (const client of [
+    storageFor("portal-staff"),
+    storageFor("student"),
+    storageFor("other-admin"),
+    env.unauthenticatedContext().storage(),
+  ]) {
+    await assertFails(listAll(ref(client, "counseling_session_files/appointment-1/counselor")));
+    await assertFails(list(ref(client, "counseling_session_files/appointment-1"), {maxResults: 10}));
+  }
+
+  // Rejected counselor, missing users/{uid}, legacy role fallback vs explicit accessRole: null
+  await env.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await Promise.all([
+      setDoc(doc(firestore, "users/counselor-rejected"), {
+        accessRole: "counselor", staffAccountStatus: "rejected", accountStatus: "active", assignedCollegeIds: ["cite"],
+      }),
+      setDoc(doc(firestore, "users/counselor-legacy-role"), {
+        role: "counselor", assignedCollegeIds: ["cite"],
+      }),
+      setDoc(doc(firestore, "users/counselor-null-role"), {
+        accessRole: null, role: "counselor", assignedCollegeIds: ["cite"],
+      }),
+    ]);
+  });
+
+  const rejected = storageFor("counselor-rejected");
+  await assertFails(getBytes(ref(rejected, path)));
+  await assertFails(deleteObject(ref(rejected, path)));
+  await assertFails(uploadBytes(ref(rejected, path.replace("/counselor/", "/counselor-rejected/").replace("0123", "abcd")), payload, {
+    ...meta, customMetadata: {uploadedBy: "counselor-rejected", appointmentId},
+  }));
+
+  const noUserDoc = storageFor("no-user-doc");
+  await assertFails(getBytes(ref(noUserDoc, path)));
+  await assertFails(deleteObject(ref(noUserDoc, path)));
+  await assertFails(uploadBytes(ref(noUserDoc, path.replace("/counselor/", "/no-user-doc/").replace("0123", "bcde")), payload, {
+    ...meta, customMetadata: {uploadedBy: "no-user-doc", appointmentId},
+  }));
+
+  // Legacy role fallback succeeds; explicit accessRole: null fails closed.
+  await assertSucceeds(getBytes(ref(storageFor("counselor-legacy-role"), path)));
+  await assertFails(getBytes(ref(storageFor("counselor-null-role"), path)));
+
+  // Missing system_config/security denies super-admin reads.
+  await env.withSecurityRulesDisabled(async (context) => {
+    await deleteDoc(doc(context.firestore(), "system_config/security"));
+  });
+  await assertFails(getMetadata(ref(storageFor("admin"), path)));
+  await assertFails(getBytes(ref(storageFor("admin"), path)));
+});
+
+test("denies path traversal, extra/missing segments, URL-encoded traversal, non-clinical roots, and distinguishes missing-object errors safely", async () => {
+  const clinician = storageFor("counselor");
+  const superAdmin = storageFor("admin");
+  const badPaths = [
+    "counseling_session_files/appointment-1/counselor/../other/0123456789abcdef0123456789abcdef.pdf",
+    "counseling_session_files/appointment-1/counselor/sub/0123456789abcdef0123456789abcdef.pdf",
+    "counseling_session_files/appointment-1/0123456789abcdef0123456789abcdef.pdf",
+    "counseling_session_files/appointment-1/counselor/..%2F0123456789abcdef0123456789abcdef.pdf",
+    "backups/2026/export.json",
+    "other_private/test.pdf",
+  ];
+  for (const badPath of badPaths) {
+    for (const client of [clinician, superAdmin]) {
+      await assertFails(getMetadata(ref(client, badPath)));
+      await assertFails(getBytes(ref(client, badPath)));
+      await assertFails(uploadBytes(ref(client, badPath), payload, meta));
+    }
+  }
+
+  // Nonexistent object: authorized callers get storage/object-not-found; unauthorized callers get storage/unauthorized.
+  const absentPath = "counseling_session_files/appointment-1/counselor/ffffffffffffffffffffffffffffffff.pdf";
+  for (const authorized of [clinician, superAdmin]) {
+    await assert.rejects(
+      getBytes(ref(authorized, absentPath)),
+      (err: {code?: string}) => err?.code === "storage/object-not-found",
+    );
+  }
+  for (const denied of [
+    storageFor("portal-staff"),
+    storageFor("student"),
+    storageFor("other-counselor"),
+    storageFor("other-admin"),
+  ]) {
+    const err = await assertFails(getBytes(ref(denied, absentPath))) as {code?: string};
+    assert.equal(err?.code, "storage/unauthorized");
+  }
 });

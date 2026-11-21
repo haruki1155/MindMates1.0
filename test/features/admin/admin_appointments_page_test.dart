@@ -24,6 +24,8 @@ class _Repository extends AdminPortalRepository {
   String? agreementAction;
   int? agreementRevision;
   bool uploadCalled = false;
+  String? downloadedPath;
+  String? downloadedAppointmentId;
   Map<String, Object?>? reviewedSubmission;
 
   @override
@@ -102,6 +104,16 @@ class _Repository extends AdminPortalRepository {
       ),
     ],
   );
+
+  @override
+  Future<Uint8List> getClinicalEvidenceBytes(
+    String path, {
+    String? appointmentId,
+  }) async {
+    downloadedPath = path;
+    downloadedAppointmentId = appointmentId;
+    return Uint8List.fromList([1, 2, 3]);
+  }
 
   @override
   Stream<List<AppointmentModel>> watchAppointments() => Stream.value(records);
@@ -400,6 +412,14 @@ void main() {
       expect(find.text('Existing summary'), findsOneWidget);
       expect(find.text('Existing worksheet.pdf'), findsOneWidget);
       expect(find.byTooltip('Download Existing worksheet.pdf'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Download Existing worksheet.pdf'));
+      await tester.pumpAndSettle();
+      expect(repo.downloadedAppointmentId, 'Completed Student');
+      expect(
+        repo.downloadedPath,
+        'counseling_session_files/apt/counselor/0123456789abcdef0123456789abcdef.pdf',
+      );
     },
   );
 

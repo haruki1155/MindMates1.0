@@ -27,10 +27,19 @@ class FirebaseErrorMessage {
       return appCheckMessage();
     }
     final code = codeOf(error);
+    if (error is FirebaseException && error.plugin == 'firebase_storage') {
+      if (code == 'unauthorized') {
+        return 'You do not have permission to complete this action.';
+      }
+      if (code == 'object-not-found') {
+        return 'The requested file could not be found.';
+      }
+    }
     if (error is FirebaseFunctionsException) {
       final message = error.message?.trim();
       if (message != null &&
           message.isNotEmpty &&
+          !(code == 'internal' && message.toUpperCase() == 'INTERNAL') &&
           {
             'invalid-argument',
             'failed-precondition',
@@ -146,6 +155,11 @@ class FirebaseErrorMessage {
       host == 'localhost' || host == '127.0.0.1' || host == '::1';
 
   static bool isAppCheckFailure(Object error) {
+    if (error is FirebaseException &&
+        error.plugin == 'firebase_storage' &&
+        codeOf(error) == 'unauthorized') {
+      return false;
+    }
     final text = error.toString().toLowerCase();
     final code = codeOf(error);
     return text.contains('app check') ||
