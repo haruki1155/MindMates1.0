@@ -405,6 +405,60 @@ export const setInquiryStatus = onCall(async (request) => {
   });
 });
 
+export const resolveInquiry = onCall(async (request) => {
+  const who = await inquiryActor(request);
+  const inquiryId = inquiryIdFrom(request.data);
+  const ref = db().collection("inquiries").doc(inquiryId);
+  const statusRef = statusCollection().doc(inquiryId);
+  const nowTs = Timestamp.now();
+  return db().runTransaction(async (tx) => {
+    const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
+    if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
+    const data = current.data()!;
+    if (!canHandleClinical(who, data)) {
+      throw new HttpsError(
+        "permission-denied",
+        data.takeover
+          ? "An administrator has taken over this inquiry."
+          : "Only the counselor assigned to this inquiry or the super-administrator can resolve this inquiry.",
+      );
+    }
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
+    const before = String(data.status ?? "pending").toLowerCase();
+    if (before === "resolved") {
+      throw new HttpsError("failed-precondition", "This inquiry is already resolved.");
+    }
+    if (before !== "in_progress") {
+      throw new HttpsError("failed-precondition", "Acknowledge receipt before marking this inquiry as resolved.");
+    }
+    tx.update(ref, {
+      status: "resolved",
+      routingRevision: revision + 1,
+      updatedAt: FieldValue.serverTimestamp(),
+      resolvedAt: FieldValue.serverTimestamp(),
+      resolvedBy: who.actor.uid,
+    });
+    const projection = buildInquiryStatusProjection(inquiryId, {
+      ...data,
+      status: "resolved",
+      routingRevision: revision + 1,
+      updatedAt: nowTs,
+      resolvedAt: nowTs,
+    });
+    if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, projection)) {
+      tx.set(statusRef, {...projection, projectedAt: FieldValue.serverTimestamp()});
+    }
+    writeAudit(tx, db(), {
+      actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
+      action: "INQUIRY_RESOLVED",
+      category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
+      metadata: {before, after: "resolved", revision: revision + 1, revisionChecked},
+    });
+    return {ok: true, changed: true, revision: revision + 1};
+  });
+});
+
 export const escalateInquiry = onCall(async (request) => {
   const who = await inquiryActor(request);
   const inquiryId = inquiryIdFrom(request.data);

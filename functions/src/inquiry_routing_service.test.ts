@@ -10,6 +10,7 @@ import {
   escalateInquiry,
   INQUIRY_STATUSES_COLLECTION,
   reassignInquiry,
+  resolveInquiry,
   ensureActiveNotification,
   routeExistingInquiries,
   routeExistingInquiriesBatch,
@@ -622,4 +623,79 @@ test("routeExistingInquiriesBatch enforces exact per-call work bounds, cursor co
     assert.ok(r.routingStatus != null);
     assert.equal(r.hasProjection, true);
   }
+});
+
+test("resolveInquiry requires acknowledgment, enforces role scope, prevents duplicate/concurrent resolution, and fails safely on invalid IDs", {skip: !emulated}, async () => {
+  // Missing or invalid inquiry IDs fail safely.
+  await rejects((resolveInquiry as unknown as Callable).run({data: {inquiryId: "missing"}}), "unauthenticated");
+  await rejects(call(resolveInquiry, "c1", {inquiryId: ""}), "invalid-argument");
+  await rejects(call(resolveInquiry, "c1", {inquiryId: "bad/id"}), "invalid-argument");
+  await rejects(call(resolveInquiry, "c1", {inquiryId: `${p}-does-not-exist`}), "not-found");
+
+  // Pending inquiry cannot bypass required acknowledgment.
+  const id = await newInquiry("cite");
+  await routeInquiry(id);
+  await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
+  await rejects(call(resolveInquiry, "c1", {inquiryId: id, expectedRevision: 2}), "failed-precondition");
+  await rejects(call(resolveInquiry, "admin", {inquiryId: id, expectedRevision: 2}), "failed-precondition");
+  assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.status, "pending");
+  assert.equal((await audit(id, "INQUIRY_RESOLVED")).length, 0);
+
+  // Acknowledge transitions pending -> in_progress (revision 3).
+  await call(acknowledgeInquiry, "c1", {inquiryId: id, expectedRevision: 2});
+  assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.status, "in_progress");
+
+  // Unauthorized actors cannot resolve an in_progress inquiry.
+  await rejects(call(resolveInquiry, "s1", {inquiryId: id, expectedRevision: 3}), "permission-denied");
+  await rejects(call(resolveInquiry, "c2", {inquiryId: id, expectedRevision: 3}), "permission-denied");
+  await rejects(call(resolveInquiry, "student-cite", {inquiryId: id, expectedRevision: 3}), "permission-denied");
+  await rejects(call(resolveInquiry, "otherAdmin", {inquiryId: id, expectedRevision: 3}), "permission-denied");
+  await rejects(call(resolveInquiry, "sus", {inquiryId: id, expectedRevision: 3}), "permission-denied");
+  await rejects(call(resolveInquiry, "unv", {inquiryId: id, expectedRevision: 3}), "permission-denied");
+
+  // Stale revision fails safely without modifying state.
+  await rejects(call(resolveInquiry, "c1", {inquiryId: id, expectedRevision: 2}), "failed-precondition");
+  assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.status, "in_progress");
+
+  // Authorized counselor resolves in_progress -> resolved.
+  const resolvedResult = await call(resolveInquiry, "c1", {inquiryId: id, expectedRevision: 3});
+  assert.deepEqual(resolvedResult, {ok: true, changed: true, revision: 4});
+  const afterDoc = (await db.doc(`inquiries/${id}`).get()).data()!;
+  assert.equal(afterDoc.status, "resolved");
+  assert.equal(afterDoc.resolvedBy, uid("c1"));
+  assert.ok(afterDoc.resolvedAt != null);
+  assert.ok(afterDoc.acknowledgedAt != null);
+  assert.equal(afterDoc.routingRevision, 4);
+  const afterProj = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
+  assert.equal(afterProj.status, "resolved");
+  assert.ok(afterProj.resolvedAt != null);
+  assert.equal((await audit(id, "INQUIRY_RESOLVED")).length, 1);
+
+  // Resolved inquiry cannot be resolved twice.
+  await rejects(call(resolveInquiry, "c1", {inquiryId: id, expectedRevision: 4}), "failed-precondition");
+  await rejects(call(resolveInquiry, "admin", {inquiryId: id, expectedRevision: 4}), "failed-precondition");
+  assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.routingRevision, 4);
+  assert.equal((await audit(id, "INQUIRY_RESOLVED")).length, 1);
+
+  // Super-admin can resolve an acknowledged inquiry; concurrent attempts produce exactly one resolution.
+  const raceId = await newInquiry("cite");
+  await routeInquiry(raceId);
+  await call(acknowledgeInquiry, "c1", {inquiryId: raceId, expectedRevision: 1});
+  const outcomes = await Promise.allSettled([
+    call(resolveInquiry, "c1", {inquiryId: raceId, expectedRevision: 2}),
+    call(resolveInquiry, "admin", {inquiryId: raceId, expectedRevision: 2}),
+  ]);
+  const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
+  const rejected = outcomes.filter((o) => o.status === "rejected");
+  assert.equal(fulfilled.length, 1, "exactly one concurrent resolution must succeed");
+  assert.equal(rejected.length, 1, "the losing concurrent resolution must fail");
+  assert.ok(
+    rejected[0].status === "rejected" &&
+    rejected[0].reason instanceof HttpsError &&
+    rejected[0].reason.code === "failed-precondition",
+  );
+  const raceDoc = (await db.doc(`inquiries/${raceId}`).get()).data()!;
+  assert.equal(raceDoc.status, "resolved");
+  assert.equal(raceDoc.routingRevision, 3);
+  assert.equal((await audit(raceId, "INQUIRY_RESOLVED")).length, 1);
 });

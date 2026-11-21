@@ -2190,6 +2190,14 @@ class AdminPortalRepository {
     'expectedRevision': ?expectedRevision,
   });
 
+  /// Marks an acknowledged (in-progress) inquiry as resolved server-side.
+  /// Pass [expectedRevision] to reject the change if someone acted first.
+  Future<void> resolveInquiry(String id, {int? expectedRevision}) =>
+      _callCallable('resolveInquiry', {
+        'inquiryId': id,
+        'expectedRevision': ?expectedRevision,
+      });
+
   /// Assignee or super-administrator posts an authored reply; returns the
   /// new revision. [requestId] makes retries return the original reply.
   Future<int> replyToInquiry(

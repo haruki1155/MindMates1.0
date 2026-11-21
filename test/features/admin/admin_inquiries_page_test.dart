@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/domain/inquiry_sla.dart';
@@ -15,13 +17,29 @@ class _FakeInquiriesRepo extends AdminPortalRepository {
     this.role = AccessRole.admin,
     this.superAdmin = true,
     this.uid = 'admin-1',
+    this.resolveCompleter,
+    this.resolveError,
   });
 
-  final List<AdminInquiryModel> inquiries;
+  List<AdminInquiryModel> inquiries;
   final AccessRole role;
   final bool superAdmin;
   final String uid;
+  final Completer<void>? resolveCompleter;
+  final Object? resolveError;
   final List<String> acknowledgedIds = [];
+  final List<(String, int?)> resolvedCalls = [];
+  final StreamController<List<AdminInquiryModel>> _controller =
+      StreamController<List<AdminInquiryModel>>.broadcast();
+
+  void emitInquiries(List<AdminInquiryModel> next) {
+    inquiries = next;
+    _controller.add(next);
+  }
+
+  void dispose() {
+    _controller.close();
+  }
 
   @override
   AccessRole get currentAccessRole => role;
@@ -40,11 +58,16 @@ class _FakeInquiriesRepo extends AdminPortalRepository {
       Stream.value(const InquirySla(hours: null));
 
   @override
-  Stream<List<AdminInquiryModel>> watchInquiries() => Stream.value(inquiries);
+  Stream<List<AdminInquiryModel>> watchInquiries() async* {
+    yield inquiries;
+    yield* _controller.stream;
+  }
 
   @override
-  Stream<List<AdminInquiryModel>> watchInquiryStatuses() =>
-      Stream.value(inquiries);
+  Stream<List<AdminInquiryModel>> watchInquiryStatuses() async* {
+    yield inquiries;
+    yield* _controller.stream;
+  }
 
   @override
   Stream<List<InquiryReply>> watchInquiryReplies(String inquiryId) =>
@@ -57,6 +80,17 @@ class _FakeInquiriesRepo extends AdminPortalRepository {
   }) async {
     acknowledgedIds.add(inquiryId);
   }
+
+  @override
+  Future<void> resolveInquiry(String inquiryId, {int? expectedRevision}) async {
+    resolvedCalls.add((inquiryId, expectedRevision));
+    if (resolveCompleter != null) {
+      await resolveCompleter!.future;
+    }
+    if (resolveError != null) {
+      throw resolveError!;
+    }
+  }
 }
 
 AdminInquiryModel _inquiry(
@@ -64,6 +98,11 @@ AdminInquiryModel _inquiry(
   required String subject,
   required InquiryStatus status,
   required DateTime createdAt,
+  DateTime? acknowledgedAt,
+  List<String> assigneeIds = const [],
+  int routingRevision = 1,
+  String? formType,
+  Map<String, dynamic> formData = const {},
 }) => AdminInquiryModel(
   id: id,
   userId: 'u1',
@@ -74,6 +113,11 @@ AdminInquiryModel _inquiry(
   message: 'Inquiry body $id',
   status: status,
   createdAt: createdAt,
+  acknowledgedAt: acknowledgedAt,
+  assigneeIds: assigneeIds,
+  routingRevision: routingRevision,
+  formType: formType,
+  formData: formData,
 );
 
 void main() {
@@ -316,6 +360,222 @@ void main() {
         expect(find.byType(AdminStatusBadge), findsOneWidget);
         expect(find.text('Change status'), findsNothing);
       }
+    },
+  );
+
+  testWidgets(
+    'Mark as Resolved is hidden for pending and resolved inquiries, and shown for in-progress inquiries with confirmation, loading, and status update',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      // 1. Pending inquiry: no Mark as Resolved button (must acknowledge first).
+      final pending = _inquiry(
+        'i_pend',
+        subject: 'Pending inquiry',
+        status: InquiryStatus.pending,
+        createdAt: DateTime.utc(2026, 11, 21, 10),
+        assigneeIds: const ['c1'],
+        routingRevision: 1,
+      );
+      final pendingRepo = _FakeInquiriesRepo(
+        [pending],
+        role: AccessRole.counselor,
+        superAdmin: false,
+        uid: 'c1',
+      );
+      addTearDown(pendingRepo.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: pending, repository: pendingRepo),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Acknowledge receipt'), findsOneWidget);
+      expect(find.text('Mark as Resolved'), findsNothing);
+      expect(find.text('Change status'), findsNothing);
+
+      // 2. In-progress inquiry for assigned counselor: shows Mark as Resolved,
+      // confirmation dialog, loading indicator, duplicate-submit guard, and live status update.
+      final completer = Completer<void>();
+      final inProgress = _inquiry(
+        'i_prog',
+        subject: 'In progress form inquiry',
+        status: InquiryStatus.inProgress,
+        createdAt: DateTime.utc(2026, 11, 21, 11),
+        acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+        assigneeIds: const ['c1'],
+        routingRevision: 2,
+        formType: 'client_feedback',
+        formData: const {'Rating': 'Helpful'},
+      );
+      final resolveRepo = _FakeInquiriesRepo(
+        [inProgress],
+        role: AccessRole.counselor,
+        superAdmin: false,
+        uid: 'c1',
+        resolveCompleter: completer,
+      );
+      addTearDown(resolveRepo.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(
+            inquiry: inProgress,
+            repository: resolveRepo,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // PDF buttons remain present for form submissions.
+      expect(find.text('PDF preview'), findsOneWidget);
+      expect(find.text('Download PDF'), findsOneWidget);
+      expect(find.text('Mark as Resolved'), findsOneWidget);
+      expect(find.text('Change status'), findsNothing);
+
+      // Cancel in confirmation dialog leaves status unchanged and makes no call.
+      await tester.ensureVisible(find.text('Mark as Resolved'));
+      await tester.tap(find.text('Mark as Resolved'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mark inquiry as resolved?'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(resolveRepo.resolvedCalls, isEmpty);
+
+      // Confirm in dialog triggers loading indicator and prevents duplicate submit.
+      await tester.tap(find.text('Mark as Resolved'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, 'Mark as Resolved'),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Marking as resolved…'), findsOneWidget);
+      expect(resolveRepo.resolvedCalls, [('i_prog', 2)]);
+
+      // Attempting another tap while loading does not submit twice.
+      await tester.tap(find.text('Marking as resolved…'), warnIfMissed: false);
+      await tester.pump();
+      expect(resolveRepo.resolvedCalls.length, 1);
+
+      // Complete resolution and emit updated resolved document from stream.
+      completer.complete();
+      resolveRepo.emitInquiries([
+        _inquiry(
+          'i_prog',
+          subject: 'In progress form inquiry',
+          status: InquiryStatus.resolved,
+          createdAt: DateTime.utc(2026, 11, 21, 11),
+          acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+          assigneeIds: const ['c1'],
+          routingRevision: 3,
+          formType: 'client_feedback',
+          formData: const {'Rating': 'Helpful'},
+        ),
+      ]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Inquiry marked as resolved.'), findsOneWidget);
+      expect(find.text('Resolved'), findsOneWidget);
+      expect(find.text('Mark as Resolved'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'Failed inquiry resolution preserves in-progress state and shows error feedback; unauthorized staff do not see Mark as Resolved',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final inProgress = _inquiry(
+        'i_fail',
+        subject: 'Failing resolve inquiry',
+        status: InquiryStatus.inProgress,
+        createdAt: DateTime.utc(2026, 11, 21, 11),
+        acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+        assigneeIds: const ['c1'],
+        routingRevision: 2,
+      );
+      final failingRepo = _FakeInquiriesRepo(
+        [inProgress],
+        role: AccessRole.admin,
+        superAdmin: true,
+        uid: 'admin-1',
+        resolveError: StateError('Server error'),
+      );
+      addTearDown(failingRepo.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(
+            inquiry: inProgress,
+            repository: failingRepo,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Mark as Resolved'));
+      await tester.tap(find.text('Mark as Resolved'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, 'Mark as Resolved'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(failingRepo.resolvedCalls, [('i_fail', 2)]);
+      expect(find.text(InquiryStatus.inProgress.label), findsOneWidget);
+      expect(find.text('Mark as Resolved'), findsOneWidget);
+      expect(find.text('Unable to mark inquiry as resolved.'), findsOneWidget);
+
+      // PAACC Staff (portalStaff) operational view does not show Mark as Resolved.
+      final operationalInProgress = AdminInquiryModel(
+        id: 'op_prog',
+        userId: '',
+        name: '',
+        email: '',
+        category: 'General',
+        subject: '',
+        message: '',
+        status: InquiryStatus.inProgress,
+        createdAt: DateTime.utc(2026, 11, 21, 11),
+        acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+        isOperationalProjection: true,
+        operationalLabel: 'General inquiry #op_prog',
+        monitoringStaffIds: const ['staff-1'],
+        routingRevision: 2,
+      );
+      final staffRepo = _FakeInquiriesRepo(
+        [operationalInProgress],
+        role: AccessRole.portalStaff,
+        superAdmin: false,
+        uid: 'staff-1',
+      );
+      addTearDown(staffRepo.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(
+            inquiry: operationalInProgress,
+            repository: staffRepo,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Mark as Resolved'), findsNothing);
     },
   );
 }

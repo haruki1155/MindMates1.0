@@ -6250,8 +6250,19 @@ class _InquiryDetails extends StatefulWidget {
 
 class _InquiryDetailsState extends State<_InquiryDetails> {
   bool _acknowledging = false;
+  bool _resolving = false;
   bool _previewingPdf = false;
   bool _downloadingPdf = false;
+
+  bool _canResolveInquiry(AdminInquiryModel item) {
+    if (item.isOperationalProjection) return false;
+    if (widget.repository.isSuperAdmin) return true;
+    if (item.isTakenOver) return false;
+    final uid = widget.repository.currentUserId;
+    return widget.repository.currentAccessRole == AccessRole.counselor &&
+        uid != null &&
+        item.assigneeIds.contains(uid);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -6428,7 +6439,8 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                     item.isAcknowledged ||
                         item.status == InquiryStatus.resolved ||
                         (item.isTakenOver && !widget.repository.isSuperAdmin) ||
-                        _acknowledging
+                        _acknowledging ||
+                        _resolving
                     ? null
                     : () => _acknowledge(context),
                 icon: Icon(
@@ -6446,6 +6458,26 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                       : 'Acknowledge receipt',
                 ),
               ),
+              if (item.status == InquiryStatus.inProgress &&
+                  _canResolveInquiry(item))
+                FilledButton.icon(
+                  onPressed: _resolving || _acknowledging
+                      ? null
+                      : () => _confirmAndResolve(context),
+                  icon: _resolving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.check_circle_outline),
+                  label: Text(
+                    _resolving ? 'Marking as resolved…' : 'Mark as Resolved',
+                  ),
+                ),
             ],
           ),
         ],
@@ -6454,7 +6486,7 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
   }
 
   Future<void> _acknowledge(BuildContext context) async {
-    if (_acknowledging) return;
+    if (_acknowledging || _resolving) return;
     setState(() => _acknowledging = true);
     try {
       await widget.repository.acknowledgeInquiry(
@@ -6476,6 +6508,69 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
       }
     } finally {
       if (mounted) setState(() => _acknowledging = false);
+    }
+  }
+
+  Future<void> _confirmAndResolve(BuildContext context) async {
+    final item = widget.item;
+    if (item == null ||
+        _resolving ||
+        _acknowledging ||
+        item.status != InquiryStatus.inProgress ||
+        !_canResolveInquiry(item)) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Mark inquiry as resolved?'),
+        content: const Text(
+          'This will update the inquiry status to Resolved. Make sure the student\'s concern has been addressed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Mark as Resolved'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || !context.mounted) return;
+    final current = widget.item;
+    if (current == null ||
+        current.id != item.id ||
+        current.status != InquiryStatus.inProgress ||
+        _resolving) {
+      return;
+    }
+    setState(() => _resolving = true);
+    try {
+      await widget.repository.resolveInquiry(
+        current.id,
+        expectedRevision: current.routingRevision,
+      );
+      widget.onUpdated();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Inquiry marked as resolved.')),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _inquiryActionError(error, 'mark inquiry as resolved'),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _resolving = false);
     }
   }
 
