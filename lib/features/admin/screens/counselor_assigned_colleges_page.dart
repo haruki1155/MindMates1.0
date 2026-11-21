@@ -114,7 +114,9 @@ class _CounselorAssignedCollegesPageState
 
             final entries =
                 assignedIds
-                    .map((id) => _AssignedCollegeEntry(id: id, college: byId[id]))
+                    .map(
+                      (id) => _AssignedCollegeEntry(id: id, college: byId[id]),
+                    )
                     .toList()
                   ..sort((a, b) => a.sortLabel.compareTo(b.sortLabel));
 

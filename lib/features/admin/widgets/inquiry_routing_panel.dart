@@ -468,7 +468,9 @@ class _ReassignDialogState extends State<_ReassignDialog> {
                             dense: true,
                             value: _selectedMonitors.contains(user.id),
                             title: Text(user.displayName),
-                            subtitle: const Text('Operational status monitoring'),
+                            subtitle: const Text(
+                              'Operational status monitoring',
+                            ),
                             onChanged: _busy
                                 ? null
                                 : (checked) => setState(

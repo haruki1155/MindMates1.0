@@ -316,9 +316,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                           child: AnimatedSwitcher(
                             duration:
                                 (MediaQuery.maybeDisableAnimationsOf(context) ??
-                                        false)
-                                    ? Duration.zero
-                                    : const Duration(milliseconds: 180),
+                                    false)
+                                ? Duration.zero
+                                : const Duration(milliseconds: 180),
                             child: _submitting
                                 ? const Row(
                                     key: ValueKey('signing-in'),
@@ -2387,11 +2387,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                     decoration: const InputDecoration(
                       labelText: 'Appointment type',
                     ),
-                    items: const [
-                      'All appointments',
-                      'Initial',
-                      'Follow-up',
-                    ]
+                    items: const ['All appointments', 'Initial', 'Follow-up']
                         .map(
                           (t) => DropdownMenuItem(
                             value: t,
@@ -3469,13 +3465,17 @@ class _AppointmentCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 14),
                       DropdownButtonFormField<String>(
+                        isExpanded: true,
                         initialValue: action,
                         decoration: const InputDecoration(labelText: 'Action'),
                         items: [
                           if (pendingStudent)
                             const DropdownMenuItem(
                               value: 'accept',
-                              child: Text('Accept student proposed time'),
+                              child: Text(
+                                'Accept student proposed time',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           if (!item.hasPendingScheduleChange &&
                               currentStatus != AppointmentStatus.confirmed &&
@@ -3483,21 +3483,33 @@ class _AppointmentCard extends StatelessWidget {
                                   AppointmentStatus.rescheduleProposed)
                             const DropdownMenuItem(
                               value: 'confirmed',
-                              child: Text('Confirm appointment'),
+                              child: Text(
+                                'Confirm appointment',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           const DropdownMenuItem(
                             value: 'rescheduled',
-                            child: Text('Re-schedule appointment'),
+                            child: Text(
+                              'Re-schedule appointment',
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           if (currentStatus == AppointmentStatus.confirmed &&
                               !future) ...[
                             const DropdownMenuItem(
                               value: 'completed',
-                              child: Text('Mark session as completed'),
+                              child: Text(
+                                'Mark session as completed',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                             const DropdownMenuItem(
                               value: 'no_show',
-                              child: Text('Mark as Did Not Attend'),
+                              child: Text(
+                                'Mark as Did Not Attend',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ],
                         ],
@@ -3510,6 +3522,7 @@ class _AppointmentCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
+                        isExpanded: true,
                         key: ValueKey('reason-$action'),
                         initialValue: reason,
                         decoration: const InputDecoration(
@@ -3519,7 +3532,10 @@ class _AppointmentCard extends StatelessWidget {
                             .map(
                               (value) => DropdownMenuItem(
                                 value: value,
-                                child: Text(value),
+                                child: Text(
+                                  value,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             )
                             .toList(),
@@ -6415,16 +6431,16 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                       ? Icons.check_circle_outline
                       : Icons.notifications_active_outlined,
                 ),
-                  label: Text(
-                    item.isAcknowledged
-                        ? 'Receipt acknowledged'
-                        : item.status == InquiryStatus.resolved
-                        ? 'Resolved'
-                        : _acknowledging
-                        ? 'Acknowledging…'
-                        : 'Acknowledge receipt',
-                  ),
+                label: Text(
+                  item.isAcknowledged
+                      ? 'Receipt acknowledged'
+                      : item.status == InquiryStatus.resolved
+                      ? 'Resolved'
+                      : _acknowledging
+                      ? 'Acknowledging…'
+                      : 'Acknowledge receipt',
                 ),
+              ),
             ],
           ),
         ],

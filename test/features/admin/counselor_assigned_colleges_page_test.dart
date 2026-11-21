@@ -201,7 +201,10 @@ void main() {
 
       expect(find.text('Retired College'), findsOneWidget);
       expect(find.textContaining('Inactive / Archived'), findsOneWidget);
-      expect(find.textContaining('Unknown or unavailable college'), findsOneWidget);
+      expect(
+        find.textContaining('Unknown or unavailable college'),
+        findsOneWidget,
+      );
       expect(find.textContaining('Catalog entry not found'), findsOneWidget);
       expect(find.textContaining('missing-col'), findsNothing);
       expect(find.textContaining('retired-col'), findsNothing);
@@ -232,7 +235,9 @@ void main() {
         expect(repo.watchCollegesCalls, 0);
         expect(repo.watchUsersCalls, 0);
         expect(
-          find.text('Assigned colleges are available only to signed-in counselors.'),
+          find.text(
+            'Assigned colleges are available only to signed-in counselors.',
+          ),
           findsOneWidget,
         );
       }

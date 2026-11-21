@@ -464,10 +464,7 @@ void main() {
       var currentRole = AccessRole.counselor;
       var currentUid = 'uid-counselor-a';
 
-      final repoA = _Repo(
-        role: AccessRole.counselor,
-        items: [_item('a1')],
-      );
+      final repoA = _Repo(role: AccessRole.counselor, items: [_item('a1')]);
       final repoStaff = _Repo(
         role: AccessRole.portalStaff,
         items: [_item('a9')],
@@ -664,10 +661,7 @@ void main() {
       expect(find.text('Administrator exception reason'), findsNothing);
       expect(find.text('Send decision'), findsNothing);
       expect(find.text('Close'), findsOneWidget);
-      expect(
-        adminCalls.where((c) => c.$1 == 'reviewAppointment'),
-        isEmpty,
-      );
+      expect(adminCalls.where((c) => c.$1 == 'reviewAppointment'), isEmpty);
     },
   );
 
@@ -817,7 +811,10 @@ void main() {
       expect(opened, isNull);
       expect(find.textContaining('not authorized to open'), findsOneWidget);
       expect(listCalls, 2);
-      expect(find.text('No appointments are waiting for a decision.'), findsOneWidget);
+      expect(
+        find.text('No appointments are waiting for a decision.'),
+        findsOneWidget,
+      );
     },
   );
 }

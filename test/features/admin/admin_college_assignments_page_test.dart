@@ -101,12 +101,7 @@ const _syntheticColleges = [
     code: 'CBA',
     active: true,
   ),
-  College(
-    id: 'old',
-    name: 'Retired College',
-    code: 'OLD',
-    active: false,
-  ),
+  College(id: 'old', name: 'Retired College', code: 'OLD', active: false),
 ];
 
 Future<void> _pumpAdminPage(
@@ -300,31 +295,26 @@ void main() {
     },
   );
 
-  testWidgets(
-    'shows error state when watchUsers or watchColleges fails',
-    (tester) async {
-      final usersErrorRepo = _FakeAdminAssignmentsRepo(
-        superAdmin: true,
-        collegesStream: Stream.value(_syntheticColleges),
-        usersStream: Stream<List<UserModel>>.error(StateError('users-failed')),
-      );
-      await _pumpAdminPage(tester, usersErrorRepo);
-      expect(
-        find.text('We could not load college assignments.'),
-        findsOneWidget,
-      );
-      expect(find.text('Retry'), findsOneWidget);
+  testWidgets('shows error state when watchUsers or watchColleges fails', (
+    tester,
+  ) async {
+    final usersErrorRepo = _FakeAdminAssignmentsRepo(
+      superAdmin: true,
+      collegesStream: Stream.value(_syntheticColleges),
+      usersStream: Stream<List<UserModel>>.error(StateError('users-failed')),
+    );
+    await _pumpAdminPage(tester, usersErrorRepo);
+    expect(find.text('We could not load college assignments.'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
 
-      final collegesErrorRepo = _FakeAdminAssignmentsRepo(
-        superAdmin: true,
-        collegesStream: Stream<List<College>>.error(StateError('colleges-failed')),
-        usersStream: Stream.value(const []),
-      );
-      await _pumpAdminPage(tester, collegesErrorRepo);
-      expect(
-        find.text('We could not load college assignments.'),
-        findsOneWidget,
-      );
-    },
-  );
+    final collegesErrorRepo = _FakeAdminAssignmentsRepo(
+      superAdmin: true,
+      collegesStream: Stream<List<College>>.error(
+        StateError('colleges-failed'),
+      ),
+      usersStream: Stream.value(const []),
+    );
+    await _pumpAdminPage(tester, collegesErrorRepo);
+    expect(find.text('We could not load college assignments.'), findsOneWidget);
+  });
 }

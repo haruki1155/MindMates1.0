@@ -80,30 +80,33 @@ void main() {
       expect(followUp.backgroundColor, AdminColors.violetBg);
     });
 
-    test('maps assessment statuses with neutral fallback for missing/unknown', () {
-      final supported = resolveAdminStatus(
-        AdminStatusDomain.assessment,
-        'generally_supported',
-      );
-      final moderate = resolveAdminStatus(
-        AdminStatusDomain.assessment,
-        'moderate',
-      );
-      final high = resolveAdminStatus(AdminStatusDomain.assessment, 'high');
-      final missing = resolveAdminStatus(AdminStatusDomain.assessment, '');
-      final unknown = resolveAdminStatus(
-        AdminStatusDomain.assessment,
-        'custom_legacy_band',
-      );
+    test(
+      'maps assessment statuses with neutral fallback for missing/unknown',
+      () {
+        final supported = resolveAdminStatus(
+          AdminStatusDomain.assessment,
+          'generally_supported',
+        );
+        final moderate = resolveAdminStatus(
+          AdminStatusDomain.assessment,
+          'moderate',
+        );
+        final high = resolveAdminStatus(AdminStatusDomain.assessment, 'high');
+        final missing = resolveAdminStatus(AdminStatusDomain.assessment, '');
+        final unknown = resolveAdminStatus(
+          AdminStatusDomain.assessment,
+          'custom_legacy_band',
+        );
 
-      expect(supported.tone, AdminSemanticTone.green);
-      expect(moderate.tone, AdminSemanticTone.amber);
-      expect(high.tone, AdminSemanticTone.red);
-      expect(missing.tone, AdminSemanticTone.neutral);
-      expect(missing.label, 'Status unavailable');
-      expect(unknown.tone, AdminSemanticTone.neutral);
-      expect(unknown.label, 'custom legacy band');
-    });
+        expect(supported.tone, AdminSemanticTone.green);
+        expect(moderate.tone, AdminSemanticTone.amber);
+        expect(high.tone, AdminSemanticTone.red);
+        expect(missing.tone, AdminSemanticTone.neutral);
+        expect(missing.label, 'Status unavailable');
+        expect(unknown.tone, AdminSemanticTone.neutral);
+        expect(unknown.label, 'custom legacy band');
+      },
+    );
   });
 
   testWidgets('AdminStatusBadge renders icon, text, and accessible semantics', (

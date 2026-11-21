@@ -31,7 +31,8 @@ class AdminOperationsDashboardPage extends StatelessWidget {
     child: StreamBuilder<List<UserModel>>(
       stream: repository.watchUsers(),
       builder: (context, usersSnapshot) => StreamBuilder<List<AdminInquiryModel>>(
-        stream: repository.currentAccessRole == AccessRole.portalStaff &&
+        stream:
+            repository.currentAccessRole == AccessRole.portalStaff &&
                 !repository.isSuperAdmin
             ? repository.watchInquiryStatuses()
             : repository.watchInquiries(),
@@ -589,7 +590,9 @@ class _Schedule extends StatelessWidget {
   final AppointmentModel appointment;
   @override
   Widget build(BuildContext context) {
-    final isFollowUp = (appointment.parentAppointmentId ?? '').trim().isNotEmpty;
+    final isFollowUp = (appointment.parentAppointmentId ?? '')
+        .trim()
+        .isNotEmpty;
     return Padding(
       padding: const EdgeInsets.only(bottom: AdminSpacing.xs),
       child: Wrap(
@@ -633,10 +636,7 @@ class _Schedule extends StatelessWidget {
 }
 
 class _Trend extends StatefulWidget {
-  const _Trend({
-    required this.buckets,
-    required this.activeUsers30d,
-  });
+  const _Trend({required this.buckets, required this.activeUsers30d});
   final List<DashboardActivityDayBucket> buckets;
   final int activeUsers30d;
 
@@ -773,7 +773,9 @@ class _TrendBar extends StatelessWidget {
         : '';
     final tooltipMessage =
         '${_shortDate(bucket.manilaDay)} · ${bucket.count} user${bucket.count == 1 ? '' : 's'}$shareText\nRolling 7-day latest-seen distribution';
-    final barHeight = maxCount == 0 ? 4.0 : (bucket.count / maxCount * 88.0).clamp(4.0, 88.0);
+    final barHeight = maxCount == 0
+        ? 4.0
+        : (bucket.count / maxCount * 88.0).clamp(4.0, 88.0);
 
     return Tooltip(
       message: tooltipMessage,
@@ -795,15 +797,14 @@ class _TrendBar extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               AnimatedContainer(
-                duration: (MediaQuery.maybeDisableAnimationsOf(context) ?? false)
+                duration:
+                    (MediaQuery.maybeDisableAnimationsOf(context) ?? false)
                     ? Duration.zero
                     : const Duration(milliseconds: 180),
                 width: 22,
                 height: barHeight,
                 decoration: BoxDecoration(
-                  color: selected
-                      ? AdminColors.blueFg
-                      : AdminColors.blueBorder,
+                  color: selected ? AdminColors.blueFg : AdminColors.blueBorder,
                   borderRadius: BorderRadius.circular(5),
                 ),
               ),
@@ -827,10 +828,7 @@ class _TrendBar extends StatelessWidget {
 }
 
 class _Status extends StatefulWidget {
-  const _Status({
-    required this.items,
-    required this.total,
-  });
+  const _Status({required this.items, required this.total});
   final List<DashboardStatusBreakdownItem> items;
   final int total;
 

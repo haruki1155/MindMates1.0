@@ -36,7 +36,15 @@ class _Repository extends AdminPortalRepository {
   String? get currentUserId => uid;
 
   @override
-  Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId, {String? exceptionReason}) async { agreementAction = action; agreementRevision = appointment.proposalRevision; }
+  Future<void> changeAppointmentAgreement(
+    AppointmentModel appointment,
+    String action,
+    String requestId, {
+    String? exceptionReason,
+  }) async {
+    agreementAction = action;
+    agreementRevision = appointment.proposalRevision;
+  }
 
   @override
   Future<List<SessionEvidenceAttachment>> uploadClinicalEvidenceFiles({
@@ -110,58 +118,122 @@ class _Repository extends AdminPortalRepository {
 }
 
 void main() {
-  testWidgets('completed-session decision preserves summary and file upload only', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1440, 1200));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final record = _appointment(
-      'confirmed', DateTime.now().subtract(const Duration(days: 1)), 'Student A',
-    );
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: AdminAppointmentsPage(
-        repository: _Repository([record], role: AccessRole.counselor),
-        onOpenAssessments: null,
-      )),
-    ));
-    await tester.pumpAndSettle();
-    expect(find.text('Needs action 1'), findsWidgets);
-    await tester.tap(find.text('Review'));
-    await tester.pumpAndSettle();
-    expect(find.text('Session summary (internal)'), findsOneWidget);
-    expect(find.text('Session attachments'), findsOneWidget);
-    expect(find.text('Add images / documents'), findsOneWidget);
-    expect(find.byKey(const Key('clinical-interview-questions')), findsNothing);
-    expect(find.byKey(const Key('clinical-requirements-checked')), findsNothing);
-    expect(find.byKey(const Key('clinical-materials-used')), findsNothing);
-  });
+  testWidgets(
+    'completed-session decision preserves summary and file upload only',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final record = _appointment(
+        'confirmed',
+        DateTime.now().subtract(const Duration(days: 1)),
+        'Student A',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: _Repository([record], role: AccessRole.counselor),
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Needs action 1'), findsWidgets);
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Session summary (internal)'), findsOneWidget);
+      expect(find.text('Session attachments'), findsOneWidget);
+      expect(find.text('Add images / documents'), findsOneWidget);
+      expect(
+        find.byKey(const Key('clinical-interview-questions')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('clinical-requirements-checked')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('clinical-materials-used')), findsNothing);
+    },
+  );
 
-  testWidgets('PACC reopens its requested-time proposal with a valid counter action', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1440, 1200));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final record = _appointment('requested', DateTime.now().add(const Duration(days: 8)), 'Pending PACC proposal').copyWith(hasScheduleRevision: true, proposalRevision: 1, proposalStatus: 'pending', proposedBy: 'counselor', proposedScheduledAt: DateTime.now().add(const Duration(days: 9)), proposedScheduledTime: '1:00 PM');
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AdminAppointmentsPage(repository: _Repository([record]), onOpenAssessments: null))));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Review'));
-    await tester.pumpAndSettle();
-    expect(find.text('Re-schedule appointment'), findsOneWidget);
-    expect(find.text('Confirm appointment'), findsNothing);
-  });
+  testWidgets(
+    'PACC reopens its requested-time proposal with a valid counter action',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final record =
+          _appointment(
+            'requested',
+            DateTime.now().add(const Duration(days: 8)),
+            'Pending PACC proposal',
+          ).copyWith(
+            hasScheduleRevision: true,
+            proposalRevision: 1,
+            proposalStatus: 'pending',
+            proposedBy: 'counselor',
+            proposedScheduledAt: DateTime.now().add(const Duration(days: 9)),
+            proposedScheduledTime: '1:00 PM',
+          );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: _Repository([record]),
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Re-schedule appointment'), findsOneWidget);
+      expect(find.text('Confirm appointment'), findsNothing);
+    },
+  );
 
-  testWidgets('PACC accepts a student proposal without moving the current time first', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1440, 1200));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final record = _appointment('confirmed', DateTime.now().add(const Duration(days: 8)), 'Agreement student').copyWith(hasScheduleRevision: true, scheduleRevision: 2, proposalRevision: 3, proposalStatus: 'pending', proposedBy: 'student', proposedScheduledAt: DateTime.now().add(const Duration(days: 9)), proposedScheduledTime: '1:00 PM');
-    final repo = _Repository([record]);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AdminAppointmentsPage(repository: repo, onOpenAssessments: null))));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Review'));
-    await tester.pumpAndSettle();
-    expect(find.text('Current reserved time'), findsOneWidget);
-    expect(find.text('Accept student proposed time'), findsOneWidget);
-    await tester.tap(find.text('Send decision'));
-    await tester.pumpAndSettle();
-    expect(repo.agreementAction, 'accept');
-    expect(repo.agreementRevision, 3);
-  });
+  testWidgets(
+    'PACC accepts a student proposal without moving the current time first',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final record =
+          _appointment(
+            'confirmed',
+            DateTime.now().add(const Duration(days: 8)),
+            'Agreement student',
+          ).copyWith(
+            hasScheduleRevision: true,
+            scheduleRevision: 2,
+            proposalRevision: 3,
+            proposalStatus: 'pending',
+            proposedBy: 'student',
+            proposedScheduledAt: DateTime.now().add(const Duration(days: 9)),
+            proposedScheduledTime: '1:00 PM',
+          );
+      final repo = _Repository([record]);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: repo,
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Current reserved time'), findsOneWidget);
+      expect(find.text('Accept student proposed time'), findsOneWidget);
+      await tester.tap(find.text('Send decision'));
+      await tester.pumpAndSettle();
+      expect(repo.agreementAction, 'accept');
+      expect(repo.agreementRevision, 3);
+    },
+  );
 
   testWidgets('Admin Appointment categories retain finished archived records', (
     tester,
@@ -403,7 +475,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        final buttonLabel = roleCase.role == AccessRole.admin ? 'Review' : 'View';
+        final buttonLabel = roleCase.role == AccessRole.admin
+            ? 'Review'
+            : 'View';
         await tester.tap(find.text(buttonLabel));
         await tester.pumpAndSettle();
         expect(find.text('PACC decision'), findsNothing);

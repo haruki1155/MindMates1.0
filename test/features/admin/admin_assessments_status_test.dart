@@ -106,4 +106,96 @@ void main() {
       expect(find.text('Result unavailable'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'Assessments page renders cleanly at 390, 768, and 1280 px with status badges on Quick and Full tabs',
+    (tester) async {
+      addTearDown(tester.view.reset);
+
+      final repo = _AssessmentStatusRepo([
+        AdminAssessmentRecord(
+          id: 'q1',
+          userId: 'u1',
+          type: 'quick',
+          createdAt: DateTime(2026, 11, 20),
+          status: 'generally_supported',
+          role: 'Student',
+        ),
+        AdminAssessmentRecord(
+          id: 'f1',
+          userId: 'u1',
+          type: 'full',
+          createdAt: DateTime(2026, 11, 20),
+          status: 'moderate',
+          role: 'Student',
+        ),
+        AdminAssessmentRecord(
+          id: 'f2',
+          userId: 'u2',
+          type: 'full',
+          createdAt: DateTime(2026, 11, 19),
+          status: 'severe',
+          role: 'Student',
+        ),
+      ]);
+
+      Future<Map<String, AssessmentParticipantInfo>> loadParticipants(
+        Iterable<String> _,
+      ) async => const {
+        'u1': AssessmentParticipantInfo(
+          userId: 'u1',
+          name: 'Alice Student',
+          role: 'Student',
+          college: 'College of Engineering',
+        ),
+        'u2': AssessmentParticipantInfo(
+          userId: 'u2',
+          name: 'Bob Student',
+          role: 'Student',
+          college: 'College of Engineering',
+        ),
+      };
+
+      for (final width in const [390.0, 768.0, 1280.0]) {
+        tester.view.physicalSize = Size(width, 1200);
+        tester.view.devicePixelRatio = 1;
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AdminTheme.data,
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: AdminAssessmentResultsPage(
+                  key: ValueKey(width),
+                  repository: repo,
+                  loadParticipants: loadParticipants,
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'quick assessments overflow at $width',
+        );
+        expect(find.byType(AdminStatusBadge), findsOneWidget);
+        expect(find.text('Supported'), findsOneWidget);
+
+        await tester.tap(find.text('Full Assessment'));
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'full assessments overflow at $width',
+        );
+        expect(find.byType(AdminStatusBadge), findsNWidgets(2));
+        expect(find.text('Moderate'), findsOneWidget);
+        expect(find.text('Severe'), findsOneWidget);
+      }
+    },
+  );
 }

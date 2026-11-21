@@ -281,16 +281,17 @@ AdminStatusPresentation _resolveAssessment(String key, String raw) =>
         label: 'High',
         icon: Icons.priority_high_rounded,
       ),
-      'veryhigh' || 'severe' || 'extremelysevere' =>
-        AdminStatusPresentation.fromTone(
-          tone: AdminSemanticTone.red,
-          label: key == 'veryhigh'
-              ? 'Very high'
-              : key == 'severe'
-              ? 'Severe'
-              : 'Extremely severe',
-          icon: Icons.priority_high_rounded,
-        ),
+      'veryhigh' ||
+      'severe' ||
+      'extremelysevere' => AdminStatusPresentation.fromTone(
+        tone: AdminSemanticTone.red,
+        label: key == 'veryhigh'
+            ? 'Very high'
+            : key == 'severe'
+            ? 'Severe'
+            : 'Extremely severe',
+        icon: Icons.priority_high_rounded,
+      ),
       'supportmayhelp' ||
       'elevated' ||
       'highsupport' ||

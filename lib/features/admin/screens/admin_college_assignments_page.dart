@@ -346,8 +346,7 @@ class _CollegeOverviewRow extends StatelessWidget {
               college.name,
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
             ),
-            if (college.code.isNotEmpty)
-              _Badge(label: 'Code ${college.code}'),
+            if (college.code.isNotEmpty) _Badge(label: 'Code ${college.code}'),
             if (!college.active)
               const _Badge(
                 label: 'Archived',

@@ -652,10 +652,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
   Future<void> _clearLegacyStaffColleges(UserModel user) async {
     final cleaned = await showDialog<bool>(
       context: context,
-      builder: (_) => _LegacyStaffCleanupDialog(
-        user: user,
-        repository: widget.repository,
-      ),
+      builder: (_) =>
+          _LegacyStaffCleanupDialog(user: user, repository: widget.repository),
     );
     if (cleaned == true && mounted && Scaffold.maybeOf(context) != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1099,21 +1097,29 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   ),
                   const SizedBox(height: 16),
                   if (!historyOnly) ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _detail(
-                            'Role',
-                            _accessRoleLabel(user.accessRole),
-                          ),
-                        ),
-                        Expanded(
-                          child: _detail(
-                            'Account status',
-                            _accountStatus(user),
-                          ),
-                        ),
-                      ],
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final roleDetail = _detail(
+                          'Role',
+                          _accessRoleLabel(user.accessRole),
+                        );
+                        final statusDetail = _detail(
+                          'Account status',
+                          _accountStatus(user),
+                        );
+                        if (constraints.maxWidth < 420) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [roleDetail, statusDetail],
+                          );
+                        }
+                        return Row(
+                          children: [
+                            Expanded(child: roleDetail),
+                            Expanded(child: statusDetail),
+                          ],
+                        );
+                      },
                     ),
                     _detail('Last sign-in', _date(user.lastSignInAt)),
                     _detail('Last active', _date(user.lastActiveAt)),
@@ -1214,10 +1220,25 @@ class _UserManagementPageState extends State<UserManagementPage> {
     ),
   );
 
-  Widget _detail(String label, String? value) => ListTile(
-    dense: true,
-    title: Text(label),
-    trailing: Text((value ?? '').isEmpty ? '—' : value!),
+  Widget _detail(String label, String? value) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 13, color: AdminColors.muted),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            (value ?? '').isEmpty ? '—' : value!,
+            textAlign: TextAlign.end,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    ),
   );
 
   Future<void> _changeRole(UserModel user) async {
@@ -2086,7 +2107,9 @@ class _LegacyStaffCleanupDialogState extends State<_LegacyStaffCleanupDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text('Clear legacy college assignments · ${widget.user.displayName}'),
+    title: Text(
+      'Clear legacy college assignments · ${widget.user.displayName}',
+    ),
     content: SizedBox(
       width: 460,
       child: SingleChildScrollView(

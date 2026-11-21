@@ -220,7 +220,8 @@ class _AppointmentApprovalsPanelState extends State<AppointmentApprovalsPanel> {
   void _mergePage(AppointmentApprovalsPage page) {
     final existing = {for (final item in _items) item.appointmentId};
     for (final item in page.items) {
-      if (item.appointmentId.isNotEmpty && !existing.contains(item.appointmentId)) {
+      if (item.appointmentId.isNotEmpty &&
+          !existing.contains(item.appointmentId)) {
         _items.add(item);
         existing.add(item.appointmentId);
       }
@@ -269,7 +270,8 @@ class _AppointmentApprovalsPanelState extends State<AppointmentApprovalsPanel> {
       if (!mounted || epoch != _requestEpoch) return;
       setState(() => _openingId = null);
       final denied =
-          error is FirebaseFunctionsException && error.code == 'permission-denied';
+          error is FirebaseFunctionsException &&
+          error.code == 'permission-denied';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(

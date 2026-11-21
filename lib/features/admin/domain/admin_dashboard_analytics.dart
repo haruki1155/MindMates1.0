@@ -93,8 +93,7 @@ class AdminDashboardAnalytics {
     final cutoff30d = now.subtract(const Duration(days: 30));
     final activeUsers30d = appUsers
         .where(
-          (u) =>
-              u.lastActiveAt != null && !u.lastActiveAt!.isBefore(cutoff30d),
+          (u) => u.lastActiveAt != null && !u.lastActiveAt!.isBefore(cutoff30d),
         )
         .map((u) => u.id)
         .toSet()
@@ -120,10 +119,12 @@ class AdminDashboardAnalytics {
       }
     }
     final latestActivityDayBuckets = windowDays
-        .map((day) => DashboardActivityDayBucket(
-              manilaDay: day,
-              count: dayCounts[day] ?? 0,
-            ))
+        .map(
+          (day) => DashboardActivityDayBucket(
+            manilaDay: day,
+            count: dayCounts[day] ?? 0,
+          ),
+        )
         .toList();
 
     // Appointment breakdown & open counts.

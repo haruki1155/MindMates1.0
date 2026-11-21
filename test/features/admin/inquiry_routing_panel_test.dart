@@ -33,24 +33,25 @@ AdminInquiryModel _inquiry({Map<String, dynamic> extra = const {}}) =>
       ...extra,
     });
 
-AdminInquiryModel _operationalInquiry({Map<String, dynamic> extra = const {}}) =>
-    AdminInquiryModel.fromOperationalProjection({
-      'inquiryId': 'inq-1',
-      'category': 'Service Form',
-      'formType': 'client_feedback',
-      'operationalLabel': 'Client Feedback Form',
-      'status': 'pending',
-      'createdAt': '2026-11-14T08:00:00.000',
-      'collegeId': 'cite',
-      'routingStatus': 'routed',
-      'routingMode': 'manual',
-      'routingRevision': 2,
-      'assigneeIds': ['c1'],
-      'assigneeLabels': {'c1': 'Counselor One'},
-      'monitoringStaffIds': ['s1'],
-      'monitoringStaffLabels': {'s1': 'Staff One'},
-      ...extra,
-    });
+AdminInquiryModel _operationalInquiry({
+  Map<String, dynamic> extra = const {},
+}) => AdminInquiryModel.fromOperationalProjection({
+  'inquiryId': 'inq-1',
+  'category': 'Service Form',
+  'formType': 'client_feedback',
+  'operationalLabel': 'Client Feedback Form',
+  'status': 'pending',
+  'createdAt': '2026-11-14T08:00:00.000',
+  'collegeId': 'cite',
+  'routingStatus': 'routed',
+  'routingMode': 'manual',
+  'routingRevision': 2,
+  'assigneeIds': ['c1'],
+  'assigneeLabels': {'c1': 'Counselor One'},
+  'monitoringStaffIds': ['s1'],
+  'monitoringStaffLabels': {'s1': 'Staff One'},
+  ...extra,
+});
 
 UserModel _staff(
   String id,
@@ -672,9 +673,17 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(repo.rawReads, 0, reason: 'portalStaff must never read raw inquiries');
+      expect(
+        repo.rawReads,
+        0,
+        reason: 'portalStaff must never read raw inquiries',
+      );
       expect(repo.statusReads, 1);
-      expect(repo.replyReads, 0, reason: 'portalStaff must never watch inquiry replies');
+      expect(
+        repo.replyReads,
+        0,
+        reason: 'portalStaff must never watch inquiry replies',
+      );
       expect(find.text('Client Feedback Form'), findsOneWidget);
       expect(find.text('Feedback'), findsNothing);
       expect(find.text('Message'), findsNothing);
@@ -717,7 +726,10 @@ void main() {
       );
       expect(find.textContaining('Administrator handling'), findsOneWidget);
       expect(find.textContaining('Secret Admin Name'), findsNothing);
-      expect(find.textContaining('Confidential takeover justification'), findsNothing);
+      expect(
+        find.textContaining('Confidential takeover justification'),
+        findsNothing,
+      );
       expect(find.text('Escalate to administrator'), findsNothing);
       expect(find.text('Take over'), findsNothing);
     },
