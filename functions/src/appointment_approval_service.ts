@@ -154,8 +154,15 @@ export async function authorizeAppointmentApproval(
 ): Promise<FirebaseFirestore.DocumentData & {approvalAuthority: ApprovalAuthority}> {
   const actor = await requireStaff(uid);
   const role = String(actor.accessRole);
-  if (role !== "counselor" && role !== "admin") {
-    throw new HttpsError("permission-denied", "Counselor or administrator access is required for clinical appointment actions.");
+  if (role === "admin") {
+    throw new HttpsError(
+      "permission-denied",
+      "Administrators have read-only access to appointments. Only assigned counselors can modify appointments.",
+      {reason: "admin_read_only"},
+    );
+  }
+  if (role !== "counselor") {
+    throw new HttpsError("permission-denied", "Counselor access is required for clinical appointment actions.");
   }
   const scope = await resolveApprovalScope(String(appointment.userId ?? ""));
   const approvalAuthority = decideFromInputs(uid, role, actor.assignedCollegeIds, scope, exceptionReason);
@@ -181,8 +188,15 @@ export async function authorizeAppointmentApprovalInTransaction(
   ]);
   const staffProfile = staffSnap.data() ?? {};
   const {accessRole: role} = resolveStaffProfile(staffProfile);
-  if (role !== "counselor" && role !== "admin") {
-    throw new HttpsError("permission-denied", "Counselor or administrator access is required for clinical appointment actions.");
+  if (role === "admin") {
+    throw new HttpsError(
+      "permission-denied",
+      "Administrators have read-only access to appointments. Only assigned counselors can modify appointments.",
+      {reason: "admin_read_only"},
+    );
+  }
+  if (role !== "counselor") {
+    throw new HttpsError("permission-denied", "Counselor access is required for clinical appointment actions.");
   }
 
   const studentData = studentSnap?.exists ? studentSnap.data() ?? {} : null;

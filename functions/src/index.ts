@@ -315,10 +315,17 @@ async function requireClinicalAppointmentStaff(
   uid: string,
 ): Promise<FirebaseFirestore.DocumentData> {
   const staff = await requireStaff(uid);
-  if (staff.accessRole !== "counselor" && staff.accessRole !== "admin") {
+  if (staff.accessRole === "admin") {
     throw new HttpsError(
       "permission-denied",
-      "Counselor or administrator access is required for clinical appointment actions.",
+      "Administrators have read-only access to appointments. Only assigned counselors can modify appointments.",
+      {reason: "admin_read_only"},
+    );
+  }
+  if (staff.accessRole !== "counselor") {
+    throw new HttpsError(
+      "permission-denied",
+      "Counselor access is required for clinical appointment actions.",
     );
   }
   return staff;

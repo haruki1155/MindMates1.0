@@ -66,7 +66,7 @@ after(async () => {
   await Promise.all(Object.keys(staff).map((name) => getAuth().deleteUser(uid(name)).catch(() => undefined)));
 });
 
-test("archiveAppointments enforces clinical role, college scope, and super-admin exception rules", {skip: !emulated}, async () => {
+test("archiveAppointments enforces counselor-only college scope and denies admins without writes", {skip: !emulated}, async () => {
   const citeAppt = `${prefix}-arch-cite`;
   const unvAppt = `${prefix}-arch-unv`;
   await Promise.all([
@@ -74,7 +74,7 @@ test("archiveAppointments enforces clinical role, college scope, and super-admin
     db.doc(`appointments/${unvAppt}`).set({userId: uid("student-unverified"), status: "completed", scheduledAt: Timestamp.now()}),
   ]);
 
-  for (const actor of ["ops", "otherAdmin", "cCas", "cSuspended", "cUnverified"]) {
+  for (const actor of ["ops", "admin", "otherAdmin", "cCas", "cSuspended", "cUnverified"]) {
     await rejects(call(archiveAppointments, actor, {appointmentIds: [citeAppt], archived: true}), "permission-denied");
   }
   // Counselor cannot archive unverified student's appointment (triage only).
@@ -83,16 +83,18 @@ test("archiveAppointments enforces clinical role, college scope, and super-admin
   await rejects(call(archiveAppointments, "cCite", {appointmentIds: [citeAppt, unvAppt], archived: true}), "permission-denied");
   assert.equal((await db.doc(`appointments/${citeAppt}`).get()).data()?.archivedAt, undefined);
 
-  // Assigned counselor archives cite appointment; super-admin requires reason to override.
+  // Assigned counselor archives and restores cite appointment; admins are denied even with an exceptionReason.
   await call(archiveAppointments, "cCite", {appointmentIds: [citeAppt], archived: true});
   assert.ok((await db.doc(`appointments/${citeAppt}`).get()).data()?.archivedAt);
-  await rejects(call(archiveAppointments, "admin", {appointmentIds: [citeAppt], archived: false}), "failed-precondition");
-  await call(archiveAppointments, "admin", {appointmentIds: [citeAppt], archived: false, exceptionReason: "Restore after review"});
+  await rejects(call(archiveAppointments, "admin", {appointmentIds: [citeAppt], archived: false}), "permission-denied");
+  await rejects(call(archiveAppointments, "admin", {appointmentIds: [citeAppt], archived: false, exceptionReason: "Restore after review"}), "permission-denied");
+  assert.ok((await db.doc(`appointments/${citeAppt}`).get()).data()?.archivedAt);
+  await call(archiveAppointments, "cCite", {appointmentIds: [citeAppt], archived: false});
   assert.equal((await db.doc(`appointments/${citeAppt}`).get()).data()?.archivedAt, undefined);
 
-  // Super-admin triages unverified student's appointment without override reason.
-  await call(archiveAppointments, "admin", {appointmentIds: [unvAppt], archived: true});
-  assert.ok((await db.doc(`appointments/${unvAppt}`).get()).data()?.archivedAt);
+  // Admin cannot archive unverified student's appointment either (read-only).
+  await rejects(call(archiveAppointments, "admin", {appointmentIds: [unvAppt], archived: true}), "permission-denied");
+  assert.equal((await db.doc(`appointments/${unvAppt}`).get()).data()?.archivedAt, undefined);
 });
 
 test("appointment portal notifications route only to assigned college counselors or super-admin for exceptions", {skip: !emulated}, async () => {
