@@ -199,7 +199,7 @@ class _CollegeAssignmentDialogState extends State<CollegeAssignmentDialog> {
                           CheckboxListTile(
                             dense: true,
                             value: _selected.contains(id),
-                            title: Text('Unknown college ($id)'),
+                            title: const Text('College not available'),
                             onChanged: _saving
                                 ? null
                                 : (checked) => setState(

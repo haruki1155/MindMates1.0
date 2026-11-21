@@ -171,8 +171,8 @@ void main() {
 
       expect(find.text('Retired College'), findsOneWidget);
       expect(find.textContaining('Archived'), findsWidgets);
-      expect(find.textContaining('Sonia Vega'), findsOneWidget);
-      expect(find.textContaining('Inactive / Suspended'), findsOneWidget);
+      expect(find.textContaining('Sonia Vega (Inactive)'), findsOneWidget);
+      expect(find.textContaining('Suspended'), findsNothing);
     },
   );
 

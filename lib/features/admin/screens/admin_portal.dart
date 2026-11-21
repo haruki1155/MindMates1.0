@@ -2291,6 +2291,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                 showHistory = value.first;
                 filter = showHistory ? 'All' : 'Needs action';
                 departmentFilter = 'All departments';
+                appointmentTypeFilter = 'All appointments';
                 selectedIds.clear();
               }),
             ),
@@ -2459,7 +2460,11 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
               style: const TextStyle(color: AdminColors.muted, fontSize: 12),
             ),
             const SizedBox(height: 8),
-            if (!showHistory && selectable.isNotEmpty)
+            if (!showHistory &&
+                !widget.repository.isSuperAdmin &&
+                widget.repository.currentAccessRole != AccessRole.admin &&
+                widget.repository.currentAccessRole != AccessRole.portalStaff &&
+                selectable.isNotEmpty)
               Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: Padding(

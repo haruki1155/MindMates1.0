@@ -1721,7 +1721,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
     'All actions',
     'Role changed',
     'Access revoked',
-    'Account suspended',
+    'Account set inactive',
     'Account reactivated',
     'Registration approved',
     'Signed in',
@@ -1794,7 +1794,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
   String _actionValue() => switch (actionFilter) {
     'Role changed' => 'STAFF_ROLE_CHANGED',
     'Access revoked' => 'STAFF_ACCESS_REVOKED',
-    'Account suspended' => 'STAFF_ACCOUNT_SUSPENDED',
+    'Account set inactive' => 'STAFF_ACCOUNT_SUSPENDED',
     'Account reactivated' => 'STAFF_ACCOUNT_REACTIVATED',
     'Registration approved' => 'STAFF_REGISTRATION_APPROVED',
     'Signed in' => 'STAFF_SIGNED_IN',
@@ -1996,7 +1996,7 @@ String _accessRoleLabel(AccessRole role) => switch (role) {
 String _auditActionLabel(String action) => switch (action) {
   'STAFF_ROLE_CHANGED' => 'Role changed',
   'STAFF_ACCESS_REVOKED' => 'Portal access revoked',
-  'STAFF_ACCOUNT_SUSPENDED' => 'Account suspended',
+  'STAFF_ACCOUNT_SUSPENDED' => 'Account set inactive',
   'STAFF_ACCOUNT_REACTIVATED' => 'Account reactivated',
   'STAFF_ACCOUNT_ACTIVATED' => 'Account activated',
   'STAFF_COLLEGE_ASSIGNMENTS_UPDATED' =>
@@ -2007,7 +2007,7 @@ String _auditActionLabel(String action) => switch (action) {
   'STUDENT_PERSONAL_INFO_VIEWED' => 'Student information viewed',
   'accessRoleAssigned' => 'Role changed',
   'staffAccountEnabled' => 'Account reactivated',
-  'staffAccountDisabled' => 'Account suspended',
+  'staffAccountDisabled' => 'Account set inactive',
   'staffRegistrationApproved' => 'Invitation accepted',
   'staffRegistrationRejected' => 'Invitation removed',
   _ => action.isEmpty ? 'Access updated' : action,

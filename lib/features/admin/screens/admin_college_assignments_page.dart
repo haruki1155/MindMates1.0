@@ -330,7 +330,7 @@ class _CollegeOverviewRow extends StatelessWidget {
               .map(
                 (owner) => isEligibleCounselorAccount(owner)
                     ? owner.displayName
-                    : '${owner.displayName} (Inactive / Suspended)',
+                    : '${owner.displayName} (Inactive)',
               )
               .join(', ');
 
@@ -469,7 +469,7 @@ class _UnknownAssignmentsCard extends StatelessWidget {
         const SizedBox(height: 4),
         for (final id in unknownIds)
           Text(
-            'College ID "$id" is assigned to: ${(ownersByCollege[id] ?? const []).map((u) => u.displayName).join(', ')}',
+            'Unlisted college assignment: ${(ownersByCollege[id] ?? const []).map((u) => u.displayName).join(', ')}',
             style: const TextStyle(color: AdminColors.muted, fontSize: 13),
           ),
       ],

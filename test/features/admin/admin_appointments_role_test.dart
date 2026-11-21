@@ -136,4 +136,34 @@ void main() {
     expect(find.text('Send decision'), findsNothing);
     expect(find.text('Close'), findsOneWidget);
   });
+
+  testWidgets('Admin does not see bulk archive controls for finalized rows', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final repo = _RoleAppointmentsRepo(
+      [_appt('a1', 'completed', 'Done Student')],
+      role: AccessRole.admin,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AdminTheme.data,
+        home: Scaffold(
+          body: AdminAppointmentsPage(repository: repo, onOpenAssessments: null),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.textContaining('All active'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Select finished'), findsNothing);
+    expect(find.textContaining('Move'), findsNothing);
+    expect(find.text('Review'), findsOneWidget);
+  });
 }

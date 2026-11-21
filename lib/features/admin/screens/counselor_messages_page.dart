@@ -157,7 +157,7 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
                     DropdownMenuItem(
                       value: college.id,
                       child: Text(
-                        '${college.data()['code'] ?? ''} — ${college.data()['name'] ?? college.id}',
+                        '${college.data()['code'] ?? ''} — ${college.data()['name'] ?? 'College not available'}',
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),

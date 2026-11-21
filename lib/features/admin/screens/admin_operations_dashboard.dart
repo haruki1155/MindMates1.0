@@ -40,13 +40,23 @@ class AdminOperationsDashboardPage extends StatelessWidget {
           builder: (context, assessmentsSnapshot) => StreamBuilder<List<AppointmentModel>>(
             stream: repository.watchAppointments(),
             builder: (context, appointmentsSnapshot) {
-              if ([
-                usersSnapshot,
-                inquiriesSnapshot,
-                assessmentsSnapshot,
-                appointmentsSnapshot,
-              ].any((s) => s.hasError)) {
-                return const _DashboardAccessPanel();
+              final errors = [
+                if (usersSnapshot.hasError) usersSnapshot.error,
+                if (inquiriesSnapshot.hasError) inquiriesSnapshot.error,
+                if (assessmentsSnapshot.hasError) assessmentsSnapshot.error,
+                if (appointmentsSnapshot.hasError) appointmentsSnapshot.error,
+              ];
+              if (errors.isNotEmpty) {
+                final isPermissionDenied = errors.any((err) {
+                  final text = '$err'.toLowerCase();
+                  return text.contains('permission-denied') ||
+                      text.contains('permission_denied') ||
+                      text.contains('unauthenticated') ||
+                      text.contains('unauthorized');
+                });
+                return _DashboardAccessPanel(
+                  isAccessDenied: isPermissionDenied,
+                );
               }
               if ([
                 usersSnapshot,
@@ -400,16 +410,19 @@ class _DashboardLoadingPanel extends StatelessWidget {
 }
 
 class _DashboardAccessPanel extends StatelessWidget {
-  const _DashboardAccessPanel();
+  const _DashboardAccessPanel({this.isAccessDenied = true});
+  final bool isAccessDenied;
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
     padding: const EdgeInsets.all(32),
     decoration: _dashboardBox,
-    child: const Text(
-      'Live admin data requires an authenticated staff account with the required access.',
+    child: Text(
+      isAccessDenied
+          ? 'Live admin data requires an authenticated staff account with the required access.'
+          : 'Unable to load live dashboard data right now. Check connectivity and try again.',
       textAlign: TextAlign.center,
-      style: TextStyle(color: AdminColors.muted),
+      style: const TextStyle(color: AdminColors.muted),
     ),
   );
 }
@@ -782,7 +795,9 @@ class _TrendBar extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
+                duration: (MediaQuery.maybeDisableAnimationsOf(context) ?? false)
+                    ? Duration.zero
+                    : const Duration(milliseconds: 180),
                 width: 22,
                 height: barHeight,
                 decoration: BoxDecoration(

@@ -96,6 +96,8 @@ class AdminDashboardAnalytics {
           (u) =>
               u.lastActiveAt != null && !u.lastActiveAt!.isBefore(cutoff30d),
         )
+        .map((u) => u.id)
+        .toSet()
         .length;
 
     final incompleteProfiles = appUsers
@@ -193,6 +195,13 @@ class AdminDashboardAnalytics {
     final awaitingReviewAppointments = appointments.where((appt) {
       if (appt.isArchived) return false;
       final s = appt.lifecycleStatus;
+      if (s == AppointmentStatus.completed ||
+          s == AppointmentStatus.cancelled ||
+          s == AppointmentStatus.declined ||
+          s == AppointmentStatus.noShow ||
+          s == AppointmentStatus.expired) {
+        return false;
+      }
       return s == AppointmentStatus.requested ||
           s == AppointmentStatus.legacyRequested ||
           s == AppointmentStatus.rescheduleProposed ||

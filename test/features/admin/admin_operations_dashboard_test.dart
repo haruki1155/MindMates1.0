@@ -86,9 +86,11 @@ void main() {
     expect(find.text('Active users (last 30 days)'), findsNothing);
   });
 
-  testWidgets('shows access panel on stream error', (tester) async {
+  testWidgets('shows access panel on permission-denied stream error', (
+    tester,
+  ) async {
     final repo = _FakeDashboardRepository(
-      users: Stream.error(StateError('denied')),
+      users: Stream.error(StateError('permission-denied')),
       inquiries: Stream.value(const []),
       assessments: Stream.value(const []),
       appointments: Stream.value(const []),
@@ -238,5 +240,59 @@ void main() {
     );
 
     tester.view.reset();
+  });
+
+  testWidgets('distinguishes general stream error from permission-denied', (
+    tester,
+  ) async {
+    final errorRepo = _FakeDashboardRepository(
+      users: Stream.error(Exception('network-offline')),
+      inquiries: Stream.value(const []),
+      assessments: Stream.value(const []),
+      appointments: Stream.value(const []),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AdminTheme.data,
+        home: Scaffold(
+          body: AdminOperationsDashboardPage(
+            repository: errorRepo,
+            onNavigate: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Unable to load live dashboard data right now'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('requires an authenticated staff account'),
+      findsNothing,
+    );
+
+    final deniedRepo = _FakeDashboardRepository(
+      users: Stream.error(Exception('permission-denied')),
+      inquiries: Stream.value(const []),
+      assessments: Stream.value(const []),
+      appointments: Stream.value(const []),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AdminTheme.data,
+        home: Scaffold(
+          body: AdminOperationsDashboardPage(
+            repository: deniedRepo,
+            onNavigate: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('requires an authenticated staff account'),
+      findsOneWidget,
+    );
   });
 }

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/domain/admin_management_models.dart';
 import 'package:mind_mates/features/admin/domain/inquiry_sla.dart';
+import 'package:mind_mates/features/admin/screens/admin_college_assignments_page.dart';
 import 'package:mind_mates/features/admin/screens/staff_appointments_page.dart';
 import 'package:mind_mates/features/admin/screens/user_management_page.dart';
 import 'package:mind_mates/features/admin/theme/admin_theme.dart';
+import 'package:mind_mates/features/admin/widgets/college_assignment_dialog.dart';
 import 'package:mind_mates/features/admin/widgets/inquiry_oversight.dart';
 import 'package:mind_mates/features/admin/widgets/inquiry_routing_panel.dart';
 import 'package:mind_mates/models/admin_inquiry_model.dart';
@@ -136,6 +138,45 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.textContaining(_syntheticCollegeId), findsNothing);
+
+      // 4. AdminCollegeAssignmentsPage (unknown college assignment never prints raw ID)
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(body: AdminCollegeAssignmentsPage(repository: repo)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining(_syntheticCollegeId), findsNothing);
+      expect(find.textContaining('Suspended'), findsNothing);
+
+      // 5. CollegeAssignmentDialog (missing catalog college never prints raw ID)
+      const staffUser = UserModel(
+        id: 'staff-1',
+        email: 'staff@example.com',
+        firstName: 'Dana',
+        lastName: 'Counselor',
+        department: 'College of Science',
+        collegeId: _syntheticCollegeId,
+        assignedCollegeIds: [_syntheticCollegeId],
+        accessRole: AccessRole.counselor,
+        staffAccountStatus: StaffAccountStatus.approved,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: CollegeAssignmentDialog(
+              repository: repo,
+              user: staffUser,
+              allUsers: const [staffUser],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining(_syntheticCollegeId), findsNothing);
+      expect(find.text('College not available'), findsOneWidget);
     },
   );
 }
