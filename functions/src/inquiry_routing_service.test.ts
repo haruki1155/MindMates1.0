@@ -207,6 +207,7 @@ test("resolved inquiries cannot be reopened by acknowledgement, including under 
   const resolvedId = await newInquiry("cite");
   await routeInquiry(resolvedId);
   await call(reassignInquiry, "admin", {inquiryId: resolvedId, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
+  await call(setInquiryStatus, "c1", {inquiryId: resolvedId, status: "in_progress"});
   await call(setInquiryStatus, "c1", {inquiryId: resolvedId, status: "resolved"});
   await rejects(call(acknowledgeInquiry, "s1", {inquiryId: resolvedId}), "failed-precondition");
   const resolvedDoc = (await db.doc(`inquiries/${resolvedId}`).get()).data()!;
@@ -223,6 +224,7 @@ test("resolved inquiries cannot be reopened by acknowledgement, including under 
   const raceId = await newInquiry("cite");
   await routeInquiry(raceId);
   await call(reassignInquiry, "admin", {inquiryId: raceId, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
+  await call(setInquiryStatus, "c1", {inquiryId: raceId, status: "in_progress"});
   const outcomes = await Promise.allSettled([
     call(setInquiryStatus, "c1", {inquiryId: raceId, status: "resolved"}),
     call(acknowledgeInquiry, "s1", {inquiryId: raceId}),
@@ -510,6 +512,7 @@ test("backfill bounds already-routed missing-projection sync work per invocation
     "invalid-argument",
   );
   assert.equal((await db.doc(`inquiries/${triageId}`).get()).data()!.routingStatus, "needs_triage");
+  await call(acknowledgeInquiry, "admin", {inquiryId: triageId});
   await call(setInquiryStatus, "admin", {inquiryId: triageId, status: "resolved"});
 
   const legacyPrefix = `${p}-legacy-proj`;
@@ -698,4 +701,49 @@ test("resolveInquiry requires acknowledgment, enforces role scope, prevents dupl
   assert.equal(raceDoc.status, "resolved");
   assert.equal(raceDoc.routingRevision, 3);
   assert.equal((await audit(raceId, "INQUIRY_RESOLVED")).length, 1);
+});
+
+test("direct pending -> resolved transition is rejected through both legacy setInquiryStatus and resolveInquiry", {skip: !emulated}, async () => {
+  const id = await newInquiry("cite");
+  await routeInquiry(id);
+  const initialRevision = (await db.doc(`inquiries/${id}`).get()).data()!.routingRevision;
+  assert.equal(initialRevision, 1);
+
+  // Legacy setInquiryStatus must not bypass acknowledgment (with or without expectedRevision).
+  await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved"}), "failed-precondition");
+  await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 1}), "failed-precondition");
+  await rejects(call(setInquiryStatus, "admin", {inquiryId: id, status: "resolved"}), "failed-precondition");
+  await rejects(call(setInquiryStatus, "admin", {inquiryId: id, status: "resolved", expectedRevision: 1}), "failed-precondition");
+
+  // New resolveInquiry must also reject direct pending -> resolved.
+  await rejects(call(resolveInquiry, "c1", {inquiryId: id, expectedRevision: 1}), "failed-precondition");
+  await rejects(call(resolveInquiry, "admin", {inquiryId: id, expectedRevision: 1}), "failed-precondition");
+
+  // Canonical document, projection, revision, and audit log remain untouched.
+  const pendingDoc = (await db.doc(`inquiries/${id}`).get()).data()!;
+  assert.equal(pendingDoc.status, "pending");
+  assert.equal(pendingDoc.routingRevision, 1);
+  assert.equal(pendingDoc.resolvedAt ?? null, null);
+  assert.equal(pendingDoc.resolvedBy ?? null, null);
+  const pendingProj = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
+  assert.equal(pendingProj.status, "pending");
+  assert.equal(pendingProj.resolvedAt ?? null, null);
+  assert.equal((await audit(id, "INQUIRY_RESOLVED")).length, 0);
+
+  // After acknowledgment, both interfaces allow resolving an eligible in_progress inquiry.
+  await call(acknowledgeInquiry, "c1", {inquiryId: id, expectedRevision: 1});
+  const legacyResolved = await call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 2});
+  assert.deepEqual(legacyResolved, {ok: true, changed: true, revision: 3});
+  const resolvedDoc = (await db.doc(`inquiries/${id}`).get()).data()!;
+  assert.equal(resolvedDoc.status, "resolved");
+  assert.equal(resolvedDoc.resolvedBy, uid("c1"));
+  assert.equal((await audit(id, "INQUIRY_RESOLVED")).length, 1);
+
+  // And a second pending inquiry acknowledged then resolved via resolveInquiry succeeds.
+  const id2 = await newInquiry("cite");
+  await routeInquiry(id2);
+  await call(acknowledgeInquiry, "c1", {inquiryId: id2, expectedRevision: 1});
+  const newResolved = await call(resolveInquiry, "c1", {inquiryId: id2, expectedRevision: 2});
+  assert.deepEqual(newResolved, {ok: true, changed: true, revision: 3});
+  assert.equal((await db.doc(`inquiries/${id2}`).get()).data()!.status, "resolved");
 });

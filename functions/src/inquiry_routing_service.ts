@@ -354,6 +354,27 @@ export const acknowledgeInquiry = onCall(async (request) => {
   return {ok: true};
 });
 
+/**
+ * Enforces the approved inquiry resolution workflow across both the dedicated
+ * `resolveInquiry` callable and the legacy `setInquiryStatus` callable:
+ * pending inquiries must be acknowledged/in-progress before resolution.
+ */
+function assertCanResolveInquiryStatus(
+  before: string,
+  alreadyResolvedMode: "reject" | "noop",
+): boolean {
+  if (before === "resolved") {
+    if (alreadyResolvedMode === "reject") {
+      throw new HttpsError("failed-precondition", "This inquiry is already resolved.");
+    }
+    return false;
+  }
+  if (before !== "in_progress") {
+    throw new HttpsError("failed-precondition", "Acknowledge receipt before marking this inquiry as resolved.");
+  }
+  return true;
+}
+
 export const setInquiryStatus = onCall(async (request) => {
   const who = await inquiryActor(request);
   const inquiryId = inquiryIdFrom(request.data);
@@ -376,8 +397,14 @@ export const setInquiryStatus = onCall(async (request) => {
     }
     const revision = revisionOf(data);
     const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
-    const before = String(data.status ?? "pending");
-    if (before === status) return {ok: true, changed: false, revision};
+    const before = String(data.status ?? "pending").toLowerCase();
+    if (status === "resolved") {
+      if (!assertCanResolveInquiryStatus(before, "noop")) {
+        return {ok: true, changed: false, revision};
+      }
+    } else if (before === status) {
+      return {ok: true, changed: false, revision};
+    }
     tx.update(ref, {
       status,
       routingRevision: revision + 1,
@@ -426,12 +453,7 @@ export const resolveInquiry = onCall(async (request) => {
     const revision = revisionOf(data);
     const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     const before = String(data.status ?? "pending").toLowerCase();
-    if (before === "resolved") {
-      throw new HttpsError("failed-precondition", "This inquiry is already resolved.");
-    }
-    if (before !== "in_progress") {
-      throw new HttpsError("failed-precondition", "Acknowledge receipt before marking this inquiry as resolved.");
-    }
+    assertCanResolveInquiryStatus(before, "reject");
     tx.update(ref, {
       status: "resolved",
       routingRevision: revision + 1,
