@@ -355,6 +355,7 @@ class MindAidChatEngine {
 
       return MindAidChatResponse(
         text: _mindAidDefaultGreeting,
+        fallbackReason: 'topic_redirect',
         intentMatches: const [],
         severity: MindAidSeverity.low,
         suggestions: const [],
