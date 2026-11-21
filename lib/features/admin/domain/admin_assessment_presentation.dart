@@ -18,10 +18,16 @@ class AssessmentStatusStyle {
     final key = value.toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
     switch (key) {
       case 'low':
-        return const AssessmentStatusStyle(
-          'Low',
-          Color(0xFF226B4D),
-          Color(0xFFE1F3E8),
+      case 'normal':
+      case 'healthy':
+        return AssessmentStatusStyle(
+          key == 'low'
+              ? 'Low'
+              : key == 'normal'
+              ? 'Normal'
+              : 'Healthy',
+          AdminColors.greenFg,
+          AdminColors.greenBg,
         );
       case 'supported':
       case 'generallysupported':
@@ -29,49 +35,66 @@ class AssessmentStatusStyle {
       case 'stable':
         return const AssessmentStatusStyle(
           'Supported',
-          Color(0xFF226B4D),
-          Color(0xFFE1F3E8),
+          AdminColors.greenFg,
+          AdminColors.greenBg,
         );
       case 'mostlysupported':
       case 'generallysteady':
-        return const AssessmentStatusStyle(
-          'Mostly supported',
-          Color(0xFF245D86),
-          Color(0xFFE2EFF9),
+      case 'mild':
+        return AssessmentStatusStyle(
+          key == 'mild' ? 'Mild' : 'Mostly supported',
+          AdminColors.blueFg,
+          AdminColors.blueBg,
         );
       case 'moderate':
         return const AssessmentStatusStyle(
           'Moderate',
-          Color(0xFF815314),
-          Color(0xFFFFEED1),
+          AdminColors.amberFg,
+          AdminColors.amberBg,
         );
       case 'somestrain':
       case 'someareasneedattention':
+      case 'needsattention':
       case 'watchful':
         return const AssessmentStatusStyle(
           'Some areas need attention',
-          Color(0xFF815314),
-          Color(0xFFFFEED1),
+          AdminColors.amberFg,
+          AdminColors.amberBg,
         );
       case 'high':
         return const AssessmentStatusStyle(
           'High',
-          Color(0xFF9A3B29),
-          Color(0xFFFFE7DE),
+          AdminColors.redFg,
+          AdminColors.redBg,
         );
       case 'veryhigh':
-        return const AssessmentStatusStyle(
-          'Very high',
-          Color(0xFF9A3B29),
-          Color(0xFFFFE7DE),
+      case 'severe':
+      case 'extremelysevere':
+        return AssessmentStatusStyle(
+          key == 'veryhigh'
+              ? 'Very high'
+              : key == 'severe'
+              ? 'Severe'
+              : 'Extremely severe',
+          AdminColors.redFg,
+          AdminColors.redBg,
         );
       case 'supportmayhelp':
       case 'elevated':
       case 'highsupport':
+      case 'prioritysupport':
+      case 'atrisk':
         return const AssessmentStatusStyle(
           'Support may help',
-          Color(0xFF9A3B29),
-          Color(0xFFFFE7DE),
+          AdminColors.redFg,
+          AdminColors.redBg,
+        );
+      case 'completed':
+      case 'submitted':
+        return AssessmentStatusStyle(
+          key == 'completed' ? 'Completed' : 'Submitted',
+          AdminColors.violetFg,
+          AdminColors.violetBg,
         );
       case 'insufficientresponses':
       case 'resultunavailable':

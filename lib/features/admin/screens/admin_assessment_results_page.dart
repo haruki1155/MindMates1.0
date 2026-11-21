@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/admin_status_repository.dart';
 import '../domain/admin_assessment_presentation.dart';
+import '../domain/admin_status_presentation.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/admin_status_badge.dart';
 import 'admin_assessment_detail_screen.dart';
 
 /// Assessment review for authorized clinical portal roles. No direct profile
@@ -504,23 +506,11 @@ class _AssessmentTable extends StatelessWidget {
                   ),
                   DataCell(Text(_date(assessment.createdAt))),
                   DataCell(
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: style.background,
-                        borderRadius: BorderRadius.circular(9),
-                      ),
-                      child: Text(
-                        style.label,
-                        style: TextStyle(
-                          color: style.foreground,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                        ),
-                      ),
+                    AdminStatusBadge.fromStatus(
+                      domain: AdminStatusDomain.assessment,
+                      status: assessment.displayStatus,
+                      labelOverride: style.label,
+                      compact: true,
                     ),
                   ),
                   DataCell(Text(assessment.role ?? 'Unknown')),
