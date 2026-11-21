@@ -171,7 +171,8 @@ void main() {
       expect(find.text('Subject fresh'), findsNothing);
       expect(find.text('Subject answered'), findsNothing);
       expect(find.text('Subject closed'), findsNothing);
-      expect(find.textContaining('cite'), findsOneWidget);
+      expect(find.textContaining('College assigned'), findsOneWidget);
+      expect(find.textContaining('cite'), findsNothing);
       expect(find.textContaining('Counselor One, Staff One'), findsOneWidget);
       expect(find.textContaining('60 h'), findsOneWidget);
       expect(find.textContaining('Acknowledged, no reply'), findsOneWidget);

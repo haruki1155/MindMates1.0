@@ -98,7 +98,7 @@ class InquiryOverduePanel extends StatelessWidget {
                         [
                           inquiry.collegeId.isEmpty
                               ? 'College not identified'
-                              : 'College ${inquiry.collegeId}',
+                              : 'College assigned',
                           inquiry.assigneeIds.isEmpty
                               ? 'No one assigned'
                               : inquiry.assigneeIds

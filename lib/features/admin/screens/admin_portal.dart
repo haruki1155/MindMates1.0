@@ -1323,17 +1323,8 @@ class _UsersPageState extends State<_UsersPage> {
                               ? const Color(0xFF8DD78B)
                               : Colors.orange.shade200,
                         ),
-                        u.departmentId ?? u.department ?? '—',
-                        [u.collegeId, u.courseId]
-                                .whereType<String>()
-                                .where((e) => e.isNotEmpty)
-                                .join(' / ')
-                                .isEmpty
-                            ? '—'
-                            : [u.collegeId, u.courseId]
-                                  .whereType<String>()
-                                  .where((e) => e.isNotEmpty)
-                                  .join(' / '),
+                        u.department ?? '—',
+                        u.course ?? '—',
                         _Tag(
                           label: u.verificationStatus.label,
                           color:
@@ -5756,7 +5747,7 @@ class _InquiryQueueRow extends StatelessWidget {
                       item.isOperationalProjection
                           ? (item.collegeId.isEmpty
                                 ? 'College: Pending triage'
-                                : 'College: ${item.collegeId}')
+                                : 'College assigned')
                           : item.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

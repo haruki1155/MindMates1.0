@@ -261,7 +261,8 @@ void main() {
         tester,
         InquiryRoutingPanel(inquiry: _inquiry(), repository: repo),
       );
-      expect(find.textContaining('cite'), findsOneWidget);
+      expect(find.textContaining('College assigned'), findsOneWidget);
+      expect(find.textContaining('cite'), findsNothing);
       expect(find.textContaining('Counselor One'), findsOneWidget);
       expect(find.textContaining('Staff One'), findsOneWidget);
       expect(find.text('Reassign'), findsNothing);
@@ -495,7 +496,7 @@ void main() {
       expect(find.text('Feedback'), findsOneWidget);
       expect(find.text('Student inquiry body'), findsOneWidget);
       expect(find.text('Acknowledge receipt'), findsOneWidget);
-      expect(find.byTooltip('Change inquiry status'), findsOneWidget);
+      expect(find.byTooltip('Change inquiry status'), findsNothing);
       expect(find.text('Escalate to administrator'), findsOneWidget);
 
       controller.add(const []);
@@ -607,16 +608,7 @@ void main() {
       expect(resolvedButton, findsOneWidget);
       expect(tester.widget<OutlinedButton>(resolvedButton).onPressed, isNull);
       expect(find.text('Acknowledge receipt'), findsNothing);
-
-      await tester.tap(find.byTooltip('Change inquiry status'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text(InquiryStatus.inProgress.label));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text('Resolved inquiries cannot be acknowledged.'),
-        findsOneWidget,
-      );
+      expect(find.byTooltip('Change inquiry status'), findsNothing);
       expect(repo.statusUpdates, isEmpty);
     },
   );

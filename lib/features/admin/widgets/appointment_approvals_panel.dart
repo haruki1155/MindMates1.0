@@ -431,7 +431,8 @@ class _ApprovalRow extends StatelessWidget {
       if (when != null)
         '${when.year}-${when.month.toString().padLeft(2, '0')}-${when.day.toString().padLeft(2, '0')}',
       if (item.pendingStudentProposal) 'Student proposed a new time',
-      if (item.collegeId.isNotEmpty) 'College ${item.collegeId}',
+      if ((appointment?.department ?? '').trim().isNotEmpty)
+        appointment!.department!,
       if (showReason) item.reasonLabel,
     ].join(' · ');
     return ListTile(

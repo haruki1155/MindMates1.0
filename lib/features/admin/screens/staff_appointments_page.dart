@@ -279,7 +279,8 @@ class StaffAppointmentTable extends StatelessWidget {
               DataCell(Text(item.studentDisplayName.isEmpty
                   ? 'Student' : item.studentDisplayName)),
               DataCell(Text(item.collegeId.isEmpty
-                  ? 'Unassigned' : (collegeNames[item.collegeId] ?? item.collegeId))),
+                  ? 'Unassigned'
+                  : (collegeNames[item.collegeId] ?? 'College not available'))),
               const DataCell(Text('Counseling')),
               DataCell(Text(_dateAndTime(context, item))),
               DataCell(Text(item.assignedCounselor ?? 'Unassigned')),

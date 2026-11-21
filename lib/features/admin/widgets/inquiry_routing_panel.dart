@@ -124,7 +124,7 @@ class InquiryRoutingPanel extends StatelessWidget {
         const SizedBox(height: 8),
         _row(
           'College',
-          inquiry.collegeId.isEmpty ? 'Not identified' : inquiry.collegeId,
+          inquiry.collegeId.isEmpty ? 'Not identified' : 'College assigned',
         ),
         _row('Status', status),
         _row(
@@ -423,7 +423,7 @@ class _ReassignDialogState extends State<_ReassignDialog> {
                       Text(
                         widget.inquiry.collegeId.isEmpty
                             ? 'College not identified. Any eligible counselor may be assigned clinical handling.'
-                            : 'College ${widget.inquiry.collegeId}. Counselors outside this college are allowed and recorded in the audit log.',
+                            : 'College identified. Counselors outside this college are allowed and recorded in the audit log.',
                         style: const TextStyle(color: AdminColors.muted),
                       ),
                       const SizedBox(height: 10),

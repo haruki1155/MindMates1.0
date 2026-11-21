@@ -977,8 +977,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
             _detail('Email', user.email),
             _detail('Employee ID', user.employeeId),
             _detail('Position', user.position),
-            _detail('Department', user.department ?? user.departmentId),
-            _detail('College', user.collegeId),
+            _detail('Department', user.department),
             if (user.accessRole == AccessRole.counselor ||
                 user.assignedCollegeIds.isNotEmpty)
               _detail(
@@ -987,9 +986,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     : 'Legacy college assignments',
                 user.assignedCollegeIds.isEmpty
                     ? 'Unassigned'
-                    : user.assignedCollegeIds.join(', '),
+                    : '${user.assignedCollegeIds.length} assigned',
               ),
-            _detail('Course', user.courseId),
+            _detail('Course', user.course),
             _detail('Account status', user.staffAccountStatus?.label),
             _detail('Portal role', user.accessRole.storedValue),
             _detail('Registered', _date(user.createdAt)),
@@ -2097,7 +2096,8 @@ class _LegacyStaffCleanupDialogState extends State<_LegacyStaffCleanupDialog> {
           children: [
             Text(
               'Portal staff accounts can no longer hold college assignments. '
-              'Removing: ${widget.user.assignedCollegeIds.join(', ')}',
+              'Removing ${widget.user.assignedCollegeIds.length} legacy assignment'
+              '${widget.user.assignedCollegeIds.length == 1 ? '' : 's'}.',
             ),
             const SizedBox(height: 12),
             TextField(
