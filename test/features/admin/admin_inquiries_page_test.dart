@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/domain/inquiry_sla.dart';
@@ -576,6 +577,327 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Mark as Resolved'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'Resolving an in-progress inquiry updates detail UI to Resolved immediately before stream emits and blocks duplicate taps',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final inProgress = _inquiry(
+        'i_immediate',
+        subject: 'Immediate resolve inquiry',
+        status: InquiryStatus.inProgress,
+        createdAt: DateTime.utc(2026, 11, 21, 11),
+        acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+        assigneeIds: const ['c1'],
+        routingRevision: 2,
+      );
+      final repo = _FakeInquiriesRepo(
+        [inProgress],
+        role: AccessRole.counselor,
+        superAdmin: false,
+        uid: 'c1',
+      );
+      addTearDown(repo.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: inProgress, repository: repo),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Mark as Resolved'));
+      await tester.tap(find.text('Mark as Resolved'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, 'Mark as Resolved'),
+        ),
+      );
+      // Do NOT emit an updated resolved inquiry from the stream yet.
+      await tester.pumpAndSettle();
+
+      expect(repo.resolvedCalls, [('i_immediate', 2)]);
+      expect(find.text('Inquiry marked as resolved.'), findsOneWidget);
+      expect(find.text('Resolved'), findsWidgets);
+      expect(find.text('Mark as Resolved'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'resolveInquiry internal/path errors show safe fallback, failed-precondition shows actionable message, and legacy missing routingRevision defaults to 0',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      // 1. Internal error with raw message and path/token never leaks into SnackBar.
+      final legacyInquiry = AdminInquiryModel.fromJson({
+        'id': 'i_legacy',
+        'userId': 'u1',
+        'name': 'Student Legacy',
+        'email': 'legacy@example.com',
+        'category': 'General',
+        'subject': 'Legacy Inquiry',
+        'message': 'Legacy message',
+        'status': 'in_progress',
+        'createdAt': '2026-11-21T11:00:00.000Z',
+        'acknowledgedAt': '2026-11-21T11:05:00.000Z',
+        'assigneeIds': ['c1'],
+      });
+      expect(legacyInquiry.routingRevision, 0);
+
+      final internalRepo = _FakeInquiriesRepo(
+        [legacyInquiry],
+        role: AccessRole.counselor,
+        superAdmin: false,
+        uid: 'c1',
+        resolveError: FirebaseFunctionsException(
+          code: 'internal',
+          message:
+              'Internal error at projects/mindmate-staging/databases/(default)/documents/inquiries/i_legacy token=secret',
+        ),
+      );
+      addTearDown(internalRepo.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(
+            inquiry: legacyInquiry,
+            repository: internalRepo,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Mark as Resolved'));
+      await tester.tap(find.text('Mark as Resolved'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, 'Mark as Resolved'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(internalRepo.resolvedCalls, [('i_legacy', 0)]);
+      expect(find.text('Unable to mark inquiry as resolved.'), findsOneWidget);
+      expect(find.textContaining('Internal'), findsNothing);
+      expect(find.textContaining('projects/'), findsNothing);
+      expect(find.textContaining('token='), findsNothing);
+      expect(find.text(InquiryStatus.inProgress.label), findsOneWidget);
+      expect(find.text('Mark as Resolved'), findsOneWidget);
+
+      // 2. Actionable failed-precondition message is shown directly.
+      final preconditionRepo = _FakeInquiriesRepo(
+        [legacyInquiry],
+        role: AccessRole.counselor,
+        superAdmin: false,
+        uid: 'c1',
+        resolveError: FirebaseFunctionsException(
+          code: 'failed-precondition',
+          message: 'Acknowledge receipt before marking this inquiry as resolved.',
+        ),
+      );
+      addTearDown(preconditionRepo.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          key: const ValueKey('precondition-test'),
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(
+            inquiry: legacyInquiry,
+            repository: preconditionRepo,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Mark as Resolved'));
+      await tester.tap(find.text('Mark as Resolved'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, 'Mark as Resolved'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'Acknowledge receipt before marking this inquiry as resolved.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text(InquiryStatus.inProgress.label), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Inquiry detail suppresses "Internal error" on passthrough codes and restores In Progress if reopened at a higher revision',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      // 1. unavailable / failed-precondition carrying "Internal error" must NOT leak into SnackBar.
+      for (final code in const ['unavailable', 'failed-precondition']) {
+        final item = _inquiry(
+          'i_leak_$code',
+          subject: 'Leak guard $code',
+          status: InquiryStatus.inProgress,
+          createdAt: DateTime.utc(2026, 11, 21, 11),
+          acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+          assigneeIds: const ['c1'],
+          routingRevision: 2,
+        );
+        final repo = _FakeInquiriesRepo(
+          [item],
+          role: AccessRole.counselor,
+          superAdmin: false,
+          uid: 'c1',
+          resolveError: FirebaseFunctionsException(
+            code: code,
+            message: 'Internal error',
+          ),
+        );
+        addTearDown(repo.dispose);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            key: ValueKey('leak-$code'),
+            theme: AdminTheme.data,
+            home: InquiryDetailScreen(inquiry: item, repository: repo),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.ensureVisible(find.text('Mark as Resolved'));
+        await tester.tap(find.text('Mark as Resolved'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.widgetWithText(FilledButton, 'Mark as Resolved'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.textContaining('Internal'),
+          findsNothing,
+          reason: 'Leaked Internal for code=$code',
+        );
+      }
+
+      // 2. Optimistically resolved inquiry reopened by server to in_progress at higher routingRevision.
+      final initial = _inquiry(
+        'i_reopen',
+        subject: 'Reopened inquiry',
+        status: InquiryStatus.inProgress,
+        createdAt: DateTime.utc(2026, 11, 21, 11),
+        acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+        assigneeIds: const ['c1'],
+        routingRevision: 2,
+      );
+      final reopenRepo = _FakeInquiriesRepo(
+        [initial],
+        role: AccessRole.counselor,
+        superAdmin: false,
+        uid: 'c1',
+      );
+      addTearDown(reopenRepo.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          key: const ValueKey('reopen-test'),
+          theme: AdminTheme.data,
+          home: InquiryDetailScreen(inquiry: initial, repository: reopenRepo),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('Mark as Resolved'));
+      await tester.tap(find.text('Mark as Resolved'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, 'Mark as Resolved'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Resolved'), findsWidgets);
+      expect(find.text('Mark as Resolved'), findsNothing);
+
+      // Stream catches up to resolved at revision 3, then reopens to in_progress at revision 4.
+      reopenRepo.emitInquiries([
+        _inquiry(
+          'i_reopen',
+          subject: 'Reopened inquiry',
+          status: InquiryStatus.resolved,
+          createdAt: DateTime.utc(2026, 11, 21, 11),
+          acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+          assigneeIds: const ['c1'],
+          routingRevision: 3,
+        ),
+      ]);
+      await tester.pumpAndSettle();
+
+      reopenRepo.emitInquiries([
+        _inquiry(
+          'i_reopen',
+          subject: 'Reopened inquiry',
+          status: InquiryStatus.inProgress,
+          createdAt: DateTime.utc(2026, 11, 21, 11),
+          acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+          assigneeIds: const ['c1'],
+          routingRevision: 4,
+        ),
+      ]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('In Progress'), findsOneWidget);
+      expect(find.text('Mark as Resolved'), findsOneWidget);
+
+      // Direct jump: optimistic resolve at rev 4, then stream emits in_progress at rev 5 without intermediate resolved.
+      await tester.ensureVisible(find.text('Mark as Resolved'));
+      await tester.tap(find.text('Mark as Resolved'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, 'Mark as Resolved'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Resolved'), findsWidgets);
+
+      reopenRepo.emitInquiries([
+        _inquiry(
+          'i_reopen',
+          subject: 'Reopened inquiry',
+          status: InquiryStatus.inProgress,
+          createdAt: DateTime.utc(2026, 11, 21, 11),
+          acknowledgedAt: DateTime.utc(2026, 11, 21, 11, 5),
+          assigneeIds: const ['c1'],
+          routingRevision: 5,
+        ),
+      ]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('In Progress'), findsOneWidget);
+      expect(find.text('Mark as Resolved'), findsOneWidget);
     },
   );
 }

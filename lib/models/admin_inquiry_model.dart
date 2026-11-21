@@ -193,6 +193,45 @@ class AdminInquiryModel {
   String get displayName =>
       (name ?? '').trim().isNotEmpty ? name!.trim() : email;
 
+  AdminInquiryModel copyWith({InquiryStatus? status}) => AdminInquiryModel(
+    id: id,
+    userId: userId,
+    subject: subject,
+    message: message,
+    category: category,
+    email: email,
+    createdAt: createdAt,
+    status: status ?? this.status,
+    name: name,
+    role: role,
+    formType: formType,
+    formData: formData,
+    acknowledgedAt: acknowledgedAt,
+    assignedStaffId: assignedStaffId,
+    collegeId: collegeId,
+    routingStatus: routingStatus,
+    routingReason: routingReason,
+    routingMode: routingMode,
+    routingRevision: routingRevision,
+    assigneeIds: assigneeIds,
+    assigneeLabels: assigneeLabels,
+    monitoringStaffIds: monitoringStaffIds,
+    monitoringStaffLabels: monitoringStaffLabels,
+    ownerId: ownerId,
+    escalationStatus: escalationStatus,
+    escalationReason: escalationReason,
+    operationalLabel: operationalLabel,
+    isOperationalProjection: isOperationalProjection,
+    firstResponseAt: firstResponseAt,
+    lastResponseAt: lastResponseAt,
+    lastResponseByName: lastResponseByName,
+    lastResponseRole: lastResponseRole,
+    responseCount: responseCount,
+    takeoverByName: takeoverByName,
+    takeoverReason: takeoverReason,
+    isTakenOverFlag: isTakenOverFlag,
+  );
+
   factory AdminInquiryModel.fromJson(Map<String, dynamic> json, {String? id}) {
     final parsedCategory = json['category']?.toString() ?? 'General';
     final parsedFormType = _optional(json['formType']);

@@ -430,4 +430,62 @@ void main() {
       expect(find.text('Send reply'), findsNothing);
     },
   );
+
+  testWidgets(
+    'InquiryReplyThread does not display raw INTERNAL or internal error text on callable internal failure',
+    (tester) async {
+      final repo = _Repo(
+        replyError: FirebaseFunctionsException(
+          code: 'internal',
+          message: 'Internal error',
+        ),
+      );
+      await _pump(
+        tester,
+        InquiryReplyThread(
+          inquiry: _inquiry('i1', age: const Duration(hours: 5)),
+          repository: repo,
+        ),
+      );
+      await tester.enterText(find.byType(TextField), 'Follow up reply');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Send reply'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Internal'), findsNothing);
+      expect(find.textContaining('INTERNAL'), findsNothing);
+      expect(find.text('The reply was not sent.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'InquiryReplyThread suppresses "Internal error" on unavailable and failed-precondition passthrough codes',
+    (tester) async {
+      for (final code in const ['unavailable', 'failed-precondition']) {
+        final repo = _Repo(
+          replyError: FirebaseFunctionsException(
+            code: code,
+            message: 'Internal error',
+          ),
+        );
+        await _pump(
+          tester,
+          InquiryReplyThread(
+            inquiry: _inquiry('i1', age: const Duration(hours: 5)),
+            repository: repo,
+          ),
+        );
+        await tester.enterText(find.byType(TextField), 'Follow up reply');
+        await tester.pump();
+        await tester.tap(find.widgetWithText(FilledButton, 'Send reply'));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.textContaining('Internal'),
+          findsNothing,
+          reason: 'Leaked Internal for code=$code',
+        );
+      }
+    },
+  );
 }

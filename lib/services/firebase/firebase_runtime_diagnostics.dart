@@ -45,12 +45,20 @@ class FirebaseRuntimeDiagnostics {
   }
 
   static String? firebaseErrorCode(Object? error) {
-    if (error is FirebaseException) return error.code;
-    final match = RegExp(
-      r'code[=: ]+([a-z0-9/-]+)',
-      caseSensitive: false,
-    ).firstMatch(error?.toString() ?? '');
-    return match?.group(1)?.toLowerCase();
+    final String? raw;
+    if (error is FirebaseException) {
+      raw = error.code.trim().toLowerCase();
+    } else {
+      final match = RegExp(
+        r'code[=: ]+([a-z0-9/-]+)',
+        caseSensitive: false,
+      ).firstMatch(error?.toString() ?? '');
+      raw = match?.group(1)?.trim().toLowerCase();
+    }
+    if (raw == null || raw.isEmpty) return raw;
+    return raw.startsWith('functions/')
+        ? raw.substring('functions/'.length)
+        : raw;
   }
 
   static String? correlationIdFrom(Object? error) {

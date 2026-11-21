@@ -14,6 +14,10 @@ class FirebaseErrorMessage {
     if (error is TimeoutException) {
       return 'MindMate did not respond in time. Your request may still be processing; check your connection before trying again.';
     }
+    final code = codeOf(error);
+    if (code == 'internal') {
+      return fallback;
+    }
     final text = [
       error.toString(),
       if (error is FirebaseFunctionsException) error.message ?? '',
@@ -26,7 +30,6 @@ class FirebaseErrorMessage {
     if (text.contains('app check') || text.contains('appcheck')) {
       return appCheckMessage();
     }
-    final code = codeOf(error);
     if (error is FirebaseException && error.plugin == 'firebase_storage') {
       if (code == 'unauthorized') {
         return 'You do not have permission to complete this action.';
@@ -39,21 +42,16 @@ class FirebaseErrorMessage {
       final message = error.message?.trim();
       if (message != null &&
           message.isNotEmpty &&
-          !(code == 'internal' && message.toUpperCase() == 'INTERNAL') &&
+          _isSafePassthroughMessage(message, code) &&
           {
             'invalid-argument',
             'failed-precondition',
             'already-exists',
             'not-found',
-            'internal',
             'unavailable',
           }.contains(code)) {
         return message;
       }
-    }
-    if (code == 'invalid-argument' && error is FirebaseFunctionsException) {
-      final message = error.message?.trim();
-      if (message != null && message.isNotEmpty) return message;
     }
     if (error is FormatException) {
       return 'The assessment was saved, but the verified result could not be read. Tap retry to refresh it.';
@@ -88,6 +86,10 @@ class FirebaseErrorMessage {
       case 'network-request-failed':
       case 'unavailable':
         return 'The connection to MindMates is unavailable. Check your internet connection and try again.';
+      case 'deadline-exceeded':
+        return 'MindMate did not respond in time. Your request may still be processing; check your connection before trying again.';
+      case 'internal':
+        return fallback;
       case 'email-already-in-use':
         return 'This email address is already registered. Sign in or use a different email address.';
       case 'weak-password':
@@ -149,6 +151,67 @@ class FirebaseErrorMessage {
       return 'Firebase App Check temporarily throttled this browser after a rejected attestation. Verify the Enterprise key and production domain, then retry with fresh site data.';
     }
     return appCheckMessage(web: false);
+  }
+
+  static bool _isSafePassthroughMessage(String message, String? code) {
+    final lower = message.toLowerCase();
+    if (lower == 'unavailable' ||
+        lower == 'unknown' ||
+        (code != null && lower == code)) {
+      return false;
+    }
+    if (RegExp(
+      r'(?:^|[^a-z])internal(?:$|[^a-z])',
+      caseSensitive: false,
+    ).hasMatch(message)) {
+      return false;
+    }
+    if (RegExp(r'^[A-Z0-9_-]+$').hasMatch(message)) {
+      return false;
+    }
+    if (lower.contains('https://') ||
+        lower.contains('http://') ||
+        lower.contains('gs://') ||
+        lower.contains('projects/') ||
+        lower.contains('databases/') ||
+        lower.contains('documents/') ||
+        lower.contains('token=') ||
+        lower.contains('token%3d') ||
+        lower.contains('%2f') ||
+        lower.contains('googleapis.com') ||
+        lower.contains('cloudfunctions.net') ||
+        lower.contains('bearer ') ||
+        lower.contains('cannot read properties of') ||
+        lower.contains('cannot read property ') ||
+        lower.contains('is not a function') ||
+        lower.contains('undefined is not') ||
+        lower.contains('null is not an object')) {
+      return false;
+    }
+    if (RegExp(
+          r'(?:^|\b)[a-z]*(?:error|exception)\s*:',
+          caseSensitive: false,
+        ).hasMatch(message) ||
+        RegExp(
+          r'\.(?:ts|js|dart):\d+',
+          caseSensitive: false,
+        ).hasMatch(message) ||
+        RegExp(r'[A-Za-z]:[/\\]').hasMatch(message) ||
+        RegExp(
+          r'(?:^|\s)/(?:workspace|app|home|users|var|tmp)/',
+          caseSensitive: false,
+        ).hasMatch(message) ||
+        RegExp(
+          r'(?:^|\r?\n)\s+at\s+\S+',
+          caseSensitive: false,
+        ).hasMatch(message) ||
+        RegExp(
+          r'(?:^|\r?\n|\s)at\s+\S+\s*\([^)]*:\d+',
+          caseSensitive: false,
+        ).hasMatch(message)) {
+      return false;
+    }
+    return true;
   }
 
   static bool _isLocalWebHost(String host) =>

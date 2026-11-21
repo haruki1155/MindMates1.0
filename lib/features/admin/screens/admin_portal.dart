@@ -6253,6 +6253,26 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
   bool _resolving = false;
   bool _previewingPdf = false;
   bool _downloadingPdf = false;
+  String? _resolvedInquiryId;
+
+  @override
+  void didUpdateWidget(covariant _InquiryDetails oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldItem = oldWidget.item;
+    final nextItem = widget.item;
+    if (oldItem?.id != nextItem?.id) {
+      _resolvedInquiryId = null;
+      return;
+    }
+    if (nextItem != null &&
+        nextItem.id == _resolvedInquiryId &&
+        (nextItem.status == InquiryStatus.resolved ||
+            (oldItem != null &&
+                nextItem.routingRevision > oldItem.routingRevision &&
+                nextItem.status != InquiryStatus.resolved))) {
+      _resolvedInquiryId = null;
+    }
+  }
 
   bool _canResolveInquiry(AdminInquiryModel item) {
     if (item.isOperationalProjection) return false;
@@ -6276,6 +6296,14 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
         item.isOperationalProjection ||
         (!widget.repository.isSuperAdmin &&
             widget.repository.currentAccessRole == AccessRole.portalStaff);
+    final effectiveStatus = _resolvedInquiryId == item.id
+        ? InquiryStatus.resolved
+        : item.status;
+    final effectiveItem =
+        effectiveStatus == InquiryStatus.resolved &&
+            item.status != InquiryStatus.resolved
+        ? item.copyWith(status: InquiryStatus.resolved)
+        : item;
     return Container(
       padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 18 : 22),
       decoration: _box,
@@ -6289,8 +6317,8 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
             children: [
               AdminStatusBadge.fromStatus(
                 domain: AdminStatusDomain.inquiry,
-                status: item.status.storedValue,
-                labelOverride: item.status.label,
+                status: effectiveStatus.storedValue,
+                labelOverride: effectiveStatus.label,
               ),
               _Tag(label: item.category, color: AdminColors.surfaceMuted),
               Text(
@@ -6416,11 +6444,14 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
               ),
             ],
             const Divider(height: 34),
-            InquiryReplyThread(inquiry: item, repository: widget.repository),
+            InquiryReplyThread(
+              inquiry: effectiveItem,
+              repository: widget.repository,
+            ),
           ],
           const Divider(height: 34),
           InquiryRoutingPanel(
-            inquiry: item,
+            inquiry: effectiveItem,
             repository: widget.repository,
             onChanged: widget.onUpdated,
           ),
@@ -6437,7 +6468,7 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
               OutlinedButton.icon(
                 onPressed:
                     item.isAcknowledged ||
-                        item.status == InquiryStatus.resolved ||
+                        effectiveStatus == InquiryStatus.resolved ||
                         (item.isTakenOver && !widget.repository.isSuperAdmin) ||
                         _acknowledging ||
                         _resolving
@@ -6451,14 +6482,14 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                 label: Text(
                   item.isAcknowledged
                       ? 'Receipt acknowledged'
-                      : item.status == InquiryStatus.resolved
+                      : effectiveStatus == InquiryStatus.resolved
                       ? 'Resolved'
                       : _acknowledging
                       ? 'Acknowledging…'
                       : 'Acknowledge receipt',
                 ),
               ),
-              if (item.status == InquiryStatus.inProgress &&
+              if (effectiveStatus == InquiryStatus.inProgress &&
                   _canResolveInquiry(item))
                 FilledButton.icon(
                   onPressed: _resolving || _acknowledging
@@ -6498,7 +6529,12 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
           const SnackBar(content: Text('Receipt notification sent.')),
         );
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'inquiry_acknowledge_failed',
+      );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -6516,6 +6552,7 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     if (item == null ||
         _resolving ||
         _acknowledging ||
+        _resolvedInquiryId == item.id ||
         item.status != InquiryStatus.inProgress ||
         !_canResolveInquiry(item)) {
       return;
@@ -6543,6 +6580,7 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     final current = widget.item;
     if (current == null ||
         current.id != item.id ||
+        _resolvedInquiryId == current.id ||
         current.status != InquiryStatus.inProgress ||
         _resolving) {
       return;
@@ -6553,13 +6591,21 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
         current.id,
         expectedRevision: current.routingRevision,
       );
+      if (mounted) {
+        setState(() => _resolvedInquiryId = current.id);
+      }
       widget.onUpdated();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Inquiry marked as resolved.')),
         );
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'inquiry_resolve_failed',
+      );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

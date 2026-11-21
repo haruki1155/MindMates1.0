@@ -312,7 +312,9 @@ export const acknowledgeInquiry = onCall(async (request) => {
     if (String(data.status ?? "pending").toLowerCase() === "resolved") {
       throw new HttpsError("failed-precondition", "Resolved inquiries cannot be acknowledged.");
     }
-    if (data.acknowledgedAt) throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
+    if (hasTimestampValue(data.acknowledgedAt)) {
+      throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
+    }
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Inquiry has no sender.");
     // Only clinical counselors or the super-admin claim inquiry `ownerId`;
@@ -363,6 +365,53 @@ export const acknowledgeInquiry = onCall(async (request) => {
  * `setInquiryStatus("in_progress")` transitions a pending inquiry without
  * acknowledging it.
  */
+function hasTimestampValue(value: unknown): boolean {
+  if (value == null || typeof value === "boolean") return false;
+  if (value instanceof Timestamp) return true;
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (typeof value === "number") return Number.isFinite(value) && value > 0;
+  if (typeof value === "string") {
+    return value.trim().length > 0 && !Number.isNaN(Date.parse(value));
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const record = value as {
+      toMillis?: unknown;
+      seconds?: unknown;
+      _seconds?: unknown;
+      nanoseconds?: unknown;
+      _nanoseconds?: unknown;
+    };
+    if (typeof record.toMillis === "function") {
+      try {
+        const ms = (record.toMillis as () => unknown)();
+        return typeof ms === "number" && Number.isFinite(ms) && ms > 0;
+      } catch {
+        return false;
+      }
+    }
+    const seconds =
+      typeof record.seconds === "number"
+        ? record.seconds
+        : typeof record._seconds === "number"
+          ? record._seconds
+          : null;
+    if (seconds !== null && Number.isFinite(seconds) && seconds >= 0) {
+      const nanos =
+        record.nanoseconds !== undefined
+          ? record.nanoseconds
+          : record._nanoseconds;
+      if (
+        nanos !== undefined &&
+        (typeof nanos !== "number" || !Number.isFinite(nanos) || nanos < 0)
+      ) {
+        return false;
+      }
+      return seconds > 0 || (typeof nanos === "number" && nanos > 0);
+    }
+  }
+  return false;
+}
+
 function assertCanResolveInquiryStatus(
   data: FirebaseFirestore.DocumentData,
   before: string,
@@ -374,7 +423,8 @@ function assertCanResolveInquiryStatus(
     }
     return false;
   }
-  const isAcknowledgedOrResponded = data.acknowledgedAt != null || data.firstResponseAt != null;
+  const isAcknowledgedOrResponded =
+    hasTimestampValue(data.acknowledgedAt) || hasTimestampValue(data.firstResponseAt);
   if (before !== "in_progress" || !isAcknowledgedOrResponded) {
     throw new HttpsError("failed-precondition", "Acknowledge receipt before marking this inquiry as resolved.");
   }

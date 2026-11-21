@@ -1,10 +1,10 @@
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/admin_inquiry_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../../../services/firebase/firebase_error_message.dart';
 import '../domain/admin_management_models.dart';
 import '../theme/admin_theme.dart';
 
@@ -53,11 +53,7 @@ String routingReasonLabel(String? reason) => switch (reason) {
 };
 
 String _errorText(Object error, String fallback) =>
-    error is FirebaseFunctionsException
-    ? (error.message?.trim().isNotEmpty == true
-          ? error.message!
-          : '$fallback (${error.code}).')
-    : '$fallback.';
+    FirebaseErrorMessage.describe(error, fallback: '$fallback.');
 
 /// Routing details and the actions this session may take on them. Every
 /// action is a server callable; the server re-checks authorization.

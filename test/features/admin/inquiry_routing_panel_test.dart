@@ -779,6 +779,67 @@ void main() {
       expect(find.text('Client Feedback Form'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'InquiryRoutingPanel does not display raw INTERNAL or internal error text on callable internal failure',
+    (tester) async {
+      final repo = _Repo(
+        error: FirebaseFunctionsException(
+          code: 'internal',
+          message: 'Internal error',
+        ),
+      );
+      await _pump(
+        tester,
+        InquiryRoutingPanel(inquiry: _inquiry(), repository: repo),
+      );
+      await tester.tap(find.text('Escalate to administrator'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Needs supervisor review');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Escalate'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Internal'), findsNothing);
+      expect(find.textContaining('INTERNAL'), findsNothing);
+      expect(find.text('The request failed.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'InquiryRoutingPanel suppresses "Internal error" on unavailable and failed-precondition passthrough codes',
+    (tester) async {
+      for (final code in const ['unavailable', 'failed-precondition']) {
+        final repo = _Repo(
+          error: FirebaseFunctionsException(
+            code: code,
+            message: 'Internal error',
+          ),
+        );
+        await _pump(
+          tester,
+          InquiryRoutingPanel(inquiry: _inquiry(), repository: repo),
+        );
+        await tester.tap(find.text('Escalate to administrator'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byType(TextField),
+          'Needs supervisor review',
+        );
+        await tester.pump();
+        await tester.tap(find.widgetWithText(FilledButton, 'Escalate'));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.textContaining('Internal'),
+          findsNothing,
+          reason: 'Leaked Internal for code=$code',
+        );
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+      }
+    },
+  );
 }
 
 class _RetryRepo extends _Repo {
