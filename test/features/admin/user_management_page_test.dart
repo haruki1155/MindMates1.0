@@ -140,4 +140,62 @@ void main() {
     expect(find.text('Manage'), findsOneWidget);
     expect(find.text('Pending review'), findsOneWidget);
   });
+
+  testWidgets(
+    'uses Inactive account / Inactive / Reactivate account consistently without Suspend copy',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final repo = _LifecycleRepo();
+      await tester.pumpWidget(
+        MaterialApp(home: UserManagementPage(repository: repo)),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Staff / Counselors (2)'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Suspended'), findsNothing);
+      expect(find.text('Suspend account'), findsNothing);
+      expect(find.text('Inactive'), findsOneWidget);
+
+      // Open overflow menu for active staff and verify 'Inactive account'.
+      await tester.tap(find.byType(PopupMenuButton<String>).first);
+      await tester.pumpAndSettle();
+      expect(find.text('Inactive account'), findsOneWidget);
+      expect(find.text('Suspend account'), findsNothing);
+
+      // Close menu and open overflow menu for disabled staff.
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PopupMenuButton<String>).last);
+      await tester.pumpAndSettle();
+      expect(find.text('Reactivate account'), findsOneWidget);
+    },
+  );
+}
+
+class _LifecycleRepo extends _Repository {
+  @override
+  Stream<List<UserModel>> watchUsers() => Stream.value([
+    const UserModel(
+      id: 'active-staff',
+      email: 'active@example.com',
+      firstName: 'Active',
+      lastName: 'Counselor',
+      accessRole: AccessRole.counselor,
+      staffAccountStatus: StaffAccountStatus.approved,
+    ),
+    const UserModel(
+      id: 'inactive-staff',
+      email: 'inactive@example.com',
+      firstName: 'Disabled',
+      lastName: 'Staff',
+      accessRole: AccessRole.portalStaff,
+      staffAccountStatus: StaffAccountStatus.disabled,
+    ),
+  ]);
 }

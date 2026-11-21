@@ -92,7 +92,7 @@ void main() {
     );
     expect(
       appDirectoryStatus(teacher.copyWith(accountStatus: 'disabled')),
-      'Suspended',
+      'Inactive',
     );
   });
 
