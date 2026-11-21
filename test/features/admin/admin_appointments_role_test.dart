@@ -80,6 +80,16 @@ void main() {
       expect(find.text('PACC decision'), findsNothing);
       expect(find.text('Send decision'), findsNothing);
       expect(find.text('Close'), findsOneWidget);
+      expect(
+        find.text(
+          'Admin review is read-only. Only assigned counselors can update appointment decisions.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('This appointment has been finalized'),
+        findsNothing,
+      );
     },
   );
 
@@ -145,7 +155,49 @@ void main() {
     expect(find.text('PACC decision'), findsNothing);
     expect(find.text('Send decision'), findsNothing);
     expect(find.text('Close'), findsOneWidget);
+    expect(
+      find.text('Appointment decisions are read-only for your role.'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('This appointment has been finalized'),
+      findsNothing,
+    );
   });
+
+  testWidgets(
+    'PAACC Staff does not see row selection or archive controls on finalized rows',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final repo = _RoleAppointmentsRepo([
+        _appt('a1', 'completed', 'Done Student'),
+      ], role: AccessRole.portalStaff);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: repo,
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.textContaining('All active'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Checkbox), findsNothing);
+      expect(find.byTooltip('Move to history'), findsNothing);
+      expect(find.textContaining('Select finished'), findsNothing);
+      expect(find.text('View'), findsOneWidget);
+    },
+  );
 
   testWidgets('Admin does not see bulk archive controls for finalized rows', (
     tester,

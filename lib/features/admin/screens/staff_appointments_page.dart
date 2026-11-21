@@ -85,7 +85,9 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                   for (final item in records)
                     if (item.collegeId.trim().isNotEmpty) item.collegeId.trim(),
                 }.toList()..sort(
-                  (a, b) => (known[a] ?? a).compareTo(known[b] ?? b),
+                  (a, b) => (known[a] ?? 'College not available').compareTo(
+                    known[b] ?? 'College not available',
+                  ),
                 );
             final knownSelection =
                 _college == 'all' ||
@@ -195,7 +197,7 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                               DropdownMenuItem(
                                 value: id,
                                 child: Text(
-                                  known[id] ?? id,
+                                  known[id] ?? 'College not available',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),

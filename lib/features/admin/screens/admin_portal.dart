@@ -3207,7 +3207,7 @@ class _AppointmentCard extends StatelessWidget {
           label: Text(isAdminRole || canReview ? 'Review' : 'View'),
         );
         final historyAction =
-            !isAdminRole &&
+            !isReadOnlyRole &&
                 item.isFinalized &&
                 !item.isArchived &&
                 onArchive != null
@@ -3229,7 +3229,7 @@ class _AppointmentCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  if (onSelected != null && !isAdminRole)
+                  if (onSelected != null && !isReadOnlyRole)
                     Checkbox(
                       value: selected,
                       onChanged: (value) => onSelected!(value ?? false),
@@ -3249,7 +3249,7 @@ class _AppointmentCard extends StatelessWidget {
         }
         return Row(
           children: [
-            if (onSelected != null && !isAdminRole)
+            if (onSelected != null && !isReadOnlyRole)
               Checkbox(
                 value: selected,
                 onChanged: (value) => onSelected!(value ?? false),
@@ -3272,10 +3272,11 @@ class _AppointmentCard extends StatelessWidget {
 
   Future<void> _showReviewDialog(BuildContext context) async {
     final currentStatus = item.lifecycleStatus;
-    final isReadOnlyRole =
+    final isAdminRole =
         repository.isSuperAdmin ||
-        repository.currentAccessRole == AccessRole.admin ||
-        repository.currentAccessRole == AccessRole.portalStaff;
+        repository.currentAccessRole == AccessRole.admin;
+    final isReadOnlyRole =
+        isAdminRole || repository.currentAccessRole == AccessRole.portalStaff;
     final canReview =
         !isReadOnlyRole && canReviewAppointment(item, DateTime.now());
     final canUploadClinicalAttachments =
@@ -3448,6 +3449,10 @@ class _AppointmentCard extends StatelessWidget {
                         icon: Icons.lock_outline,
                         message: item.isArchived
                             ? 'This appointment is archived. Details are read-only.'
+                            : isAdminRole
+                            ? 'Admin review is read-only. Only assigned counselors can update appointment decisions.'
+                            : isReadOnlyRole
+                            ? 'Appointment decisions are read-only for your role.'
                             : currentStatus == AppointmentStatus.confirmed
                             ? 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.'
                             : 'This appointment has been finalized. The recorded decision is read-only.',

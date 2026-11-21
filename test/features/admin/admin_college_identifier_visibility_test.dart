@@ -101,7 +101,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining(_syntheticCollegeId), findsNothing);
 
-      // 2. StaffAppointmentsPage (unresolved college lookup falls back to neutral text, never raw ID)
+      // 2. StaffAppointmentsPage (unresolved college lookup falls back to neutral text, never raw ID — including inside the Filter by college dropdown)
       await tester.pumpWidget(
         MaterialApp(
           theme: AdminTheme.data,
@@ -111,6 +111,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining(_syntheticCollegeId), findsNothing);
       expect(find.text('College not available'), findsOneWidget);
+
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      expect(find.textContaining(_syntheticCollegeId), findsNothing);
+      expect(find.text('College not available'), findsAtLeastNWidgets(2));
+      await tester.tap(find.text('All colleges').last);
+      await tester.pumpAndSettle();
 
       // 3. InquiryOverduePanel & InquiryRoutingPanel
       await tester.pumpWidget(
