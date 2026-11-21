@@ -357,9 +357,14 @@ export const acknowledgeInquiry = onCall(async (request) => {
 /**
  * Enforces the approved inquiry resolution workflow across both the dedicated
  * `resolveInquiry` callable and the legacy `setInquiryStatus` callable:
- * pending inquiries must be acknowledged/in-progress before resolution.
+ * pending inquiries must be acknowledged (or have a clinical response) and in
+ * progress before resolution. Checking `acknowledgedAt != null ||
+ * firstResponseAt != null` also closes the two-step legacy bypass where
+ * `setInquiryStatus("in_progress")` transitions a pending inquiry without
+ * acknowledging it.
  */
 function assertCanResolveInquiryStatus(
+  data: FirebaseFirestore.DocumentData,
   before: string,
   alreadyResolvedMode: "reject" | "noop",
 ): boolean {
@@ -369,7 +374,8 @@ function assertCanResolveInquiryStatus(
     }
     return false;
   }
-  if (before !== "in_progress") {
+  const isAcknowledgedOrResponded = data.acknowledgedAt != null || data.firstResponseAt != null;
+  if (before !== "in_progress" || !isAcknowledgedOrResponded) {
     throw new HttpsError("failed-precondition", "Acknowledge receipt before marking this inquiry as resolved.");
   }
   return true;
@@ -399,7 +405,7 @@ export const setInquiryStatus = onCall(async (request) => {
     const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     const before = String(data.status ?? "pending").toLowerCase();
     if (status === "resolved") {
-      if (!assertCanResolveInquiryStatus(before, "noop")) {
+      if (!assertCanResolveInquiryStatus(data, before, "noop")) {
         return {ok: true, changed: false, revision};
       }
     } else if (before === status) {
@@ -453,7 +459,7 @@ export const resolveInquiry = onCall(async (request) => {
     const revision = revisionOf(data);
     const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     const before = String(data.status ?? "pending").toLowerCase();
-    assertCanResolveInquiryStatus(before, "reject");
+    assertCanResolveInquiryStatus(data, before, "reject");
     tx.update(ref, {
       status: "resolved",
       routingRevision: revision + 1,

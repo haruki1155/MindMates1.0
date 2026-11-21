@@ -5,6 +5,7 @@ import {getFirestore} from "firebase-admin/firestore";
 import {HttpsError} from "firebase-functions/v2/https";
 
 import {notifyPortalOfInquiry, syncInquiryStatusOnWrite} from "./index";
+import {replyToInquiry} from "./inquiry_sla_service";
 import {
   acknowledgeInquiry,
   escalateInquiry,
@@ -207,7 +208,7 @@ test("resolved inquiries cannot be reopened by acknowledgement, including under 
   const resolvedId = await newInquiry("cite");
   await routeInquiry(resolvedId);
   await call(reassignInquiry, "admin", {inquiryId: resolvedId, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
-  await call(setInquiryStatus, "c1", {inquiryId: resolvedId, status: "in_progress"});
+  await call(replyToInquiry, "c1", {inquiryId: resolvedId, message: "Following up on your concern.", expectedRevision: 2, requestId: `req-${p}-resolved-ack`});
   await call(setInquiryStatus, "c1", {inquiryId: resolvedId, status: "resolved"});
   await rejects(call(acknowledgeInquiry, "s1", {inquiryId: resolvedId}), "failed-precondition");
   const resolvedDoc = (await db.doc(`inquiries/${resolvedId}`).get()).data()!;
@@ -217,6 +218,7 @@ test("resolved inquiries cannot be reopened by acknowledgement, including under 
   const resolvedStudentNotes = await db.collection("notifications")
     .where("inquiryId", "==", resolvedId)
     .where("userId", "==", uid("student-cite"))
+    .where("title", "==", "Form received")
     .get();
   assert.equal(resolvedStudentNotes.size, 0);
 
@@ -224,7 +226,7 @@ test("resolved inquiries cannot be reopened by acknowledgement, including under 
   const raceId = await newInquiry("cite");
   await routeInquiry(raceId);
   await call(reassignInquiry, "admin", {inquiryId: raceId, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
-  await call(setInquiryStatus, "c1", {inquiryId: raceId, status: "in_progress"});
+  await call(replyToInquiry, "c1", {inquiryId: raceId, message: "Following up on your concern.", expectedRevision: 2, requestId: `req-${p}-race-ack`});
   const outcomes = await Promise.allSettled([
     call(setInquiryStatus, "c1", {inquiryId: raceId, status: "resolved"}),
     call(acknowledgeInquiry, "s1", {inquiryId: raceId}),
@@ -238,6 +240,7 @@ test("resolved inquiries cannot be reopened by acknowledgement, including under 
     const raceNotes = await db.collection("notifications")
       .where("inquiryId", "==", raceId)
       .where("userId", "==", uid("student-cite"))
+      .where("title", "==", "Form received")
       .get();
     assert.equal(raceNotes.size, 0);
   }
@@ -252,6 +255,7 @@ test("status changes are server-side, counselor/super-admin scoped and audited; 
   await rejects(call(setInquiryStatus, "student-cite", {inquiryId: id, status: "resolved"}), "permission-denied");
   await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "deleted"}), "invalid-argument");
   await call(setInquiryStatus, "c1", {inquiryId: id, status: "in_progress"});
+  await call(acknowledgeInquiry, "c1", {inquiryId: id});
   await call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved"});
   const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
   assert.deepEqual([inquiry.status, inquiry.resolvedBy], ["resolved", uid("c1")]);
@@ -746,4 +750,43 @@ test("direct pending -> resolved transition is rejected through both legacy setI
   const newResolved = await call(resolveInquiry, "c1", {inquiryId: id2, expectedRevision: 2});
   assert.deepEqual(newResolved, {ok: true, changed: true, revision: 3});
   assert.equal((await db.doc(`inquiries/${id2}`).get()).data()!.status, "resolved");
+});
+
+test("two-step setInquiryStatus(in_progress) without acknowledgment cannot bypass resolution guard", {skip: !emulated}, async () => {
+  const id = await newInquiry("cite");
+  await routeInquiry(id);
+
+  // Legacy setInquiryStatus can transition pending -> in_progress without setting acknowledgedAt.
+  await call(setInquiryStatus, "c1", {inquiryId: id, status: "in_progress", expectedRevision: 1});
+  const unackDoc = (await db.doc(`inquiries/${id}`).get()).data()!;
+  assert.equal(unackDoc.status, "in_progress");
+  assert.equal(unackDoc.acknowledgedAt ?? null, null);
+  assert.equal(unackDoc.firstResponseAt ?? null, null);
+
+  // Neither legacy setInquiryStatus(resolved) nor resolveInquiry may resolve an unacknowledged in_progress inquiry.
+  await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 2}), "failed-precondition");
+  await rejects(call(setInquiryStatus, "admin", {inquiryId: id, status: "resolved"}), "failed-precondition");
+  await rejects(call(resolveInquiry, "c1", {inquiryId: id, expectedRevision: 2}), "failed-precondition");
+  await rejects(call(resolveInquiry, "admin", {inquiryId: id, expectedRevision: 2}), "failed-precondition");
+
+  const stillInProgress = (await db.doc(`inquiries/${id}`).get()).data()!;
+  assert.equal(stillInProgress.status, "in_progress");
+  assert.equal(stillInProgress.routingRevision, 2);
+  assert.equal(stillInProgress.resolvedAt ?? null, null);
+  assert.equal(stillInProgress.resolvedBy ?? null, null);
+  assert.equal((await audit(id, "INQUIRY_RESOLVED")).length, 0);
+
+  // Acknowledging the inquiry makes it eligible for resolution (not stuck).
+  await call(acknowledgeInquiry, "c1", {inquiryId: id, expectedRevision: 2});
+  const resolved = await call(resolveInquiry, "c1", {inquiryId: id, expectedRevision: 3});
+  assert.deepEqual(resolved, {ok: true, changed: true, revision: 4});
+  assert.equal((await db.doc(`inquiries/${id}`).get()).data()!.status, "resolved");
+
+  // A clinical reply (setting firstResponseAt) also makes an in_progress inquiry eligible for resolution.
+  const idReplied = await newInquiry("cite");
+  await routeInquiry(idReplied);
+  await call(replyToInquiry, "c1", {inquiryId: idReplied, message: "We received your inquiry.", expectedRevision: 1, requestId: `req-${p}-reply-resolve`});
+  const resolvedAfterReply = await call(resolveInquiry, "c1", {inquiryId: idReplied, expectedRevision: 2});
+  assert.deepEqual(resolvedAfterReply, {ok: true, changed: true, revision: 3});
+  assert.equal((await db.doc(`inquiries/${idReplied}`).get()).data()!.status, "resolved");
 });
