@@ -13,8 +13,10 @@ import '../../../models/pacc_availability_model.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../domain/admin_management_models.dart';
+import '../domain/admin_status_presentation.dart';
 import '../services/admin_unload_guard.dart';
 import '../domain/appointment_workflow.dart';
+import '../widgets/admin_status_badge.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/appointment_repository.dart';
 import '../../../repositories/pacc_availability_repository.dart';
@@ -649,7 +651,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
       controller: _scheduleController,
     ),
-    AdminPortalPage.inquiries => _InquiriesPage(
+    AdminPortalPage.inquiries => AdminInquiriesPage(
       repository: _repository,
       initialSection: _initialInquirySection,
     ),
@@ -5413,53 +5415,25 @@ class _CompactSummaryStrip extends StatelessWidget {
   );
 }
 
-class _FilterField extends StatelessWidget {
-  const _FilterField({
-    required this.label,
-    required this.value,
-    required this.values,
-    required this.onChanged,
-  });
-
-  final String label;
-  final String value;
-  final List<String> values;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 190,
-    child: DropdownButtonFormField<String>(
-      initialValue: value,
-      isExpanded: true,
-      decoration: InputDecoration(labelText: label),
-      items: values
-          .map(
-            (item) => DropdownMenuItem(
-              value: item,
-              child: Text(_formalLabel(item), overflow: TextOverflow.ellipsis),
-            ),
-          )
-          .toList(),
-      onChanged: onChanged,
-    ),
-  );
-}
-
-class _InquiriesPage extends StatefulWidget {
-  const _InquiriesPage({
+class AdminInquiriesPage extends StatefulWidget {
+  const AdminInquiriesPage({
+    super.key,
     required this.repository,
     this.initialSection = CounselorInquirySection.messages,
   });
   final AdminPortalRepository repository;
   final CounselorInquirySection initialSection;
   @override
-  State<_InquiriesPage> createState() => _InquiriesPageState();
+  State<AdminInquiriesPage> createState() => _AdminInquiriesPageState();
 }
 
-class _InquiriesPageState extends State<_InquiriesPage> {
-  String status = 'All Status';
-  String category = 'All Categories';
+int _inquiryStatusOrder(InquiryStatus status) => switch (status) {
+  InquiryStatus.pending => 0,
+  InquiryStatus.inProgress => 1,
+  InquiryStatus.resolved => 2,
+};
+
+class _AdminInquiriesPageState extends State<AdminInquiriesPage> {
   int _streamEpoch = 0;
 
   bool get _isOperationalStaff =>
@@ -5507,7 +5481,7 @@ class _InquiriesPageState extends State<_InquiriesPage> {
         ? 'Student messages and other PACC service inquiries.'
         : _isOperationalStaff
         ? 'Monitor assigned operational inquiry status and escalate items when needed.'
-        : 'Review, acknowledge, and resolve submitted inquiries.',
+        : 'Review and acknowledge submitted inquiries.',
     child:
         canShowCounselorMessagingInInquiries(
           widget.repository.currentAccessRole,
@@ -5548,17 +5522,16 @@ class _InquiriesPageState extends State<_InquiriesPage> {
           );
         }
         final all = snapshot.data ?? const <AdminInquiryModel>[];
-        final categories = [
-          'All Categories',
-          ...{for (final item in all) item.category},
-        ];
-        final items = all
-            .where(
-              (i) =>
-                  (status == 'All Status' || i.status.label == status) &&
-                  (category == 'All Categories' || i.category == category),
-            )
-            .toList();
+        // Deterministic queue order: Pending first, In progress second,
+        // Resolved last, newest within each status.
+        final items = List<AdminInquiryModel>.of(all)
+          ..sort((a, b) {
+            final orderCompare = _inquiryStatusOrder(
+              a.status,
+            ).compareTo(_inquiryStatusOrder(b.status));
+            if (orderCompare != 0) return orderCompare;
+            return b.createdAt.compareTo(a.createdAt);
+          });
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -5583,47 +5556,6 @@ class _InquiriesPageState extends State<_InquiriesPage> {
                     .where((item) => item.status == InquiryStatus.resolved)
                     .length,
               },
-            ),
-            const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: _box,
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                crossAxisAlignment: WrapCrossAlignment.end,
-                children: [
-                  _FilterField(
-                    label: 'Status',
-                    value: status,
-                    values: const [
-                      'All Status',
-                      'Pending',
-                      'In Progress',
-                      'Resolved',
-                    ],
-                    onChanged: (value) => setState(() => status = value!),
-                  ),
-                  _FilterField(
-                    label: 'Category',
-                    value: category,
-                    values: categories,
-                    onChanged: (value) => setState(() => category = value!),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      '${items.length} ${items.length == 1 ? 'inquiry' : 'inquiries'} shown',
-                      style: const TextStyle(
-                        color: AdminColors.muted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ),
             const SizedBox(height: 14),
             _InquiryList(
@@ -5657,7 +5589,7 @@ class _InquiryList extends StatelessWidget {
       return _EmptyPanel(
         message: operationalEmpty
             ? 'No inquiry status items are currently assigned to you for monitoring.'
-            : 'No inquiries match the selected filters.',
+            : 'No inquiries have been submitted yet.',
       );
     }
     return Container(
@@ -6084,7 +6016,6 @@ class _InquiryDetails extends StatefulWidget {
 
 class _InquiryDetailsState extends State<_InquiryDetails> {
   bool _acknowledging = false;
-  bool _updatingStatus = false;
   bool _previewingPdf = false;
   bool _downloadingPdf = false;
 
@@ -6100,10 +6031,6 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
         item.isOperationalProjection ||
         (!widget.repository.isSuperAdmin &&
             widget.repository.currentAccessRole == AccessRole.portalStaff);
-    final canUpdateClinicalStatus =
-        widget.repository.isSuperAdmin ||
-        (widget.repository.currentAccessRole == AccessRole.counselor &&
-            !item.isTakenOver);
     return Container(
       padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 18 : 22),
       decoration: _box,
@@ -6115,9 +6042,10 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              _Tag(
-                label: item.status.label,
-                color: _statusColor(item.status.storedValue),
+              AdminStatusBadge.fromStatus(
+                domain: AdminStatusDomain.inquiry,
+                status: item.status.storedValue,
+                labelOverride: item.status.label,
               ),
               _Tag(label: item.category, color: AdminColors.surfaceMuted),
               Text(
@@ -6274,21 +6202,15 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                       ? Icons.check_circle_outline
                       : Icons.notifications_active_outlined,
                 ),
-                label: Text(
-                  item.isAcknowledged
-                      ? 'Receipt acknowledged'
-                      : item.status == InquiryStatus.resolved
-                      ? 'Resolved'
-                      : _acknowledging
-                      ? 'Acknowledging…'
-                      : 'Acknowledge receipt',
-                ),
-              ),
-              if (canUpdateClinicalStatus && !isOperationalOnly)
-                _InquiryStatusMenu(
-                  current: item.status,
-                  enabled: !_updatingStatus && !_acknowledging,
-                  onSelected: (next) => _updateStatus(context, next),
+                  label: Text(
+                    item.isAcknowledged
+                        ? 'Receipt acknowledged'
+                        : item.status == InquiryStatus.resolved
+                        ? 'Resolved'
+                        : _acknowledging
+                        ? 'Acknowledging…'
+                        : 'Acknowledge receipt',
+                  ),
                 ),
             ],
           ),
@@ -6320,34 +6242,6 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
       }
     } finally {
       if (mounted) setState(() => _acknowledging = false);
-    }
-  }
-
-  Future<void> _updateStatus(BuildContext context, InquiryStatus next) async {
-    if (_updatingStatus || next == widget.item!.status) return;
-    setState(() => _updatingStatus = true);
-    try {
-      await widget.repository.updateInquiryStatus(
-        widget.item!.id,
-        next,
-        expectedRevision: widget.item!.routingRevision,
-      );
-      widget.onUpdated();
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Inquiry marked ${next.label.toLowerCase()}.'),
-          ),
-        );
-      }
-    } catch (error) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_inquiryActionError(error, 'update inquiry'))),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _updatingStatus = false);
     }
   }
 
@@ -6512,65 +6406,6 @@ class _InquiryResponseGrid extends StatelessWidget {
       },
     );
   }
-}
-
-class _InquiryStatusMenu extends StatelessWidget {
-  const _InquiryStatusMenu({
-    required this.current,
-    required this.onSelected,
-    required this.enabled,
-  });
-  final InquiryStatus current;
-  final ValueChanged<InquiryStatus> onSelected;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) => PopupMenuButton<InquiryStatus>(
-    tooltip: 'Change inquiry status',
-    onSelected: enabled ? onSelected : null,
-    itemBuilder: (context) => InquiryStatus.values
-        .map(
-          (status) => PopupMenuItem(
-            value: status,
-            child: Row(
-              children: [
-                Icon(
-                  status == current
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  size: 17,
-                ),
-                const SizedBox(width: 9),
-                Text(status.label),
-              ],
-            ),
-          ),
-        )
-        .toList(),
-    child: Container(
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: AdminColors.ink,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.swap_horiz, color: Colors.white, size: 18),
-          const SizedBox(width: 8),
-          Text(
-            'Change status',
-            style: Theme.of(
-              context,
-            ).textTheme.labelLarge?.copyWith(color: Colors.white),
-          ),
-          const SizedBox(width: 6),
-          const Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
-        ],
-      ),
-    ),
-  );
 }
 
 class _ProfilePage extends StatefulWidget {
