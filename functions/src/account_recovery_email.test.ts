@@ -57,6 +57,13 @@ test("resolveStaffVerificationWebUrl routes staging to paaccmindmate.com and rej
   );
 });
 
+test("production links never use the obsolete Vercel host or an empty origin", () => {
+  for (const configured of ["https://mindmate-admin-staging.vercel.app", "https://mindmate-admin-staging.vercel.app/", ""]) {
+    assert.equal(resolveStaffVerificationWebUrl(configured, "mind-mates-cd2cf"), "https://mind-mates-cd2cf.web.app",
+      JSON.stringify(configured));
+  }
+});
+
 test("resolveStaffVerificationWebUrl blocks cross-environment hosts and preserves dev/production config", () => {
   assert.equal(
     resolveStaffVerificationWebUrl("https://mind-mates-cd2cf.web.app", "mindmate-staging"),

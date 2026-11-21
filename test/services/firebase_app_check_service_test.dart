@@ -1,5 +1,6 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/core/config/app_environment.dart';
 import 'package:mind_mates/services/firebase/firebase_app_check_service.dart';
 import 'package:mind_mates/services/firebase/firebase_runtime_diagnostics.dart';
 
@@ -14,6 +15,27 @@ void main() {
   );
 
   setUp(FirebaseAppCheckService.resetForTesting);
+
+  test('web site key: Staging uses its registered key, explicit define wins', () {
+    expect(
+      FirebaseAppCheckService.webSiteKeyFor(AppEnvironment.staging, configured: ''),
+      '6Le17JgtAAAAACbHth-LPHcS_P2n4ejBuddUYReM',
+    );
+    // Other environments keep the previous default unchanged.
+    for (final env in [AppEnvironment.production, AppEnvironment.development]) {
+      expect(
+        FirebaseAppCheckService.webSiteKeyFor(env, configured: ''),
+        '6LeYF1YtAAAAABwSnD8TeEOaZpWcB3sym5aAWuW0',
+      );
+    }
+    expect(
+      FirebaseAppCheckService.webSiteKeyFor(
+        AppEnvironment.staging,
+        configured: ' explicit-key ',
+      ),
+      'explicit-key',
+    );
+  });
 
   test('web App Check requires a non-empty Enterprise site key', () {
     expect(

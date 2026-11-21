@@ -55,10 +55,29 @@ class NativeAppCheckConfiguration {
 class FirebaseAppCheckService {
   const FirebaseAppCheckService._();
 
-  static const _webSiteKey = String.fromEnvironment(
+  static const _configuredWebSiteKey = String.fromEnvironment(
     'RECAPTCHA_ENTERPRISE_SITE_KEY',
-    defaultValue: '6LeYF1YtAAAAABwSnD8TeEOaZpWcB3sym5aAWuW0',
   );
+
+  /// reCAPTCHA Enterprise key registered for the Staging web app
+  /// ("MindMate Admin - Staging"). Site keys are public by design.
+  static const stagingWebSiteKey = '6Le17JgtAAAAACbHth-LPHcS_P2n4ejBuddUYReM';
+  static const _defaultWebSiteKey = '6LeYF1YtAAAAABwSnD8TeEOaZpWcB3sym5aAWuW0';
+
+  /// An explicit build define wins; otherwise Staging uses its own registered
+  /// key and every other environment keeps the previous default.
+  static String webSiteKeyFor(
+    AppEnvironment environment, {
+    String configured = _configuredWebSiteKey,
+  }) {
+    if (configured.trim().isNotEmpty) return configured.trim();
+    return environment == AppEnvironment.staging
+        ? stagingWebSiteKey
+        : _defaultWebSiteKey;
+  }
+
+  static String get _webSiteKey =>
+      webSiteKeyFor(AppEnvironmentConfig.current);
   static const stagingPilotEnabled =
       AppEnvironmentConfig.stagingAppCheckEnabled;
   static const _stagingAndroidDebugToken = String.fromEnvironment(

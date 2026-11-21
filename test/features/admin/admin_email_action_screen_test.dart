@@ -315,6 +315,94 @@ void main() {
         expect(recoverLocations, ['https://paaccmindmate.com/']);
       },
     );
+
+    testWidgets(
+      'expired reset code shows a request-again error without a password form',
+      (tester) async {
+        final auth = _FakeFirebaseAuth()
+          ..verifyResetError = FirebaseAuthException(code: 'expired-action-code');
+        await tester.pumpWidget(
+          MaterialApp(
+            home: AdminEmailActionScreen(
+              uri: Uri.parse(
+                'https://paaccmindmate.com/__/auth/action?mode=resetPassword&oobCode=synthetic-expired',
+              ),
+              auth: auth,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('expired'), findsOneWidget);
+        expect(find.byType(TextFormField), findsNothing);
+        expect(find.textContaining('synthetic-expired'), findsNothing);
+        expect(auth.confirmedResets, isEmpty);
+      },
+    );
+
+    testWidgets(
+      'a reused reset code is refused at submit and the password is not changed',
+      (tester) async {
+        final auth = _FakeFirebaseAuth()
+          ..confirmResetError = FirebaseAuthException(code: 'invalid-action-code');
+        await tester.pumpWidget(
+          MaterialApp(
+            home: AdminEmailActionScreen(
+              uri: Uri.parse(
+                'https://mindmate-staging.web.app/__/auth/action?mode=resetPassword&oobCode=synthetic-used',
+              ),
+              auth: auth,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final fields = find.byType(TextFormField);
+        await tester.enterText(fields.at(0), 'StrongPass123');
+        await tester.enterText(fields.at(1), 'StrongPass123');
+        await tester.tap(find.text('Update password'));
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('already been used'), findsOneWidget);
+        expect(find.text('Password updated'), findsNothing);
+        expect(auth.confirmedResets, isEmpty);
+        expect(find.textContaining('synthetic-used'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'both Staging admin hosts complete a reset and return to their own sign-in',
+      (tester) async {
+        for (final host in ['paaccmindmate.com', 'mindmate-staging.web.app']) {
+          final auth = _FakeFirebaseAuth();
+          final locations = <String>[];
+          await tester.pumpWidget(
+            MaterialApp(
+              home: AdminEmailActionScreen(
+                key: ValueKey(host),
+                uri: Uri.parse(
+                  'https://$host/__/auth/action?mode=resetPassword&oobCode=synthetic-$host'
+                  '&continueUrl=https%3A%2F%2Fevil.example%2F',
+                ),
+                auth: auth,
+                onReplaceLocation: locations.add,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final fields = find.byType(TextFormField);
+          await tester.enterText(fields.at(0), 'StrongPass123');
+          await tester.enterText(fields.at(1), 'StrongPass123');
+          await tester.tap(find.text('Update password'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Continue to sign in'));
+          await tester.pump();
+
+          expect(auth.confirmedResets.single.code, 'synthetic-$host');
+          // Same validated origin, no action-code params, continueUrl ignored.
+          expect(locations, ['https://$host/'], reason: host);
+        }
+      },
+    );
   });
 
   group('Origin and environment isolation', () {
