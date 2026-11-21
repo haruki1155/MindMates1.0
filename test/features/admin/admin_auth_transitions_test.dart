@@ -27,12 +27,6 @@ class _AuthTestRepo extends AdminPortalRepository {
   bool get isSuperAdmin => false;
 
   @override
-  String get currentDisplayName => 'Staff User';
-
-  @override
-  String get currentEmail => 'staff@example.com';
-
-  @override
   Stream<List<AppNotificationModel>> watchPortalNotifications() =>
       Stream.value(const []);
 

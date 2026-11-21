@@ -34,11 +34,6 @@ class _FakeInquiriesRepo extends AdminPortalRepository {
   Stream<List<AdminInquiryModel>> watchInquiries() => Stream.value(inquiries);
 
   @override
-  Stream<AdminInquiryModel?> watchInquiry(String inquiryId) => Stream.value(
-    inquiries.where((i) => i.id == inquiryId).firstOrNull,
-  );
-
-  @override
   Stream<List<InquiryReply>> watchInquiryReplies(String inquiryId) =>
       Stream.value(const []);
 
