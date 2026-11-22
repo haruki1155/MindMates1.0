@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../models/appointment_model.dart';
 import '../theme/admin_theme.dart';
 import 'backup_job.dart';
 
@@ -10,6 +11,7 @@ enum AdminStatusDomain {
   assessment,
   appointmentType,
   backup,
+  followUp,
 }
 
 enum AdminSemanticTone { amber, blue, green, violet, red, neutral }
@@ -114,6 +116,7 @@ AdminStatusPresentation resolveAdminStatus(
     ),
     AdminStatusDomain.appointmentType => _resolveAppointmentType(key),
     AdminStatusDomain.backup => _resolveBackup(key),
+    AdminStatusDomain.followUp => _resolveFollowUp(key),
   };
 
   if (labelOverride != null && labelOverride.trim().isNotEmpty) {
@@ -435,9 +438,191 @@ AdminStatusPresentation _resolveAssessment(String key, String raw) =>
         label: 'Result unavailable',
         icon: Icons.help_outline,
       ),
-      _ => AdminStatusPresentation.fromTone(
+    _ => AdminStatusPresentation.fromTone(
         tone: AdminSemanticTone.neutral,
         label: raw.replaceAll('_', ' '),
         icon: Icons.help_outline,
       ),
     };
+
+/// Presentation details for a counselor follow-up offer or linked follow-up booking.
+class FollowUpOfferPresentation {
+  const FollowUpOfferPresentation({
+    required this.presentation,
+    required this.supportingText,
+    required this.isAwaitingClientResponse,
+  });
+
+  final AdminStatusPresentation presentation;
+  final String supportingText;
+  final bool isAwaitingClientResponse;
+}
+
+/// Resolves the semantic badge, supporting copy, and pending state for a
+/// post-session follow-up record without mutating stored appointment data.
+FollowUpOfferPresentation resolveFollowUpOfferStatus(
+  AppointmentModel appointment, {
+  AppointmentModel? linkedAppointment,
+}) {
+  if (linkedAppointment != null) {
+    return _followUpFromAppointmentStatus(linkedAppointment.lifecycleStatus);
+  }
+  if (appointment.hasAvailableFollowUpOffer) {
+    return FollowUpOfferPresentation(
+      presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'offered'),
+      supportingText:
+          'Pending follow-up offer — client has not booked a session yet.',
+      isAwaitingClientResponse: true,
+    );
+  }
+
+  final key = _normalizeKey(appointment.followUpStatus);
+  if (key == 'offered') {
+    return switch (appointment.lifecycleStatus) {
+      AppointmentStatus.declined ||
+      AppointmentStatus.cancelled ||
+      AppointmentStatus.expired ||
+      AppointmentStatus.noShow => _followUpFromAppointmentStatus(
+        appointment.lifecycleStatus,
+      ),
+      _ => FollowUpOfferPresentation(
+        presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'none'),
+        supportingText: 'Follow-up offer is not active.',
+        isAwaitingClientResponse: false,
+      ),
+    };
+  }
+
+  return switch (key) {
+    'booked' => FollowUpOfferPresentation(
+      presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'booked'),
+      supportingText: 'Client booked a follow-up session.',
+      isAwaitingClientResponse: false,
+    ),
+    'completed' || 'complete' => FollowUpOfferPresentation(
+      presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'completed'),
+      supportingText: 'Follow-up session completed.',
+      isAwaitingClientResponse: false,
+    ),
+    'declined' => FollowUpOfferPresentation(
+      presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'declined'),
+      supportingText: 'Follow-up session was declined.',
+      isAwaitingClientResponse: false,
+    ),
+    'cancelled' || 'canceled' => FollowUpOfferPresentation(
+      presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'cancelled'),
+      supportingText: 'Follow-up session was cancelled.',
+      isAwaitingClientResponse: false,
+    ),
+    'expired' => FollowUpOfferPresentation(
+      presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'expired'),
+      supportingText: 'Follow-up offer or booking expired.',
+      isAwaitingClientResponse: false,
+    ),
+    'noshow' => FollowUpOfferPresentation(
+      presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'no_show'),
+      supportingText: 'Client did not attend the follow-up session.',
+      isAwaitingClientResponse: false,
+    ),
+    _ => FollowUpOfferPresentation(
+      presentation: resolveAdminStatus(AdminStatusDomain.followUp, key),
+      supportingText: 'No active follow-up offer.',
+      isAwaitingClientResponse: false,
+    ),
+  };
+}
+
+FollowUpOfferPresentation _followUpFromAppointmentStatus(
+  AppointmentStatus status,
+) => switch (status) {
+  AppointmentStatus.completed => FollowUpOfferPresentation(
+    presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'completed'),
+    supportingText: 'Follow-up session completed.',
+    isAwaitingClientResponse: false,
+  ),
+  AppointmentStatus.declined => FollowUpOfferPresentation(
+    presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'declined'),
+    supportingText: 'Follow-up session was declined.',
+    isAwaitingClientResponse: false,
+  ),
+  AppointmentStatus.cancelled => FollowUpOfferPresentation(
+    presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'cancelled'),
+    supportingText: 'Follow-up session was cancelled.',
+    isAwaitingClientResponse: false,
+  ),
+  AppointmentStatus.expired => FollowUpOfferPresentation(
+    presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'expired'),
+    supportingText: 'Follow-up offer or booking expired.',
+    isAwaitingClientResponse: false,
+  ),
+  AppointmentStatus.noShow => FollowUpOfferPresentation(
+    presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'no_show'),
+    supportingText: 'Client did not attend the follow-up session.',
+    isAwaitingClientResponse: false,
+  ),
+  AppointmentStatus.confirmed => FollowUpOfferPresentation(
+    presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'booked'),
+    supportingText: 'Follow-up session booked and confirmed.',
+    isAwaitingClientResponse: false,
+  ),
+  AppointmentStatus.requested ||
+  AppointmentStatus.legacyRequested ||
+  AppointmentStatus.rescheduleProposed ||
+  AppointmentStatus.unknown => FollowUpOfferPresentation(
+    presentation: resolveAdminStatus(AdminStatusDomain.followUp, 'booked'),
+    supportingText: 'Client booked a follow-up session.',
+    isAwaitingClientResponse: false,
+  ),
+};
+
+AdminStatusPresentation _resolveFollowUp(String key) => switch (key) {
+  'offered' ||
+  'awaitingclientresponse' ||
+  'followupoffered' ||
+  'pending' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.amber,
+    label: 'Awaiting Client Response',
+    icon: Icons.hourglass_top_outlined,
+  ),
+  'booked' ||
+  'requested' ||
+  'legacyrequested' ||
+  'rescheduleproposed' ||
+  'confirmed' ||
+  'approved' ||
+  'scheduled' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.blue,
+    label: 'Booked',
+    icon: Icons.event_available_outlined,
+  ),
+  'completed' || 'complete' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.green,
+    label: 'Completed',
+    icon: Icons.check_circle_outline,
+  ),
+  'declined' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.neutral,
+    label: 'Declined',
+    icon: Icons.cancel_outlined,
+  ),
+  'cancelled' || 'canceled' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.neutral,
+    label: 'Cancelled',
+    icon: Icons.cancel_outlined,
+  ),
+  'expired' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.neutral,
+    label: 'Expired',
+    icon: Icons.timer_off_outlined,
+  ),
+  'noshow' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.red,
+    label: 'No-show',
+    icon: Icons.person_off_outlined,
+  ),
+  _ => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.neutral,
+    label: 'Unknown',
+    icon: Icons.help_outline,
+  ),
+};
