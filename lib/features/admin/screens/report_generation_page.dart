@@ -581,10 +581,11 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
     if (widget.onPrintPdf != null) {
       await widget.onPrintPdf!(pdfBytes);
     } else {
-      await Printing.layoutPdf(
+      final requested = await Printing.layoutPdf(
         name: AdminReportPdfService.filenameFor(report, _reportType),
         onLayout: (_) async => pdfBytes,
       );
+      if (!requested) return;
     }
     await _recordReportAudit('REPORT_PRINTED', report);
   }

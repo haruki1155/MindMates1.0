@@ -173,7 +173,7 @@ String auditActionLabel(String action) {
     'REPORT_EXPORTED_PDF' => 'Report exported (PDF)',
     'REPORT_EXPORTED_CSV' => 'Report exported (CSV)',
     'REPORT_EXPORTED_XLSX' => 'Report exported (Excel)',
-    'REPORT_PRINTED' => 'Report printed',
+    'REPORT_PRINTED' => 'Report print requested',
     'ACADEMIC_YEAR_CREATED' => 'Academic year created',
     'ACADEMIC_YEAR_CLOSED' => 'Academic year closed',
     'ACADEMIC_YEAR_CHANGED' => 'Active academic year changed',

@@ -65,7 +65,7 @@ export {
 } from "./account_recovery";
 import {configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid as requireAuthenticatedUser} from "./access";
 import {createHash, randomBytes} from "node:crypto";
-import {AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, auditLogOwnerField, writeAudit} from "./audit";
+import {ACTOR_SCOPED_AUDIT_ACTIONS, AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, auditLogOwnerField, writeAudit, writeAuditBatch} from "./audit";
 import {
   AppointmentSchedulingValidationError,
   formatAppointmentTime,
@@ -95,6 +95,8 @@ import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_int
 import {canBookFollowUpFromParent, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
 import {
   downloadSessionEvidenceFile,
+  parseSessionEvidenceUpload,
+  storeSessionEvidenceFile,
   validateSessionEvidence,
   validateSessionEvidenceDownloadRequest,
   verifySessionEvidenceObjects,
@@ -972,7 +974,9 @@ export const recordAuditEvent = onCall(async (request) => {
   const actor = await requireStaff(actorId);
   const action = String(request.data?.action ?? "") as typeof AUDIT_ACTIONS[number];
   const category = String(request.data?.category ?? "");
-  if (!AUDIT_ACTIONS.includes(action)) throw new HttpsError("invalid-argument", "Choose a valid audit action.");
+  if (!AUDIT_ACTIONS.includes(action) || ACTOR_SCOPED_AUDIT_ACTIONS.includes(action)) {
+    throw new HttpsError("invalid-argument", "Choose a valid audit action.");
+  }
   if (!AUDIT_CATEGORY_VALUES.includes(category as typeof AUDIT_CATEGORY_VALUES[number])) throw new HttpsError("invalid-argument", "Choose a valid audit category.");
   const targetType = typeof request.data?.targetType === "string" ? request.data.targetType.trim().slice(0, 60) : undefined;
   const targetId = typeof request.data?.targetId === "string" ? request.data.targetId.trim().slice(0, 160) : undefined;
@@ -985,7 +989,6 @@ export const recordAuditEvent = onCall(async (request) => {
   return {ok: true};
 });
 
-const SENSITIVE_AUDIT_KEY_PATTERN = /password|token|secret|authcode|activationcode|passcode|verificationcode|otp|pin|message|reply|remark|concern|content|base64|email|phone|contact|personal|studentname|fullname/i;
 
 const AUDIT_FEED_ACTION_LABELS: Record<string, string> = {
   STAFF_SIGNED_IN: "Staff signed in",
@@ -1052,7 +1055,7 @@ const AUDIT_FEED_ACTION_LABELS: Record<string, string> = {
   REPORT_EXPORTED_PDF: "Report exported (PDF)",
   REPORT_EXPORTED_CSV: "Report exported (CSV)",
   REPORT_EXPORTED_XLSX: "Report exported (Excel)",
-  REPORT_PRINTED: "Report printed",
+  REPORT_PRINTED: "Report print requested",
   ACADEMIC_YEAR_CREATED: "Academic year created",
   ACADEMIC_YEAR_CLOSED: "Academic year closed",
   ACADEMIC_YEAR_CHANGED: "Active academic year changed",
@@ -1127,49 +1130,74 @@ function normalizeStaffAuditRole(rawRole: unknown): "admin" | "counselor" | "por
   return "other";
 }
 
-function sanitizeAuditMetadataForFeed(raw: unknown): Record<string, unknown> {
+const AUDIT_FEED_PUBLIC_TARGETS = new Set(["staff", "colleges", "departments", "courses", "announcement"]);
+const AUDIT_FEED_STATUS = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
+
+function sanitizeAuditMetadataForFeed(raw: unknown, targetType: string | null): Record<string, unknown> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (SENSITIVE_AUDIT_KEY_PATTERN.test(key)) continue;
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-      out[key] = value;
-    } else if (value && typeof value === "object" && !Array.isArray(value)) {
-      const nested: Record<string, unknown> = {};
-      for (const [nKey, nVal] of Object.entries(value as Record<string, unknown>)) {
-        if (SENSITIVE_AUDIT_KEY_PATTERN.test(nKey)) continue;
-        if (typeof nVal === "string" || typeof nVal === "number" || typeof nVal === "boolean") {
-          nested[nKey] = nVal;
-        }
-      }
-      if (Object.keys(nested).length > 0) out[key] = nested;
+  const data = raw as Record<string, unknown>;
+  const clean: Record<string, unknown> = {};
+  for (const key of ["status", "resolutionDisposition", "assignedRole"]) {
+    const value = data[key];
+    if (typeof value === "string" && AUDIT_FEED_STATUS.test(value)) clean[key] = value;
+  }
+  for (const key of ["size", "revision", "count"]) {
+    const value = data[key];
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) clean[key] = value;
+  }
+  if (typeof data.active === "boolean") clean.active = data.active;
+  if (["colleges", "departments", "courses"].includes(targetType ?? "") &&
+      typeof data.code === "string" && /^[A-Z0-9_-]{1,30}$/.test(data.code)) clean.code = data.code;
+  if (typeof data.attachmentPathHash === "string" && /^[a-f0-9]{16}$/.test(data.attachmentPathHash)) {
+    clean.attachmentPathHash = data.attachmentPathHash;
+  }
+  for (const key of ["before", "after"]) {
+    const value = data[key] as {active?: unknown; status?: unknown} | null | undefined;
+    if (typeof value?.active === "boolean") clean[key] = {active: value.active};
+    else if (typeof value?.status === "string" && AUDIT_FEED_STATUS.test(value.status)) {
+      clean[key] = {status: value.status};
     }
   }
-  return out;
+  return clean;
 }
 
-function redactAuditTargetId(targetType: unknown, targetId: unknown): string | null {
+function redactAuditTargetId(targetType: string | null, targetId: unknown): string | null {
   const id = typeof targetId === "string" ? targetId.trim() : "";
   if (!id) return null;
-  const type = String(targetType ?? "").trim().toLowerCase();
-  if (type === "student" || type === "student_personal_info") {
-    const suffix = id.length > 4 ? id.slice(-4) : id;
-    return `student••••${suffix}`;
+  if (targetType && AUDIT_FEED_PUBLIC_TARGETS.has(targetType)) return id;
+  if (targetType === "student" || targetType === "student_personal_info" || targetType === "student_roster") {
+    return "student••••" + (id.length > 4 ? id.slice(-4) : "");
   }
-  return id;
+  return null;
+}
+
+function auditFeedCursor(raw: unknown): [Timestamp, string] {
+  try {
+    if (typeof raw !== "string" || raw.length > 1600) throw new Error();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length !== 3) throw new Error();
+    const [seconds, nanoseconds, id] = parsed;
+    if (!Number.isInteger(seconds) || !Number.isInteger(nanoseconds) ||
+        typeof id !== "string" || !id || id.includes("/") || id === "." || id === "..") throw new Error();
+    return [new Timestamp(seconds, nanoseconds), id];
+  } catch {
+    throw new HttpsError("invalid-argument", "Invalid activity log cursor.");
+  }
 }
 
 export const getAuditLogPage = onCall(async (request) => {
   const actorId = requireAuthenticatedUser(request);
-  await requireSuperAdmin(actorId);
-  const rawTargetUserId = typeof request.data?.targetUserId === "string" ? request.data.targetUserId.trim() : "";
+  if (actorId !== configuredSuperAdminUid() || (await requireStaff(actorId)).accessRole !== "admin") {
+    throw new HttpsError("permission-denied", "Super-administrator access is required.");
+  }
   const category = typeof request.data?.category === "string" ? request.data.category.trim() : "";
   const action = typeof request.data?.action === "string" ? request.data.action.trim() : "";
   const afterMillis = typeof request.data?.afterMillis === "number" ? request.data.afterMillis : null;
-  const pageSize = Math.min(Math.max(Number(request.data?.pageSize ?? 25), 1), 50);
+  const requestedPageSize = Number(request.data?.pageSize ?? 25);
+  const pageSize = Number.isFinite(requestedPageSize) ? Math.min(Math.max(Math.trunc(requestedPageSize), 1), 50) : 25;
 
-  if (rawTargetUserId.length > 0) {
-    const targetUserId = requiredText(rawTargetUserId, "Target user", 1, 128);
+  if (Object.prototype.hasOwnProperty.call(request.data ?? {}, "targetUserId")) {
+    const targetUserId = requiredText(request.data.targetUserId, "Target user", 1, 128);
     let query: FirebaseFirestore.Query = db.collection("admin_audit_logs")
       .where(auditLogOwnerField(action), "==", targetUserId).orderBy("createdAt", "desc").limit(pageSize);
     if (category) query = query.where("category", "==", category);
@@ -1189,19 +1217,19 @@ export const getAuditLogPage = onCall(async (request) => {
   const filterActorId = typeof request.data?.filterActorId === "string" ? request.data.filterActorId.trim() : "";
   const search = typeof request.data?.search === "string" ? request.data.search.trim().toLowerCase() : "";
   const beforeMillis = typeof request.data?.beforeMillis === "number" ? request.data.beforeMillis : null;
-  const cursorMillis = typeof request.data?.cursorMillis === "number" ? request.data.cursorMillis : null;
-
-  let query: FirebaseFirestore.Query = db.collection("admin_audit_logs").orderBy("createdAt", "desc");
+  let query: FirebaseFirestore.Query = db.collection("admin_audit_logs")
+    .orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc");
   if (afterMillis != null) query = query.where("createdAt", ">=", Timestamp.fromMillis(afterMillis));
-  if (beforeMillis != null) query = query.where("createdAt", "<=", Timestamp.fromMillis(beforeMillis));
-  if (cursorMillis != null) query = query.startAfter(Timestamp.fromMillis(cursorMillis));
+  if (beforeMillis != null) query = query.where("createdAt", "<", Timestamp.fromMillis(beforeMillis + 1));
+  if (request.data?.cursor != null) query = query.startAfter(...auditFeedCursor(request.data.cursor));
 
   const batchLimit = Math.min(Math.max(pageSize * 6, 120), 400);
   const snapshot = await query.limit(batchLimit).get();
   const matched: Array<Record<string, unknown>> = [];
-  let hasMore = false;
+  let scanned = 0;
 
   for (const doc of snapshot.docs) {
+    scanned++;
     const data = doc.data();
     const rawRole = data.actorRoleSnapshot ?? data.actorAccessRole ?? "";
     const normalizedRole = normalizeStaffAuditRole(rawRole);
@@ -1214,21 +1242,16 @@ export const getAuditLogPage = onCall(async (request) => {
     const docAction = String(data.action ?? "").trim();
     if (action && docAction !== action) continue;
 
-    const redactedTargetId = redactAuditTargetId(data.targetType, data.targetId ?? data.targetUserId);
+    const targetType = typeof data.targetType === "string" ? data.targetType.trim().toLowerCase() : null;
+    const redactedTargetId = redactAuditTargetId(targetType, data.targetId ?? data.targetUserId);
     const roleLabel = normalizedRole === "admin" ? "Administrator" : normalizedRole === "counselor" ? "Counselor" : "PAACC Staff";
     const actorNameVal = String(data.actorNameSnapshot ?? "").trim() || roleLabel;
-    const reasonText = typeof data.reason === "string" ? data.reason : "";
 
     if (search) {
       const actionLabel = humanizeAuditFeedAction(docAction);
       const categoryLabel = AUDIT_FEED_CATEGORY_LABELS[docCategory.toUpperCase()] ?? docCategory;
-      const haystack = `${actorNameVal} ${normalizedRole} ${roleLabel} ${docAction} ${actionLabel} ${docCategory} ${categoryLabel} ${data.targetType ?? ""} ${redactedTargetId ?? ""} ${reasonText}`.toLowerCase();
+      const haystack = `${actorNameVal} ${normalizedRole} ${roleLabel} ${docAction} ${actionLabel} ${docCategory} ${categoryLabel} ${data.targetType ?? ""} ${redactedTargetId ?? ""}`.toLowerCase();
       if (!haystack.includes(search)) continue;
-    }
-
-    if (matched.length >= pageSize) {
-      hasMore = true;
-      break;
     }
 
     const ts = data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.timestamp instanceof Timestamp ? data.timestamp.toDate().toISOString() : null;
@@ -1239,21 +1262,21 @@ export const getAuditLogPage = onCall(async (request) => {
       actorRoleSnapshot: normalizedRole,
       action: docAction,
       category: docCategory,
-      targetType: data.targetType ?? null,
+      targetType,
       targetId: redactedTargetId,
-      targetUserId: data.targetType === "staff" ? (data.targetUserId ?? data.targetId ?? null) : null,
-      reason: typeof data.reason === "string" ? data.reason : "",
-      metadata: sanitizeAuditMetadataForFeed(data.metadata),
+      targetUserId: targetType === "staff" ? redactedTargetId : null,
+      metadata: sanitizeAuditMetadataForFeed(data.metadata, targetType),
       timestamp: ts,
       createdAt: ts,
     });
+    if (matched.length === pageSize) break;
   }
 
-  if (!hasMore && snapshot.size === batchLimit && matched.length === pageSize) {
-    hasMore = true;
-  }
-
-  return {events: matched, hasMore};
+  const hasMore = snapshot.size === batchLimit || scanned < snapshot.size;
+  const lastScanned = hasMore ? snapshot.docs[scanned - 1] : undefined;
+  const time = lastScanned?.get("createdAt") as Timestamp | undefined;
+  const nextCursor = lastScanned && time ? JSON.stringify([time.seconds, time.nanoseconds, lastScanned.id]) : null;
+  return {events: matched, hasMore, nextCursor};
 });
 
 const DEFAULT_ACADEMIC_STRUCTURE: Record<string, string[]> = {
@@ -1346,10 +1369,11 @@ export const saveOrganizationRecord = onCall(async (request) => {
   if (duplicate.docs.some((doc) => doc.id !== recordId) || duplicateCode.docs.some((doc) => doc.id !== recordId)) {
     throw new HttpsError("already-exists", `A ${kind} with that name already exists.`);
   }
-  await db.collection(collection).doc(recordId).set({name, code, normalizedName: name.toLowerCase(), normalizedCode: code.toLowerCase(), active, status: active ? "ACTIVE" : "INACTIVE",
+  const batch = db.batch();
+  batch.set(db.collection(collection).doc(recordId), {name, code, normalizedName: name.toLowerCase(), normalizedCode: code.toLowerCase(), active, status: active ? "ACTIVE" : "INACTIVE",
     ...(kind !== "college" ? {collegeId} : {}), ...(kind === "course" ? {departmentId} : {}), updatedBy: actorId, updatedAt: FieldValue.serverTimestamp(),
     ...(isUpdate ? {} : {createdBy: actorId, createdAt: FieldValue.serverTimestamp()})}, {merge: true});
-  await db.collection("admin_audit_logs").add({
+  writeAuditBatch(batch, db, {
     actorId,
     actorNameSnapshot: actorName(actor),
     actorRoleSnapshot: actor.accessRole,
@@ -1358,11 +1382,8 @@ export const saveOrganizationRecord = onCall(async (request) => {
     targetType: collection,
     targetId: recordId,
     metadata: {code, active, ...(collegeId ? {collegeId} : {}), ...(departmentId ? {departmentId} : {})},
-    sessionId: null,
-    timestamp: FieldValue.serverTimestamp(),
-    createdAt: FieldValue.serverTimestamp(),
-    targetUserId: null,
   });
+  await batch.commit();
   return {ok: true, id: recordId};
 });
 
@@ -1389,8 +1410,9 @@ export const archiveOrganizationRecord = onCall(async (request) => {
     const courses = await db.collection("courses").where("departmentId", "==", id).where("active", "==", true).limit(1).get();
     if (!courses.empty) throw new HttpsError("failed-precondition", "Archive its active courses first.");
   }
-  await ref.update({active: !archived, status: archived ? "ARCHIVED" : "ACTIVE", updatedBy: actorId, updatedAt: FieldValue.serverTimestamp()});
-  await db.collection("admin_audit_logs").add({
+  const batch = db.batch();
+  batch.update(ref, {active: !archived, status: archived ? "ARCHIVED" : "ACTIVE", updatedBy: actorId, updatedAt: FieldValue.serverTimestamp()});
+  writeAuditBatch(batch, db, {
     actorId,
     actorNameSnapshot: actorName(actor),
     actorRoleSnapshot: actor.accessRole,
@@ -1399,11 +1421,8 @@ export const archiveOrganizationRecord = onCall(async (request) => {
     targetType: collection,
     targetId: id,
     metadata: {before: {active: data.active === true}, after: {active: !archived}},
-    sessionId: null,
-    timestamp: FieldValue.serverTimestamp(),
-    createdAt: FieldValue.serverTimestamp(),
-    targetUserId: null,
   });
+  await batch.commit();
   return {ok: true};
 });
 
@@ -2705,7 +2724,23 @@ export const reviewAppointment = onCall(async (request) => {
   return {ok: true};
 });
 
-export const downloadClinicalSessionEvidence = onCall(async (request) => {
+export const uploadClinicalSessionEvidence = onCall({concurrency: 4, memory: "512MiB"}, async (request) => {
+  const actorId = requireAuthenticatedUser(request);
+  await requireClinicalAppointmentStaff(actorId);
+  const appointmentId = requiredText(request.data?.appointmentId, "Appointment", 1, 120);
+  const {attachment, bytes} = parseSessionEvidenceUpload(request.data, appointmentId, actorId);
+  const snapshot = await db.collection("appointments").doc(appointmentId).get();
+  const appointment = snapshot.data();
+  if (!appointment) throw new HttpsError("permission-denied", "Counselor access is required.");
+  await authorizeAppointmentApproval(actorId, appointment);
+  if (appointment.status !== "confirmed") {
+    throw new HttpsError("failed-precondition", "Only confirmed sessions can accept attachments.");
+  }
+  await storeSessionEvidenceFile(attachment, bytes, appointmentId, actorId);
+  return {path: attachment.path};
+});
+
+export const downloadClinicalSessionEvidence = onCall({concurrency: 4, memory: "512MiB"}, async (request) => {
   const actorId = requireAuthenticatedUser(request);
   const {appointmentId, path} = validateSessionEvidenceDownloadRequest(request.data);
   return downloadSessionEvidenceFile({actorId, appointmentId, path});

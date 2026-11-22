@@ -34,7 +34,8 @@ class _FakeActivityLogRepository extends AdminPortalRepository {
   bool get isSuperAdmin => superAdmin;
 
   @override
-  Future<({List<AdminAuditEvent> events, bool hasMore})> fetchActivityLogPage({
+  Future<({List<AdminAuditEvent> events, bool hasMore, String? nextCursor})>
+  fetchActivityLogPage({
     ActivityActorRoleFilter roleFilter = ActivityActorRoleFilter.all,
     String actorId = '',
     String category = '',
@@ -42,7 +43,7 @@ class _FakeActivityLogRepository extends AdminPortalRepository {
     String search = '',
     DateTime? after,
     DateTime? before,
-    DateTime? cursor,
+    String? cursor,
     int pageSize = 25,
   }) async {
     fetchCalls++;
@@ -59,24 +60,25 @@ class _FakeActivityLogRepository extends AdminPortalRepository {
     if (throwError != null) {
       throw throwError!;
     }
-    final filtered =
-        filterActivityLogEvents(
-          seedEvents,
-          roleFilter: roleFilter,
-          actorIdFilter: actorId,
-          categoryFilter: category,
-          actionFilter: action,
-          searchQuery: search,
-          after: after,
-          before: before,
-        ).where((e) {
-          if (cursor == null) return true;
-          final ts = e.createdAt;
-          return ts != null && ts.isBefore(cursor);
-        }).toList();
+    final filtered = filterActivityLogEvents(
+      seedEvents,
+      roleFilter: roleFilter,
+      actorIdFilter: actorId,
+      categoryFilter: category,
+      actionFilter: action,
+      searchQuery: search,
+      after: after,
+      before: before,
+    ).toList();
 
-    final page = filtered.take(pageSize).toList();
-    return (events: page, hasMore: filtered.length > pageSize);
+    final offset = cursor == null ? 0 : int.parse(cursor);
+    final page = filtered.skip(offset).take(pageSize).toList();
+    final hasMore = filtered.length > offset + pageSize;
+    return (
+      events: page,
+      hasMore: hasMore,
+      nextCursor: hasMore ? (offset + pageSize).toString() : null,
+    );
   }
 }
 

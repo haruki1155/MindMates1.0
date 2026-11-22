@@ -1,4 +1,4 @@
-import {createHash} from "node:crypto";
+import {createHash, randomBytes} from "node:crypto";
 import {getApp} from "firebase-admin/app";
 import {getFirestore} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
@@ -90,8 +90,32 @@ export function resolveEvidenceBucket() {
     getApp().options.storageBucket ||
     process.env.FIREBASE_STORAGE_BUCKET?.trim() ||
     configBucket ||
-    (process.env.GCLOUD_PROJECT?.trim() ? `${process.env.GCLOUD_PROJECT.trim()}.appspot.com` : undefined);
+    (process.env.FIREBASE_STORAGE_EMULATOR_HOST && process.env.GCLOUD_PROJECT?.trim() ? `${process.env.GCLOUD_PROJECT.trim()}.appspot.com` : undefined);
   return bucketName ? getStorage().bucket(bucketName) : getStorage().bucket();
+}
+
+export function parseSessionEvidenceUpload(data: Record<string, unknown>, appointmentId: string, uid: string) {
+  const extension = typeof data.name === "string" ? data.name.split(".").pop()?.toLowerCase() ?? "" : "";
+  const path = sessionEvidencePathFor(appointmentId, uid, randomBytes(16).toString("hex"), extension);
+  const [attachment] = validateSessionEvidence({attachments: [{...data, path}]}, appointmentId, uid).attachments;
+  const encoded = data.dataBase64;
+  if (typeof encoded !== "string" || encoded.length !== 4 * Math.ceil(attachment.size / 3)) {
+    throw new HttpsError("invalid-argument", "Invalid private attachment data.");
+  }
+  const bytes = Buffer.from(encoded, "base64");
+  if (bytes.length !== attachment.size || bytes.toString("base64") !== encoded) {
+    throw new HttpsError("invalid-argument", "Invalid private attachment data.");
+  }
+  return {attachment, bytes};
+}
+
+export async function storeSessionEvidenceFile(attachment: ClinicalEvidenceAttachment, bytes: Buffer, appointmentId: string, uid: string) {
+  // GCS writes bypass Firebase Storage client upload token creation.
+  await resolveEvidenceBucket().file(attachment.path).save(bytes, {
+    resumable: false,
+    preconditionOpts: {ifGenerationMatch: 0},
+    metadata: {contentType: attachment.contentType, metadata: {uploadedBy: uid, appointmentId}},
+  });
 }
 
 /** The privileged callable verifies each uploaded object before committing clinical references. */
@@ -130,6 +154,8 @@ export interface DownloadSessionEvidenceResult {
 export interface StorageObjectMetadataView {
   size?: unknown;
   contentType?: unknown;
+  contentEncoding?: unknown;
+  generation?: string | number;
   metadata?: Record<string, unknown>;
 }
 
@@ -140,7 +166,7 @@ export interface DownloadSessionEvidenceDeps {
   readStudentUser?: (studentId: string) => Promise<FirebaseFirestore.DocumentData | null>;
   readSessionNote?: (appointmentId: string) => Promise<FirebaseFirestore.DocumentData | null>;
   readObjectMetadata?: (path: string) => Promise<StorageObjectMetadataView | null>;
-  downloadObjectBytes?: (path: string) => Promise<Buffer>;
+  downloadObjectBytes?: (path: string, generation?: string | number) => Promise<Buffer>;
   writeAudit?: (event: AuditWrite) => Promise<void>;
 }
 
@@ -211,16 +237,24 @@ export async function downloadSessionEvidenceFile(
     if (!superUid || input.actorId !== superUid) {
       throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
     }
-  } else if (role === "counselor") {
-    const readAppointmentFn =
-      deps.readAppointment ??
-      (async (id: string) => {
-        const snap = await getFirestore().collection("appointments").doc(id).get();
-        return snap.exists ? snap.data() ?? {} : null;
-      });
-    const appointment = await readAppointmentFn(appointmentId);
-    const studentId = typeof appointment?.userId === "string" ? appointment.userId.trim() : "";
-    if (!appointment || !validId(studentId)) {
+  } else if (role !== "counselor") {
+    throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
+  }
+
+  const readAppointmentFn =
+    deps.readAppointment ??
+    (async (id: string) => {
+      const snap = await getFirestore().collection("appointments").doc(id).get();
+      return snap.exists ? snap.data() ?? {} : null;
+    });
+  const appointment = await readAppointmentFn(appointmentId);
+  if (!appointment) {
+    throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
+  }
+
+  if (role === "counselor") {
+    const studentId = typeof appointment.userId === "string" ? appointment.userId.trim() : "";
+    if (!validId(studentId)) {
       throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
     }
     const readStudentFn =
@@ -238,8 +272,6 @@ export async function downloadSessionEvidenceFile(
         !assignedColleges.includes(studentCollegeId)) {
       throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
     }
-  } else {
-    throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
   }
 
   const readSessionNoteFn =
@@ -269,6 +301,8 @@ export async function downloadSessionEvidenceFile(
         return {
           size: metadata.size,
           contentType: metadata.contentType,
+          contentEncoding: metadata.contentEncoding,
+          generation: metadata.generation,
           metadata: metadata.metadata as Record<string, unknown> | undefined,
         };
       } catch (error) {
@@ -286,6 +320,7 @@ export async function downloadSessionEvidenceFile(
       size <= 0 ||
       size > maxFileBytes ||
       metadata.contentType !== expectedMime ||
+      (metadata.contentEncoding && metadata.contentEncoding !== "identity") ||
       metadata.metadata?.uploadedBy !== pathUploaderUid ||
       metadata.metadata?.appointmentId !== appointmentId) {
     throw new HttpsError("failed-precondition", "This private file failed verification.");
@@ -293,9 +328,10 @@ export async function downloadSessionEvidenceFile(
 
   const downloadObjectBytesFn =
     deps.downloadObjectBytes ??
-    (async (objectPath: string) => {
+    (async (objectPath: string, generation?: string | number) => {
       try {
-        const [bytes] = await resolveEvidenceBucket().file(objectPath).download();
+        const file = resolveEvidenceBucket().file(objectPath, {generation});
+        const [bytes] = await file.download({decompress: false});
         return bytes;
       } catch (error) {
         if (isStorageNotFoundError(error)) {
@@ -305,7 +341,7 @@ export async function downloadSessionEvidenceFile(
       }
     });
 
-  const bytes = await downloadObjectBytesFn(path);
+  const bytes = await downloadObjectBytesFn(path, metadata.generation);
   if (bytes.length <= 0 || bytes.length > maxFileBytes || bytes.length !== size) {
     throw new HttpsError("failed-precondition", "This private file failed verification.");
   }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {after, before, test} from "node:test";
 import {getApps, initializeApp} from "firebase-admin/app";
-import {FieldValue, getFirestore} from "firebase-admin/firestore";
+import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {archiveOrganizationRecord, getAuditLogPage, saveOrganizationRecord} from "./index";
 import {ensureAuthUser} from "./test_auth_helper";
@@ -25,6 +25,7 @@ type Callable = {
   run: (request: {auth?: {uid: string}; data?: unknown}) => Promise<{
     events: AuditEventRow[];
     hasMore: boolean;
+    nextCursor?: string | null;
   }>;
 };
 
@@ -105,6 +106,9 @@ before(async () => {
     metadata: {
       studentName: "Confidential Student",
       message: "Confidential clinical note",
+      studentNo: "SYNTHETIC-STUDENT-NUMBER",
+      userId: studentUid,
+      before: {status: "active", studentKey: "SYNTHETIC-ROSTER-KEY"},
     },
   });
   // PAACC Staff action.
@@ -200,6 +204,9 @@ test("Admin-wide Activity Logs feed monitors Admin, Counselor, and PAACC Staff, 
   assert.equal(counselorEv.targetId, `student••••${studentUid.slice(-4)}`);
   assert.equal("studentName" in (counselorEv.metadata ?? {}), false);
   assert.equal("message" in (counselorEv.metadata ?? {}), false);
+  assert.equal("studentNo" in (counselorEv.metadata ?? {}), false);
+  assert.equal("userId" in (counselorEv.metadata ?? {}), false);
+  assert.deepEqual(counselorEv.metadata?.before, {status: "active"});
 
   // Filter by actorRole = portalStaff
   const staffOnly = await page.run({
@@ -277,4 +284,40 @@ test("saveOrganizationRecord and archiveOrganizationRecord write server-authorit
   const createdEvent = orgFeed.events.find((e) => e.targetId === created.id);
   assert.ok(createdEvent, "COLLEGE_CREATED event should be visible in feed");
   assert.equal(createdEvent?.metadata?.code, collegeCode.toUpperCase());
+});
+
+
+test("global feed continues across a sparse window and preserves tied timestamps", async () => {
+  const date = new Timestamp(1700000000, 456000);
+  const older = await seed({actorId: run, actorRoleSnapshot: "admin", action: "AUDIT_PAGE_TEST", createdAt: date});
+  const tied = await seed({actorId: run, actorRoleSnapshot: "admin", action: "AUDIT_PAGE_TEST", createdAt: date});
+  const newest = await seed({actorId: run, actorRoleSnapshot: "admin", action: "AUDIT_PAGE_TEST", createdAt: new Timestamp(1700000000, 457000)});
+  const batch = db.batch();
+  for (let i = 0; i < 120; i++) {
+    const ref = db.collection("admin_audit_logs").doc();
+    ids.push(ref.id);
+    batch.create(ref, {createdAt: new Timestamp(1700000001, 0), actorRoleSnapshot: "admin", action: "OTHER"});
+  }
+  await batch.commit();
+  const data = {filterActorId: run, action: "AUDIT_PAGE_TEST", afterMillis: 1700000000000, beforeMillis: 1700000001000, pageSize: 1};
+  let result = await page.run({auth: {uid: adminUid}, data});
+  assert.deepEqual(result.events, []);
+  assert.equal(result.hasMore, true);
+  const seen: string[] = [];
+  for (let i = 0; result.hasMore && i < 5; i++) {
+    assert.ok(result.nextCursor);
+    result = await page.run({auth: {uid: adminUid}, data: {...data, cursor: result.nextCursor}});
+    seen.push(...result.events.map((event) => event.id));
+  }
+  assert.equal(seen[0], newest);
+  assert.deepEqual(new Set(seen.slice(1)), new Set([older, tied]));
+  assert.equal(seen.length, 3);
+  assert.equal(result.hasMore, false);
+});
+
+test("an invalid explicit per-user target cannot select the global feed", async () => {
+  await assert.rejects(
+    page.run({auth: {uid: adminUid}, data: {targetUserId: ""}}),
+    {code: "invalid-argument"},
+  );
 });

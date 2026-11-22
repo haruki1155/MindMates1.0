@@ -146,6 +146,18 @@ test('counselor_inbox_reads rejects extra keys, client timestamps, and nonexiste
   }));
 });
 
+test('receipt can preserve the observed student timestamp while readAt records the commit', async () => {
+  await studentSend(db('student'));
+  const counselor = db('counselor', true);
+  const thread = await getDoc(doc(counselor, 'counselor_threads/student'));
+  const readThrough = thread.data().lastStudentMessageAt;
+  const receipt = doc(counselor, 'counselor_inbox_reads/counselor/threads/student');
+  await assertSucceeds(setDoc(receipt, {readAt: serverTimestamp(), readThrough}));
+  assert.ok((await getDoc(receipt)).data().readThrough.isEqual(readThrough));
+  await assertFails(setDoc(receipt, {readAt: serverTimestamp(), readThrough: 'invalid'}));
+  await assertFails(setDoc(receipt, {readAt: serverTimestamp(), readThrough: Timestamp.fromMillis(4102444800000)}));
+});
+
 test('atomic 3-write counselor reply and mark-read batch succeeds with matching timestamps', async () => {
   await studentSend(db('student'));
   const counselor = db('counselor', true);

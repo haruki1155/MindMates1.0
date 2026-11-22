@@ -524,7 +524,9 @@ void main() {
       'concurrent incoming student message arriving while earlier mark-read is pending stays unread',
       () async {
         final t1 = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10, 0, 0));
-        final t2 = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10, 0, 3));
+        final t2 = Timestamp.fromDate(
+          DateTime.utc(2026, 11, 22, 10, 0, 1, 500),
+        );
         db = FakeCounselorFirestore(
           initialServerTime: DateTime.utc(2026, 11, 22, 10, 0, 1),
           deferWriteCompletion: true,
@@ -569,7 +571,7 @@ void main() {
         expect(controller.unreadCount(), 1);
         expect(controller.stateFor('s1')?.status, CounselorReadStatus.unread);
 
-        // Even after m1's mark-read resolves at server time 10:00:02 (< t2), s1 remains unread!
+        // The server commits after t2 arrived. Only the observed t1 was read.
         db.completeNextPendingWrite();
         await markFuture;
         await Future<void>.delayed(Duration.zero);

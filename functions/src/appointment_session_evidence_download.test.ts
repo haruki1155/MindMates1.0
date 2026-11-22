@@ -5,7 +5,7 @@ import {getAuth} from "firebase-admin/auth";
 import {getFirestore} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
 
-import {downloadClinicalSessionEvidence} from "./index";
+import {downloadClinicalSessionEvidence, uploadClinicalSessionEvidence} from "./index";
 import {ensureAuthUser} from "./test_auth_helper";
 
 type Callable = {
@@ -549,4 +549,39 @@ test("rejects unreferenced clinical paths, missing storage objects safely, misma
   );
 
   assert.equal((await countRunAudits()).length, 0);
+});
+
+test("confirmed assigned counselor uploads an immutable object without a download token", async () => {
+  const uploadedPaths: string[] = [];
+  const upload = uploadClinicalSessionEvidence as unknown as {
+    run: (request: {auth?: {uid: string}; data: Record<string, unknown>}) => Promise<{path: string}>;
+  };
+  const data = {appointmentId, name: "Worksheet.pdf", contentType: "application/pdf",
+    size: samplePdfBytes.length, dataBase64: samplePdfBytes.toString("base64")};
+  const appointment = db.collection("appointments").doc(appointmentId);
+  await expectCallableCode(upload.run({auth: {uid: counselorCiteId}, data}), "failed-precondition");
+  await appointment.update({status: "confirmed"});
+  try {
+    await expectCallableCode(upload.run({data}), "unauthenticated");
+    await expectCallableCode(upload.run({auth: {uid: superAdminId}, data}), "permission-denied");
+    await expectCallableCode(upload.run({auth: {uid: counselorCiteId}, data: {...data, dataBase64: "bad"}}), "invalid-argument");
+    const {path} = await upload.run({auth: {uid: counselorCiteId}, data});
+    uploadedPaths.push(path);
+    assert.ok(path.startsWith(["counseling_session_files", appointmentId, counselorCiteId, ""].join("/")));
+    const file = testBucket().file(path);
+    const [metadata] = await file.getMetadata();
+    assert.equal(metadata.metadata?.firebaseStorageDownloadTokens, undefined);
+    assert.deepEqual(metadata.metadata, {uploadedBy: counselorCiteId, appointmentId});
+    const [stored] = await file.download();
+    assert.deepEqual(stored, samplePdfBytes);
+    const next = await upload.run({auth: {uid: counselorCiteId}, data: {...data, dataBase64: Buffer.alloc(samplePdfBytes.length).toString("base64")}});
+    uploadedPaths.push(next.path);
+    assert.notEqual(next.path, path);
+    assert.deepEqual((await file.download())[0], samplePdfBytes);
+  } finally {
+    await Promise.all([
+      ...uploadedPaths.map((path) => testBucket().file(path).delete({ignoreNotFound: true})),
+      appointment.update({status: "completed"}),
+    ]);
+  }
 });

@@ -157,7 +157,12 @@ class CounselorInboxUnreadController extends ChangeNotifier {
       return false;
     }
 
-    final pendingWatermark = _pendingWatermarkByStudent[studentId];
+    final pendingWatermark = maxTimestamp(
+      _pendingWatermarkByStudent[studentId],
+      (_receiptPendingWrites[studentId] ?? false)
+          ? _receiptReadAt[studentId]
+          : null,
+    );
     final pendingActive =
         _hasInFlightWrite(studentId) ||
         (_receiptPendingWrites[studentId] ?? false) ||
@@ -266,7 +271,7 @@ class CounselorInboxUnreadController extends ChangeNotifier {
             _receiptPendingWrites.clear();
             for (final doc in snapshot.docs) {
               final data = doc.data();
-              final rawReadAt = data['readAt'];
+              final rawReadAt = data['readThrough'] ?? data['readAt'];
               final readAt = rawReadAt is Timestamp ? rawReadAt : null;
               final pending = doc.metadata.hasPendingWrites;
               _receiptReadAt[doc.id] = readAt;
@@ -318,9 +323,10 @@ class CounselorInboxUnreadController extends ChangeNotifier {
       final updatedAt = data['updatedAt'] is Timestamp
           ? data['updatedAt'] as Timestamp
           : null;
-      final serverReadAt = _receiptReadAt[studentId];
+      final receiptReadAt = _receiptReadAt[studentId];
       final receiptExists = _receiptExists[studentId] ?? false;
       final receiptPending = _receiptPendingWrites[studentId] ?? false;
+      final serverReadAt = receiptPending ? null : receiptReadAt;
       final writeInFlight = _hasInFlightWrite(studentId);
       final awaitingReceiptConfirmation = _committedAwaitingReceiptByStudent
           .containsKey(studentId);
@@ -331,7 +337,10 @@ class CounselorInboxUnreadController extends ChangeNotifier {
         lastStudentMessageAt: lastStudentMessageAt,
         serverReadAt: serverReadAt,
         lastConfirmedReadAt: _lastConfirmedReadAtByStudent[studentId],
-        pendingStudentMessageWatermark: _pendingWatermarkByStudent[studentId],
+        pendingStudentMessageWatermark: maxTimestamp(
+          _pendingWatermarkByStudent[studentId],
+          receiptPending ? receiptReadAt : null,
+        ),
         receiptExists: receiptExists,
         receiptHasPendingWrites: receiptPending,
         writeInFlight: writeInFlight,
@@ -417,7 +426,7 @@ class CounselorInboxUnreadController extends ChangeNotifier {
           .doc(uid)
           .collection('threads')
           .doc(studentId)
-          .set({'readAt': FieldValue.serverTimestamp()});
+          .set(_receiptFields(studentId, watermark));
       if (!_disposed && epoch == _authEpoch && _activeUid == uid) {
         _recordCommittedWatermark(studentId, watermark);
       }
@@ -450,6 +459,16 @@ class CounselorInboxUnreadController extends ChangeNotifier {
         }
       }
     }
+  }
+
+  Map<String, Object> _receiptFields(String studentId, Timestamp? observedAt) {
+    return {
+      'readAt': FieldValue.serverTimestamp(),
+      // Keep the legacy commit timestamp and track which message was seen.
+      'readThrough':
+          maxTimestamp(observedAt, _lastConfirmedReadAtByStudent[studentId]) ??
+          Timestamp(0, 0),
+    };
   }
 
   /// Sends a counselor reply and records the counselor's read receipt in a
@@ -500,7 +519,7 @@ class CounselorInboxUnreadController extends ChangeNotifier {
         'text': trimmed,
         'createdAt': FieldValue.serverTimestamp(),
       });
-      batch.set(receipt, {'readAt': FieldValue.serverTimestamp()});
+      batch.set(receipt, _receiptFields(studentId, watermark));
       await batch.commit();
       if (!_disposed &&
           epoch == _authEpoch &&

@@ -4,7 +4,18 @@ import 'dart:typed_data';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/domain/session_evidence.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/repositories/admin_portal_repository.dart';
+
+class _CounselorRepository extends AdminPortalRepository {
+  _CounselorRepository({required super.callableInvoker});
+
+  @override
+  AccessRole get currentAccessRole => AccessRole.counselor;
+
+  @override
+  String get currentUserId => 'counselor_1';
+}
 
 void main() {
   const appointmentId = 'appointment_1';
@@ -12,6 +23,36 @@ void main() {
   const nonce = '0123456789abcdef0123456789abcdef';
   const validPath =
       'counseling_session_files/$appointmentId/$uploaderUid/$nonce.pdf';
+
+  test(
+    'clinical upload uses the private callable with the evidence bytes',
+    () async {
+      final bytes = Uint8List.fromList([37, 80, 68, 70]);
+      Map<String, Object?>? payload;
+      final repo = _CounselorRepository(
+        callableInvoker: (name, data) async {
+          expect(name, 'uploadClinicalSessionEvidence');
+          payload = data;
+          return {'path': validPath};
+        },
+      );
+      final attachments = await repo.uploadClinicalEvidenceFiles(
+        appointmentId: appointmentId,
+        files: [
+          PendingSessionEvidenceFile(
+            name: 'Worksheet.pdf',
+            contentType: 'application/pdf',
+            bytes: bytes,
+          ),
+        ],
+      );
+      expect(payload?['appointmentId'], appointmentId);
+      expect(payload?.containsKey('path'), isFalse);
+      expect(attachments.single.path, validPath);
+      expect(payload?['dataBase64'], base64Encode(bytes));
+      expect(attachments.single.size, bytes.length);
+    },
+  );
 
   test(
     'getClinicalEvidenceBytes invokes downloadClinicalSessionEvidence with appointmentId and decodes bytes',

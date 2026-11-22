@@ -35,7 +35,8 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
   String _appliedSearch = '';
 
   List<AdminAuditEvent> _events = const [];
-  DateTime? _cursor;
+  String? _cursor;
+  int _requestGeneration = 0;
   bool _loading = true;
   bool _loadingMore = false;
   bool _hasMore = false;
@@ -76,6 +77,8 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
   }
 
   Future<void> _load({bool more = false}) async {
+    if (more && (_loading || _loadingMore || !_hasMore)) return;
+    final generation = ++_requestGeneration;
     if (!widget.repository.isSuperAdmin) {
       setState(() {
         _loading = false;
@@ -88,7 +91,6 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
     }
 
     if (more) {
-      if (_loadingMore || !_hasMore) return;
       setState(() => _loadingMore = true);
     } else {
       setState(() {
@@ -98,6 +100,7 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
         _errorMessage = null;
         _events = const [];
         _cursor = null;
+        _hasMore = false;
       });
     }
 
@@ -118,7 +121,7 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
         cursor: more ? _cursor : null,
         pageSize: widget.pageSize,
       );
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       setState(() {
         if (more) {
           final existingIds = _events.map((e) => e.id).toSet();
@@ -130,14 +133,12 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
           _events = result.events;
         }
         _hasMore = result.hasMore;
-        if (result.events.isNotEmpty) {
-          _cursor = result.events.last.createdAt;
-        }
+        _cursor = result.nextCursor;
         _loading = false;
         _loadingMore = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _requestGeneration) return;
       final text = '$error'.toLowerCase();
       final isDenied =
           text.contains('permission-denied') ||
@@ -478,7 +479,7 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
       );
     }
 
-    if (_events.isEmpty) {
+    if (_events.isEmpty && !_hasMore) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(36),

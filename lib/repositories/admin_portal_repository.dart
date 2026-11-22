@@ -2,7 +2,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -912,7 +911,15 @@ class AdminPortalRepository {
     } catch (_) {
       // Never report "no views" when the access-log query itself failed (for
       // example a missing index); the client-side fallback cannot filter it.
-      if (action == 'STUDENT_PERSONAL_INFO_VIEWED') rethrow;
+      if (const {
+        'STUDENT_PERSONAL_INFO_VIEWED',
+        'COUNSELING_HISTORY_VIEWED',
+        'CASE_REMARKS_VIEWED',
+        'CASE_REMARKS_UPDATED',
+        'CLINICAL_ATTACHMENT_DOWNLOADED',
+      }.contains(action)) {
+        rethrow;
+      }
       // The caller is already an authorized portal administrator. Fall back to
       // the protected Firestore read while a callable/index is propagating.
       final items = await _firestoreService.getDocuments(
@@ -945,7 +952,8 @@ class AdminPortalRepository {
   /// Administrator, Counselor, and PAACC Staff actions.
   ///
   /// Restricted strictly to Super-Administrators on both client and server.
-  Future<({List<AdminAuditEvent> events, bool hasMore})> fetchActivityLogPage({
+  Future<({List<AdminAuditEvent> events, bool hasMore, String? nextCursor})>
+  fetchActivityLogPage({
     ActivityActorRoleFilter roleFilter = ActivityActorRoleFilter.all,
     String actorId = '',
     String category = '',
@@ -953,7 +961,7 @@ class AdminPortalRepository {
     String search = '',
     DateTime? after,
     DateTime? before,
-    DateTime? cursor,
+    String? cursor,
     int pageSize = 25,
   }) async {
     if (!isSuperAdmin) {
@@ -964,63 +972,37 @@ class AdminPortalRepository {
             'Super-administrator access is required to view system activity logs.',
       );
     }
-    try {
-      final result = await FirebaseFunctions.instance
-          .httpsCallable('getAuditLogPage')
-          .call<Map<String, dynamic>>({
-            if (roleFilter != ActivityActorRoleFilter.all)
-              'actorRole': roleFilter.code,
-            if (actorId.trim().isNotEmpty) 'filterActorId': actorId.trim(),
-            if (category.trim().isNotEmpty) 'category': category.trim(),
-            if (action.trim().isNotEmpty) 'action': action.trim(),
-            if (search.trim().isNotEmpty) 'search': search.trim(),
-            if (after != null) 'afterMillis': after.millisecondsSinceEpoch,
-            if (before != null) 'beforeMillis': before.millisecondsSinceEpoch,
-            if (cursor != null) 'cursorMillis': cursor.millisecondsSinceEpoch,
-            'pageSize': pageSize,
-          });
-      final raw = result.data['events'];
-      final events = raw is List
-          ? raw
-                .whereType<Map>()
-                .map(
-                  (item) => sanitizeAuditEventForDisplay(
-                    AdminAuditEvent.fromJson(Map<String, dynamic>.from(item)),
-                  ),
-                )
-                .toList()
-          : <AdminAuditEvent>[];
-      return (events: events, hasMore: result.data['hasMore'] == true);
-    } catch (error) {
-      final text = '$error'.toLowerCase();
-      if (text.contains('permission-denied') ||
-          text.contains('permission_denied') ||
-          text.contains('unauthenticated')) {
-        rethrow;
-      }
-      final items = await _firestoreService.getDocuments(
-        FirestoreCollections.adminAuditLogs,
-        orderBy: 'createdAt',
-        limit: pageSize * 6,
-      );
-      final rawEvents = items.map(AdminAuditEvent.fromJson);
-      final filtered = filterActivityLogEvents(
-        rawEvents,
-        roleFilter: roleFilter,
-        actorIdFilter: actorId,
-        categoryFilter: category,
-        actionFilter: action,
-        searchQuery: search,
-        after: after,
-        before: before,
-      ).where((e) {
-        if (cursor == null) return true;
-        final ts = e.createdAt;
-        return ts != null && ts.isBefore(cursor);
-      }).toList();
-      final page = filtered.take(pageSize).toList();
-      return (events: page, hasMore: filtered.length > pageSize);
-    }
+    final result = await FirebaseFunctions.instance
+        .httpsCallable('getAuditLogPage')
+        .call<Map<String, dynamic>>({
+          if (roleFilter != ActivityActorRoleFilter.all)
+            'actorRole': roleFilter.code,
+          if (actorId.trim().isNotEmpty) 'filterActorId': actorId.trim(),
+          if (category.trim().isNotEmpty) 'category': category.trim(),
+          if (action.trim().isNotEmpty) 'action': action.trim(),
+          if (search.trim().isNotEmpty) 'search': search.trim(),
+          if (after != null) 'afterMillis': after.millisecondsSinceEpoch,
+          if (before != null) 'beforeMillis': before.millisecondsSinceEpoch,
+          if (cursor != null) 'cursor': cursor,
+          'pageSize': pageSize,
+        });
+    final raw = result.data['events'];
+    final events = raw is List
+        ? raw
+              .whereType<Map>()
+              .map(
+                (item) => sanitizeAuditEventForDisplay(
+                  AdminAuditEvent.fromJson(Map<String, dynamic>.from(item)),
+                ),
+              )
+              .toList()
+        : <AdminAuditEvent>[];
+    final nextCursor = result.data['nextCursor'] as String?;
+    return (
+      events: events,
+      hasMore: nextCursor != null,
+      nextCursor: nextCursor,
+    );
   }
 
   Future<void> recordAuditEvent({
@@ -2058,19 +2040,22 @@ class AdminPortalRepository {
           file.size > maxSessionEvidenceFileBytes) {
         throw const FormatException('Unsupported file or file size.');
       }
-      final path = buildSessionEvidencePath(appointmentId, uid, file.name);
-      await FirebaseStorage.instance
-          .ref(path)
-          .putData(
-            file.bytes,
-            SettableMetadata(
-              contentType: file.contentType,
-              customMetadata: {
-                'uploadedBy': uid,
-                'appointmentId': appointmentId,
-              },
-            ),
-          );
+      final result = await _callCallable('uploadClinicalSessionEvidence', {
+        'appointmentId': appointmentId,
+        'name': file.name,
+        'contentType': file.contentType,
+        'size': file.size,
+        'dataBase64': base64Encode(file.bytes),
+      });
+      final path = result is Map ? result['path'] : null;
+      final match = path is String
+          ? _clinicalEvidencePathPattern.firstMatch(path)
+          : null;
+      if (path is! String ||
+          match?.group(1) != appointmentId ||
+          match?.group(2) != uid) {
+        throw StateError('Attachment upload could not be verified.');
+      }
       attachments.add(
         SessionEvidenceAttachment(
           path: path,
