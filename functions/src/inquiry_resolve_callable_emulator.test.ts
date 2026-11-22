@@ -209,6 +209,11 @@ async function auditEvents(inquiryId: string, action: string): Promise<FirebaseF
   return snap.docs.map((d) => d.data());
 }
 
+// Firestore-triggered functions are delivered asynchronously. In the full suite the Functions emulator
+// works through a deep trigger backlog; delivery was measured at ~56s locally, so waits on trigger
+// effects get a bound well above that. waitFor is a condition poll and returns as soon as the state appears.
+const TRIGGER_BACKLOG_TIMEOUT_MS = 120_000;
+
 async function waitFor<T>(
   probe: () => Promise<T | null>,
   timeoutMs = 10000,
@@ -331,12 +336,18 @@ test(
       assert.deepEqual(res, {ok: true, changed: true, revision: 2});
     });
 
+    // Steps 3-5 keep their legacy revision shape (missing/null routingRevision, which revisionOf reads
+    // as 0) but are seeded as already routed. An unrouted fixture is routed by the asynchronous creation
+    // trigger at an unpredictable moment: that sets routingRevision 1 and replaces assigneeIds, which
+    // made these calls fail with failed-precondition, a wrong revision, or permission-denied depending
+    // on timing. Genuinely unrouted inquiries have their own deterministic test below.
     // 3. Legacy missing routingRevision (undefined) & missing inquiry_statuses/{id} with expectedRevision: 0
     const legacyZeroId = await seedInquiry({
       userId: staffSeeds.student.uid,
       subject: "Legacy undefined revision",
       message: "Legacy body",
       status: "in_progress",
+      routingStatus: "routed",
       assigneeIds: [c1.uid],
       acknowledgedAt: new Date("2026-11-20T10:00:00.000Z"),
       createdAt: new Date("2026-11-20T09:00:00.000Z"),
@@ -345,7 +356,12 @@ test(
       const res = await call("resolveInquiry", {inquiryId: legacyZeroId, expectedRevision: 0});
       assert.deepEqual(res, {ok: true, changed: true, revision: 1});
     });
-    assert.ok((await db.doc(`inquiry_statuses/${legacyZeroId}`).get()).exists);
+    // The creation/write triggers also project routed inquiries, so this checks the projection's
+    // post-resolve state rather than attributing the write to the callable alone.
+    const legacyZeroProjection = (await db.doc(`inquiry_statuses/${legacyZeroId}`).get()).data();
+    assert.ok(legacyZeroProjection);
+    assert.equal(legacyZeroProjection.routingRevision, 1);
+    assert.equal(legacyZeroProjection.status, "resolved");
 
     // 4. Legacy routingRevision: null & partial legacy inquiry_statuses/{id} with expectedRevision: null & omitted
     const legacyNullRevId = await seedInquiry({
@@ -353,11 +369,14 @@ test(
       subject: "Legacy null revision",
       message: "Body",
       status: "in_progress",
+      routingStatus: "routed",
       routingRevision: null,
       assigneeIds: [c1.uid],
       acknowledgedAt: Date.now(),
       createdAt: Date.now(),
     });
+    // Best effort: the creation/write triggers may rewrite this projection in full before the callable
+    // runs, in which case only the final "resolved" projection state below is exercised.
     await db.doc(`inquiry_statuses/${legacyNullRevId}`).set({
       status: "in_progress",
       extraField: "legacy",
@@ -373,6 +392,7 @@ test(
       subject: "Legacy omitted expectedRevision",
       message: "Body",
       status: "in_progress",
+      routingStatus: "routed",
       assigneeIds: [c1.uid],
       firstResponseAt: "2026-11-20T12:00:00.000Z",
       createdAt: "2026-11-20T11:00:00.000Z",
@@ -388,6 +408,7 @@ test(
       subject: "Legacy counselor",
       message: "Body",
       status: "in_progress",
+      routingStatus: "routed",
       assigneeIds: [legacyC.uid],
       acknowledgedAt: Timestamp.now(),
       createdAt: Timestamp.now(),
@@ -415,6 +436,7 @@ test(
       subject: "Pending",
       message: "Body",
       status: "pending",
+      routingStatus: "routed",
       routingRevision: 1,
       assigneeIds: [c1.uid],
       createdAt: Timestamp.now(),
@@ -494,6 +516,7 @@ test(
       subject: "Malformed ack on pending",
       message: "Body",
       status: "pending",
+      routingStatus: "routed",
       routingRevision: 1,
       assigneeIds: [c1.uid],
       acknowledgedAt: {},
@@ -512,6 +535,7 @@ test(
       subject: "Set status ok",
       message: "Body",
       status: "in_progress",
+      routingStatus: "routed",
       routingRevision: 0,
       assigneeIds: [c1.uid],
       acknowledgedAt: Timestamp.now(),
@@ -654,15 +678,12 @@ test(
     await withClientCallable(c1.uid, c1.email, async (call) => {
       await call("resolveInquiry", {inquiryId: notifyInqId, expectedRevision: 1});
     });
-    // Archival is delivered by an asynchronous Firestore trigger. In the full suite the Functions
-    // emulator works through a deep trigger backlog; delivery was measured at ~56s locally, so this
-    // condition poll (returns as soon as the state appears) gets a bound well above that.
-    const ARCHIVAL_TRIGGER_BACKLOG_TIMEOUT_MS = 120_000;
+    // Archival is delivered by an asynchronous Firestore trigger; see TRIGGER_BACKLOG_TIMEOUT_MS.
     const archivedPortalNote = await waitFor(async () => {
       const snap = await portalNoteRef.get();
       const data = snap.data();
       return data?.archivedAt != null ? data : null;
-    }, ARCHIVAL_TRIGGER_BACKLOG_TIMEOUT_MS);
+    }, TRIGGER_BACKLOG_TIMEOUT_MS);
     assert.ok(archivedPortalNote.resolvedAt != null);
     assert.ok(archivedPortalNote.expiresAt != null);
     assert.equal(archivedPortalNote.archiveEligibleAt, null);
@@ -716,6 +737,45 @@ test(
         assert.deepEqual(res, {ok: true, changed: true, revision: 4});
       });
     }
+  },
+);
+
+test(
+  "a genuinely unrouted inquiry is routed by the creation trigger, after which resolveInquiry enforces the routed revision",
+  {skip: !emulated},
+  async () => {
+    const c1 = staffSeeds.c1;
+    // No routingStatus and no routingRevision: the creation trigger (routeInquiry) must route this.
+    const unroutedId = await seedInquiry({
+      userId: staffSeeds.student.uid,
+      subject: "Unrouted legacy inquiry",
+      message: "Body",
+      status: "in_progress",
+      assigneeIds: [c1.uid],
+      acknowledgedAt: Timestamp.now(),
+      createdAt: Timestamp.now(),
+    });
+    // Wait for the trigger's effect instead of racing it; this test owns the trigger-first ordering.
+    const routed = await waitFor(async () => {
+      const data = (await db.doc(`inquiries/${unroutedId}`).get()).data();
+      return data?.routingStatus != null ? data : null;
+    }, TRIGGER_BACKLOG_TIMEOUT_MS);
+    assert.equal(routed.routingStatus, "routed");
+    assert.equal(routed.routingRevision, 1);
+    assert.ok((routed.assigneeIds as string[]).includes(c1.uid));
+
+    await withClientCallable(c1.uid, c1.email, async (call) => {
+      // The pre-routing revision (0) is now stale and must still be rejected without mutation.
+      await expectCallableRejects(
+        call("resolveInquiry", {inquiryId: unroutedId, expectedRevision: 0}),
+        "functions/failed-precondition",
+        "updated by someone else",
+      );
+      assert.equal((await db.doc(`inquiries/${unroutedId}`).get()).data()!.status, "in_progress");
+      const res = await call("resolveInquiry", {inquiryId: unroutedId, expectedRevision: 1});
+      assert.deepEqual(res, {ok: true, changed: true, revision: 2});
+    });
+    assert.equal((await auditEvents(unroutedId, "INQUIRY_RESOLVED")).length, 1);
   },
 );
 
