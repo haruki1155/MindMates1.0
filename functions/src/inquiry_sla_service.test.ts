@@ -282,10 +282,19 @@ test("a stale acknowledgement changes nothing: no status change, receipt or audi
 
 test("escalation advances the revision too", {skip: !emulated}, async () => {
   const id = await routedInquiry();
-  await call(escalateInquiry, "c1", {inquiryId: id, reason: "Needs supervisor review"});
-  assert.equal((await inquiry(id)).routingRevision, 2);
+  await call(escalateInquiry, "c1", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 1});
+  const escalated = await inquiry(id);
+  assert.equal(escalated.routingRevision, 2);
+  assert.equal(escalated.escalation.type, "counselor_confirmation");
+  assert.equal(escalated.escalation.reason, null);
   await rejects(call(takeOverInquiry, "admin", {inquiryId: id, expectedRevision: 1, reason: "Past the response target"}), "failed-precondition");
   await rejects(call(replyToInquiry, "c1b", {inquiryId: id, message: "Hi", expectedRevision: 1, requestId: requestId("esc-stale")}), "failed-precondition");
+  // takeOverInquiry still enforces 3-500 char reason and preserves escalation.type when marking handled.
+  await rejects(call(takeOverInquiry, "admin", {inquiryId: id, expectedRevision: 2, reason: "no"}), "invalid-argument");
+  await call(takeOverInquiry, "admin", {inquiryId: id, expectedRevision: 2, reason: "Past the response target"});
+  const taken = await inquiry(id);
+  assert.equal(taken.escalation.status, "handled");
+  assert.equal(taken.escalation.type, "counselor_confirmation");
 });
 
 test("legacy PR #4 clients that omit the revision are still served, and the audit says it was unchecked", {skip: !emulated}, async () => {

@@ -279,16 +279,99 @@ test("assigned counselors or monitoring staff escalate once to the super-adminis
   await rejects(call(escalateInquiry, "c1", {inquiryId: id, reason: "no"}), "invalid-argument");
   await call(escalateInquiry, "c1", {inquiryId: id, reason: "Private clinical escalation reason"});
   const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
-  assert.deepEqual([inquiry.escalation.status, inquiry.escalation.requestedBy, inquiry.escalation.reason], ["requested", uid("c1"), "Private clinical escalation reason"]);
+  assert.deepEqual(
+    [inquiry.escalation.status, inquiry.escalation.type, inquiry.escalation.requestedBy, inquiry.escalation.reason],
+    ["requested", "staff_reasoned", uid("c1"), "Private clinical escalation reason"],
+  );
   const projection = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
   assert.equal(projection.escalationStatus, "requested");
   assert.ok(!JSON.stringify(projection).includes("Private clinical escalation reason"));
+  assert.ok(!JSON.stringify(projection).includes("staff_reasoned"));
   assert.equal(projection.escalationReason, undefined);
+  assert.equal(projection.escalationType, undefined);
   const note = await db.doc(`notifications/portal_inquiry_escalation_${id}_2`).get();
   assert.equal(note.data()?.userId, uid("admin"));
   assert.ok(!JSON.stringify(note.data()).includes("Sensitive"));
-  assert.equal((await audit(id, "INQUIRY_ESCALATED")).length, 1);
+  const audits = await audit(id, "INQUIRY_ESCALATED");
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0].metadata.escalationType, "staff_reasoned");
+  assert.equal(audits[0].metadata.reasonProvided, true);
+  assert.equal(audits[0].metadata.reason, "Private clinical escalation reason");
   await rejects(call(escalateInquiry, "s1", {inquiryId: id, reason: "Again please"}), "failed-precondition");
+});
+
+test("assigned counselors confirm escalation without a free-text reason while preserving audit, notifications, revision checks, and role/reason guards", {skip: !emulated}, async () => {
+  const id = await newInquiry("cite");
+  await routeInquiry(id);
+  await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c1")], monitoringStaffIds: [uid("s1")], expectedRevision: 1, reason: "Add monitor"});
+
+  // Super-admin always receives permission-denied even when omitting reason.
+  await rejects(call(escalateInquiry, "admin", {inquiryId: id}), "permission-denied");
+  // Unassigned counselor, otherAdmin, student, suspended, unverified rejected.
+  await rejects(call(escalateInquiry, "c2", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 2}), "permission-denied");
+  await rejects(call(escalateInquiry, "otherAdmin", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 2}), "permission-denied");
+  await rejects(call(escalateInquiry, "student-cite", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 2}), "permission-denied");
+  await rejects(call(escalateInquiry, "sus", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 2}), "permission-denied");
+  await rejects(call(escalateInquiry, "unv", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 2}), "permission-denied");
+
+  // portalStaff without reason or conflicting/unknown escalationType rejected with invalid-argument.
+  await rejects(call(escalateInquiry, "s1", {inquiryId: id, expectedRevision: 2}), "invalid-argument");
+  await rejects(call(escalateInquiry, "s1", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 2}), "invalid-argument");
+  await rejects(call(escalateInquiry, "c1", {inquiryId: id, escalationType: "staff_reasoned", expectedRevision: 2}), "invalid-argument");
+  await rejects(call(escalateInquiry, "c1", {inquiryId: id, escalationType: "bogus", expectedRevision: 2}), "invalid-argument");
+  await rejects(call(escalateInquiry, "c1", {inquiryId: id, escalationType: "counselor_confirmation", reason: "Conflicting", expectedRevision: 2}), "invalid-argument");
+
+  // Stale expectedRevision fails cleanly.
+  await rejects(call(escalateInquiry, "c1", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 1}), "failed-precondition");
+
+  // Concurrent confirmation escalations: exactly one succeeds.
+  const outcomes = await Promise.allSettled([
+    call(escalateInquiry, "c1", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 2}),
+    call(escalateInquiry, "c1", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 2}),
+  ]);
+  assert.equal(outcomes.filter((o) => o.status === "fulfilled").length, 1);
+  assert.equal(outcomes.filter((o) => o.status === "rejected").length, 1);
+
+  const inquiry = (await db.doc(`inquiries/${id}`).get()).data()!;
+  assert.deepEqual(
+    [inquiry.escalation.status, inquiry.escalation.type, inquiry.escalation.reason, inquiry.escalation.requestedBy, inquiry.routingRevision],
+    ["requested", "counselor_confirmation", null, uid("c1"), 3],
+  );
+  const projection = (await db.doc(`${INQUIRY_STATUSES_COLLECTION}/${id}`).get()).data()!;
+  assert.equal(projection.escalationStatus, "requested");
+  assert.equal(projection.escalationType, undefined);
+  assert.equal(projection.escalationReason, undefined);
+  assert.ok(!JSON.stringify(projection).includes("counselor_confirmation"));
+
+  const note = await db.doc(`notifications/portal_inquiry_escalation_${id}_2`).get();
+  assert.equal(note.exists, true);
+  assert.equal(note.data()?.userId, uid("admin"));
+
+  const audits = await audit(id, "INQUIRY_ESCALATED");
+  assert.equal(audits.length, 1);
+  assert.deepEqual(audits[0].metadata, {
+    escalationType: "counselor_confirmation",
+    reasonProvided: false,
+    reason: null,
+    recipient: uid("admin"),
+    revision: 3,
+    revisionChecked: true,
+  });
+
+  // Subsequent reassignInquiry still requires a 3-500 char reason and preserves escalation.type when marking handled.
+  await rejects(call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 3, reason: "no"}), "invalid-argument");
+  await call(reassignInquiry, "admin", {inquiryId: id, assigneeIds: [uid("c2")], expectedRevision: 3, reason: "Coverage change"});
+  const afterReassign = (await db.doc(`inquiries/${id}`).get()).data()!;
+  assert.equal(afterReassign.escalation.status, "handled");
+  assert.equal(afterReassign.escalation.type, "counselor_confirmation");
+  assert.equal(afterReassign.escalation.reason, null);
+
+  // Resolved inquiries cannot be escalated.
+  const resolvedId = await newInquiry("cite");
+  await routeInquiry(resolvedId);
+  await call(acknowledgeInquiry, "c1", {inquiryId: resolvedId, expectedRevision: 1});
+  await call(resolveInquiry, "c1", {inquiryId: resolvedId, expectedRevision: 2});
+  await rejects(call(escalateInquiry, "c1", {inquiryId: resolvedId, escalationType: "counselor_confirmation", expectedRevision: 3}), "failed-precondition");
 });
 
 test("the super-administrator reassigns with revision checks; removed assignees and monitors lose projection access immediately", {skip: !emulated}, async () => {

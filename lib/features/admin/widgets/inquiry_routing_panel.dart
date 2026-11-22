@@ -141,7 +141,11 @@ class InquiryRoutingPanel extends StatelessWidget {
             'Escalation',
             _isOperationalView
                 ? 'Requested'
-                : 'Requested — ${inquiry.escalationReason ?? ''}',
+                : (inquiry.escalationReason ?? '').trim().isNotEmpty
+                ? 'Requested — ${inquiry.escalationReason!.trim()}'
+                : inquiry.escalationType != null
+                ? 'Requested — ${inquiry.escalationType!.label}'
+                : 'Requested',
           ),
         if (inquiry.isTakenOver)
           _row(
@@ -195,18 +199,31 @@ class InquiryRoutingPanel extends StatelessWidget {
   );
 
   Future<void> _escalate(BuildContext context) async {
-    final done = await showDialog<bool>(
-      context: context,
-      builder: (_) => _ReasonDialog(
-        title: 'Escalate to administrator',
-        actionLabel: 'Escalate',
-        onSubmit: (reason) => repository.escalateInquiry(
-          inquiry.id,
-          reason: reason,
-          expectedRevision: inquiry.routingRevision,
-        ),
-      ),
-    );
+    final done = _isOperationalView
+        ? await showDialog<bool>(
+            context: context,
+            builder: (_) => _ReasonDialog(
+              title: 'Escalate to administrator',
+              actionLabel: 'Escalate',
+              onSubmit: (reason) => repository.escalateInquiry(
+                inquiry.id,
+                escalationType: InquiryEscalationType.staffReasoned,
+                reason: reason,
+                expectedRevision: inquiry.routingRevision,
+              ),
+            ),
+          )
+        : await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _EscalateConfirmDialog(
+              onConfirm: () => repository.escalateInquiry(
+                inquiry.id,
+                escalationType: InquiryEscalationType.counselorConfirmation,
+                expectedRevision: inquiry.routingRevision,
+              ),
+            ),
+          );
     if (done == true) onChanged?.call();
   }
 
@@ -233,6 +250,62 @@ class InquiryRoutingPanel extends StatelessWidget {
     );
     if (done == true) onChanged?.call();
   }
+}
+
+class _EscalateConfirmDialog extends StatefulWidget {
+  const _EscalateConfirmDialog({required this.onConfirm});
+
+  final Future<void> Function() onConfirm;
+
+  @override
+  State<_EscalateConfirmDialog> createState() => _EscalateConfirmDialogState();
+}
+
+class _EscalateConfirmDialogState extends State<_EscalateConfirmDialog> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.onConfirm();
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = _errorText(error, 'The request failed'));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_busy,
+    child: AlertDialog(
+      title: const Text('Escalate this inquiry to the Administrator?'),
+      content: _error == null
+          ? null
+          : Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+          child: const Text('No'),
+        ),
+        FilledButton(
+          onPressed: _busy ? null : _submit,
+          child: Text(_busy ? 'Escalating…' : 'Yes'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _ReasonDialog extends StatefulWidget {

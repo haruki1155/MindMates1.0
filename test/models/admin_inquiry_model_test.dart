@@ -73,6 +73,7 @@ void main() {
     expect(projection.name, isNull);
     expect(projection.formData, isEmpty);
     expect(projection.escalationStatus, 'requested');
+    expect(projection.escalationType, isNull);
     expect(projection.escalationReason, isNull);
     expect(projection.responseCount, 2);
     expect(projection.firstResponseAt, DateTime.utc(2026, 11, 18, 9));
@@ -83,5 +84,46 @@ void main() {
     expect(projection.takeoverByName, isNull);
     expect(projection.takeoverReason, isNull);
     expect(projection.monitoringStaffIds, ['s1']);
+  });
+
+  test('fromJson parses escalationType and copyWith preserves it', () {
+    final confirmed = AdminInquiryModel.fromJson({
+      'id': 'inq-confirm',
+      'status': 'in_progress',
+      'createdAt': '2026-11-18T08:00:00.000',
+      'escalation': {
+        'status': 'requested',
+        'type': 'counselor_confirmation',
+        'reason': null,
+      },
+    });
+    expect(confirmed.isEscalated, isTrue);
+    expect(confirmed.escalationType, InquiryEscalationType.counselorConfirmation);
+    expect(confirmed.escalationReason, isNull);
+    expect(
+      confirmed.copyWith(status: InquiryStatus.resolved).escalationType,
+      InquiryEscalationType.counselorConfirmation,
+    );
+
+    final staffReasoned = AdminInquiryModel.fromJson({
+      'id': 'inq-staff',
+      'status': 'in_progress',
+      'createdAt': '2026-11-18T08:00:00.000',
+      'escalation': {
+        'status': 'requested',
+        'type': 'staff_reasoned',
+        'reason': 'SLA monitor note',
+      },
+    });
+    expect(staffReasoned.escalationType, InquiryEscalationType.staffReasoned);
+    expect(staffReasoned.escalationReason, 'SLA monitor note');
+
+    final unknown = AdminInquiryModel.fromJson({
+      'id': 'inq-unknown',
+      'status': 'in_progress',
+      'createdAt': '2026-11-18T08:00:00.000',
+      'escalation': {'status': 'requested', 'type': 'unknown_type'},
+    });
+    expect(unknown.escalationType, isNull);
   });
 }

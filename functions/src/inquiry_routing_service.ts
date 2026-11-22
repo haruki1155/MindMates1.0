@@ -10,8 +10,11 @@ import {
   buildInquiryStatusProjection,
   Candidate,
   decideRouting,
+  EscalationInput,
   escalationNotificationId,
+  InquiryEscalationInputError,
   InquiryRoutingError,
+  parseEscalationInput,
   planReassignment,
   shouldWriteInquiryProjection,
   triageNotificationId,
@@ -261,6 +264,32 @@ export function reasonFrom(data: unknown): string {
   const text = typeof (data as {reason?: unknown})?.reason === "string" ? (data as {reason: string}).reason.trim() : "";
   if (text.length < 3 || text.length > 500) throw new HttpsError("invalid-argument", "Reason must be 3-500 characters.");
   return text;
+}
+
+export function escalationInputFrom(data: unknown, role: string): EscalationInput {
+  const input = (data ?? {}) as {reason?: unknown};
+  if (input.reason !== undefined && input.reason !== null) {
+    const reason = reasonFrom(data);
+    try {
+      const payload = (data && typeof data === "object" && !Array.isArray(data)
+        ? data
+        : {}) as Record<string, unknown>;
+      return parseEscalationInput({...payload, reason}, role);
+    } catch (error) {
+      if (error instanceof InquiryEscalationInputError) {
+        throw new HttpsError("invalid-argument", error.message);
+      }
+      throw error;
+    }
+  }
+  try {
+    return parseEscalationInput(data, role);
+  } catch (error) {
+    if (error instanceof InquiryEscalationInputError) {
+      throw new HttpsError("invalid-argument", error.message);
+    }
+    throw error;
+  }
 }
 
 export const STALE_REVISION = "This inquiry was updated by someone else. Reload and try again.";
@@ -539,8 +568,11 @@ export const resolveInquiry = onCall(async (request) => {
 
 export const escalateInquiry = onCall(async (request) => {
   const who = await inquiryActor(request);
+  if (who.isSuperAdmin || (who.role !== "counselor" && who.role !== "portalStaff")) {
+    throw new HttpsError("permission-denied", "Only staff assigned to this inquiry can escalate it.");
+  }
   const inquiryId = inquiryIdFrom(request.data);
-  const reason = reasonFrom(request.data);
+  const {escalationType, reason} = escalationInputFrom(request.data, who.role);
   const ref = db().collection("inquiries").doc(inquiryId);
   const statusRef = statusCollection().doc(inquiryId);
   const admin = superAdminUid();
@@ -558,7 +590,13 @@ export const escalateInquiry = onCall(async (request) => {
     const revision = revisionOf(data);
     const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     if (data.escalation?.status === "requested") throw new HttpsError("failed-precondition", "This inquiry is already escalated.");
-    const nextEscalation = {status: "requested", reason, requestedBy: who.actor.uid, requestedAt: FieldValue.serverTimestamp()};
+    const nextEscalation = {
+      status: "requested",
+      type: escalationType,
+      reason,
+      requestedBy: who.actor.uid,
+      requestedAt: FieldValue.serverTimestamp(),
+    };
     tx.update(ref, {
       escalation: nextEscalation,
       routingRevision: revision + 1,
@@ -576,7 +614,14 @@ export const escalateInquiry = onCall(async (request) => {
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ESCALATED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {reason, recipient: admin, revision: revision + 1, revisionChecked},
+      metadata: {
+        escalationType,
+        reasonProvided: reason !== null,
+        reason,
+        recipient: admin,
+        revision: revision + 1,
+        revisionChecked,
+      },
     });
     return revision;
   });

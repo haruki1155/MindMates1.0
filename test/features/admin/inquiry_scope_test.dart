@@ -33,7 +33,11 @@ void main() {
         'routingRevision': 3,
         'ownerId': 'c1',
         'assigneeLabels': {'c1': 'Counselor One', 's1': 'Staff One'},
-        'escalation': {'status': 'requested', 'reason': 'Needs review'},
+        'escalation': {
+          'status': 'requested',
+          'type': 'counselor_confirmation',
+          'reason': 'Needs review',
+        },
       },
     );
     expect(inquiry.collegeId, 'cite');
@@ -44,6 +48,7 @@ void main() {
     expect(inquiry.ownerId, 'c1');
     expect(inquiry.isManuallyRouted, isTrue);
     expect(inquiry.isEscalated, isTrue);
+    expect(inquiry.escalationType, InquiryEscalationType.counselorConfirmation);
     expect(inquiry.escalationReason, 'Needs review');
   });
 
@@ -170,7 +175,10 @@ void main() {
     );
     await repository.updateInquiryStatus('i1', InquiryStatus.resolved);
     await repository.acknowledgeInquiry('i1');
-    await repository.escalateInquiry('i1', reason: 'Needs supervisor');
+    await repository.escalateInquiry(
+      'i1',
+      escalationType: InquiryEscalationType.counselorConfirmation,
+    );
     expect(
       await repository.reassignInquiry(
         'i1',
@@ -195,7 +203,10 @@ void main() {
       'routeExistingInquiries',
     ]);
     expect(calls[0].$2, {'inquiryId': 'i1', 'status': 'resolved'});
-    expect(calls[2].$2, {'inquiryId': 'i1', 'reason': 'Needs supervisor'});
+    expect(calls[2].$2, {
+      'inquiryId': 'i1',
+      'escalationType': 'counselor_confirmation',
+    });
     expect(calls[3].$2, {
       'inquiryId': 'i1',
       'assigneeIds': ['c2'],

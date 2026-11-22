@@ -75,8 +75,14 @@ void main() {
       await repository.acknowledgeInquiry('i1', expectedRevision: 6);
       await repository.escalateInquiry(
         'i1',
-        reason: 'Needs review',
+        escalationType: InquiryEscalationType.counselorConfirmation,
         expectedRevision: 7,
+      );
+      await repository.escalateInquiry(
+        'i1',
+        escalationType: InquiryEscalationType.staffReasoned,
+        reason: 'Needs review',
+        expectedRevision: 8,
       );
       expect(calls.map((c) => c.$1), [
         'replyToInquiry',
@@ -85,6 +91,7 @@ void main() {
         'setInquiryStatus',
         'setInquiryStatus',
         'acknowledgeInquiry',
+        'escalateInquiry',
         'escalateInquiry',
       ]);
       expect(calls[0].$2, {
@@ -108,9 +115,78 @@ void main() {
       expect(calls[5].$2, {'inquiryId': 'i1', 'expectedRevision': 6});
       expect(calls[6].$2, {
         'inquiryId': 'i1',
-        'reason': 'Needs review',
+        'escalationType': 'counselor_confirmation',
         'expectedRevision': 7,
       });
+      expect(calls[6].$2.containsKey('reason'), isFalse);
+      expect(calls[7].$2, {
+        'inquiryId': 'i1',
+        'escalationType': 'staff_reasoned',
+        'reason': 'Needs review',
+        'expectedRevision': 8,
+      });
+
+      final countBefore = calls.length;
+      expect(
+        () => repository.escalateInquiry('i1'),
+        throwsArgumentError,
+      );
+      expect(
+        () => repository.escalateInquiry('i1', reason: 'no'),
+        throwsArgumentError,
+      );
+      expect(
+        () => repository.escalateInquiry('i1', reason: '   '),
+        throwsArgumentError,
+      );
+      expect(
+        () => repository.escalateInquiry(
+          'i1',
+          escalationType: InquiryEscalationType.counselorConfirmation,
+          reason: 'Conflicting',
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => repository.escalateInquiry(
+          'i1',
+          escalationType: InquiryEscalationType.staffReasoned,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => repository.escalateInquiry(
+          'i1',
+          escalationType: InquiryEscalationType.staffReasoned,
+          reason: '',
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => repository.escalateInquiry(
+          'i1',
+          escalationType: InquiryEscalationType.staffReasoned,
+          reason: '   ',
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => repository.escalateInquiry(
+          'i1',
+          escalationType: InquiryEscalationType.counselorConfirmation,
+          reason: '',
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => repository.escalateInquiry(
+          'i1',
+          escalationType: InquiryEscalationType.counselorConfirmation,
+          reason: '   ',
+        ),
+        throwsArgumentError,
+      );
+      expect(calls.length, countBefore);
     },
   );
 }

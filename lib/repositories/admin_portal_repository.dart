@@ -2317,13 +2317,51 @@ class AdminPortalRepository {
   /// Assignee asks the super-administrator to review the inquiry.
   Future<void> escalateInquiry(
     String id, {
-    required String reason,
+    InquiryEscalationType? escalationType,
+    String? reason,
     int? expectedRevision,
-  }) => _callCallable('escalateInquiry', {
-    'inquiryId': id,
-    'reason': reason,
-    'expectedRevision': ?expectedRevision,
-  });
+  }) {
+    final trimmedReason = reason?.trim();
+    if (trimmedReason != null && trimmedReason.isNotEmpty) {
+      if (trimmedReason.length < 3 || trimmedReason.length > 500) {
+        throw ArgumentError.value(
+          reason,
+          'reason',
+          'Reason must be 3-500 characters.',
+        );
+      }
+      if (escalationType == InquiryEscalationType.counselorConfirmation) {
+        throw ArgumentError.value(
+          escalationType,
+          'escalationType',
+          'counselorConfirmation cannot include a free-text reason.',
+        );
+      }
+    } else if (reason != null) {
+      throw ArgumentError.value(
+        reason,
+        'reason',
+        'Reason must be 3-500 characters.',
+      );
+    } else if (escalationType != InquiryEscalationType.counselorConfirmation) {
+      throw escalationType == InquiryEscalationType.staffReasoned
+          ? ArgumentError.value(
+              reason,
+              'reason',
+              'Reason must be 3-500 characters.',
+            )
+          : ArgumentError(
+              'Either escalationType or a 3-500 character reason is required.',
+            );
+    }
+    return _callCallable('escalateInquiry', {
+      'inquiryId': id,
+      if (escalationType != null) 'escalationType': escalationType.storedValue,
+      if (trimmedReason != null && trimmedReason.isNotEmpty)
+        'reason': trimmedReason,
+      'expectedRevision': ?expectedRevision,
+    });
+  }
 
   /// Super-administrator replaces the clinical counselors (and optionally
   /// operational monitoring staff); returns the new revision.
