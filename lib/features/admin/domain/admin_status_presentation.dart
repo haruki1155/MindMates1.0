@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/admin_theme.dart';
+import 'backup_job.dart';
 
 enum AdminStatusDomain {
   appointment,
@@ -8,6 +9,7 @@ enum AdminStatusDomain {
   account,
   assessment,
   appointmentType,
+  backup,
 }
 
 enum AdminSemanticTone { amber, blue, green, violet, red, neutral }
@@ -111,6 +113,7 @@ AdminStatusPresentation resolveAdminStatus(
       raw,
     ),
     AdminStatusDomain.appointmentType => _resolveAppointmentType(key),
+    AdminStatusDomain.backup => _resolveBackup(key),
   };
 
   if (labelOverride != null && labelOverride.trim().isNotEmpty) {
@@ -122,6 +125,91 @@ AdminStatusPresentation resolveAdminStatus(
   }
   return resolved;
 }
+
+/// Returns whether a completed backup job's retention window has ended.
+bool isBackupJobExpired(BackupJob job, {DateTime? now}) {
+  if (job.status != BackupJobStatus.completed) return false;
+  if (job.verification == BackupVerificationStatus.missing) return false;
+  final expiresAt = job.expiresAt;
+  if (expiresAt == null) return false;
+  return !expiresAt.isAfter(now ?? DateTime.now());
+}
+
+/// Maps a [BackupJob] and current timestamp into a semantic badge presentation.
+AdminStatusPresentation resolveBackupJobStatus(
+  BackupJob job, {
+  DateTime? now,
+}) {
+  if (isBackupJobExpired(job, now: now)) {
+    return resolveAdminStatus(AdminStatusDomain.backup, 'expired');
+  }
+  return switch (job.status) {
+    BackupJobStatus.running => resolveAdminStatus(
+      AdminStatusDomain.backup,
+      'running',
+    ),
+    BackupJobStatus.completed => switch (job.verification) {
+      BackupVerificationStatus.verified => resolveAdminStatus(
+        AdminStatusDomain.backup,
+        'verified',
+      ),
+      BackupVerificationStatus.pending => resolveAdminStatus(
+        AdminStatusDomain.backup,
+        'pending',
+      ),
+      BackupVerificationStatus.missing => resolveAdminStatus(
+        AdminStatusDomain.backup,
+        'output_missing',
+      ),
+    },
+    BackupJobStatus.failed => resolveAdminStatus(
+      AdminStatusDomain.backup,
+      job.verification == BackupVerificationStatus.missing
+          ? 'output_missing'
+          : 'failed',
+    ),
+  };
+}
+
+AdminStatusPresentation _resolveBackup(String key) => switch (key) {
+  'running' || 'inprogress' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.blue,
+    label: 'Running',
+    icon: Icons.sync_outlined,
+  ),
+  'verified' || 'successful' || 'completed' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.green,
+    label: 'Successful · Verified',
+    icon: Icons.check_circle_outline,
+  ),
+  'pending' || 'pendingverification' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.amber,
+    label: 'Pending verification',
+    icon: Icons.hourglass_top_outlined,
+  ),
+  'outputmissing' ||
+  'missing' ||
+  'failedoutputmissing' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.red,
+    label: 'Failed · Output missing',
+    icon: Icons.error_outline,
+  ),
+  'failed' || 'error' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.red,
+    label: 'Failed',
+    icon: Icons.error_outline,
+  ),
+  'expired' => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.neutral,
+    label: 'Expired',
+    icon: Icons.timer_off_outlined,
+  ),
+  _ => AdminStatusPresentation.fromTone(
+    tone: AdminSemanticTone.neutral,
+    label: 'Unknown',
+    icon: Icons.help_outline,
+  ),
+};
 
 AdminStatusPresentation _resolveAppointment(String key) => switch (key) {
   'pending' ||
