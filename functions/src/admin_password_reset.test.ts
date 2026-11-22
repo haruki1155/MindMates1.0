@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import {createHash, randomUUID} from "node:crypto";
+import {performance} from "node:perf_hooks";
 import {before, test} from "node:test";
 import {getFirestore} from "firebase-admin/firestore";
 import {CallableRequest} from "firebase-functions/v2/https";
 import {
-  PasswordResetDelivery, PasswordResetMessage, processAdminPasswordReset, requestAdminPasswordResetDev,
+  MIN_PASSWORD_RESET_RESPONSE_MS, PasswordResetDelivery, PasswordResetMessage, processAdminPasswordReset,
+  requestAdminPasswordResetDev,
 } from "./account_recovery";
 
 // Task 11A.5F / D3b: the pre-login admin password reset must answer every
@@ -12,7 +14,9 @@ import {
 // Delivery is stubbed: these tests never generate real links or send mail.
 
 const db = getFirestore();
-const MIN_MS = 250;
+// Timers count whole milliseconds, so a padded wait can measure just under its floor.
+const TIMER_TOLERANCE_MS = 50;
+const SLOW_DELIVERY_MS = 1000;
 const firebaseLink = (oobCode: string) =>
   `https://mindmate-staging.firebaseapp.com/__/auth/action?mode=resetPassword&oobCode=${oobCode}` +
   "&apiKey=synthetic-api-key&lang=en&continueUrl=https%3A%2F%2Fpaaccmindmate.com%2F";
@@ -58,7 +62,7 @@ async function captureLogs<T>(fn: () => Promise<T>): Promise<{result: T; output:
   }
 }
 
-function stubDelivery(known: Set<string>, sendError?: Error) {
+function stubDelivery(known: Set<string>, sendError?: Error, sendDelayMs = 0) {
   const sent: PasswordResetMessage[] = [];
   const continueUrls: string[] = [];
   const delivery: PasswordResetDelivery = {
@@ -68,6 +72,7 @@ function stubDelivery(known: Set<string>, sendError?: Error) {
       return firebaseLink(`oob-${createHash("sha256").update(email).digest("hex").slice(0, 12)}`);
     },
     async send(message) {
+      if (sendDelayMs) await new Promise(resolve => setTimeout(resolve, sendDelayMs));
       if (sendError) throw sendError;
       sent.push(message);
     },
@@ -76,21 +81,33 @@ function stubDelivery(known: Set<string>, sendError?: Error) {
 }
 
 async function timed<T>(fn: () => Promise<T>): Promise<{value: T; ms: number}> {
-  const started = Date.now();
+  const started = performance.now();
   const value = await fn();
-  return {value, ms: Date.now() - started};
+  return {value, ms: performance.now() - started};
 }
 
-test("known and unknown accounts get the same response no sooner than the floor", async () => {
+test("known, unknown and failed deliveries are all padded to the production floor", async () => {
   await withProject("mindmate-staging", async () => {
+    assert.equal(MIN_PASSWORD_RESET_RESPONSE_MS, 3000);
     const known = `admin-${randomUUID()}@example.org`;
     const unknown = `nobody-${randomUUID()}@example.org`;
-    const stub = stubDelivery(new Set([known]));
-    const a = await timed(() => processAdminPasswordReset(request(known), stub.delivery, MIN_MS));
-    const b = await timed(() => processAdminPasswordReset(request(unknown), stub.delivery, MIN_MS));
-    assert.deepEqual(a.value, {accepted: true});
-    assert.deepEqual(b.value, a.value);
-    assert.ok(a.ms >= MIN_MS && b.ms >= MIN_MS, `both padded to the floor (${a.ms}ms, ${b.ms}ms)`);
+    const undeliverable = `bounced-${randomUUID()}@example.org`;
+    const stub = stubDelivery(new Set([known]), undefined, SLOW_DELIVERY_MS);
+    const failing = stubDelivery(new Set([undeliverable]), new Error("synthetic delivery failure"));
+    // The first Firestore call connects lazily and can outlast the floor, hiding the padding.
+    await processAdminPasswordReset(request(`warmup-${randomUUID()}@example.org`), stubDelivery(new Set()).delivery, 0);
+    // No floor override: this exercises the default the deployed callable uses.
+    const [a, b, c] = await Promise.all([
+      timed(() => processAdminPasswordReset(request(known), stub.delivery)),
+      timed(() => processAdminPasswordReset(request(unknown), stub.delivery)),
+      timed(() => processAdminPasswordReset(request(undeliverable), failing.delivery)),
+    ]);
+    for (const [label, {value, ms}] of Object.entries({known: a, unknown: b, undeliverable: c})) {
+      assert.deepEqual(value, {accepted: true}, label);
+      assert.ok(ms >= MIN_PASSWORD_RESET_RESPONSE_MS - TIMER_TOLERANCE_MS, `${label} padded to the floor (${ms}ms)`);
+    }
+    // The floor must absorb delivery time; a fixed delay added afterwards would expose it.
+    assert.ok(Math.abs(a.ms - b.ms) < SLOW_DELIVERY_MS / 2, `delivery time is hidden (${a.ms}ms, ${b.ms}ms)`);
     assert.equal(stub.sent.length, 1, "mail goes only to the existing account");
     assert.equal(stub.sent[0].to, known);
   });
