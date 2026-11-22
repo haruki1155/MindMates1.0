@@ -177,12 +177,24 @@ class PendingWriteOperation {
 }
 
 class _CollectionWatch {
-  _CollectionWatch(this.path, {this.orderByField, this.descending = false})
-    : controller = StreamController<QuerySnapshot<Map<String, dynamic>>>.broadcast();
+  _CollectionWatch(
+    this.path, {
+    this.orderByField,
+    this.descending = false,
+    this.limitCount,
+    this.limitToLastCount,
+    this.startAfterDocId,
+    this.startAfterData,
+  }) : controller =
+           StreamController<QuerySnapshot<Map<String, dynamic>>>.broadcast();
 
   final String path;
   final String? orderByField;
   final bool descending;
+  final int? limitCount;
+  final int? limitToLastCount;
+  final String? startAfterDocId;
+  final Map<String, dynamic>? startAfterData;
   final StreamController<QuerySnapshot<Map<String, dynamic>>> controller;
 }
 
@@ -357,7 +369,7 @@ class FakeCounselorFirestore extends Fake implements FirebaseFirestore {
   QuerySnapshot<Map<String, dynamic>> _buildQuerySnapshot(
     _CollectionWatch watch,
   ) {
-    final matching = _docs.entries
+    var matching = _docs.entries
         .where((e) => _isImmediateParent(e.key, watch.path))
         .toList();
 
@@ -367,10 +379,41 @@ class FakeCounselorFirestore extends Fake implements FirebaseFirestore {
         final va = a.value.data[field];
         final vb = b.value.data[field];
         final cmp = _compareValues(va, vb);
-        return watch.descending ? -cmp : cmp;
+        if (cmp != 0) {
+          return watch.descending ? -cmp : cmp;
+        }
+        final idCmp = a.key.split('/').last.compareTo(b.key.split('/').last);
+        return watch.descending ? -idCmp : idCmp;
       });
     } else {
       matching.sort((a, b) => a.key.compareTo(b.key));
+    }
+
+    if (watch.startAfterDocId != null) {
+      final idx = matching.indexWhere(
+        (e) => e.key.split('/').last == watch.startAfterDocId,
+      );
+      if (idx >= 0) {
+        matching = matching.sublist(idx + 1);
+      } else if (watch.orderByField != null && watch.startAfterData != null) {
+        final field = watch.orderByField!;
+        final anchorVal = watch.startAfterData![field];
+        final anchorId = watch.startAfterDocId!;
+        matching = matching.where((e) {
+          final cmp = _compareValues(e.value.data[field], anchorVal);
+          final directed = watch.descending ? -cmp : cmp;
+          if (directed != 0) return directed > 0;
+          final idCmp = e.key.split('/').last.compareTo(anchorId);
+          return (watch.descending ? -idCmp : idCmp) > 0;
+        }).toList();
+      }
+    }
+
+    if (watch.limitCount != null && matching.length > watch.limitCount!) {
+      matching = matching.sublist(0, watch.limitCount!);
+    } else if (watch.limitToLastCount != null &&
+        matching.length > watch.limitToLastCount!) {
+      matching = matching.sublist(matching.length - watch.limitToLastCount!);
     }
 
     final docs = matching
@@ -391,8 +434,9 @@ class FakeCounselorFirestore extends Fake implements FirebaseFirestore {
 
   int _compareValues(Object? a, Object? b) {
     if (a == null && b == null) return 0;
-    if (a == null) return 1;
-    if (b == null) return -1;
+    // Match Cloud Firestore ordering: null sorts before non-null values.
+    if (a == null) return -1;
+    if (b == null) return 1;
     if (a is Timestamp && b is Timestamp) return a.compareTo(b);
     if (a is Comparable && b is Comparable) return a.compareTo(b);
     return a.toString().compareTo(b.toString());
@@ -402,12 +446,20 @@ class FakeCounselorFirestore extends Fake implements FirebaseFirestore {
     String path, {
     String? orderByField,
     bool descending = false,
+    int? limitCount,
+    int? limitToLastCount,
+    String? startAfterDocId,
+    Map<String, dynamic>? startAfterData,
   }) {
     subscribedCollectionPaths.add(path);
     final watch = _CollectionWatch(
       path,
       orderByField: orderByField,
       descending: descending,
+      limitCount: limitCount,
+      limitToLastCount: limitToLastCount,
+      startAfterDocId: startAfterDocId,
+      startAfterData: startAfterData,
     );
     _collectionWatches.add(watch);
 
@@ -430,6 +482,27 @@ class FakeCounselorFirestore extends Fake implements FirebaseFirestore {
       );
       multi.onCancel = sub.cancel;
     });
+  }
+
+  QuerySnapshot<Map<String, dynamic>> _getCollectionSnapshot(
+    String path, {
+    String? orderByField,
+    bool descending = false,
+    int? limitCount,
+    int? limitToLastCount,
+    String? startAfterDocId,
+    Map<String, dynamic>? startAfterData,
+  }) {
+    final watch = _CollectionWatch(
+      path,
+      orderByField: orderByField,
+      descending: descending,
+      limitCount: limitCount,
+      limitToLastCount: limitToLastCount,
+      startAfterDocId: startAfterDocId,
+      startAfterData: startAfterData,
+    );
+    return _buildQuerySnapshot(watch);
   }
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> _watchDocument(String path) {
@@ -618,10 +691,41 @@ class _FakeCollectionReference extends Fake
       _FakeQuery(db, path, orderByField: field.toString(), descending: descending);
 
   @override
+  Query<Map<String, dynamic>> limit(int limit) =>
+      _FakeQuery(db, path, limitCount: limit);
+
+  @override
+  Query<Map<String, dynamic>> limitToLast(int limit) =>
+      _FakeQuery(db, path, limitToLastCount: limit);
+
+  @override
+  Query<Map<String, dynamic>> startAfterDocument(
+    DocumentSnapshot<Object?> documentSnapshot,
+  ) => _FakeQuery(
+    db,
+    path,
+    startAfterDocId: documentSnapshot.id,
+    startAfterData: _extractDocData(documentSnapshot),
+  );
+
+  @override
+  Future<QuerySnapshot<Map<String, dynamic>>> get([GetOptions? options]) async =>
+      db._getCollectionSnapshot(path);
+
+  @override
   Stream<QuerySnapshot<Map<String, dynamic>>> snapshots({
     bool includeMetadataChanges = false,
     ListenSource source = ListenSource.defaultSource,
   }) => db._watchCollection(path);
+}
+
+Map<String, dynamic>? _extractDocData(DocumentSnapshot<Object?> snapshot) {
+  final raw = snapshot.data();
+  if (raw is Map<String, dynamic>) return Map<String, dynamic>.from(raw);
+  if (raw is Map) {
+    return raw.map((k, v) => MapEntry(k.toString(), v));
+  }
+  return null;
 }
 
 class _FakeQuery extends Fake implements Query<Map<String, dynamic>> {
@@ -630,12 +734,83 @@ class _FakeQuery extends Fake implements Query<Map<String, dynamic>> {
     this.path, {
     this.orderByField,
     this.descending = false,
+    this.limitCount,
+    this.limitToLastCount,
+    this.startAfterDocId,
+    this.startAfterData,
   });
 
   final FakeCounselorFirestore db;
   final String path;
   final String? orderByField;
   final bool descending;
+  final int? limitCount;
+  final int? limitToLastCount;
+  final String? startAfterDocId;
+  final Map<String, dynamic>? startAfterData;
+
+  @override
+  Query<Map<String, dynamic>> orderBy(Object field, {bool descending = false}) =>
+      _FakeQuery(
+        db,
+        path,
+        orderByField: field.toString(),
+        descending: descending,
+        limitCount: limitCount,
+        limitToLastCount: limitToLastCount,
+        startAfterDocId: startAfterDocId,
+        startAfterData: startAfterData,
+      );
+
+  @override
+  Query<Map<String, dynamic>> limit(int limit) => _FakeQuery(
+    db,
+    path,
+    orderByField: orderByField,
+    descending: descending,
+    limitCount: limit,
+    limitToLastCount: null,
+    startAfterDocId: startAfterDocId,
+    startAfterData: startAfterData,
+  );
+
+  @override
+  Query<Map<String, dynamic>> limitToLast(int limit) => _FakeQuery(
+    db,
+    path,
+    orderByField: orderByField,
+    descending: descending,
+    limitCount: null,
+    limitToLastCount: limit,
+    startAfterDocId: startAfterDocId,
+    startAfterData: startAfterData,
+  );
+
+  @override
+  Query<Map<String, dynamic>> startAfterDocument(
+    DocumentSnapshot<Object?> documentSnapshot,
+  ) => _FakeQuery(
+    db,
+    path,
+    orderByField: orderByField,
+    descending: descending,
+    limitCount: limitCount,
+    limitToLastCount: limitToLastCount,
+    startAfterDocId: documentSnapshot.id,
+    startAfterData: _extractDocData(documentSnapshot),
+  );
+
+  @override
+  Future<QuerySnapshot<Map<String, dynamic>>> get([GetOptions? options]) async =>
+      db._getCollectionSnapshot(
+        path,
+        orderByField: orderByField,
+        descending: descending,
+        limitCount: limitCount,
+        limitToLastCount: limitToLastCount,
+        startAfterDocId: startAfterDocId,
+        startAfterData: startAfterData,
+      );
 
   @override
   Stream<QuerySnapshot<Map<String, dynamic>>> snapshots({
@@ -645,6 +820,10 @@ class _FakeQuery extends Fake implements Query<Map<String, dynamic>> {
     path,
     orderByField: orderByField,
     descending: descending,
+    limitCount: limitCount,
+    limitToLastCount: limitToLastCount,
+    startAfterDocId: startAfterDocId,
+    startAfterData: startAfterData,
   );
 }
 
