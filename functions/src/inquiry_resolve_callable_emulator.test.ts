@@ -540,6 +540,7 @@ test(
       subject: "Staff gate",
       message: "Body",
       status: "in_progress",
+      routingStatus: "routed",
       routingRevision: 1,
       assigneeIds: [c1.uid, staffSeeds.pendingStaff.uid, staffSeeds.disabledCounselor.uid],
       acknowledgedAt: Timestamp.now(),
@@ -579,20 +580,27 @@ test(
       );
     });
 
-    // 3. Concurrent HTTP Promise.all race on legacy undefined-revision inquiry
+    // 3. Concurrent HTTP Promise.all race against one explicit revision. The fixture is
+    // already routed at revision 1: an unrouted fixture would be routed (revision 0 -> 1)
+    // by the asynchronous inquiry-creation trigger at an unpredictable moment, so the
+    // revision the callables see would depend on trigger timing. Legacy missing/null
+    // revision handling is exercised by the staging-like fixtures test above, whose
+    // unrouted fixtures share this trigger-timing exposure (tracked as a follow-up).
     const raceId = await seedInquiry({
       userId: staffSeeds.student.uid,
       subject: "Concurrent race",
       message: "Body",
       status: "in_progress",
+      routingStatus: "routed",
+      routingRevision: 1,
       assigneeIds: [c1.uid],
       acknowledgedAt: Timestamp.now(),
       createdAt: Timestamp.now(),
     });
     await withClientCallable(c1.uid, c1.email, async (call) => {
       const outcomes = await Promise.allSettled([
-        call("resolveInquiry", {inquiryId: raceId, expectedRevision: 0}),
-        call("resolveInquiry", {inquiryId: raceId}),
+        call("resolveInquiry", {inquiryId: raceId, expectedRevision: 1}),
+        call("resolveInquiry", {inquiryId: raceId, expectedRevision: 1}),
       ]);
       const fulfilled = outcomes.filter((o) => o.status === "fulfilled");
       const rejected = outcomes.filter((o) => o.status === "rejected");
@@ -603,15 +611,19 @@ test(
     assert.equal((await auditEvents(raceId, "INQUIRY_RESOLVED")).length, 1);
 
     // 4. resolvePortalInquiryNotifications archives portal notifications on resolve while keeping student notifications unarchived
+    // The fixture is explicitly routed at revision 1 (see step 3) so the asynchronous creation
+    // trigger cannot change its revision between seeding and the callable.
     const notifyInqId = await seedInquiry({
       userId: staffSeeds.student.uid,
-      subject: "Legacy notification archive",
+      subject: "Notification archive on resolve",
       message: "Body",
       status: "in_progress",
+      routingStatus: "routed",
+      routingRevision: 1,
       assigneeIds: [c1.uid],
       acknowledgedAt: Timestamp.now(),
       createdAt: Timestamp.now(),
-      // Intentionally omit assignedTo, collegeId, studentId, routingRevision
+      // Intentionally omit assignedTo, collegeId, studentId
     });
     const portalNoteRef = db.collection("notifications").doc(`portal_inquiry_${notifyInqId}_${c1.uid}`);
     const studentNoteRef = db.collection("notifications").doc(`${prefix}-student-note-${notifyInqId}`);
@@ -640,13 +652,17 @@ test(
       archivedAt: null,
     });
     await withClientCallable(c1.uid, c1.email, async (call) => {
-      await call("resolveInquiry", {inquiryId: notifyInqId, expectedRevision: 0});
+      await call("resolveInquiry", {inquiryId: notifyInqId, expectedRevision: 1});
     });
+    // Archival is delivered by an asynchronous Firestore trigger. In the full suite the Functions
+    // emulator works through a deep trigger backlog; delivery was measured at ~56s locally, so this
+    // condition poll (returns as soon as the state appears) gets a bound well above that.
+    const ARCHIVAL_TRIGGER_BACKLOG_TIMEOUT_MS = 120_000;
     const archivedPortalNote = await waitFor(async () => {
       const snap = await portalNoteRef.get();
       const data = snap.data();
       return data?.archivedAt != null ? data : null;
-    });
+    }, ARCHIVAL_TRIGGER_BACKLOG_TIMEOUT_MS);
     assert.ok(archivedPortalNote.resolvedAt != null);
     assert.ok(archivedPortalNote.expiresAt != null);
     assert.equal(archivedPortalNote.archiveEligibleAt, null);
