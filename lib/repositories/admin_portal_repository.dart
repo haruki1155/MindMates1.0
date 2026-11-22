@@ -983,7 +983,7 @@ class AdminPortalRepository {
           if (search.trim().isNotEmpty) 'search': search.trim(),
           if (after != null) 'afterMillis': after.millisecondsSinceEpoch,
           if (before != null) 'beforeMillis': before.millisecondsSinceEpoch,
-          if (cursor != null) 'cursor': cursor,
+          'cursor': ?cursor,
           'pageSize': pageSize,
         });
     final raw = result.data['events'];
