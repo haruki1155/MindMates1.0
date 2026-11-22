@@ -559,6 +559,20 @@ class CounselingPopulationConfig {
   final List<AcademicYearRecord> years;
   final String status;
 
+  bool get isReportable => status == 'current' || status == 'closed';
+
+  AcademicYearRecord? get preferredReportableYear {
+    final currentByPeriod = years
+        .where((y) => y.periodState() == AcademicYearPeriodState.current)
+        .firstOrNull;
+    if (currentByPeriod != null) return currentByPeriod;
+    final currentByStatus = years.where((y) => y.isCurrent).firstOrNull;
+    if (currentByStatus != null) return currentByStatus;
+    final closed = years.where((y) => y.isClosed).toList()
+      ..sort((a, b) => b.schoolYear.compareTo(a.schoolYear));
+    return closed.firstOrNull;
+  }
+
   factory CounselingPopulationConfig.fromJson(Map<String, dynamic> json) {
     final rawPopulations = json['populations'];
     final populations = <String, int>{};
@@ -699,9 +713,13 @@ List<Map<String, dynamic>> _list(Object? value) {
 Map<String, dynamic> _map(Object? value) =>
     value is Map ? Map<String, dynamic>.from(value) : const {};
 
-double _number(Object? value) => value is num
-    ? value.toDouble().clamp(0, double.infinity)
-    : (double.tryParse(value?.toString() ?? '') ?? 0).clamp(0, double.infinity);
+double _number(Object? value) {
+  final parsed = value is num
+      ? value.toDouble()
+      : double.tryParse(value?.toString() ?? '') ?? 0;
+  if (!parsed.isFinite) return 0;
+  return parsed.clamp(0, double.infinity).toDouble();
+}
 
 int _integer(Object? value, int fallback) => value is num
     ? value.toInt()

@@ -27,6 +27,13 @@ class AdminReportPdfService {
         AppointmentReportDimension.department,
   }) async {
     final emotional = report.emotionalActivity;
+    final emotionalParticipation =
+        emotional.participationRate ?? emotional.appUserCohortShare;
+    final visibleUserCategories = userCategoryKey == 'all'
+        ? report.userCategories
+        : report.userCategories
+              .where((item) => item.key == userCategoryKey)
+              .toList(growable: false);
     final document = pw.Document(
       title: switch (reportType) {
         AdminReportType.users => 'App User Activity Report',
@@ -36,11 +43,16 @@ class AdminReportPdfService {
       author: 'MindMate PACC',
       subject: 'Privacy-preserving aggregate report',
     );
+    final showAppointmentDistribution =
+        report.population.configured &&
+        report.totalAppointments > 0 &&
+        report.uniqueStudentsServed >= 5;
     final data = switch (reportType) {
       AdminReportType.users => _userData(report, userCategoryKey),
-      AdminReportType.appointments => report.appointmentsFor(
-        appointmentDimension,
-      ),
+      AdminReportType.appointments =>
+        showAppointmentDistribution
+            ? report.appointmentsFor(appointmentDimension)
+            : const <ReportPercentageItem>[],
       AdminReportType.emotionalActivity =>
         emotional.isReady
             ? emotional.valenceBreakdown
@@ -138,43 +150,102 @@ class AdminReportPdfService {
             style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
           ),
           pw.SizedBox(height: 24),
+          if (reportType == AdminReportType.appointments) ...[
+            _summaryMetricsTable(
+              'Appointment summary',
+              [
+                ['Total appointments', '${report.totalAppointments}'],
+                ['Unique students served', '${report.uniqueStudentsServed}'],
+                [
+                  'Counseling reach',
+                  report.population.configured
+                      ? _percent(report.counselingReach)
+                      : 'Not available',
+                ],
+                ['Completion rate', _percent(report.completionRate)],
+                [
+                  'Appointment rate',
+                  report.population.configured
+                      ? _percent(report.appointmentRate)
+                      : 'Not available',
+                ],
+                [
+                  'Waiting time',
+                  report.waitingTimeDays == null
+                      ? 'No data'
+                      : '${report.waitingTimeDays!.toStringAsFixed(1)} days',
+                ],
+                ['Rescheduled', '${report.rescheduledAppointments}'],
+              ],
+            ),
+            pw.SizedBox(height: 18),
+          ],
+          if (reportType == AdminReportType.emotionalActivity &&
+              emotional.isReady) ...[
+            _summaryMetricsTable(
+              'Emotional activity summary',
+              [
+                [
+                  'Population participation',
+                  emotionalParticipation == null
+                      ? 'Not available'
+                      : _percent(emotionalParticipation),
+                ],
+                [
+                  'Primary emotional pattern',
+                  emotional.dominantValenceLabel ??
+                      'Suppressed (n < ${emotional.suppressionThreshold})',
+                ],
+                if (emotional.moodCheckInShare != null &&
+                    emotional.assessmentShare != null)
+                  [
+                    'Mood vs assessments mix',
+                    '${_percent(emotional.moodCheckInShare!)} mood / ${_percent(emotional.assessmentShare!)} assessment',
+                  ],
+              ],
+            ),
+            pw.SizedBox(height: 18),
+          ],
           if (reportType == AdminReportType.emotionalActivity &&
               emotional.suppressed)
-            pw.Container(
-              width: double.infinity,
-              padding: const pw.EdgeInsets.all(20),
-              decoration: pw.BoxDecoration(
-                color: PdfColors.grey100,
-                border: pw.Border.all(color: PdfColors.grey300),
-              ),
-              child: pw.Text(
-                emotional.suppressionReason ??
-                    'Results suppressed to protect privacy (n < ${emotional.suppressionThreshold}).',
-              ),
+            _noticeBox(
+              emotional.suppressionReason ??
+                  'Results suppressed to protect privacy (n < ${emotional.suppressionThreshold}).',
+            )
+          else if (reportType == AdminReportType.appointments &&
+              !report.population.configured)
+            _noticeBox(
+              'Complete and save the student population in Report setup below to calculate population-based percentages. Appointment counts remain available.',
+            )
+          else if (reportType == AdminReportType.appointments &&
+              report.totalAppointments == 0)
+            _noticeBox(
+              'No counseling appointments matched the selected filters.',
+            )
+          else if (reportType == AdminReportType.appointments &&
+              report.uniqueStudentsServed < 5)
+            _noticeBox(
+              'Distribution details are hidden because this report contains fewer than 5 unique students. Aggregate totals remain available.',
             )
           else if (data.isEmpty)
-            pw.Container(
-              width: double.infinity,
-              padding: const pw.EdgeInsets.all(20),
-              decoration: pw.BoxDecoration(
-                color: PdfColors.grey100,
-                border: pw.Border.all(color: PdfColors.grey300),
-              ),
-              child: pw.Text(
-                reportType == AdminReportType.emotionalActivity
-                    ? (emotional.isReady
-                          ? 'Chart omitted: all category distributions are suppressed to protect privacy (n < ${emotional.suppressionThreshold}).'
-                          : 'No reportable emotional activity data is available for the selected filters.')
-                    : 'No reportable data is available for this category.',
-              ),
+            _noticeBox(
+              reportType == AdminReportType.emotionalActivity
+                  ? (emotional.isReady
+                        ? 'Chart omitted: all category distributions are suppressed to protect privacy (n < ${emotional.suppressionThreshold}).'
+                        : 'No reportable emotional activity data is available for the selected filters.')
+                  : 'No reportable data is available for this category.',
             )
+          else if (chartType == ReportChartType.pie &&
+              !chartData.any(
+                (item) => item.percentage.isFinite && item.percentage > 0,
+              ))
+            _noticeBox(
+              'Chart omitted: no non-zero percentages are available for the selected filters.',
+            )
+          else if (chartType == ReportChartType.pie)
+            pw.SizedBox(height: 270, child: _pieChart(chartData))
           else
-            pw.SizedBox(
-              height: 270,
-              child: chartType == ReportChartType.pie
-                  ? _pieChart(chartData)
-                  : _barChart(chartData),
-            ),
+            _barChart(chartData),
           if (reportType == AdminReportType.emotionalActivity &&
               emotional.isReady &&
               (emotional.valenceBreakdown.isNotEmpty ||
@@ -245,6 +316,41 @@ class AdminReportPdfService {
               ),
               border: pw.TableBorder.all(color: PdfColors.grey300),
             ),
+            if (reportType == AdminReportType.users &&
+                visibleUserCategories.isNotEmpty) ...[
+              pw.SizedBox(height: 16),
+              pw.Text(
+                userCategoryKey == 'all'
+                    ? 'App users per category'
+                    : 'Selected app-user category only',
+                style: pw.TextStyle(
+                  fontSize: 13,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.TableHelper.fromTextArray(
+                headers: const ['Category', 'Population share', 'Active rate'],
+                data: visibleUserCategories
+                    .map(
+                      (item) => [
+                        item.label,
+                        _percent(item.populationPercentage),
+                        _percent(item.activePercentage),
+                      ],
+                    )
+                    .toList(growable: false),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.grey200,
+                ),
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                cellPadding: const pw.EdgeInsets.symmetric(
+                  horizontal: 9,
+                  vertical: 7,
+                ),
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+              ),
+            ],
           ],
           pw.SizedBox(height: 18),
           pw.Container(
@@ -267,11 +373,14 @@ class AdminReportPdfService {
     AdminReportAnalytics report,
     AdminReportType reportType,
   ) {
+    final activeYear = report.filters.schoolYear.isNotEmpty
+        ? report.filters.schoolYear
+        : report.population.schoolYear;
     final scope = switch (reportType) {
       AdminReportType.users => report.userScopeLabel,
       AdminReportType.appointments => report.appointmentDepartmentScopeLabel,
       AdminReportType.emotionalActivity =>
-        '${report.population.schoolYear}_${report.appointmentDepartmentScopeLabel}',
+        '${activeYear}_${report.appointmentDepartmentScopeLabel}',
     };
     final programSuffix = report.filters.programKey != 'all'
         ? '_${_safe(report.filters.programLabel)}'
@@ -310,17 +419,50 @@ class AdminReportPdfService {
     );
   }
 
+  static pw.Widget _noticeBox(String message) => pw.Container(
+    width: double.infinity,
+    padding: const pw.EdgeInsets.all(20),
+    decoration: pw.BoxDecoration(
+      color: PdfColors.grey100,
+      border: pw.Border.all(color: PdfColors.grey300),
+    ),
+    child: pw.Text(message),
+  );
+
+  static pw.Widget _summaryMetricsTable(
+    String title,
+    List<List<String>> rows,
+  ) => pw.Column(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Text(
+        title,
+        style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+      ),
+      pw.SizedBox(height: 6),
+      pw.TableHelper.fromTextArray(
+        headers: const ['Metric', 'Value'],
+        data: rows,
+        headerDecoration: const pw.BoxDecoration(color: PdfColors.grey200),
+        headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+        cellPadding: const pw.EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+        border: pw.TableBorder.all(color: PdfColors.grey300),
+      ),
+    ],
+  );
+
   static List<ReportPercentageItem> _userData(
     AdminReportAnalytics report,
     String categoryKey,
   ) {
+    if (report.userCategories.isEmpty) return const [];
+    final selected = report.userCategories
+        .where((category) => category.key == categoryKey)
+        .firstOrNull;
+    if (categoryKey != 'all' && selected == null) return const [];
     final active = categoryKey == 'all'
         ? report.overallActivePercentage
-        : report.userCategories
-                  .where((category) => category.key == categoryKey)
-                  .map((category) => category.activePercentage)
-                  .firstOrNull ??
-              0;
+        : selected!.activePercentage;
     return [
       ReportPercentageItem(
         key: 'active',
@@ -340,7 +482,9 @@ class AdminReportPdfService {
     return pw.Chart(
       grid: pw.PieGrid(),
       datasets: [
-        for (final item in data.where((item) => item.percentage > 0))
+        for (final item in data.where(
+          (item) => item.percentage.isFinite && item.percentage > 0,
+        ))
           pw.PieDataSet(
             value: item.percentage,
             legend: '${item.label} ${_percent(item.percentage)}',
@@ -375,7 +519,10 @@ class AdminReportPdfService {
           alignment: pw.Alignment.centerLeft,
           decoration: const pw.BoxDecoration(color: PdfColors.grey200),
           child: pw.Container(
-            width: 4.2 * data[index].percentage.clamp(0, 100),
+            width:
+                4.2 *
+                (data[index].percentage.isFinite ? data[index].percentage : 0)
+                    .clamp(0, 100),
             color: _colors[index % _colors.length],
           ),
         ),
@@ -429,21 +576,26 @@ class AdminReportPdfService {
     final visible = items.take(7).toList(growable: true);
     final remaining = items
         .skip(7)
-        .fold<double>(0, (total, item) => total + item.percentage);
+        .fold<double>(
+          0,
+          (total, item) =>
+              total + (item.percentage.isFinite ? item.percentage : 0),
+        );
     visible.add(
       ReportPercentageItem(
         key: 'remaining',
         label: 'Remaining categories',
-        percentage: remaining.clamp(0, 100),
+        percentage: remaining.isFinite ? remaining.clamp(0, 100) : 0,
       ),
     );
     return visible;
   }
 
   static String _percent(double value) {
-    final rounded = value.roundToDouble() == value
-        ? value.toStringAsFixed(0)
-        : value.toStringAsFixed(1);
+    final safe = value.isFinite ? value : 0.0;
+    final rounded = safe.roundToDouble() == safe
+        ? safe.toStringAsFixed(0)
+        : safe.toStringAsFixed(1);
     return '$rounded%';
   }
 

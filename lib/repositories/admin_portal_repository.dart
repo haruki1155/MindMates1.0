@@ -441,6 +441,8 @@ class AdminPortalRepository {
     _currentAccessRole = role;
     if (role == AccessRole.admin) {
       _isSuperAdmin = await _confirmSuperAdmin();
+    } else {
+      _isSuperAdmin = false;
     }
     await _tryRecordAudit(
       action: 'STAFF_SIGNED_IN',
@@ -1457,19 +1459,17 @@ class AdminPortalRepository {
     if (!currentAccessRole.canAccessClinicalData) {
       throw StateError('Counselor or administrator access is required.');
     }
-    final result = await FirebaseFunctions.instance
-        .httpsCallable('getReportAnalytics')
-        .call<Map<String, dynamic>>({
-          'userCategory': userCategory,
-          'appointmentDepartment': appointmentDepartment,
-          'program': program,
-          'schoolYear': ?schoolYear,
-          'periodLabel': ?periodLabel,
-          'startDate': ?startDate?.toUtc().toIso8601String(),
-          'endDate': ?endDate?.toUtc().toIso8601String(),
-          'emotionalSource': emotionalSource,
-        });
-    final raw = result.data['report'];
+    final data = await _callCallable('getReportAnalytics', {
+      'userCategory': userCategory,
+      'appointmentDepartment': appointmentDepartment,
+      'program': program,
+      'schoolYear': ?schoolYear,
+      'periodLabel': ?periodLabel,
+      'startDate': ?startDate?.toUtc().toIso8601String(),
+      'endDate': ?endDate?.toUtc().toIso8601String(),
+      'emotionalSource': emotionalSource,
+    });
+    final raw = data is Map ? data['report'] : null;
     if (raw is! Map) {
       throw StateError('The report service returned an invalid response.');
     }

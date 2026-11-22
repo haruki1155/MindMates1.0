@@ -451,4 +451,273 @@ void main() {
       expect(find.text('Current'), findsNothing);
     },
   );
+
+  testWidgets(
+    'initial fetch omits schoolYear, syncs unknown response to preferred reportable year, and reset uses reportable year',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = _AutoSyncReportRepository();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ReportGenerationPage(repository: repo)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Counseling appointments'));
+      await tester.pumpAndSettle();
+
+      expect(repo.rawRequestedYears.first, isNull);
+      expect(repo.rawRequestedYears, contains('2025-2026'));
+      expect(find.text('Appointment results · 2025-2026'), findsOneWidget);
+      expect(find.text('12'), findsOneWidget);
+
+      // Select planned year explicitly -> triggers error; Reset filters picks '2025-2026' (current), not planned/calendar year.
+      repo.forceUnknownNext = false;
+      repo.failForPlanned = true;
+      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('2027-2028').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('The report could not be loaded.'), findsOneWidget);
+      await tester.tap(find.text('Reset filters'));
+      await tester.pumpAndSettle();
+
+      expect(repo.rawRequestedYears.last, '2025-2026');
+      expect(find.text('Appointment results · 2025-2026'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'explicitly selecting an unreportable year after valid initial load does not bounce back to preferred year',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = _ManualUnknownYearRepository();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ReportGenerationPage(repository: repo)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Counseling appointments'));
+      await tester.pumpAndSettle();
+
+      expect(repo.rawRequestedYears, [null]);
+      expect(find.text('Appointment results · 2025-2026'), findsOneWidget);
+
+      await tester.tap(find.byType(DropdownButtonFormField<String>).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('2024-2025').last);
+      await tester.pumpAndSettle();
+
+      expect(repo.rawRequestedYears, [null, '2024-2025']);
+      expect(find.text('Appointment results · 2024-2025'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'dropdown does not display planned year as selected when initial omitted-year response is unknown',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = _PlannedAndVoidedOnlyRepository();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ReportGenerationPage(repository: repo)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Counseling appointments'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Appointment results · 2026-2027'), findsOneWidget);
+      final dropdown = tester.widget<DropdownButtonFormField<String>>(
+        find.byType(DropdownButtonFormField<String>).first,
+      );
+      expect(dropdown.initialValue, '2026-2027');
+      expect(dropdown.initialValue, isNot('2027-2028'));
+    },
+  );
+}
+
+class _AutoSyncReportRepository extends AdminPortalRepository {
+  final rawRequestedYears = <String?>[];
+  bool forceUnknownNext = true;
+  bool failForPlanned = false;
+
+  @override
+  AccessRole get currentAccessRole => AccessRole.admin;
+
+  @override
+  bool get isSuperAdmin => true;
+
+  @override
+  Future<AdminReportAnalytics> fetchFilteredReportAnalytics({
+    String userCategory = 'all',
+    String appointmentDepartment = 'all',
+    String program = 'all',
+    String? schoolYear,
+    String? periodLabel,
+    DateTime? startDate,
+    DateTime? endDate,
+    String emotionalSource = 'all',
+  }) async {
+    rawRequestedYears.add(schoolYear);
+    if (failForPlanned && schoolYear == '2027-2028') {
+      throw StateError('Planned academic years cannot generate official reports.');
+    }
+    final returnUnknown = schoolYear == null && forceUnknownNext;
+    final resolvedYear = returnUnknown ? '2026-2027' : (schoolYear ?? '2025-2026');
+    return AdminReportAnalytics.fromJson({
+      'generatedAt': '2026-09-19T00:00:00Z',
+      'population': {
+        'schoolYear': resolvedYear,
+        'configured': !returnUnknown,
+        'status': returnUnknown ? 'unknown' : 'current',
+        'departments': ['College of Computing'],
+        'populations': returnUnknown ? <String, int>{} : {'College of Computing': 120},
+        'totalPopulation': returnUnknown ? 0 : 120,
+        'years': [
+          {
+            'schoolYear': '2027-2028',
+            'startDate': '2027-06-01',
+            'endDate': '2028-05-31',
+            'status': 'planned',
+          },
+          {
+            'schoolYear': '2025-2026',
+            'startDate': '2025-06-01',
+            'endDate': '2026-05-31',
+            'status': 'current',
+          },
+        ],
+      },
+      'appointments': {
+        'totalAppointments': returnUnknown ? 0 : 12,
+        'uniqueStudentsServed': returnUnknown ? 0 : 8,
+      },
+    });
+  }
+
+  @override
+  Future<List<ImportedWalkInFile>> listWalkInImports() async => [];
+}
+
+class _ManualUnknownYearRepository extends AdminPortalRepository {
+  final rawRequestedYears = <String?>[];
+
+  @override
+  AccessRole get currentAccessRole => AccessRole.admin;
+
+  @override
+  bool get isSuperAdmin => true;
+
+  @override
+  Future<AdminReportAnalytics> fetchFilteredReportAnalytics({
+    String userCategory = 'all',
+    String appointmentDepartment = 'all',
+    String program = 'all',
+    String? schoolYear,
+    String? periodLabel,
+    DateTime? startDate,
+    DateTime? endDate,
+    String emotionalSource = 'all',
+  }) async {
+    rawRequestedYears.add(schoolYear);
+    final isManualUnknown = schoolYear == '2024-2025';
+    final resolvedYear = schoolYear ?? '2025-2026';
+    return AdminReportAnalytics.fromJson({
+      'generatedAt': '2026-09-19T00:00:00Z',
+      'population': {
+        'schoolYear': resolvedYear,
+        'configured': !isManualUnknown,
+        'status': isManualUnknown ? 'unknown' : 'current',
+        'departments': ['College of Computing'],
+        'populations': isManualUnknown ? <String, int>{} : {'College of Computing': 120},
+        'totalPopulation': isManualUnknown ? 0 : 120,
+        'years': [
+          {
+            'schoolYear': '2025-2026',
+            'startDate': '2025-06-01',
+            'endDate': '2026-05-31',
+            'status': 'current',
+          },
+          {
+            'schoolYear': '2024-2025',
+            'startDate': '2024-06-01',
+            'endDate': '2025-05-31',
+            'status': 'closed',
+          },
+        ],
+      },
+      'appointments': {
+        'totalAppointments': isManualUnknown ? 0 : 12,
+        'uniqueStudentsServed': isManualUnknown ? 0 : 8,
+      },
+    });
+  }
+
+  @override
+  Future<List<ImportedWalkInFile>> listWalkInImports() async => [];
+}
+
+class _PlannedAndVoidedOnlyRepository extends AdminPortalRepository {
+  @override
+  AccessRole get currentAccessRole => AccessRole.admin;
+
+  @override
+  bool get isSuperAdmin => true;
+
+  @override
+  Future<AdminReportAnalytics> fetchFilteredReportAnalytics({
+    String userCategory = 'all',
+    String appointmentDepartment = 'all',
+    String program = 'all',
+    String? schoolYear,
+    String? periodLabel,
+    DateTime? startDate,
+    DateTime? endDate,
+    String emotionalSource = 'all',
+  }) async {
+    return AdminReportAnalytics.fromJson({
+      'generatedAt': '2026-09-19T00:00:00Z',
+      'population': {
+        'schoolYear': schoolYear ?? '2026-2027',
+        'configured': false,
+        'status': 'unknown',
+        'departments': ['College of Computing'],
+        'populations': <String, int>{},
+        'totalPopulation': 0,
+        'years': [
+          {
+            'schoolYear': '2027-2028',
+            'startDate': '2027-06-01',
+            'endDate': '2028-05-31',
+            'status': 'planned',
+          },
+          {
+            'schoolYear': '2025-2026',
+            'startDate': '2025-06-01',
+            'endDate': '2026-05-31',
+            'status': 'voided',
+          },
+        ],
+      },
+      'appointments': {
+        'totalAppointments': 0,
+        'uniqueStudentsServed': 0,
+      },
+    });
+  }
+
+  @override
+  Future<List<ImportedWalkInFile>> listWalkInImports() async => [];
 }

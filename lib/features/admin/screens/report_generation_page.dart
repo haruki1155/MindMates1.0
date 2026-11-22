@@ -43,7 +43,8 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   String _userCategory = 'all';
   String _appointmentDepartment = 'all';
   String _program = 'all';
-  String _schoolYear = _currentSchoolYear();
+  String? _schoolYear;
+  bool _autoSyncedYearFallback = false;
   _ReportPeriod _period = _ReportPeriod.wholeYear;
   EmotionalActivitySource _emotionalSource = EmotionalActivitySource.all;
   DateTimeRange? _customRange;
@@ -81,12 +82,33 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   }
 
   Future<AdminReportAnalytics> _runFetch(int requestId) {
+    final requestedSchoolYear = _schoolYear;
     final future = _fetch();
     future.then(
       (value) {
         if (!mounted || requestId != _reportRequestId) return;
+        final fallbackYear =
+            requestedSchoolYear == null &&
+                !_autoSyncedYearFallback &&
+                !value.population.isReportable
+            ? value.population.preferredReportableYear?.schoolYear
+            : null;
+        if (fallbackYear != null &&
+            fallbackYear.isNotEmpty &&
+            fallbackYear != _schoolYear) {
+          _autoSyncedYearFallback = true;
+          setState(() {
+            _latestReport = value;
+            _schoolYear = fallbackYear;
+          });
+          _reloadReport();
+          return;
+        }
         setState(() {
           _latestReport = value;
+          if (_schoolYear == null && value.population.schoolYear.isNotEmpty) {
+            _schoolYear = value.population.schoolYear;
+          }
           _filterLoading = false;
         });
       },
@@ -129,8 +151,13 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
         ),
       );
     }
+    final effectiveSchoolYear =
+        _schoolYear ??
+        (_latestReport?.population.schoolYear.isNotEmpty == true
+            ? _latestReport!.population.schoolYear
+            : _currentSchoolYear());
     final activeYear = _latestReport?.population.years
-        .where((item) => item.schoolYear == _schoolYear)
+        .where((item) => item.schoolYear == effectiveSchoolYear)
         .firstOrNull;
     final configuredStart = activeYear == null
         ? null
@@ -161,7 +188,8 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
       }
     }
     final startYear =
-        int.tryParse(_schoolYear.split('-').first) ?? DateTime.now().year;
+        int.tryParse(effectiveSchoolYear.split('-').first) ??
+        DateTime.now().year;
     return _period == _ReportPeriod.firstSemester
         ? DateTimeRange(
             start: _manilaDayStart(startYear, 6, 1),
@@ -211,14 +239,9 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
 
   void _resetFilters() {
     final currentYear =
-        _latestReport?.population.years
-            .where(
-              (item) => item.periodState() == AcademicYearPeriodState.current,
-            )
-            .firstOrNull
-            ?.schoolYear ??
-        _currentSchoolYear();
+        _latestReport?.population.preferredReportableYear?.schoolYear;
     setState(() {
+      _autoSyncedYearFallback = false;
       _userCategory = 'all';
       _appointmentDepartment = 'all';
       _program = 'all';
@@ -315,6 +338,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
                     const _LoadingPanel()
                   else if (snapshot.hasError)
                     _ErrorPanel(
+                      error: snapshot.error,
                       onRetry: _refresh,
                       onResetFilters: _resetFilters,
                     )
@@ -330,6 +354,11 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   }
 
   Widget _content(AdminReportAnalytics report) {
+    final activeSchoolYear =
+        _schoolYear ??
+        (report.population.schoolYear.isNotEmpty
+            ? report.population.schoolYear
+            : _currentSchoolYear());
     final collegeOptions = report.filters.collegeOptions.isNotEmpty
         ? report.filters.collegeOptions
         : (_reportType == AdminReportType.emotionalActivity &&
@@ -344,7 +373,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
       children: [
         if (_reportType == AdminReportType.appointments) ...[
           _AdminReportControls(
-            schoolYear: _schoolYear,
+            schoolYear: activeSchoolYear,
             years: report.population.years,
             period: _period,
             report: report,
@@ -373,7 +402,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
           ),
         ] else if (_reportType == AdminReportType.emotionalActivity) ...[
           _EmotionalReportControls(
-            schoolYear: _schoolYear,
+            schoolYear: activeSchoolYear,
             years: report.population.years,
             period: _period,
             report: report,
@@ -405,7 +434,7 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
           ),
         ] else ...[
           _ControlPanel(
-            schoolYear: _schoolYear,
+            schoolYear: activeSchoolYear,
             years: report.population.years,
             period: _period,
             reportType: _reportType,
@@ -510,7 +539,9 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
         action: action,
         category: 'REPORTS',
         targetType: 'report',
-        targetId: report.population.schoolYear,
+        targetId: report.filters.schoolYear.isNotEmpty
+            ? report.filters.schoolYear
+            : report.population.schoolYear,
         metadata: {
           'reportType': _reportType.name,
           'department': _appointmentDepartment,
@@ -1499,7 +1530,19 @@ class _AcademicYearField extends StatelessWidget {
         .where((item) => !item.isVoided && !item.isUnknown)
         .toList(growable: false);
     final hasSelectableYears = visibleYears.isNotEmpty;
-    final options = hasSelectableYears
+    final hasMatchingVisibleYear =
+        schoolYear.isNotEmpty &&
+        visibleYears.any((item) => item.schoolYear == schoolYear);
+    final options = !hasSelectableYears
+        ? [
+            AcademicYearRecord(
+              schoolYear: schoolYear,
+              startDate: '',
+              endDate: '',
+              status: 'unknown',
+            ),
+          ]
+        : hasMatchingVisibleYear
         ? visibleYears
         : [
             AcademicYearRecord(
@@ -1508,6 +1551,7 @@ class _AcademicYearField extends StatelessWidget {
               endDate: '',
               status: 'unknown',
             ),
+            ...visibleYears,
           ];
     final activeYear = options.any((item) => item.schoolYear == schoolYear)
         ? schoolYear
@@ -1537,7 +1581,7 @@ class _AcademicYearField extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    hasSelectableYears
+                    hasSelectableYears && !item.isUnknown
                         ? _AcademicYearStateBadge(state: item.periodState())
                         : const _UnavailableYearBadge(),
                   ],
@@ -1629,30 +1673,34 @@ class _CollegeDropdownField extends StatelessWidget {
     final activeDept = departmentOptions.any((item) => item.key == department)
         ? department
         : 'all';
+    final optionsSignature = departmentOptions.map((item) => item.key).join('|');
     return _LabeledControl(
       label: label,
-      child: DropdownButtonFormField<String>(
+      child: KeyedSubtree(
         key: dropdownKey,
-        initialValue: activeDept,
-        isExpanded: true,
-        decoration: const InputDecoration(
-          prefixIcon: Icon(Icons.account_balance_outlined),
-        ),
-        items: [
-          DropdownMenuItem(
-            value: 'all',
-            child: Text(allLabel, overflow: TextOverflow.ellipsis),
+        child: DropdownButtonFormField<String>(
+          key: ValueKey('dept-field-$activeDept-$optionsSignature'),
+          initialValue: activeDept,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.account_balance_outlined),
           ),
-          ...departmentOptions.map(
-            (item) => DropdownMenuItem(
-              value: item.key,
-              child: Text(item.label, overflow: TextOverflow.ellipsis),
+          items: [
+            DropdownMenuItem(
+              value: 'all',
+              child: Text(allLabel, overflow: TextOverflow.ellipsis),
             ),
-          ),
-        ],
-        onChanged: (value) {
-          if (value != null) onChanged(value);
-        },
+            ...departmentOptions.map(
+              (item) => DropdownMenuItem(
+                value: item.key,
+                child: Text(item.label, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ],
+          onChanged: (value) {
+            if (value != null) onChanged(value);
+          },
+        ),
       ),
     );
   }
@@ -2216,6 +2264,30 @@ class _UserReport extends StatelessWidget {
     final selected = report.userCategories
         .where((item) => item.key == categoryKey)
         .firstOrNull;
+    if (report.userCategories.isEmpty ||
+        (categoryKey != 'all' && selected == null)) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(22),
+        decoration: _panelDecoration,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'App user activity · ${report.population.schoolYear}',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              !report.population.isReportable
+                  ? 'Select a current or closed academic year to view app-user activity.'
+                  : 'No app-user activity data available for the selected filters.',
+              style: const TextStyle(color: AdminColors.muted),
+            ),
+          ],
+        ),
+      );
+    }
     final active = selected?.activePercentage ?? report.overallActivePercentage;
     final data = [
       ReportPercentageItem(key: 'active', label: 'Active', percentage: active),
@@ -2260,15 +2332,20 @@ class _UserReport extends StatelessWidget {
               ? 'App users per category'
               : 'Selected app-user category only',
           headers: const ['Category', 'Population share', 'Active rate'],
-          rows: report.userCategories
-              .map(
-                (item) => [
-                  item.label,
-                  _formatPercent(item.populationPercentage),
-                  _formatPercent(item.activePercentage),
-                ],
-              )
-              .toList(growable: false),
+          rows:
+              (categoryKey == 'all'
+                      ? report.userCategories
+                      : report.userCategories.where(
+                          (item) => item.key == categoryKey,
+                        ))
+                  .map(
+                    (item) => [
+                      item.label,
+                      _formatPercent(item.populationPercentage),
+                      _formatPercent(item.activePercentage),
+                    ],
+                  )
+                  .toList(growable: false),
         ),
       ],
     );
@@ -2377,6 +2454,16 @@ class _AppointmentReport extends StatelessWidget {
         const SizedBox(height: 22),
         if (!report.population.configured)
           const SizedBox.shrink()
+        else if (report.totalAppointments == 0)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: _panelDecoration,
+            child: const Text(
+              'No counseling appointments matched the selected filters.',
+              style: TextStyle(color: AdminColors.muted),
+            ),
+          )
         else if (report.uniqueStudentsServed < 5)
           Container(
             width: double.infinity,
@@ -2396,7 +2483,9 @@ class _AppointmentReport extends StatelessWidget {
             chartType: items.length > 6 ? ReportChartType.bar : chartType,
           ),
         const SizedBox(height: 18),
-        if (report.population.configured && report.uniqueStudentsServed >= 5)
+        if (report.population.configured &&
+            report.totalAppointments > 0 &&
+            report.uniqueStudentsServed >= 5)
           _PercentageTable(
             title:
                 '$label distribution - ${report.appointmentDepartmentScopeLabel}',
@@ -3011,6 +3100,16 @@ class _ChartPanel extends StatelessWidget {
               height: 220,
               child: Center(
                 child: Text('No reportable appointment data is available.'),
+              ),
+            )
+          else if (chartType == ReportChartType.pie &&
+              !chartData.any((item) => item.percentage > 0))
+            const SizedBox(
+              height: 220,
+              child: Center(
+                child: Text(
+                  'No non-zero percentages are available for a pie chart.',
+                ),
               ),
             )
           else
@@ -3744,51 +3843,63 @@ class _SkeletonBlock extends StatelessWidget {
 }
 
 class _ErrorPanel extends StatelessWidget {
-  const _ErrorPanel({required this.onRetry, this.onResetFilters});
+  const _ErrorPanel({
+    required this.onRetry,
+    this.onResetFilters,
+    this.error,
+  });
   final VoidCallback onRetry;
   final VoidCallback? onResetFilters;
+  final Object? error;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(28),
-    decoration: _panelDecoration,
-    child: Column(
-      children: [
-        const Icon(
-          Icons.cloud_off_outlined,
-          size: 38,
-          color: AdminColors.muted,
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'The report could not be loaded.',
-          style: TextStyle(fontWeight: FontWeight.w800),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 5),
-        const Text(
-          'Check your filters, access scope, or report function deployment, then try again.',
-          style: TextStyle(color: AdminColors.muted),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          alignment: WrapAlignment.center,
-          children: [
-            OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
-            if (onResetFilters != null)
-              FilledButton.tonal(
-                onPressed: onResetFilters,
-                child: const Text('Reset filters'),
-              ),
-          ],
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    const fallback =
+        'Check your filters, access scope, or report service connection, then try again.';
+    final detail = error == null
+        ? fallback
+        : FirebaseErrorMessage.describe(error!, fallback: fallback);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(28),
+      decoration: _panelDecoration,
+      child: Column(
+        children: [
+          const Icon(
+            Icons.cloud_off_outlined,
+            size: 38,
+            color: AdminColors.muted,
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'The report could not be loaded.',
+            style: TextStyle(fontWeight: FontWeight.w800),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 5),
+          Text(
+            detail,
+            style: const TextStyle(color: AdminColors.muted),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            alignment: WrapAlignment.center,
+            children: [
+              OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+              if (onResetFilters != null)
+                FilledButton.tonal(
+                  onPressed: onResetFilters,
+                  child: const Text('Reset filters'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ReportPreviewDialog extends StatefulWidget {
