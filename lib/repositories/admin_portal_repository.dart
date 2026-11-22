@@ -24,6 +24,7 @@ import '../models/student_case_history_model.dart';
 import '../models/pacc_availability_model.dart';
 import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
+import '../features/admin/domain/admin_activity_log_presentation.dart';
 import '../features/admin/domain/admin_management_models.dart';
 import '../features/admin/domain/appointment_approvals.dart';
 import '../features/admin/domain/backup_export.dart';
@@ -937,6 +938,88 @@ class AdminPortalRepository {
             matchesBefore;
       }).toList();
       return (events: events, hasMore: false);
+    }
+  }
+
+  /// Fetches a paginated, sanitized page of Admin-wide activity logs monitoring
+  /// Administrator, Counselor, and PAACC Staff actions.
+  ///
+  /// Restricted strictly to Super-Administrators on both client and server.
+  Future<({List<AdminAuditEvent> events, bool hasMore})> fetchActivityLogPage({
+    ActivityActorRoleFilter roleFilter = ActivityActorRoleFilter.all,
+    String actorId = '',
+    String category = '',
+    String action = '',
+    String search = '',
+    DateTime? after,
+    DateTime? before,
+    DateTime? cursor,
+    int pageSize = 25,
+  }) async {
+    if (!isSuperAdmin) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'permission-denied',
+        message:
+            'Super-administrator access is required to view system activity logs.',
+      );
+    }
+    try {
+      final result = await FirebaseFunctions.instance
+          .httpsCallable('getAuditLogPage')
+          .call<Map<String, dynamic>>({
+            if (roleFilter != ActivityActorRoleFilter.all)
+              'actorRole': roleFilter.code,
+            if (actorId.trim().isNotEmpty) 'filterActorId': actorId.trim(),
+            if (category.trim().isNotEmpty) 'category': category.trim(),
+            if (action.trim().isNotEmpty) 'action': action.trim(),
+            if (search.trim().isNotEmpty) 'search': search.trim(),
+            if (after != null) 'afterMillis': after.millisecondsSinceEpoch,
+            if (before != null) 'beforeMillis': before.millisecondsSinceEpoch,
+            if (cursor != null) 'cursorMillis': cursor.millisecondsSinceEpoch,
+            'pageSize': pageSize,
+          });
+      final raw = result.data['events'];
+      final events = raw is List
+          ? raw
+                .whereType<Map>()
+                .map(
+                  (item) => sanitizeAuditEventForDisplay(
+                    AdminAuditEvent.fromJson(Map<String, dynamic>.from(item)),
+                  ),
+                )
+                .toList()
+          : <AdminAuditEvent>[];
+      return (events: events, hasMore: result.data['hasMore'] == true);
+    } catch (error) {
+      final text = '$error'.toLowerCase();
+      if (text.contains('permission-denied') ||
+          text.contains('permission_denied') ||
+          text.contains('unauthenticated')) {
+        rethrow;
+      }
+      final items = await _firestoreService.getDocuments(
+        FirestoreCollections.adminAuditLogs,
+        orderBy: 'createdAt',
+        limit: pageSize * 6,
+      );
+      final rawEvents = items.map(AdminAuditEvent.fromJson);
+      final filtered = filterActivityLogEvents(
+        rawEvents,
+        roleFilter: roleFilter,
+        actorIdFilter: actorId,
+        categoryFilter: category,
+        actionFilter: action,
+        searchQuery: search,
+        after: after,
+        before: before,
+      ).where((e) {
+        if (cursor == null) return true;
+        final ts = e.createdAt;
+        return ts != null && ts.isBefore(cursor);
+      }).toList();
+      final page = filtered.take(pageSize).toList();
+      return (events: page, hasMore: filtered.length > pageSize);
     }
   }
 

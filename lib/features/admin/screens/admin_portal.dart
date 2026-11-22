@@ -34,6 +34,7 @@ import 'counselor_assigned_colleges_page.dart';
 import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
 import '../../announcements/screens/manage_announcements_page.dart';
+import 'activity_logs_page.dart';
 import 'backup_data_page.dart';
 import 'staff_operations_dashboard.dart';
 import 'staff_appointments_page.dart';
@@ -80,6 +81,7 @@ enum AdminPortalPage {
   availability,
   inquiries,
   assessments,
+  activityLogs,
   backupData,
   profile,
 }
@@ -102,6 +104,7 @@ extension on AdminPortalPage {
     AdminPortalPage.availability => 'Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
     AdminPortalPage.assessments => 'Assessment',
+    AdminPortalPage.activityLogs => 'Activity Logs',
     AdminPortalPage.backupData => 'Back-up Data',
     AdminPortalPage.profile => 'Profile',
   };
@@ -130,6 +133,7 @@ extension on AdminPortalPage {
     AdminPortalPage.availability => Icons.storefront_outlined,
     AdminPortalPage.inquiries => Icons.chat_bubble_outline_rounded,
     AdminPortalPage.assessments => Icons.assignment_outlined,
+    AdminPortalPage.activityLogs => Icons.history_rounded,
     AdminPortalPage.backupData => Icons.backup_outlined,
     AdminPortalPage.profile => Icons.account_circle_outlined,
   };
@@ -751,6 +755,7 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       initialSection: _initialInquirySection,
     ),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
+    AdminPortalPage.activityLogs => ActivityLogsPage(repository: _repository),
     AdminPortalPage.backupData =>
       _repository.isSuperAdmin
           ? BackupDataPage(repository: _repository)
@@ -808,6 +813,7 @@ class PortalWorkspaceNavigation extends StatelessWidget {
     // duplicating the destination in the workspace navigation.
     AdminPortalPage.notifications => false,
     AdminPortalPage.assessments => accessRole.canAccessClinicalData,
+    AdminPortalPage.activityLogs => isSuperAdmin,
     AdminPortalPage.backupData => isSuperAdmin,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor ||
@@ -842,6 +848,7 @@ class PortalWorkspaceNavigation extends StatelessWidget {
         AdminPortalPage.academicYear,
       ]),
       const _NavSection('System', [
+        AdminPortalPage.activityLogs,
         AdminPortalPage.backupData,
         AdminPortalPage.profile,
       ]),
