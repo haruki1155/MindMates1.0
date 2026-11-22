@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {after, before, beforeEach, test} from "node:test";
-import {getFirestore} from "firebase-admin/firestore";
+import {FieldPath, getFirestore} from "firebase-admin/firestore";
 
 import {getAvailableAppointmentSlots, savePaccAvailability} from "./index";
 import {ensureAuthUser} from "./test_auth_helper";
@@ -22,6 +22,15 @@ const v2 = {
   overrides: [],
 };
 const request = (availability: Record<string, unknown>, expectedRevision: number, confirmConflicts = true, uid = adminId) => save.run({auth: {uid}, data: {availability, expectedRevision, confirmConflicts}});
+// Other appointment suites choose dates relative to Date.now() and share this emulator, so on some
+// calendar days they leave occupied slots on the fixed fixture day (2027-01-08 Asia/Manila). Clear
+// that whole Manila day (2027-01-07T16:00Z inclusive to 2027-01-08T16:00Z exclusive) before each test.
+async function clearSlotsForFixtureDay() {
+  const start = `pacc_${Date.UTC(2027, 0, 7, 16)}`;
+  const end = `pacc_${Date.UTC(2027, 0, 8, 16)}`;
+  const stale = await db.collection("appointment_slots").where(FieldPath.documentId(), ">=", start).where(FieldPath.documentId(), "<", end).get();
+  await Promise.all(stale.docs.map((doc) => doc.ref.delete()));
+}
 async function rejects(promise: Promise<unknown>, code: string) { await assert.rejects(promise, (error: {code?: string}) => error.code === code); }
 
 before(async () => {
@@ -37,7 +46,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await current.set(v1);
-  await db.collection("appointment_slots").doc(`pacc_${Date.UTC(2027, 0, 8, 0)}`).delete();
+  await clearSlotsForFixtureDay();
   const appointments = await db.collection("appointments").where("testOwner", "==", prefix).get();
   await Promise.all(appointments.docs.map((doc) => doc.ref.delete()));
   const audits = await db.collection("admin_audit_logs").where("actorId", "==", adminId).get();
