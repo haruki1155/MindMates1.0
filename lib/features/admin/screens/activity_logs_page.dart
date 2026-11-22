@@ -374,8 +374,8 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
                           icon: const Icon(Icons.search_rounded, size: 20),
                           onPressed: () {
                             setState(
-                              () =>
-                                  _appliedSearch = _searchController.text.trim(),
+                              () => _appliedSearch = _searchController.text
+                                  .trim(),
                             );
                             _load();
                           },
@@ -411,7 +411,10 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
                     if (_hasActiveFilters)
                       TextButton.icon(
                         onPressed: _resetFilters,
-                        icon: const Icon(Icons.filter_alt_off_outlined, size: 18),
+                        icon: const Icon(
+                          Icons.filter_alt_off_outlined,
+                          size: 18,
+                        ),
                         label: const Text('Reset filters'),
                       ),
                   ],
@@ -973,10 +976,7 @@ class _DetailLine extends StatelessWidget {
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 12.5,
-            ),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
           ),
         ),
       ],

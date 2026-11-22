@@ -151,59 +151,53 @@ class AdminReportPdfService {
           ),
           pw.SizedBox(height: 24),
           if (reportType == AdminReportType.appointments) ...[
-            _summaryMetricsTable(
-              'Appointment summary',
+            _summaryMetricsTable('Appointment summary', [
+              ['Total appointments', '${report.totalAppointments}'],
+              ['Unique students served', '${report.uniqueStudentsServed}'],
               [
-                ['Total appointments', '${report.totalAppointments}'],
-                ['Unique students served', '${report.uniqueStudentsServed}'],
-                [
-                  'Counseling reach',
-                  report.population.configured
-                      ? _percent(report.counselingReach)
-                      : 'Not available',
-                ],
-                ['Completion rate', _percent(report.completionRate)],
-                [
-                  'Appointment rate',
-                  report.population.configured
-                      ? _percent(report.appointmentRate)
-                      : 'Not available',
-                ],
-                [
-                  'Waiting time',
-                  report.waitingTimeDays == null
-                      ? 'No data'
-                      : '${report.waitingTimeDays!.toStringAsFixed(1)} days',
-                ],
-                ['Rescheduled', '${report.rescheduledAppointments}'],
+                'Counseling reach',
+                report.population.configured
+                    ? _percent(report.counselingReach)
+                    : 'Not available',
               ],
-            ),
+              ['Completion rate', _percent(report.completionRate)],
+              [
+                'Appointment rate',
+                report.population.configured
+                    ? _percent(report.appointmentRate)
+                    : 'Not available',
+              ],
+              [
+                'Waiting time',
+                report.waitingTimeDays == null
+                    ? 'No data'
+                    : '${report.waitingTimeDays!.toStringAsFixed(1)} days',
+              ],
+              ['Rescheduled', '${report.rescheduledAppointments}'],
+            ]),
             pw.SizedBox(height: 18),
           ],
           if (reportType == AdminReportType.emotionalActivity &&
               emotional.isReady) ...[
-            _summaryMetricsTable(
-              'Emotional activity summary',
+            _summaryMetricsTable('Emotional activity summary', [
               [
-                [
-                  'Population participation',
-                  emotionalParticipation == null
-                      ? 'Not available'
-                      : _percent(emotionalParticipation),
-                ],
-                [
-                  'Primary emotional pattern',
-                  emotional.dominantValenceLabel ??
-                      'Suppressed (n < ${emotional.suppressionThreshold})',
-                ],
-                if (emotional.moodCheckInShare != null &&
-                    emotional.assessmentShare != null)
-                  [
-                    'Mood vs assessments mix',
-                    '${_percent(emotional.moodCheckInShare!)} mood / ${_percent(emotional.assessmentShare!)} assessment',
-                  ],
+                'Population participation',
+                emotionalParticipation == null
+                    ? 'Not available'
+                    : _percent(emotionalParticipation),
               ],
-            ),
+              [
+                'Primary emotional pattern',
+                emotional.dominantValenceLabel ??
+                    'Suppressed (n < ${emotional.suppressionThreshold})',
+              ],
+              if (emotional.moodCheckInShare != null &&
+                  emotional.assessmentShare != null)
+                [
+                  'Mood vs assessments mix',
+                  '${_percent(emotional.moodCheckInShare!)} mood / ${_percent(emotional.assessmentShare!)} assessment',
+                ],
+            ]),
             pw.SizedBox(height: 18),
           ],
           if (reportType == AdminReportType.emotionalActivity &&

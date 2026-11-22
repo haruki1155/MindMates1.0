@@ -670,8 +670,7 @@ class AcademicYearRecord {
   bool get isPlanned => status == 'planned';
   bool get isClosed => status == 'closed';
   bool get isVoided => status == 'voided';
-  bool get isUnknown =>
-      !isCurrent && !isPlanned && !isClosed && !isVoided;
+  bool get isUnknown => !isCurrent && !isPlanned && !isClosed && !isVoided;
 
   AcademicYearPeriodState periodState({DateTime? now}) {
     if (isVoided) return AcademicYearPeriodState.voided;

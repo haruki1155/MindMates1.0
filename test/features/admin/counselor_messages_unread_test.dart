@@ -91,9 +91,9 @@ class _PortalRoleRepo extends AdminPortalRepository {
       Stream<List<UserModel>>.value(const []).asBroadcastStream();
 
   @override
-  Stream<InquirySla> watchInquirySla() =>
-      Stream<InquirySla>.value(const InquirySla(hours: null))
-          .asBroadcastStream();
+  Stream<InquirySla> watchInquirySla() => Stream<InquirySla>.value(
+    const InquirySla(hours: null),
+  ).asBroadcastStream();
 }
 
 void main() {
@@ -104,8 +104,16 @@ void main() {
     setUp(() {
       db = FakeCounselorFirestore();
       auth = FakeCounselorAuth(initialUid: 'counselor-a');
-      db.seedDoc('colleges/CITE', {'code': 'CITE', 'name': 'Engineering', 'active': true});
-      db.seedDoc('colleges/CBA', {'code': 'CBA', 'name': 'Business', 'active': true});
+      db.seedDoc('colleges/CITE', {
+        'code': 'CITE',
+        'name': 'Engineering',
+        'active': true,
+      });
+      db.seedDoc('colleges/CBA', {
+        'code': 'CBA',
+        'name': 'Business',
+        'active': true,
+      });
     });
 
     tearDown(() async {
@@ -192,7 +200,11 @@ void main() {
           deferWriteCompletion: true,
           simulatePendingServerTimestamp: true,
         );
-        db.seedDoc('colleges/CITE', {'code': 'CITE', 'name': 'Engineering', 'active': true});
+        db.seedDoc('colleges/CITE', {
+          'code': 'CITE',
+          'name': 'Engineering',
+          'active': true,
+        });
         db.seedDoc('counselor_threads/s1', {
           'userId': 's1',
           'collegeId': 'CITE',
@@ -343,7 +355,11 @@ void main() {
           deferWriteCompletion: true,
           simulatePendingServerTimestamp: true,
         );
-        db.seedDoc('colleges/CITE', {'code': 'CITE', 'name': 'Engineering', 'active': true});
+        db.seedDoc('colleges/CITE', {
+          'code': 'CITE',
+          'name': 'Engineering',
+          'active': true,
+        });
         db.seedDoc('counselor_threads/s1', {
           'userId': 's1',
           'collegeId': 'CITE',
@@ -470,7 +486,9 @@ void main() {
 
         // Emit raw internal exception -> must NOT render raw exception or stack details
         db.emitThreadsError(
-          Exception('firestore internal stack at projects/mindmate/databases/default'),
+          Exception(
+            'firestore internal stack at projects/mindmate/databases/default',
+          ),
         );
         await tester.pumpAndSettle();
 

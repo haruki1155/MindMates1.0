@@ -187,10 +187,7 @@ void main() {
       // Toggle to My Caseload scope in status breakdown.
       await tester.tap(find.text('My Caseload (2)'));
       await tester.pumpAndSettle();
-      expect(
-        find.text('Assigned caseload records (2 total)'),
-        findsOneWidget,
-      );
+      expect(find.text('Assigned caseload records (2 total)'), findsOneWidget);
 
       // Click-through navigation on KPI card.
       await tester.tap(find.text('My Assigned Active'));

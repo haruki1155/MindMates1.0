@@ -139,10 +139,7 @@ bool isBackupJobExpired(BackupJob job, {DateTime? now}) {
 }
 
 /// Maps a [BackupJob] and current timestamp into a semantic badge presentation.
-AdminStatusPresentation resolveBackupJobStatus(
-  BackupJob job, {
-  DateTime? now,
-}) {
+AdminStatusPresentation resolveBackupJobStatus(BackupJob job, {DateTime? now}) {
   if (isBackupJobExpired(job, now: now)) {
     return resolveAdminStatus(AdminStatusDomain.backup, 'expired');
   }
@@ -438,7 +435,7 @@ AdminStatusPresentation _resolveAssessment(String key, String raw) =>
         label: 'Result unavailable',
         icon: Icons.help_outline,
       ),
-    _ => AdminStatusPresentation.fromTone(
+      _ => AdminStatusPresentation.fromTone(
         tone: AdminSemanticTone.neutral,
         label: raw.replaceAll('_', ' '),
         icon: Icons.help_outline,

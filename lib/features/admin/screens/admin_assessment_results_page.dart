@@ -147,7 +147,9 @@ class _AdminAssessmentResultsPageState
             ..sort((a, b) => b.compareTo(a));
       final statuses =
           scoped
-              .map((r) => AssessmentStatusStyle.fromStored(r.displayStatus).label)
+              .map(
+                (r) => AssessmentStatusStyle.fromStored(r.displayStatus).label,
+              )
               .where((s) => s != 'All Statuses')
               .toSet()
               .toList()
@@ -160,8 +162,9 @@ class _AdminAssessmentResultsPageState
               .toList()
             ..sort();
       final effectiveYear = years.contains(_year) ? _year : 'All Years';
-      final effectiveStatus =
-          statuses.contains(_status) ? _status : 'All Statuses';
+      final effectiveStatus = statuses.contains(_status)
+          ? _status
+          : 'All Statuses';
       final effectiveRole = roles.contains(_role) ? _role : 'All Roles';
       final filtered = scoped
           .where(

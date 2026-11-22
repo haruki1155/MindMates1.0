@@ -495,9 +495,7 @@ class _CounselorTimelineBubble extends StatelessWidget {
 
     final bubbleColor = isCounselor ? AdminColors.ink : AdminColors.surface;
     final textColor = isCounselor ? Colors.white : AdminColors.ink;
-    final metaColor = isCounselor
-        ? const Color(0xFFD6D6D0)
-        : AdminColors.muted;
+    final metaColor = isCounselor ? const Color(0xFFD6D6D0) : AdminColors.muted;
     final senderLabel = isCounselor ? 'Counselor' : studentLabel;
 
     final borderRadius = BorderRadius.only(

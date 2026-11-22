@@ -94,30 +94,39 @@ void main() {
     );
   });
 
-  test('maps Storage unauthorized and object-not-found safely without App Check confusion', () {
-    final unauthorized = FirebaseErrorMessage.describe(
-      FirebaseException(plugin: 'firebase_storage', code: 'unauthorized'),
-      fallback: 'Unable to download this private file.',
-    );
-    expect(unauthorized, 'You do not have permission to complete this action.');
-    expect(unauthorized, isNot(contains('App Check')));
+  test(
+    'maps Storage unauthorized and object-not-found safely without App Check confusion',
+    () {
+      final unauthorized = FirebaseErrorMessage.describe(
+        FirebaseException(plugin: 'firebase_storage', code: 'unauthorized'),
+        fallback: 'Unable to download this private file.',
+      );
+      expect(
+        unauthorized,
+        'You do not have permission to complete this action.',
+      );
+      expect(unauthorized, isNot(contains('App Check')));
 
-    final missing = FirebaseErrorMessage.describe(
-      FirebaseException(plugin: 'firebase_storage', code: 'object-not-found'),
-      fallback: 'Unable to download this private file.',
-    );
-    expect(missing, isNot(contains('App Check')));
-    expect(missing.toLowerCase(), anyOf(contains('not'), contains('unable')));
-  });
+      final missing = FirebaseErrorMessage.describe(
+        FirebaseException(plugin: 'firebase_storage', code: 'object-not-found'),
+        fallback: 'Unable to download this private file.',
+      );
+      expect(missing, isNot(contains('App Check')));
+      expect(missing.toLowerCase(), anyOf(contains('not'), contains('unable')));
+    },
+  );
 
-  test('never exposes raw INTERNAL messages from FirebaseFunctionsException', () {
-    final message = FirebaseErrorMessage.describe(
-      FirebaseFunctionsException(code: 'internal', message: 'INTERNAL'),
-      fallback: 'Something went wrong. Please try again.',
-    );
-    expect(message, 'Something went wrong. Please try again.');
-    expect(message, isNot('INTERNAL'));
-  });
+  test(
+    'never exposes raw INTERNAL messages from FirebaseFunctionsException',
+    () {
+      final message = FirebaseErrorMessage.describe(
+        FirebaseFunctionsException(code: 'internal', message: 'INTERNAL'),
+        fallback: 'Something went wrong. Please try again.',
+      );
+      expect(message, 'Something went wrong. Please try again.');
+      expect(message, isNot('INTERNAL'));
+    },
+  );
 
   test(
     'suppresses all internal error variants, paths, tokens, and stack details',
@@ -205,10 +214,7 @@ void main() {
       );
       expect(
         FirebaseErrorMessage.describe(
-          FirebaseFunctionsException(
-            code: 'not-found',
-            message: 'NOT_FOUND',
-          ),
+          FirebaseFunctionsException(code: 'not-found', message: 'NOT_FOUND'),
           fallback: fallback,
         ),
         fallback,
@@ -229,7 +235,8 @@ void main() {
         FirebaseErrorMessage.describe(
           FirebaseFunctionsException(
             code: 'failed-precondition',
-            message: 'Acknowledge receipt before marking this inquiry as resolved.',
+            message:
+                'Acknowledge receipt before marking this inquiry as resolved.',
           ),
           fallback: fallback,
         ),
@@ -277,7 +284,10 @@ void main() {
     () {
       expect(
         FirebaseRuntimeDiagnostics.firebaseErrorCode(
-          FirebaseFunctionsException(code: ' functions/internal ', message: 'x'),
+          FirebaseFunctionsException(
+            code: ' functions/internal ',
+            message: 'x',
+          ),
         ),
         'internal',
       );
@@ -306,7 +316,11 @@ void main() {
     'internal codes are never hijacked by profile or App Check message heuristics',
     () {
       const fallback = 'Unable to mark inquiry as resolved.';
-      for (final code in const ['internal', 'INTERNAL', ' functions/internal ']) {
+      for (final code in const [
+        'internal',
+        'INTERNAL',
+        ' functions/internal ',
+      ]) {
         for (final msg in const [
           'Firestore profile document missing at projects/p/documents/users/1',
           'App Check token missing in projects/p/databases/(default)/documents/inquiries/1',

@@ -297,9 +297,7 @@ class AdminInquiryModel {
           ? _optional((json['escalation'] as Map)['status'])
           : null,
       escalationType: json['escalation'] is Map
-          ? InquiryEscalationType.fromValue(
-              (json['escalation'] as Map)['type'],
-            )
+          ? InquiryEscalationType.fromValue((json['escalation'] as Map)['type'])
           : null,
       escalationReason: json['escalation'] is Map
           ? _optional((json['escalation'] as Map)['reason'])

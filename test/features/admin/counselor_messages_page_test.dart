@@ -57,9 +57,9 @@ void main() {
           ? page
           : Builder(
               builder: (context) => MediaQuery(
-                data: MediaQuery.of(context).copyWith(
-                  textScaler: TextScaler.linear(textScale),
-                ),
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(textScale)),
                 child: page,
               ),
             );
@@ -148,17 +148,21 @@ void main() {
 
         // Verify selected card uses accentFaint & accentStrong border
         final anaTileMaterial = tester.widget<Material>(
-          find.ancestor(
-            of: find.text('Ana Reyes'),
-            matching: find.byType(Material),
-          ).first,
+          find
+              .ancestor(
+                of: find.text('Ana Reyes'),
+                matching: find.byType(Material),
+              )
+              .first,
         );
         expect(anaTileMaterial.color, AdminColors.accentFaint);
         final shape = anaTileMaterial.shape as RoundedRectangleBorder;
         expect(shape.side.color, AdminColors.accentStrong);
 
         // Incoming student message on unselected s2 flips s2 back to Unread
-        final tIncoming = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10, 15));
+        final tIncoming = Timestamp.fromDate(
+          DateTime.utc(2026, 11, 22, 10, 15),
+        );
         db.putAndEmit('counselor_threads/s2', {
           'userId': 's2',
           'collegeId': 'CBA',
@@ -187,10 +191,18 @@ void main() {
           'senderRole': 'assistant',
         });
 
-        final nov18 = Timestamp.fromDate(DateTime.utc(2026, 11, 18, 2, 15)); // 10:15 AM Manila
-        final yesterday = Timestamp.fromDate(DateTime.utc(2026, 11, 21, 9, 30)); // 5:30 PM Manila
-        final todayStudent = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10, 0)); // 6:00 PM Manila
-        final todayCounselor = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10, 5)); // 6:05 PM Manila
+        final nov18 = Timestamp.fromDate(
+          DateTime.utc(2026, 11, 18, 2, 15),
+        ); // 10:15 AM Manila
+        final yesterday = Timestamp.fromDate(
+          DateTime.utc(2026, 11, 21, 9, 30),
+        ); // 5:30 PM Manila
+        final todayStudent = Timestamp.fromDate(
+          DateTime.utc(2026, 11, 22, 10, 0),
+        ); // 6:00 PM Manila
+        final todayCounselor = Timestamp.fromDate(
+          DateTime.utc(2026, 11, 22, 10, 5),
+        ); // 6:05 PM Manila
 
         db.seedDoc('counselor_threads/s1', {
           'userId': 's1',
@@ -248,26 +260,32 @@ void main() {
 
         // Distinct alignment & surface colors
         final counselorAlign = tester.widget<Align>(
-          find.ancestor(
-            of: find.text('Counselor reply today'),
-            matching: find.byType(Align),
-          ).first,
+          find
+              .ancestor(
+                of: find.text('Counselor reply today'),
+                matching: find.byType(Align),
+              )
+              .first,
         );
         expect(counselorAlign.alignment, Alignment.centerRight);
 
         final studentAlign = tester.widget<Align>(
-          find.ancestor(
-            of: find.text('Student message today'),
-            matching: find.byType(Align),
-          ).first,
+          find
+              .ancestor(
+                of: find.text('Student message today'),
+                matching: find.byType(Align),
+              )
+              .first,
         );
         expect(studentAlign.alignment, Alignment.centerLeft);
 
         final counselorBubble = tester.widget<Container>(
-          find.ancestor(
-            of: find.text('Counselor reply today'),
-            matching: find.byType(Container),
-          ).first,
+          find
+              .ancestor(
+                of: find.text('Counselor reply today'),
+                matching: find.byType(Container),
+              )
+              .first,
         );
         expect(
           (counselorBubble.decoration as BoxDecoration).color,
@@ -279,10 +297,12 @@ void main() {
         expect(counselorText.style?.color, Colors.white);
 
         final studentBubble = tester.widget<Container>(
-          find.ancestor(
-            of: find.text('Student message today'),
-            matching: find.byType(Container),
-          ).first,
+          find
+              .ancestor(
+                of: find.text('Student message today'),
+                matching: find.byType(Container),
+              )
+              .first,
         );
         expect(
           (studentBubble.decoration as BoxDecoration).color,
@@ -360,9 +380,7 @@ void main() {
             'senderId': 's1',
             'senderRole': 'user',
             'text': 'Student msg $i',
-            'createdAt': Timestamp.fromDate(
-              baseTime.add(Duration(minutes: i)),
-            ),
+            'createdAt': Timestamp.fromDate(baseTime.add(Duration(minutes: i))),
           });
         }
         db.putAndEmit('counselor_threads/s1', {
@@ -519,10 +537,7 @@ void main() {
 
         // 1. Thread opens at bottom (pixels == 0) showing latest message m25
         expect(scrollController.position.pixels, 0);
-        expect(
-          find.textContaining('History message 25'),
-          findsOneWidget,
-        );
+        expect(find.textContaining('History message 25'), findsOneWidget);
 
         // 2. Incoming student message while near bottom -> stays at bottom & visible
         final t26 = Timestamp.fromDate(base.add(const Duration(minutes: 26)));
@@ -621,7 +636,8 @@ void main() {
         db.seedDoc('counselor_threads/s1', {
           'userId': 's1',
           'collegeId': 'CITE',
-          'studentName': 'Very Long Student Name That Might Wrap On Narrow Screens',
+          'studentName':
+              'Very Long Student Name That Might Wrap On Narrow Screens',
           'updatedAt': t1,
           'lastStudentMessageAt': t1,
           'lastStudentMessageId': 'm1',
@@ -629,7 +645,8 @@ void main() {
         db.seedDoc('counselor_threads/s1/messages/m1', {
           'senderId': 's1',
           'senderRole': 'user',
-          'text': 'Long incoming message to verify clean wrapping across mobile, tablet, and desktop breakpoints.',
+          'text':
+              'Long incoming message to verify clean wrapping across mobile, tablet, and desktop breakpoints.',
           'createdAt': t1,
         });
 

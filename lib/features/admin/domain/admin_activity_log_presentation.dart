@@ -138,7 +138,8 @@ String auditActionLabel(String action) {
     'COUNSELING_HISTORY_VIEWED' => 'Counseling case history viewed',
     'CASE_REMARKS_VIEWED' => 'Clinical case remarks viewed',
     'CASE_REMARKS_UPDATED' => 'Clinical case remarks updated',
-    'CLINICAL_ATTACHMENT_DOWNLOADED' => 'Clinical session attachment downloaded',
+    'CLINICAL_ATTACHMENT_DOWNLOADED' =>
+      'Clinical session attachment downloaded',
     'ASSESSMENT_SUMMARY_VIEWED' => 'Assessment summary viewed',
     'ASSESSMENT_HISTORY_VIEWED' => 'Assessment history viewed',
     'APPOINTMENT_VIEWED' => 'Appointment viewed',

@@ -113,10 +113,10 @@ void main() {
 
         // Today schedule includes active today sessions (confirmed + completed),
         // excluding cancelled/declined/expired, with 1 remaining open today.
-        expect(
-          analytics.todaySchedule.map((a) => a.id).toList(),
-          ['a-today-confirm', 'a-today-completed'],
-        );
+        expect(analytics.todaySchedule.map((a) => a.id).toList(), [
+          'a-today-confirm',
+          'a-today-completed',
+        ]);
         expect(analytics.todayRemainingCount, 1);
 
         // My active caseload excludes completed/no_show/cancelled/archived.

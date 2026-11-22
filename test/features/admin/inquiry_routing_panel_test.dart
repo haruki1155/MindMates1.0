@@ -896,11 +896,17 @@ void main() {
 
       expect(find.text('Escalating…'), findsOneWidget);
       expect(
-        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Escalating…')).onPressed,
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Escalating…'),
+            )
+            .onPressed,
         isNull,
       );
       expect(
-        tester.widget<TextButton>(find.widgetWithText(TextButton, 'No')).onPressed,
+        tester
+            .widget<TextButton>(find.widgetWithText(TextButton, 'No'))
+            .onPressed,
         isNull,
       );
 
@@ -1020,7 +1026,9 @@ void main() {
 
       // Retrying Yes succeeds, invokes onChanged, and closes the dialog.
       expect(
-        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Yes')).onPressed,
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Yes'))
+            .onPressed,
         isNotNull,
       );
       await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
@@ -1081,7 +1089,9 @@ void main() {
       );
 
       expect(
-        find.textContaining('Requested — Counselor requested administrator review'),
+        find.textContaining(
+          'Requested — Counselor requested administrator review',
+        ),
         findsOneWidget,
       );
       expect(
@@ -1099,17 +1109,16 @@ void main() {
       final repo = _Repo(role: AccessRole.portalStaff, uid: 's1');
       await _pump(
         tester,
-        InquiryRoutingPanel(
-          inquiry: _operationalInquiry(),
-          repository: repo,
-        ),
+        InquiryRoutingPanel(inquiry: _operationalInquiry(), repository: repo),
       );
       await tester.tap(find.text('Escalate to administrator'));
       await tester.pumpAndSettle();
 
       expect(find.byType(TextField), findsOneWidget);
       expect(
-        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Escalate')).onPressed,
+        tester
+            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Escalate'))
+            .onPressed,
         isNull,
       );
       await tester.enterText(find.byType(TextField), 'SLA monitor review');
@@ -1145,13 +1154,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(TextField), findsOneWidget);
       expect(
-        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Take over')).onPressed,
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Take over'),
+            )
+            .onPressed,
         isNull,
       );
       await tester.enterText(find.byType(TextField), 'ab');
       await tester.pump();
       expect(
-        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Take over')).onPressed,
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Take over'),
+            )
+            .onPressed,
         isNull,
       );
       await tester.tap(find.text('Cancel'));
@@ -1161,13 +1178,21 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(TextField), findsOneWidget);
       expect(
-        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save assignment')).onPressed,
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Save assignment'),
+            )
+            .onPressed,
         isNull,
       );
       await tester.enterText(find.byType(TextField), 'ab');
       await tester.pump();
       expect(
-        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Save assignment')).onPressed,
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Save assignment'),
+            )
+            .onPressed,
         isNull,
       );
       await tester.tap(find.text('Cancel'));

@@ -14,121 +14,123 @@ void main() {
     'teaching_workplace_reflection_v4',
     'non_teaching_workplace_reflection_v4',
   ]) {
-    testWidgets('simplifies $version V4 assessment details with semantic badges', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AdminTheme.data,
-          home: AdminAssessmentDetailScreen(
-            userId: 'user-1',
-            userLabel: 'Student',
-            repository: _Repository([_v4Record(version)]),
+    testWidgets(
+      'simplifies $version V4 assessment details with semantic badges',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AdminTheme.data,
+            home: AdminAssessmentDetailScreen(
+              userId: 'user-1',
+              userLabel: 'Student',
+              repository: _Repository([_v4Record(version)]),
+            ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
+        );
+        await tester.pumpAndSettle();
 
-      expect(find.text(_displayName(version)), findsNWidgets(2));
-      expect(
-        find.text('Well-being appears generally supported.'),
-        findsOneWidget,
-      );
-      expect(find.text('Stored profile summary.'), findsOneWidget);
-      expect(find.text('Follow-up guidance.'), findsOneWidget);
-      expect(find.text('Response quality'), findsOneWidget);
-      expect(find.text('Well-being areas'), findsOneWidget);
-      expect(find.text('Current strengths'), findsOneWidget);
-      expect(find.text('Areas to explore'), findsOneWidget);
-      expect(find.text('Assessment information'), findsNothing);
+        expect(find.text(_displayName(version)), findsNWidgets(2));
+        expect(
+          find.text('Well-being appears generally supported.'),
+          findsOneWidget,
+        );
+        expect(find.text('Stored profile summary.'), findsOneWidget);
+        expect(find.text('Follow-up guidance.'), findsOneWidget);
+        expect(find.text('Response quality'), findsOneWidget);
+        expect(find.text('Well-being areas'), findsOneWidget);
+        expect(find.text('Current strengths'), findsOneWidget);
+        expect(find.text('Areas to explore'), findsOneWidget);
+        expect(find.text('Assessment information'), findsNothing);
 
-      expect(find.text('What the responses suggest overall'), findsNothing);
-      expect(find.text('Suggested next steps'), findsNothing);
-      expect(find.text('Counselor discussion guide'), findsNothing);
-      expect(find.text(version), findsNothing);
+        expect(find.text('What the responses suggest overall'), findsNothing);
+        expect(find.text('Suggested next steps'), findsNothing);
+        expect(find.text('Counselor discussion guide'), findsNothing);
+        expect(find.text(version), findsNothing);
 
-      // Header + _AreaPanel + _V4DomainReview + _AssessmentHistory all use semantic green AdminStatusBadge.
-      final badges = tester
-          .widgetList<AdminStatusBadge>(find.byType(AdminStatusBadge))
-          .toList();
-      expect(badges, hasLength(4));
-      for (final badge in badges) {
-        expect(badge.presentation.tone, AdminSemanticTone.green);
-        expect(badge.presentation.label, 'Supported');
-        expect(badge.presentation.backgroundColor, AdminColors.greenBg);
-        expect(badge.presentation.foregroundColor, AdminColors.greenFg);
-        expect(badge.presentation.icon, Icons.check_circle_outline);
-      }
+        // Header + _AreaPanel + _V4DomainReview + _AssessmentHistory all use semantic green AdminStatusBadge.
+        final badges = tester
+            .widgetList<AdminStatusBadge>(find.byType(AdminStatusBadge))
+            .toList();
+        expect(badges, hasLength(4));
+        for (final badge in badges) {
+          expect(badge.presentation.tone, AdminSemanticTone.green);
+          expect(badge.presentation.label, 'Supported');
+          expect(badge.presentation.backgroundColor, AdminColors.greenBg);
+          expect(badge.presentation.foregroundColor, AdminColors.greenFg);
+          expect(badge.presentation.icon, Icons.check_circle_outline);
+        }
 
-      // Hardcoded accentStrong status text is completely gone.
-      final accentTexts = tester.widgetList<Text>(find.byType(Text)).where(
-        (t) => t.style?.color == AdminColors.accentStrong,
-      );
-      expect(accentTexts, isEmpty);
-    });
+        // Hardcoded accentStrong status text is completely gone.
+        final accentTexts = tester
+            .widgetList<Text>(find.byType(Text))
+            .where((t) => t.style?.color == AdminColors.accentStrong);
+        expect(accentTexts, isEmpty);
+      },
+    );
   }
 
   testWidgets(
     'V4 detail screen renders all 5 profileStatus tones plus unknown fallback cleanly',
     (tester) async {
-      final cases = <(String?, AdminSemanticTone, String, Color, IconData, String)>[
-        (
-          'generallySupported',
-          AdminSemanticTone.green,
-          'Supported',
-          AdminColors.greenBg,
-          Icons.check_circle_outline,
-          'Well-being appears generally supported.',
-        ),
-        (
-          'mostlySupported',
-          AdminSemanticTone.blue,
-          'Mostly supported',
-          AdminColors.blueBg,
-          Icons.info_outline,
-          'Mostly supported, with an area to explore.',
-        ),
-        (
-          'someAreasNeedAttention',
-          AdminSemanticTone.amber,
-          'Some areas need attention',
-          AdminColors.amberBg,
-          Icons.warning_amber_outlined,
-          'Some areas may benefit from attention.',
-        ),
-        (
-          'supportMayHelp',
-          AdminSemanticTone.red,
-          'Support may help',
-          AdminColors.redBg,
-          Icons.priority_high_rounded,
-          'Support may be helpful right now.',
-        ),
-        (
-          'insufficientResponses',
-          AdminSemanticTone.neutral,
-          'Insufficient responses',
-          AdminColors.neutralBg,
-          Icons.help_outline,
-          'More responses are needed for a complete profile.',
-        ),
-        (
-          'unexpected_v4_band',
-          AdminSemanticTone.neutral,
-          'unexpected v4 band',
-          AdminColors.neutralBg,
-          Icons.help_outline,
-          'More responses are needed for a complete profile.',
-        ),
-        (
-          null,
-          AdminSemanticTone.neutral,
-          'Result unavailable',
-          AdminColors.neutralBg,
-          Icons.help_outline,
-          'More responses are needed for a complete profile.',
-        ),
-      ];
+      final cases =
+          <(String?, AdminSemanticTone, String, Color, IconData, String)>[
+            (
+              'generallySupported',
+              AdminSemanticTone.green,
+              'Supported',
+              AdminColors.greenBg,
+              Icons.check_circle_outline,
+              'Well-being appears generally supported.',
+            ),
+            (
+              'mostlySupported',
+              AdminSemanticTone.blue,
+              'Mostly supported',
+              AdminColors.blueBg,
+              Icons.info_outline,
+              'Mostly supported, with an area to explore.',
+            ),
+            (
+              'someAreasNeedAttention',
+              AdminSemanticTone.amber,
+              'Some areas need attention',
+              AdminColors.amberBg,
+              Icons.warning_amber_outlined,
+              'Some areas may benefit from attention.',
+            ),
+            (
+              'supportMayHelp',
+              AdminSemanticTone.red,
+              'Support may help',
+              AdminColors.redBg,
+              Icons.priority_high_rounded,
+              'Support may be helpful right now.',
+            ),
+            (
+              'insufficientResponses',
+              AdminSemanticTone.neutral,
+              'Insufficient responses',
+              AdminColors.neutralBg,
+              Icons.help_outline,
+              'More responses are needed for a complete profile.',
+            ),
+            (
+              'unexpected_v4_band',
+              AdminSemanticTone.neutral,
+              'unexpected v4 band',
+              AdminColors.neutralBg,
+              Icons.help_outline,
+              'More responses are needed for a complete profile.',
+            ),
+            (
+              null,
+              AdminSemanticTone.neutral,
+              'Result unavailable',
+              AdminColors.neutralBg,
+              Icons.help_outline,
+              'More responses are needed for a complete profile.',
+            ),
+          ];
 
       for (final (
             profileStatus,
@@ -402,38 +404,39 @@ void main() {
     },
   );
 
-  testWidgets('Detail screen handles loading, empty, and error states cleanly', (
-    tester,
-  ) async {
-    final completer = Completer<List<Map<String, dynamic>>>();
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AdminTheme.data,
-        home: AdminAssessmentDetailScreen(
-          userId: 'u-load',
-          userLabel: 'Loading User',
-          repository: _FutureRepo(() => completer.future),
+  testWidgets(
+    'Detail screen handles loading, empty, and error states cleanly',
+    (tester) async {
+      final completer = Completer<List<Map<String, dynamic>>>();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: AdminAssessmentDetailScreen(
+            userId: 'u-load',
+            userLabel: 'Loading User',
+            repository: _FutureRepo(() => completer.future),
+          ),
         ),
-      ),
-    );
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    completer.complete(const []);
-    await tester.pumpAndSettle();
-    expect(find.text('No assessments available.'), findsOneWidget);
+      );
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      completer.complete(const []);
+      await tester.pumpAndSettle();
+      expect(find.text('No assessments available.'), findsOneWidget);
 
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AdminTheme.data,
-        home: AdminAssessmentDetailScreen(
-          userId: 'u-err',
-          userLabel: 'Error User',
-          repository: _FutureRepo(() async => throw StateError('boom')),
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: AdminAssessmentDetailScreen(
+            userId: 'u-err',
+            userLabel: 'Error User',
+            repository: _FutureRepo(() async => throw StateError('boom')),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('Unable to load assessments.'), findsOneWidget);
-  });
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Unable to load assessments.'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'legacy fallback card and history resolve wellBeingStatus and responsePatternCode without neutral Result unavailable',

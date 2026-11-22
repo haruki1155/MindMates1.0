@@ -80,9 +80,7 @@ CounselorReadStatus resolveCounselorReadStatus({
     return CounselorReadStatus.read;
   }
 
-  if (writeInFlight ||
-      receiptHasPendingWrites ||
-      awaitingReceiptConfirmation) {
+  if (writeInFlight || receiptHasPendingWrites || awaitingReceiptConfirmation) {
     if (pendingStudentMessageWatermark != null &&
         lastStudentMessageAt.compareTo(pendingStudentMessageWatermark) <= 0) {
       return CounselorReadStatus.pendingRead;

@@ -39,7 +39,9 @@ BackupJob _job(
   startedAt: startedAt ?? DateTime(2026, 11, 15, 2, 31),
   completedAt:
       completedAt ??
-      (status == BackupJobStatus.running ? null : DateTime(2026, 11, 15, 2, 41)),
+      (status == BackupJobStatus.running
+          ? null
+          : DateTime(2026, 11, 15, 2, 41)),
   documentsCompleted: documentsCompleted,
   documentsEstimated: documentsEstimated,
   verification: verification,
@@ -145,8 +147,7 @@ Future<void> _pump(
   _Repo repo, {
   Size size = const Size(1280, 1200),
   DateTime Function()? clock,
-  void Function(String fileName, List<int> bytes, String mimeType)?
-  onDownload,
+  void Function(String fileName, List<int> bytes, String mimeType)? onDownload,
   bool settle = true,
   TextScaler? textScaler,
 }) async {
@@ -187,9 +188,10 @@ void _expectNoTechnicalJargon(WidgetTester tester) {
       .join('\n');
   // Preserve exported filename format from backup_export_formatter.dart,
   // while asserting no UI copy contains infrastructure jargon.
-  final lower = texts
-      .toLowerCase()
-      .replaceAll(RegExp(r'mindmate-firestore-backup-\d{8}-\d{6}\.(zip|xlsx)'), '');
+  final lower = texts.toLowerCase().replaceAll(
+    RegExp(r'mindmate-firestore-backup-\d{8}-\d{6}\.(zip|xlsx)'),
+    '',
+  );
   const forbidden = [
     'firestore',
     'firebase authentication',
@@ -220,7 +222,11 @@ void _expectNoTechnicalJargon(WidgetTester tester) {
     'documents',
   ];
   for (final term in forbidden) {
-    expect(lower, isNot(contains(term)), reason: 'Found forbidden term "$term"');
+    expect(
+      lower,
+      isNot(contains(term)),
+      reason: 'Found forbidden term "$term"',
+    );
   }
 }
 
@@ -268,7 +274,9 @@ void main() {
       expect(find.text('Server-managed retention'), findsOneWidget);
       expect(find.text('What is included'), findsOneWidget);
       expect(
-        find.textContaining('Application database records (all academic years)'),
+        find.textContaining(
+          'Application database records (all academic years)',
+        ),
         findsOneWidget,
       );
       expect(
@@ -345,9 +353,8 @@ void main() {
           .widgetList<AdminStatusBadge>(find.byType(AdminStatusBadge))
           .toList();
 
-      AdminStatusPresentation badgeFor(String label) => badges
-          .firstWhere((b) => b.presentation.label == label)
-          .presentation;
+      AdminStatusPresentation badgeFor(String label) =>
+          badges.firstWhere((b) => b.presentation.label == label).presentation;
 
       expect(badgeFor('Running').tone, AdminSemanticTone.blue);
       expect(badgeFor('Running').icon, Icons.sync_outlined);
@@ -428,10 +435,7 @@ void main() {
     await _pump(tester, repo);
     expect(find.text('Running'), findsWidgets);
     expect(find.text('Successful · Verified'), findsOneWidget);
-    expect(
-      find.textContaining('A backup is already running.'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('A backup is already running.'), findsOneWidget);
     final button = tester.widget<FilledButton>(
       find.widgetWithText(FilledButton, 'Request backup now'),
     );
@@ -469,10 +473,7 @@ void main() {
     await tester.tap(find.text('Refresh status'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.textContaining('temporarily unavailable'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('temporarily unavailable'), findsOneWidget);
     _expectNoTechnicalJargon(tester);
 
     await tester.tap(find.byTooltip('Dismiss'));
@@ -495,7 +496,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Start a full system backup?'), findsOneWidget);
       expect(
-        find.textContaining('all application database records across all academic years'),
+        find.textContaining(
+          'all application database records across all academic years',
+        ),
         findsOneWidget,
       );
       expect(
@@ -702,20 +705,13 @@ void main() {
         );
       },
     );
-    await _pump(
-      tester,
-      repo,
-      onDownload: (_, _, _) => downloadCount++,
-    );
+    await _pump(tester, repo, onDownload: (_, _, _) => downloadCount++);
 
     await tester.tap(find.text('Download CSV (.zip)'));
     await tester.pumpAndSettle();
 
     expect(downloadCount, 0);
-    expect(
-      find.textContaining('Backup download was denied'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Backup download was denied'), findsOneWidget);
     expect(find.textContaining('No backup file was created.'), findsOneWidget);
     expect(find.textContaining('(permission-denied)'), findsNothing);
     _expectNoTechnicalJargon(tester);
@@ -725,15 +721,8 @@ void main() {
     'non-super-admin cannot trigger backup requests or export downloads',
     (tester) async {
       var downloadCount = 0;
-      final repo = _Repo(
-        Stream.value([_job('done')]),
-        superAdmin: false,
-      );
-      await _pump(
-        tester,
-        repo,
-        onDownload: (_, _, _) => downloadCount++,
-      );
+      final repo = _Repo(Stream.value([_job('done')]), superAdmin: false);
+      await _pump(tester, repo, onDownload: (_, _, _) => downloadCount++);
 
       final requestBtn = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, 'Request backup now'),
@@ -937,7 +926,8 @@ void main() {
         expect(
           tester.takeException(),
           isNull,
-          reason: 'Unexpected layout/overflow exception at 390px with ${scale}x text scale',
+          reason:
+              'Unexpected layout/overflow exception at 390px with ${scale}x text scale',
         );
       }
     },

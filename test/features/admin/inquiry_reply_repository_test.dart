@@ -127,10 +127,7 @@ void main() {
       });
 
       final countBefore = calls.length;
-      expect(
-        () => repository.escalateInquiry('i1'),
-        throwsArgumentError,
-      );
+      expect(() => repository.escalateInquiry('i1'), throwsArgumentError);
       expect(
         () => repository.escalateInquiry('i1', reason: 'no'),
         throwsArgumentError,

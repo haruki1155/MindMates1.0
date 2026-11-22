@@ -130,10 +130,8 @@ class FakeDocumentSnapshot extends Fake
 
 class FakeQuerySnapshot extends Fake
     implements QuerySnapshot<Map<String, dynamic>> {
-  FakeQuerySnapshot(
-    this.docs, {
-    SnapshotMetadata? metadata,
-  }) : metadata = metadata ?? FakeSnapshotMetadata();
+  FakeQuerySnapshot(this.docs, {SnapshotMetadata? metadata})
+    : metadata = metadata ?? FakeSnapshotMetadata();
 
   @override
   final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs;
@@ -639,7 +637,11 @@ class FakeCounselorFirestore extends Fake implements FirebaseFirestore {
       if (deferWriteCompletion) {
         final completer = Completer<void>();
         pendingWrites.add(
-          PendingWriteOperation(completer, commitToServer, (_) => revertOnFailure()),
+          PendingWriteOperation(
+            completer,
+            commitToServer,
+            (_) => revertOnFailure(),
+          ),
         );
         return completer.future;
       }
@@ -650,7 +652,11 @@ class FakeCounselorFirestore extends Fake implements FirebaseFirestore {
     if (deferWriteCompletion) {
       final completer = Completer<void>();
       pendingWrites.add(
-        PendingWriteOperation(completer, commitToServer, (_) => revertOnFailure()),
+        PendingWriteOperation(
+          completer,
+          commitToServer,
+          (_) => revertOnFailure(),
+        ),
       );
       return completer.future;
     }
@@ -687,8 +693,15 @@ class _FakeCollectionReference extends Fake
   }
 
   @override
-  Query<Map<String, dynamic>> orderBy(Object field, {bool descending = false}) =>
-      _FakeQuery(db, path, orderByField: field.toString(), descending: descending);
+  Query<Map<String, dynamic>> orderBy(
+    Object field, {
+    bool descending = false,
+  }) => _FakeQuery(
+    db,
+    path,
+    orderByField: field.toString(),
+    descending: descending,
+  );
 
   @override
   Query<Map<String, dynamic>> limit(int limit) =>
@@ -709,8 +722,9 @@ class _FakeCollectionReference extends Fake
   );
 
   @override
-  Future<QuerySnapshot<Map<String, dynamic>>> get([GetOptions? options]) async =>
-      db._getCollectionSnapshot(path);
+  Future<QuerySnapshot<Map<String, dynamic>>> get([
+    GetOptions? options,
+  ]) async => db._getCollectionSnapshot(path);
 
   @override
   Stream<QuerySnapshot<Map<String, dynamic>>> snapshots({
@@ -750,17 +764,19 @@ class _FakeQuery extends Fake implements Query<Map<String, dynamic>> {
   final Map<String, dynamic>? startAfterData;
 
   @override
-  Query<Map<String, dynamic>> orderBy(Object field, {bool descending = false}) =>
-      _FakeQuery(
-        db,
-        path,
-        orderByField: field.toString(),
-        descending: descending,
-        limitCount: limitCount,
-        limitToLastCount: limitToLastCount,
-        startAfterDocId: startAfterDocId,
-        startAfterData: startAfterData,
-      );
+  Query<Map<String, dynamic>> orderBy(
+    Object field, {
+    bool descending = false,
+  }) => _FakeQuery(
+    db,
+    path,
+    orderByField: field.toString(),
+    descending: descending,
+    limitCount: limitCount,
+    limitToLastCount: limitToLastCount,
+    startAfterDocId: startAfterDocId,
+    startAfterData: startAfterData,
+  );
 
   @override
   Query<Map<String, dynamic>> limit(int limit) => _FakeQuery(
@@ -801,16 +817,17 @@ class _FakeQuery extends Fake implements Query<Map<String, dynamic>> {
   );
 
   @override
-  Future<QuerySnapshot<Map<String, dynamic>>> get([GetOptions? options]) async =>
-      db._getCollectionSnapshot(
-        path,
-        orderByField: orderByField,
-        descending: descending,
-        limitCount: limitCount,
-        limitToLastCount: limitToLastCount,
-        startAfterDocId: startAfterDocId,
-        startAfterData: startAfterData,
-      );
+  Future<QuerySnapshot<Map<String, dynamic>>> get([
+    GetOptions? options,
+  ]) async => db._getCollectionSnapshot(
+    path,
+    orderByField: orderByField,
+    descending: descending,
+    limitCount: limitCount,
+    limitToLastCount: limitToLastCount,
+    startAfterDocId: startAfterDocId,
+    startAfterData: startAfterData,
+  );
 
   @override
   Stream<QuerySnapshot<Map<String, dynamic>>> snapshots({
@@ -883,9 +900,9 @@ class _FakeWriteBatch extends Fake implements WriteBatch {
     _items.add(
       _PendingWriteItem(
         path: document.path,
-        data: Map<Object?, Object?>.from(data as Map).map(
-          (k, v) => MapEntry(k.toString(), v),
-        ),
+        data: Map<Object?, Object?>.from(
+          data as Map,
+        ).map((k, v) => MapEntry(k.toString(), v)),
         isUpdate: true,
       ),
     );

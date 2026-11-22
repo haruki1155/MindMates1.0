@@ -216,7 +216,9 @@ void main() {
         ),
       );
       expect(
-        badgeSemantics.any((s) => s.properties.label == 'Awaiting Client Response'),
+        badgeSemantics.any(
+          (s) => s.properties.label == 'Awaiting Client Response',
+        ),
         isTrue,
       );
       expect(find.byIcon(Icons.hourglass_top_outlined), findsOneWidget);
@@ -240,7 +242,8 @@ void main() {
         final decoration = container.decoration;
         if (decoration is! BoxDecoration) return false;
         final border = decoration.border;
-        return decoration.color == AdminColors.amberBg.withValues(alpha: 0.28) &&
+        return decoration.color ==
+                AdminColors.amberBg.withValues(alpha: 0.28) &&
             border is Border &&
             border.top.color == AdminColors.amberBorder;
       });
@@ -354,17 +357,14 @@ void main() {
       final badges = tester
           .widgetList<AdminStatusBadge>(find.byType(AdminStatusBadge))
           .toList();
-      expect(
-        badges.map((b) => b.presentation.label).toList(),
-        [
-          'Awaiting Client Response',
-          'Booked',
-          'Expired',
-          'Cancelled',
-          'Declined',
-          'Completed',
-        ],
-      );
+      expect(badges.map((b) => b.presentation.label).toList(), [
+        'Awaiting Client Response',
+        'Booked',
+        'Expired',
+        'Cancelled',
+        'Declined',
+        'Completed',
+      ]);
       expect(badges[0].presentation.backgroundColor, AdminColors.amberBg);
       expect(badges[1].presentation.backgroundColor, AdminColors.blueBg);
       expect(badges[2].presentation.backgroundColor, AdminColors.neutralBg);
@@ -372,10 +372,7 @@ void main() {
       expect(badges[4].presentation.backgroundColor, AdminColors.neutralBg);
       expect(badges[5].presentation.backgroundColor, AdminColors.greenBg);
 
-      expect(
-        find.text('Client booked a follow-up session.'),
-        findsOneWidget,
-      );
+      expect(find.text('Client booked a follow-up session.'), findsOneWidget);
       expect(find.text('Follow-up session completed.'), findsOneWidget);
       expect(find.text('Follow-up session was declined.'), findsOneWidget);
       expect(find.text('Follow-up session was cancelled.'), findsOneWidget);
@@ -445,9 +442,7 @@ void main() {
       );
       expect(find.text('No cases in your assigned colleges'), findsOneWidget);
       expect(
-        find.text(
-          'No counseling cases were found for your assigned colleges.',
-        ),
+        find.text('No counseling cases were found for your assigned colleges.'),
         findsOneWidget,
       );
     },

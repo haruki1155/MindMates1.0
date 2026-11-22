@@ -16,7 +16,16 @@ void main() {
   test(
     'getClinicalEvidenceBytes invokes downloadClinicalSessionEvidence with appointmentId and decodes bytes',
     () async {
-      final expectedBytes = Uint8List.fromList([37, 80, 68, 70, 45, 49, 46, 52]);
+      final expectedBytes = Uint8List.fromList([
+        37,
+        80,
+        68,
+        70,
+        45,
+        49,
+        46,
+        52,
+      ]);
       String? calledName;
       Map<String, Object?>? calledData;
       final repo = AdminPortalRepository(
@@ -37,10 +46,7 @@ void main() {
         appointmentId: appointmentId,
       );
       expect(calledName, 'downloadClinicalSessionEvidence');
-      expect(calledData, {
-        'appointmentId': appointmentId,
-        'path': validPath,
-      });
+      expect(calledData, {'appointmentId': appointmentId, 'path': validPath});
       expect(actual, expectedBytes);
     },
   );
@@ -58,10 +64,7 @@ void main() {
       );
 
       final actual = await repo.getClinicalEvidenceBytes(validPath);
-      expect(calledData, {
-        'appointmentId': appointmentId,
-        'path': validPath,
-      });
+      expect(calledData, {'appointmentId': appointmentId, 'path': validPath});
       expect(actual, expectedBytes);
     },
   );
@@ -73,7 +76,9 @@ void main() {
       final repo = AdminPortalRepository(
         callableInvoker: (_, _) async {
           invokerCalled = true;
-          return {'dataBase64': base64Encode([1, 2, 3])};
+          return {
+            'dataBase64': base64Encode([1, 2, 3]),
+          };
         },
       );
 
@@ -81,27 +86,33 @@ void main() {
         (path: 'backups/2026/export.json', appointmentId: null),
         (path: 'profile_images/$uploaderUid/$nonce.png', appointmentId: null),
         (
-          path: 'counseling_session_files/$appointmentId/$uploaderUid/../$nonce.pdf',
+          path:
+              'counseling_session_files/$appointmentId/$uploaderUid/../$nonce.pdf',
           appointmentId: appointmentId,
         ),
         (
-          path: 'counseling_session_files/$appointmentId/$uploaderUid/%2e%2e/$nonce.pdf',
+          path:
+              'counseling_session_files/$appointmentId/$uploaderUid/%2e%2e/$nonce.pdf',
           appointmentId: appointmentId,
         ),
         (
-          path: 'counseling_session_files/$appointmentId/$uploaderUid\\$nonce.pdf',
+          path:
+              'counseling_session_files/$appointmentId/$uploaderUid\\$nonce.pdf',
           appointmentId: appointmentId,
         ),
         (
-          path: 'counseling_session_files/$appointmentId/$uploaderUid/sub/$nonce.pdf',
+          path:
+              'counseling_session_files/$appointmentId/$uploaderUid/sub/$nonce.pdf',
           appointmentId: appointmentId,
         ),
         (
-          path: 'counseling_session_files/$appointmentId/$uploaderUid/0123456789ABCDEF0123456789ABCDEF.pdf',
+          path:
+              'counseling_session_files/$appointmentId/$uploaderUid/0123456789ABCDEF0123456789ABCDEF.pdf',
           appointmentId: appointmentId,
         ),
         (
-          path: 'counseling_session_files/$appointmentId/$uploaderUid/$nonce.txt',
+          path:
+              'counseling_session_files/$appointmentId/$uploaderUid/$nonce.txt',
           appointmentId: appointmentId,
         ),
         (path: validPath, appointmentId: 'other_appointment'),
@@ -129,7 +140,11 @@ void main() {
         <String, Object?>{},
         {'dataBase64': ''},
         {'dataBase64': base64Encode(Uint8List(0))},
-        {'dataBase64': base64Encode(Uint8List(maxSessionEvidenceFileBytes + 1))},
+        {
+          'dataBase64': base64Encode(
+            Uint8List(maxSessionEvidenceFileBytes + 1),
+          ),
+        },
       ]) {
         final repo = AdminPortalRepository(
           callableInvoker: (_, _) async => payload,
@@ -155,8 +170,10 @@ void main() {
         'unavailable',
       ]) {
         final repo = AdminPortalRepository(
-          callableInvoker: (_, _) async =>
-              throw FirebaseFunctionsException(code: code, message: 'Server $code'),
+          callableInvoker: (_, _) async => throw FirebaseFunctionsException(
+            code: code,
+            message: 'Server $code',
+          ),
         );
         await expectLater(
           () => repo.getClinicalEvidenceBytes(
@@ -164,7 +181,11 @@ void main() {
             appointmentId: appointmentId,
           ),
           throwsA(
-            isA<FirebaseFunctionsException>().having((e) => e.code, 'code', code),
+            isA<FirebaseFunctionsException>().having(
+              (e) => e.code,
+              'code',
+              code,
+            ),
           ),
         );
       }

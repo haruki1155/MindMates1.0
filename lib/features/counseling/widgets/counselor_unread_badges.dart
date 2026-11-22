@@ -19,7 +19,8 @@ class CounselorInboxUnreadController extends ChangeNotifier {
   }) : _firestore =
            firestore ??
            (Firebase.apps.isNotEmpty ? FirebaseFirestore.instance : null),
-       _auth = auth ?? (Firebase.apps.isNotEmpty ? FirebaseAuth.instance : null) {
+       _auth =
+           auth ?? (Firebase.apps.isNotEmpty ? FirebaseAuth.instance : null) {
     if (autoBind) {
       bind();
     }
@@ -138,10 +139,7 @@ class CounselorInboxUnreadController extends ChangeNotifier {
   bool isThreadUnread(String studentId) =>
       _statesByStudent[studentId]?.isUnread ?? false;
 
-  bool needsMarkRead(
-    String studentId, {
-    Timestamp? observedStudentMessageAt,
-  }) {
+  bool needsMarkRead(String studentId, {Timestamp? observedStudentMessageAt}) {
     if (!isReady) return false;
     final state = _statesByStudent[studentId];
     final targetStudentMsgAt = maxTimestamp(
@@ -324,8 +322,8 @@ class CounselorInboxUnreadController extends ChangeNotifier {
       final receiptExists = _receiptExists[studentId] ?? false;
       final receiptPending = _receiptPendingWrites[studentId] ?? false;
       final writeInFlight = _hasInFlightWrite(studentId);
-      final awaitingReceiptConfirmation =
-          _committedAwaitingReceiptByStudent.containsKey(studentId);
+      final awaitingReceiptConfirmation = _committedAwaitingReceiptByStudent
+          .containsKey(studentId);
 
       final status = resolveCounselorReadStatus(
         streamsReady: streamsReady,
@@ -466,10 +464,7 @@ class CounselorInboxUnreadController extends ChangeNotifier {
     final uid = _activeUid;
     final db = _firestore;
     final epoch = _authEpoch;
-    if (uid == null ||
-        db == null ||
-        trimmed.isEmpty ||
-        trimmed.length > 1600) {
+    if (uid == null || db == null || trimmed.isEmpty || trimmed.length > 1600) {
       return;
     }
     if (expectedUid != null && expectedUid != uid) return;
@@ -646,10 +641,7 @@ class _CounselorInboxUnreadBadgeState extends State<CounselorInboxUnreadBadge> {
         if (count < 1) {
           return const SizedBox.shrink();
         }
-        final badge = UnreadCountBadge(
-          count: count,
-          compact: widget.compact,
-        );
+        final badge = UnreadCountBadge(count: count, compact: widget.compact);
         if (widget.margin != null) {
           return Padding(padding: widget.margin!, child: badge);
         }

@@ -236,10 +236,7 @@ int _compareTimelineMessages(
   return a.id.compareTo(b.id);
 }
 
-String formatManilaTimeOfDay(
-  DateTime value, {
-  bool use24HourFormat = false,
-}) {
+String formatManilaTimeOfDay(DateTime value, {bool use24HourFormat = false}) {
   final manila = toManilaDateTime(value);
   final minute = manila.minute.toString().padLeft(2, '0');
   if (use24HourFormat) {

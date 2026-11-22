@@ -59,84 +59,90 @@ void main() {
       );
     });
 
-    test('uses non-regressing server/confirmed timestamps and detects newer student msg', () {
-      expect(
-        resolveCounselorReadStatus(
-          streamsReady: true,
-          hasError: false,
-          lastStudentMessageAt: t100,
-          serverReadAt: null,
-          lastConfirmedReadAt: t105,
-          pendingStudentMessageWatermark: null,
-          receiptExists: true,
-          receiptHasPendingWrites: true,
-          writeInFlight: false,
-        ),
-        CounselorReadStatus.read,
-      );
+    test(
+      'uses non-regressing server/confirmed timestamps and detects newer student msg',
+      () {
+        expect(
+          resolveCounselorReadStatus(
+            streamsReady: true,
+            hasError: false,
+            lastStudentMessageAt: t100,
+            serverReadAt: null,
+            lastConfirmedReadAt: t105,
+            pendingStudentMessageWatermark: null,
+            receiptExists: true,
+            receiptHasPendingWrites: true,
+            writeInFlight: false,
+          ),
+          CounselorReadStatus.read,
+        );
 
-      expect(
-        resolveCounselorReadStatus(
-          streamsReady: true,
-          hasError: false,
-          lastStudentMessageAt: t110,
-          serverReadAt: t105,
-          lastConfirmedReadAt: t105,
-          pendingStudentMessageWatermark: t105,
-          receiptExists: true,
-          receiptHasPendingWrites: true,
-          writeInFlight: true,
-        ),
-        CounselorReadStatus.unread,
-      );
-    });
+        expect(
+          resolveCounselorReadStatus(
+            streamsReady: true,
+            hasError: false,
+            lastStudentMessageAt: t110,
+            serverReadAt: t105,
+            lastConfirmedReadAt: t105,
+            pendingStudentMessageWatermark: t105,
+            receiptExists: true,
+            receiptHasPendingWrites: true,
+            writeInFlight: true,
+          ),
+          CounselorReadStatus.unread,
+        );
+      },
+    );
 
-    test('pending watermark prevents false unread during serverTimestamp null snapshot', () {
-      expect(
-        resolveCounselorReadStatus(
-          streamsReady: true,
-          hasError: false,
-          lastStudentMessageAt: t105,
-          serverReadAt: null,
-          lastConfirmedReadAt: t100,
-          pendingStudentMessageWatermark: t105,
-          receiptExists: true,
-          receiptHasPendingWrites: true,
-          writeInFlight: true,
-        ),
-        CounselorReadStatus.pendingRead,
-      );
-      expect(
-        resolveCounselorReadStatus(
-          streamsReady: true,
-          hasError: false,
-          lastStudentMessageAt: t105,
-          serverReadAt: null,
-          lastConfirmedReadAt: t100,
-          pendingStudentMessageWatermark: t105,
-          receiptExists: false,
-          receiptHasPendingWrites: false,
-          writeInFlight: false,
-          awaitingReceiptConfirmation: true,
-        ),
-        CounselorReadStatus.pendingRead,
-      );
-      expect(
-        resolveCounselorReadStatus(
-          streamsReady: true,
-          hasError: false,
-          lastStudentMessageAt: t110,
-          serverReadAt: null,
-          lastConfirmedReadAt: t100,
-          pendingStudentMessageWatermark: t105,
-          receiptExists: false,
-          receiptHasPendingWrites: false,
-          writeInFlight: false,
-          awaitingReceiptConfirmation: true,
-        ),
-        CounselorReadStatus.unread,
-      );
-    });
+    test(
+      'pending watermark prevents false unread during serverTimestamp null snapshot',
+      () {
+        expect(
+          resolveCounselorReadStatus(
+            streamsReady: true,
+            hasError: false,
+            lastStudentMessageAt: t105,
+            serverReadAt: null,
+            lastConfirmedReadAt: t100,
+            pendingStudentMessageWatermark: t105,
+            receiptExists: true,
+            receiptHasPendingWrites: true,
+            writeInFlight: true,
+          ),
+          CounselorReadStatus.pendingRead,
+        );
+        expect(
+          resolveCounselorReadStatus(
+            streamsReady: true,
+            hasError: false,
+            lastStudentMessageAt: t105,
+            serverReadAt: null,
+            lastConfirmedReadAt: t100,
+            pendingStudentMessageWatermark: t105,
+            receiptExists: false,
+            receiptHasPendingWrites: false,
+            writeInFlight: false,
+            awaitingReceiptConfirmation: true,
+          ),
+          CounselorReadStatus.pendingRead,
+        );
+        expect(
+          resolveCounselorReadStatus(
+            streamsReady: true,
+            hasError: false,
+            lastStudentMessageAt: t110,
+            serverReadAt: null,
+            lastConfirmedReadAt: t100,
+            pendingStudentMessageWatermark: t105,
+            receiptExists: false,
+            receiptHasPendingWrites: false,
+            writeInFlight: false,
+            awaitingReceiptConfirmation: true,
+          ),
+          CounselorReadStatus.unread,
+        );
+      },
+    );
 
     test('countUnreadCounselorThreads filters by optional collegeId', () {
       final states = [
@@ -184,10 +190,22 @@ void main() {
     });
 
     test('counselorThreadUnread handles Timestamp comparisons accurately', () {
-      expect(counselorThreadUnread({'lastStudentMessageAt': t105}, null), isTrue);
-      expect(counselorThreadUnread({'lastStudentMessageAt': t105}, t100), isTrue);
-      expect(counselorThreadUnread({'lastStudentMessageAt': t105}, t105), isFalse);
-      expect(counselorThreadUnread({'lastStudentMessageAt': t100}, t105), isFalse);
+      expect(
+        counselorThreadUnread({'lastStudentMessageAt': t105}, null),
+        isTrue,
+      );
+      expect(
+        counselorThreadUnread({'lastStudentMessageAt': t105}, t100),
+        isTrue,
+      );
+      expect(
+        counselorThreadUnread({'lastStudentMessageAt': t105}, t105),
+        isFalse,
+      );
+      expect(
+        counselorThreadUnread({'lastStudentMessageAt': t100}, t105),
+        isFalse,
+      );
       expect(counselorThreadUnread({}, null), isFalse);
     });
   });
@@ -376,7 +394,9 @@ void main() {
         expect(controller.unreadCount(), 1);
 
         final countsObserved = <int>[];
-        controller.addListener(() => countsObserved.add(controller.unreadCount()));
+        controller.addListener(
+          () => countsObserved.add(controller.unreadCount()),
+        );
 
         // Mark read -> emits local pending snapshot with readAt == null and hasPendingWrites == true
         final markFuture = controller.markThreadRead(
@@ -386,12 +406,22 @@ void main() {
         );
         await Future<void>.delayed(Duration.zero);
 
-        expect(db.getEntry('counselor_inbox_reads/counselor-a/threads/s1')?.data['readAt'], isNull);
         expect(
-          db.getEntry('counselor_inbox_reads/counselor-a/threads/s1')?.hasPendingWrites,
+          db
+              .getEntry('counselor_inbox_reads/counselor-a/threads/s1')
+              ?.data['readAt'],
+          isNull,
+        );
+        expect(
+          db
+              .getEntry('counselor_inbox_reads/counselor-a/threads/s1')
+              ?.hasPendingWrites,
           isTrue,
         );
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
         expect(controller.unreadCount(), 0);
         expect(countsObserved, everyElement(0));
 
@@ -403,7 +433,9 @@ void main() {
         expect(controller.unreadCount(), 0);
 
         // Now a newer student message arrives -> becomes unread, and failing markThreadRead rolls back to unread
-        final tStudent2 = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10, 0, 20));
+        final tStudent2 = Timestamp.fromDate(
+          DateTime.utc(2026, 11, 22, 10, 0, 20),
+        );
         db.putAndEmit('counselor_threads/s1', {
           'userId': 's1',
           'collegeId': 'CITE',
@@ -480,14 +512,11 @@ void main() {
         expect(controller.stateFor('s1')?.status, CounselorReadStatus.read);
         expect(db.committedBatches, hasLength(1));
         expect(db.committedBatches.single, hasLength(3));
-        expect(
-          db.committedBatches.single.map((w) => w.path).toList(),
-          [
-            'counselor_threads/s1',
-            startsWith('counselor_threads/s1/messages/'),
-            'counselor_inbox_reads/counselor-a/threads/s1',
-          ],
-        );
+        expect(db.committedBatches.single.map((w) => w.path).toList(), [
+          'counselor_threads/s1',
+          startsWith('counselor_threads/s1/messages/'),
+          'counselor_inbox_reads/counselor-a/threads/s1',
+        ]);
       },
     );
 
@@ -608,9 +637,11 @@ void main() {
         expect(controller.isThreadUnread('s1'), isTrue);
         expect(controller.isThreadUnread('s2'), isFalse);
         expect(
-          db.writeLog.skip(writeCountBeforeSwitch).where(
-            (w) => w.path.contains('counselor_inbox_reads/counselor-b'),
-          ),
+          db.writeLog
+              .skip(writeCountBeforeSwitch)
+              .where(
+                (w) => w.path.contains('counselor_inbox_reads/counselor-b'),
+              ),
           isEmpty,
         );
 
@@ -755,7 +786,10 @@ void main() {
               .length,
           2,
         );
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
         expect(controller.unreadCount(), 0);
 
         // Complete follow-up markThreadRead at 10:00:07 (>= t2) -> settled read
@@ -826,9 +860,11 @@ void main() {
 
         // No writes under counselor-b, and counselor-b still sees s1 unread
         expect(
-          db.writeLog.skip(writesBeforeSwitch).where(
-            (w) => w.path.contains('counselor_inbox_reads/counselor-b'),
-          ),
+          db.writeLog
+              .skip(writesBeforeSwitch)
+              .where(
+                (w) => w.path.contains('counselor_inbox_reads/counselor-b'),
+              ),
           isEmpty,
         );
         expect(controller.activeUid, 'counselor-b');
@@ -903,7 +939,10 @@ void main() {
           expectedUid: 'counselor-a',
         );
         await Future<void>.delayed(Duration.zero);
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
 
         // Newer incoming message t2 arrives, then counselor starts reply covering t2.
         db.putAndEmit('counselor_threads/s1', {
@@ -923,7 +962,10 @@ void main() {
           expectedUid: 'counselor-a',
         );
         await Future<void>.delayed(Duration.zero);
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
         expect(controller.unreadCount(), 0);
 
         // markThreadRead(t1) completes at server time 10:00:02 (< t2) while reply is still in flight.
@@ -931,7 +973,10 @@ void main() {
         await markFuture;
         await Future<void>.delayed(Duration.zero);
 
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
         expect(controller.unreadCount(), 0);
 
         // Reply completes at server time 10:00:04 (>= t2) -> settles cleanly to read.
@@ -983,7 +1028,10 @@ void main() {
           expectedUid: 'counselor-a',
         );
         await Future<void>.delayed(Duration.zero);
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
 
         // First write (markThreadRead) fails while sendCounselorReply is still pending.
         db.failNextPendingWrite(
@@ -992,7 +1040,10 @@ void main() {
         await expectLater(markFuture, throwsA(isA<FirebaseException>()));
         await Future<void>.delayed(Duration.zero);
 
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
         expect(controller.unreadCount(), 0);
 
         // Reply completes -> settles to read.
@@ -1076,7 +1127,10 @@ void main() {
         await sendFuture;
         await Future<void>.delayed(Duration.zero);
         expect(db.writeLog, hasLength(5));
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
 
         // Follow-up markThreadRead(t2) finishes at 10:00:05 (>= t2) -> settles to read.
         db.setServerClock(DateTime.utc(2026, 11, 22, 10, 0, 4));
@@ -1116,7 +1170,9 @@ void main() {
         expect(controller.unreadCount(), 1);
 
         final observedCounts = <int>[];
-        controller.addListener(() => observedCounts.add(controller.unreadCount()));
+        controller.addListener(
+          () => observedCounts.add(controller.unreadCount()),
+        );
 
         // Commit resolves immediately while snapshot delivery is still deferred (hasPendingWrites == false).
         await controller.markThreadRead(
@@ -1127,7 +1183,10 @@ void main() {
         await Future<void>.delayed(Duration.zero);
 
         expect(db.pendingSnapshotCount, 1);
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
         expect(controller.unreadCount(), 0);
         expect(controller.needsMarkRead('s1'), isFalse);
         expect(observedCounts, everyElement(0));
@@ -1165,7 +1224,10 @@ void main() {
           studentMessageAt: t2,
           expectedUid: 'counselor-a',
         );
-        expect(controller.stateFor('s1')?.status, CounselorReadStatus.pendingRead);
+        expect(
+          controller.stateFor('s1')?.status,
+          CounselorReadStatus.pendingRead,
+        );
         expect(controller.needsMarkRead('s1'), isFalse);
 
         final t3 = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10, 0, 20));

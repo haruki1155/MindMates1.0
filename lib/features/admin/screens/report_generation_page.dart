@@ -1673,7 +1673,9 @@ class _CollegeDropdownField extends StatelessWidget {
     final activeDept = departmentOptions.any((item) => item.key == department)
         ? department
         : 'all';
-    final optionsSignature = departmentOptions.map((item) => item.key).join('|');
+    final optionsSignature = departmentOptions
+        .map((item) => item.key)
+        .join('|');
     return _LabeledControl(
       label: label,
       child: KeyedSubtree(
@@ -2070,11 +2072,7 @@ class _AcademicYearStateBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-          color: fg,
-        ),
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: fg),
       ),
     );
   }
@@ -2740,11 +2738,8 @@ class _PopulationSetupState extends State<_PopulationSetup> {
     super.dispose();
   }
 
-  bool get _isLocked => const {
-    'closed',
-    'voided',
-    'unknown',
-  }.contains(widget.config.status);
+  bool get _isLocked =>
+      const {'closed', 'voided', 'unknown'}.contains(widget.config.status);
 
   String get _populationSubtitle {
     if (widget.config.status == 'voided') {
@@ -3843,11 +3838,7 @@ class _SkeletonBlock extends StatelessWidget {
 }
 
 class _ErrorPanel extends StatelessWidget {
-  const _ErrorPanel({
-    required this.onRetry,
-    this.onResetFilters,
-    this.error,
-  });
+  const _ErrorPanel({required this.onRetry, this.onResetFilters, this.error});
   final VoidCallback onRetry;
   final VoidCallback? onResetFilters;
   final Object? error;
@@ -3888,7 +3879,10 @@ class _ErrorPanel extends StatelessWidget {
             runSpacing: 10,
             alignment: WrapAlignment.center,
             children: [
-              OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+              OutlinedButton(
+                onPressed: onRetry,
+                child: const Text('Try again'),
+              ),
               if (onResetFilters != null)
                 FilledButton.tonal(
                   onPressed: onResetFilters,

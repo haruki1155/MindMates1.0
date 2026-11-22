@@ -233,7 +233,11 @@ void main() {
           ReportPercentageItem(key: 'cas', label: 'CAS', percentage: 3),
         ],
         appointmentsByCourse: const [
-          ReportPercentageItem(key: 'bs psych', label: 'BS Psych', percentage: 3),
+          ReportPercentageItem(
+            key: 'bs psych',
+            label: 'BS Psych',
+            percentage: 3,
+          ),
         ],
         appointmentsByYearLevel: const [
           ReportPercentageItem(key: 'year 1', label: 'Year 1', percentage: 3),
@@ -301,7 +305,10 @@ void main() {
       );
       expect(unconfiguredBytes.length, greaterThan(1000));
       final unconfiguredText = extractPdfText(unconfiguredBytes);
-      expect(unconfiguredText, contains('Complete and save the student population'));
+      expect(
+        unconfiguredText,
+        contains('Complete and save the student population'),
+      );
       expect(unconfiguredText, isNot(contains('Percentage summary')));
 
       final allZeroConfigured = AdminReportAnalytics(
@@ -372,214 +379,229 @@ void main() {
     },
   );
 
-  test('8-item bar chart renders all 7 top labels plus Remaining categories without truncation', () async {
-    final nineItems = List.generate(
-      9,
-      (i) => ReportPercentageItem(
-        key: 'course-$i',
-        label: 'ProgramLabel${i + 1}',
-        percentage: 10.0 - i,
-      ),
-    );
-    final manyCourses = AdminReportAnalytics(
-      generatedAt: DateTime.utc(2026, 9, 10),
-      activeWindowDays: 30,
-      population: const CounselingPopulationConfig(
-        schoolYear: '2026-2027',
-        departments: ['CAS'],
-        populations: {'CAS': 100},
-        configured: true,
-        totalPopulation: 100,
-        years: [],
-        status: 'current',
-      ),
-      userScopeKey: 'all',
-      userScopeLabel: 'Whole app-user population',
-      overallActivePercentage: 50,
-      userCategoryOptions: const [],
-      userCategories: const [],
-      appointmentDepartmentScopeKey: 'all',
-      totalAppointments: 25,
-      uniqueStudentsServed: 20,
-      counselingReach: 20,
-      appointmentRate: 25,
-      completionRate: 80,
-      statusCounts: const {'completed': 20},
-      appointmentDepartmentScopeLabel: 'All departments',
-      appointmentDepartmentOptions: const [],
-      appointmentsByDepartment: const [],
-      appointmentsByCourse: nineItems,
-      appointmentsByYearLevel: const [],
-    );
-    final text = extractPdfText(
-      await AdminReportPdfService.build(
-        report: manyCourses,
+  test(
+    '8-item bar chart renders all 7 top labels plus Remaining categories without truncation',
+    () async {
+      final nineItems = List.generate(
+        9,
+        (i) => ReportPercentageItem(
+          key: 'course-$i',
+          label: 'ProgramLabel${i + 1}',
+          percentage: 10.0 - i,
+        ),
+      );
+      final manyCourses = AdminReportAnalytics(
+        generatedAt: DateTime.utc(2026, 9, 10),
+        activeWindowDays: 30,
+        population: const CounselingPopulationConfig(
+          schoolYear: '2026-2027',
+          departments: ['CAS'],
+          populations: {'CAS': 100},
+          configured: true,
+          totalPopulation: 100,
+          years: [],
+          status: 'current',
+        ),
+        userScopeKey: 'all',
+        userScopeLabel: 'Whole app-user population',
+        overallActivePercentage: 50,
+        userCategoryOptions: const [],
+        userCategories: const [],
+        appointmentDepartmentScopeKey: 'all',
+        totalAppointments: 25,
+        uniqueStudentsServed: 20,
+        counselingReach: 20,
+        appointmentRate: 25,
+        completionRate: 80,
+        statusCounts: const {'completed': 20},
+        appointmentDepartmentScopeLabel: 'All departments',
+        appointmentDepartmentOptions: const [],
+        appointmentsByDepartment: const [],
+        appointmentsByCourse: nineItems,
+        appointmentsByYearLevel: const [],
+      );
+      final text = extractPdfText(
+        await AdminReportPdfService.build(
+          report: manyCourses,
+          reportType: AdminReportType.appointments,
+          chartType: ReportChartType.bar,
+          appointmentDimension: AppointmentReportDimension.course,
+        ),
+      );
+      for (var i = 1; i <= 7; i++) {
+        expect(text, contains('ProgramLabel$i'));
+      }
+      expect(text, contains('Remaining categories'));
+    },
+  );
+
+  test(
+    'Emotional Activity PDF includes summary metrics matching preview',
+    () async {
+      final emotionalReport = AdminReportAnalytics.fromJson({
+        'generatedAt': '2026-11-16T04:00:00Z',
+        'population': {
+          'schoolYear': '2026-2027',
+          'configured': true,
+          'status': 'current',
+          'departments': ['CAS'],
+          'populations': {'CAS': 100},
+          'totalPopulation': 100,
+        },
+        'emotionalActivity': {
+          'status': 'ready',
+          'suppressed': false,
+          'suppressionThreshold': 10,
+          'sourceScopeKey': 'all',
+          'sourceScopeLabel': 'All approved sources',
+          'schoolYear': '2026-2027',
+          'dateRangeLabel': 'Academic year 2026-2027',
+          'participationRate': 25.0,
+          'dominantValenceLabel': 'Positive (Levels 4-5)',
+          'moodCheckInShare': 62.5,
+          'assessmentShare': 37.5,
+          'valenceBreakdown': [
+            {
+              'key': 'positive',
+              'label': 'Positive (Levels 4-5)',
+              'percentage': 70.0,
+              'suppressed': false,
+            },
+          ],
+        },
+      });
+      final text = extractPdfText(
+        await AdminReportPdfService.build(
+          report: emotionalReport,
+          reportType: AdminReportType.emotionalActivity,
+          chartType: ReportChartType.bar,
+        ),
+      );
+      expect(text, contains('Population participation'));
+      expect(text, contains('25%'));
+      expect(text, contains('Primary emotional pattern'));
+      expect(text, contains('Positive (Levels 4-5)'));
+    },
+  );
+
+  test(
+    'Emotional Activity PDF falls back to appUserCohortShare when participationRate is null',
+    () async {
+      final cohortOnlyReport = AdminReportAnalytics.fromJson({
+        'generatedAt': '2026-11-16T04:00:00Z',
+        'population': {
+          'schoolYear': '2026-2027',
+          'configured': false,
+          'status': 'current',
+        },
+        'emotionalActivity': {
+          'status': 'ready',
+          'suppressed': false,
+          'suppressionThreshold': 10,
+          'sourceScopeKey': 'all',
+          'sourceScopeLabel': 'All approved sources',
+          'schoolYear': '2026-2027',
+          'dateRangeLabel': 'Academic year 2026-2027',
+          'participationRate': null,
+          'appUserCohortShare': 42.5,
+          'dominantValenceLabel': 'Positive (Levels 4-5)',
+          'valenceBreakdown': [
+            {
+              'key': 'positive',
+              'label': 'Positive (Levels 4-5)',
+              'percentage': 70.0,
+              'suppressed': false,
+            },
+          ],
+        },
+      });
+      final text = extractPdfText(
+        await AdminReportPdfService.build(
+          report: cohortOnlyReport,
+          reportType: AdminReportType.emotionalActivity,
+          chartType: ReportChartType.bar,
+        ),
+      );
+      expect(text, contains('42.5%'));
+      expect(text, isNot(contains('Not available')));
+    },
+  );
+
+  test(
+    'Users PDF renders Selected app-user category only table when userCategoryKey != all',
+    () async {
+      final multiCategoryReport = AdminReportAnalytics.fromJson({
+        'generatedAt': '2026-11-16T04:00:00Z',
+        'population': {
+          'schoolYear': '2026-2027',
+          'configured': true,
+          'status': 'current',
+        },
+        'users': {
+          'scopeKey': 'students',
+          'scopeLabel': 'Students',
+          'overallActivePercentage': 50,
+          'categories': [
+            {
+              'key': 'students',
+              'label': 'Students',
+              'populationPercentage': 30,
+              'activePercentage': 50,
+            },
+            {
+              'key': 'faculty',
+              'label': 'Faculty',
+              'populationPercentage': 70,
+              'activePercentage': 20,
+            },
+          ],
+        },
+      });
+      final text = extractPdfText(
+        await AdminReportPdfService.build(
+          report: multiCategoryReport,
+          reportType: AdminReportType.users,
+          chartType: ReportChartType.bar,
+          userCategoryKey: 'students',
+        ),
+      );
+      expect(text, contains('Selected app-user category only'));
+      expect(text, contains('Students'));
+      expect(text, contains('30%'));
+      expect(text, contains('50%'));
+      expect(text, isNot(contains('Faculty')));
+      expect(text, isNot(contains('70%')));
+    },
+  );
+
+  test(
+    'AdminReportPdfService pie chart safely handles NaN and Infinity percentages without throwing',
+    () async {
+      final badItemsReport = AdminReportAnalytics.fromJson({
+        'generatedAt': '2026-11-16T04:00:00Z',
+        'population': {
+          'schoolYear': '2026-2027',
+          'configured': true,
+          'status': 'current',
+          'departments': ['CAS'],
+          'populations': {'CAS': 100},
+          'totalPopulation': 100,
+        },
+        'appointments': {
+          'totalAppointments': 10,
+          'uniqueStudentsServed': 8,
+          'department': [
+            {'key': 'x', 'label': 'X', 'percentage': 'NaN'},
+            {'key': 'y', 'label': 'Y', 'percentage': 'Infinity'},
+          ],
+        },
+      });
+      final bytes = await AdminReportPdfService.build(
+        report: badItemsReport,
         reportType: AdminReportType.appointments,
-        chartType: ReportChartType.bar,
-        appointmentDimension: AppointmentReportDimension.course,
-      ),
-    );
-    for (var i = 1; i <= 7; i++) {
-      expect(text, contains('ProgramLabel$i'));
-    }
-    expect(text, contains('Remaining categories'));
-  });
-
-  test('Emotional Activity PDF includes summary metrics matching preview', () async {
-    final emotionalReport = AdminReportAnalytics.fromJson({
-      'generatedAt': '2026-11-16T04:00:00Z',
-      'population': {
-        'schoolYear': '2026-2027',
-        'configured': true,
-        'status': 'current',
-        'departments': ['CAS'],
-        'populations': {'CAS': 100},
-        'totalPopulation': 100,
-      },
-      'emotionalActivity': {
-        'status': 'ready',
-        'suppressed': false,
-        'suppressionThreshold': 10,
-        'sourceScopeKey': 'all',
-        'sourceScopeLabel': 'All approved sources',
-        'schoolYear': '2026-2027',
-        'dateRangeLabel': 'Academic year 2026-2027',
-        'participationRate': 25.0,
-        'dominantValenceLabel': 'Positive (Levels 4-5)',
-        'moodCheckInShare': 62.5,
-        'assessmentShare': 37.5,
-        'valenceBreakdown': [
-          {
-            'key': 'positive',
-            'label': 'Positive (Levels 4-5)',
-            'percentage': 70.0,
-            'suppressed': false,
-          },
-        ],
-      },
-    });
-    final text = extractPdfText(
-      await AdminReportPdfService.build(
-        report: emotionalReport,
-        reportType: AdminReportType.emotionalActivity,
-        chartType: ReportChartType.bar,
-      ),
-    );
-    expect(text, contains('Population participation'));
-    expect(text, contains('25%'));
-    expect(text, contains('Primary emotional pattern'));
-    expect(text, contains('Positive (Levels 4-5)'));
-  });
-
-  test('Emotional Activity PDF falls back to appUserCohortShare when participationRate is null', () async {
-    final cohortOnlyReport = AdminReportAnalytics.fromJson({
-      'generatedAt': '2026-11-16T04:00:00Z',
-      'population': {
-        'schoolYear': '2026-2027',
-        'configured': false,
-        'status': 'current',
-      },
-      'emotionalActivity': {
-        'status': 'ready',
-        'suppressed': false,
-        'suppressionThreshold': 10,
-        'sourceScopeKey': 'all',
-        'sourceScopeLabel': 'All approved sources',
-        'schoolYear': '2026-2027',
-        'dateRangeLabel': 'Academic year 2026-2027',
-        'participationRate': null,
-        'appUserCohortShare': 42.5,
-        'dominantValenceLabel': 'Positive (Levels 4-5)',
-        'valenceBreakdown': [
-          {
-            'key': 'positive',
-            'label': 'Positive (Levels 4-5)',
-            'percentage': 70.0,
-            'suppressed': false,
-          },
-        ],
-      },
-    });
-    final text = extractPdfText(
-      await AdminReportPdfService.build(
-        report: cohortOnlyReport,
-        reportType: AdminReportType.emotionalActivity,
-        chartType: ReportChartType.bar,
-      ),
-    );
-    expect(text, contains('42.5%'));
-    expect(text, isNot(contains('Not available')));
-  });
-
-  test('Users PDF renders Selected app-user category only table when userCategoryKey != all', () async {
-    final multiCategoryReport = AdminReportAnalytics.fromJson({
-      'generatedAt': '2026-11-16T04:00:00Z',
-      'population': {
-        'schoolYear': '2026-2027',
-        'configured': true,
-        'status': 'current',
-      },
-      'users': {
-        'scopeKey': 'students',
-        'scopeLabel': 'Students',
-        'overallActivePercentage': 50,
-        'categories': [
-          {
-            'key': 'students',
-            'label': 'Students',
-            'populationPercentage': 30,
-            'activePercentage': 50,
-          },
-          {
-            'key': 'faculty',
-            'label': 'Faculty',
-            'populationPercentage': 70,
-            'activePercentage': 20,
-          },
-        ],
-      },
-    });
-    final text = extractPdfText(
-      await AdminReportPdfService.build(
-        report: multiCategoryReport,
-        reportType: AdminReportType.users,
-        chartType: ReportChartType.bar,
-        userCategoryKey: 'students',
-      ),
-    );
-    expect(text, contains('Selected app-user category only'));
-    expect(text, contains('Students'));
-    expect(text, contains('30%'));
-    expect(text, contains('50%'));
-    expect(text, isNot(contains('Faculty')));
-    expect(text, isNot(contains('70%')));
-  });
-
-  test('AdminReportPdfService pie chart safely handles NaN and Infinity percentages without throwing', () async {
-    final badItemsReport = AdminReportAnalytics.fromJson({
-      'generatedAt': '2026-11-16T04:00:00Z',
-      'population': {
-        'schoolYear': '2026-2027',
-        'configured': true,
-        'status': 'current',
-        'departments': ['CAS'],
-        'populations': {'CAS': 100},
-        'totalPopulation': 100,
-      },
-      'appointments': {
-        'totalAppointments': 10,
-        'uniqueStudentsServed': 8,
-        'department': [
-          {'key': 'x', 'label': 'X', 'percentage': 'NaN'},
-          {'key': 'y', 'label': 'Y', 'percentage': 'Infinity'},
-        ],
-      },
-    });
-    final bytes = await AdminReportPdfService.build(
-      report: badItemsReport,
-      reportType: AdminReportType.appointments,
-      chartType: ReportChartType.pie,
-    );
-    expect(bytes.length, greaterThan(1000));
-  });
+        chartType: ReportChartType.pie,
+      );
+      expect(bytes.length, greaterThan(1000));
+    },
+  );
 }

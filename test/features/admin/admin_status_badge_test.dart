@@ -234,56 +234,65 @@ void main() {
   });
 
   group('AdminStatusDomain.followUp & resolveFollowUpOfferStatus', () {
-    test('maps AdminStatusDomain.followUp keys to canonical semantic tones', () {
-      final offered = resolveAdminStatus(
-        AdminStatusDomain.followUp,
-        'offered',
-      );
-      final booked = resolveAdminStatus(AdminStatusDomain.followUp, 'booked');
-      final completed = resolveAdminStatus(
-        AdminStatusDomain.followUp,
-        'completed',
-      );
-      final declined = resolveAdminStatus(
-        AdminStatusDomain.followUp,
-        'declined',
-      );
-      final cancelled = resolveAdminStatus(
-        AdminStatusDomain.followUp,
-        'cancelled',
-      );
-      final expired = resolveAdminStatus(AdminStatusDomain.followUp, 'expired');
-      final noShow = resolveAdminStatus(AdminStatusDomain.followUp, 'no_show');
+    test(
+      'maps AdminStatusDomain.followUp keys to canonical semantic tones',
+      () {
+        final offered = resolveAdminStatus(
+          AdminStatusDomain.followUp,
+          'offered',
+        );
+        final booked = resolveAdminStatus(AdminStatusDomain.followUp, 'booked');
+        final completed = resolveAdminStatus(
+          AdminStatusDomain.followUp,
+          'completed',
+        );
+        final declined = resolveAdminStatus(
+          AdminStatusDomain.followUp,
+          'declined',
+        );
+        final cancelled = resolveAdminStatus(
+          AdminStatusDomain.followUp,
+          'cancelled',
+        );
+        final expired = resolveAdminStatus(
+          AdminStatusDomain.followUp,
+          'expired',
+        );
+        final noShow = resolveAdminStatus(
+          AdminStatusDomain.followUp,
+          'no_show',
+        );
 
-      expect(offered.tone, AdminSemanticTone.amber);
-      expect(offered.label, 'Awaiting Client Response');
-      expect(offered.icon, Icons.hourglass_top_outlined);
-      expect(offered.backgroundColor, AdminColors.amberBg);
-      expect(offered.foregroundColor, AdminColors.amberFg);
-      expect(offered.borderColor, AdminColors.amberBorder);
+        expect(offered.tone, AdminSemanticTone.amber);
+        expect(offered.label, 'Awaiting Client Response');
+        expect(offered.icon, Icons.hourglass_top_outlined);
+        expect(offered.backgroundColor, AdminColors.amberBg);
+        expect(offered.foregroundColor, AdminColors.amberFg);
+        expect(offered.borderColor, AdminColors.amberBorder);
 
-      expect(booked.tone, AdminSemanticTone.blue);
-      expect(booked.label, 'Booked');
-      expect(booked.icon, Icons.event_available_outlined);
+        expect(booked.tone, AdminSemanticTone.blue);
+        expect(booked.label, 'Booked');
+        expect(booked.icon, Icons.event_available_outlined);
 
-      expect(completed.tone, AdminSemanticTone.green);
-      expect(completed.label, 'Completed');
-      expect(completed.icon, Icons.check_circle_outline);
+        expect(completed.tone, AdminSemanticTone.green);
+        expect(completed.label, 'Completed');
+        expect(completed.icon, Icons.check_circle_outline);
 
-      expect(declined.tone, AdminSemanticTone.neutral);
-      expect(declined.label, 'Declined');
+        expect(declined.tone, AdminSemanticTone.neutral);
+        expect(declined.label, 'Declined');
 
-      expect(cancelled.tone, AdminSemanticTone.neutral);
-      expect(cancelled.label, 'Cancelled');
+        expect(cancelled.tone, AdminSemanticTone.neutral);
+        expect(cancelled.label, 'Cancelled');
 
-      expect(expired.tone, AdminSemanticTone.neutral);
-      expect(expired.label, 'Expired');
-      expect(expired.icon, Icons.timer_off_outlined);
+        expect(expired.tone, AdminSemanticTone.neutral);
+        expect(expired.label, 'Expired');
+        expect(expired.icon, Icons.timer_off_outlined);
 
-      expect(noShow.tone, AdminSemanticTone.red);
-      expect(noShow.label, 'No-show');
-      expect(noShow.icon, Icons.person_off_outlined);
-    });
+        expect(noShow.tone, AdminSemanticTone.red);
+        expect(noShow.label, 'No-show');
+        expect(noShow.icon, Icons.person_off_outlined);
+      },
+    );
 
     test(
       'resolveFollowUpOfferStatus highlights pending offered state in amber without green',
@@ -295,7 +304,10 @@ void main() {
         expect(offered.presentation.backgroundColor, AdminColors.amberBg);
         expect(offered.presentation.foregroundColor, AdminColors.amberFg);
         expect(offered.presentation.borderColor, AdminColors.amberBorder);
-        expect(offered.presentation.backgroundColor, isNot(AdminColors.greenBg));
+        expect(
+          offered.presentation.backgroundColor,
+          isNot(AdminColors.greenBg),
+        );
         expect(offered.supportingText, contains('client has not booked'));
       },
     );

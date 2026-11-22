@@ -556,76 +556,77 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   Widget build(BuildContext context) {
     final inboxController = _activeCounselorInboxController;
     final body = LayoutBuilder(
-    builder: (context, constraints) {
-      final compact = constraints.maxWidth < 760;
-      return Scaffold(
-        backgroundColor: _cream,
-        drawer: compact
-            ? Drawer(
-                child: PortalWorkspaceNavigation(
-                  page: _page,
-                  onChanged: _setPage,
-                  compact: true,
-                  accessRole: _repository.currentAccessRole,
-                  isSuperAdmin: _repository.isSuperAdmin,
-                ),
-              )
-            : null,
-        body: Row(
-          children: [
-            if (!compact)
-              SizedBox(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  width: _navCollapsed
-                      ? 76
-                      : constraints.maxWidth < 1120
-                      ? 224
-                      : 252,
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 760;
+        return Scaffold(
+          backgroundColor: _cream,
+          drawer: compact
+              ? Drawer(
                   child: PortalWorkspaceNavigation(
                     page: _page,
                     onChanged: _setPage,
-                    collapsed: _navCollapsed,
+                    compact: true,
                     accessRole: _repository.currentAccessRole,
                     isSuperAdmin: _repository.isSuperAdmin,
                   ),
+                )
+              : null,
+          body: Row(
+            children: [
+              if (!compact)
+                SizedBox(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    width: _navCollapsed
+                        ? 76
+                        : constraints.maxWidth < 1120
+                        ? 224
+                        : 252,
+                    child: PortalWorkspaceNavigation(
+                      page: _page,
+                      onChanged: _setPage,
+                      collapsed: _navCollapsed,
+                      accessRole: _repository.currentAccessRole,
+                      isSuperAdmin: _repository.isSuperAdmin,
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: Column(
+                  children: [
+                    _PortalHeader(
+                      compact: compact,
+                      navCollapsed: _navCollapsed,
+                      onMenuPressed: compact
+                          ? null
+                          : () =>
+                                setState(() => _navCollapsed = !_navCollapsed),
+                      page: _page,
+                      repository: _repository,
+                      notifications: _notifications,
+                      onOpenNotifications: () =>
+                          _setPage(AdminPortalPage.notifications),
+                      confirmLeave: _rosterLeaveGuard.confirmLeave,
+                    ),
+                    Expanded(child: _buildPage()),
+                  ],
                 ),
               ),
-            Expanded(
-              child: Column(
-                children: [
-                  _PortalHeader(
-                    compact: compact,
-                    navCollapsed: _navCollapsed,
-                    onMenuPressed: compact
-                        ? null
-                        : () => setState(() => _navCollapsed = !_navCollapsed),
-                    page: _page,
-                    repository: _repository,
-                    notifications: _notifications,
-                    onOpenNotifications: () =>
-                        _setPage(AdminPortalPage.notifications),
-                    confirmLeave: _rosterLeaveGuard.confirmLeave,
-                  ),
-                  Expanded(child: _buildPage()),
-                ],
-              ),
-            ),
-          ],
-        ),
-        floatingActionButton:
-            _repository.currentAccessRole.canAccessClinicalData &&
-                _page != AdminPortalPage.notifications
-            ? _NotificationBubble(
-                notifications: _notifications,
-                onPressed: () => _setPage(AdminPortalPage.notifications),
-              )
-            : null,
-        floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
-      );
-    },
-  );
+            ],
+          ),
+          floatingActionButton:
+              _repository.currentAccessRole.canAccessClinicalData &&
+                  _page != AdminPortalPage.notifications
+              ? _NotificationBubble(
+                  notifications: _notifications,
+                  onPressed: () => _setPage(AdminPortalPage.notifications),
+                )
+              : null,
+          floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
+        );
+      },
+    );
     if (inboxController != null) {
       return CounselorInboxScope(notifier: inboxController, child: body);
     }
@@ -970,7 +971,8 @@ class PortalWorkspaceNavigation extends StatelessWidget {
                                     child: SizedBox(
                                       height: 46,
                                       child: Center(
-                                        child: item == AdminPortalPage.inquiries &&
+                                        child:
+                                            item == AdminPortalPage.inquiries &&
                                                 canShowCounselorMessagingInInquiries(
                                                   accessRole,
                                                 )

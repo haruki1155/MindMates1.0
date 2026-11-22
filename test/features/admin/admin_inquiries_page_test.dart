@@ -705,7 +705,8 @@ void main() {
         uid: 'c1',
         resolveError: FirebaseFunctionsException(
           code: 'failed-precondition',
-          message: 'Acknowledge receipt before marking this inquiry as resolved.',
+          message:
+              'Acknowledge receipt before marking this inquiry as resolved.',
         ),
       );
       addTearDown(preconditionRepo.dispose);

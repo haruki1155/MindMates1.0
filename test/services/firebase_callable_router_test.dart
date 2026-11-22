@@ -43,10 +43,13 @@ void main() {
     expect(FirebaseCallableRouter.name('unlistedCallable'), 'unlistedCallable');
   });
 
-  test('routes downloadClinicalSessionEvidence consistently across environments', () {
-    expect(
-      FirebaseCallableRouter.name('downloadClinicalSessionEvidence'),
-      'downloadClinicalSessionEvidence',
-    );
-  });
+  test(
+    'routes downloadClinicalSessionEvidence consistently across environments',
+    () {
+      expect(
+        FirebaseCallableRouter.name('downloadClinicalSessionEvidence'),
+        'downloadClinicalSessionEvidence',
+      );
+    },
+  );
 }

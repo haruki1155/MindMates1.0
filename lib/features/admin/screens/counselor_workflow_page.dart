@@ -136,8 +136,9 @@ class CounselorWorkflowPage extends StatelessWidget {
                             appointmentsById,
                           ),
                           onOpenAppointments: onOpenAppointments,
-                          canViewStudentInfo:
-                              repository.currentAccessRole.canAccessClinicalData,
+                          canViewStudentInfo: repository
+                              .currentAccessRole
+                              .canAccessClinicalData,
                           studentInfoLoader: studentInfoLoader,
                         ),
                       ),

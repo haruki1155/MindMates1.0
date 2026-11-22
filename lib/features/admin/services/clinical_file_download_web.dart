@@ -13,8 +13,8 @@ Future<void> saveClinicalFileBytes(
       .trim();
   final safeName =
       sanitizedName.isEmpty || RegExp(r'^[._\s]+$').hasMatch(sanitizedName)
-          ? 'attachment'
-          : sanitizedName;
+      ? 'attachment'
+      : sanitizedName;
   final safeContentType = contentType.trim().isEmpty
       ? 'application/octet-stream'
       : contentType.trim();

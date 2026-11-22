@@ -70,21 +70,19 @@ class CounselorDashboardAnalytics {
     );
 
     List<AppointmentModel> normalizeToManila(List<AppointmentModel> source) =>
-        source
-            .map((a) {
-              final m = toManilaDateTime(a.scheduledAt);
-              return a.copyWith(
-                scheduledAt: DateTime(
-                  m.year,
-                  m.month,
-                  m.day,
-                  m.hour,
-                  m.minute,
-                  m.second,
-                ),
-              );
-            })
-            .toList();
+        source.map((a) {
+          final m = toManilaDateTime(a.scheduledAt);
+          return a.copyWith(
+            scheduledAt: DateTime(
+              m.year,
+              m.month,
+              m.day,
+              m.hour,
+              m.minute,
+              m.second,
+            ),
+          );
+        }).toList();
 
     final normalizedPacc = normalizeToManila(appointments);
     final normalizedMy = normalizeToManila(myAppointments);

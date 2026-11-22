@@ -137,7 +137,10 @@ void main() {
           'status': 'Some areas may benefit from attention.',
         });
         expect(sentenceOnly.profileStatus, isNull);
-        expect(sentenceOnly.displayStatus, 'Some areas may benefit from attention.');
+        expect(
+          sentenceOnly.displayStatus,
+          'Some areas may benefit from attention.',
+        );
 
         final profileOnly = AdminAssessmentRecord.fromJson({
           'id': 'full-profile-only',
@@ -386,21 +389,13 @@ void main() {
           'Insufficient responses',
           Icons.help_outline,
         ),
-        'low': (
-          AdminSemanticTone.green,
-          'Low',
-          Icons.check_circle_outline,
-        ),
+        'low': (AdminSemanticTone.green, 'Low', Icons.check_circle_outline),
         'moderate': (
           AdminSemanticTone.amber,
           'Moderate',
           Icons.warning_amber_outlined,
         ),
-        'high': (
-          AdminSemanticTone.red,
-          'High',
-          Icons.priority_high_rounded,
-        ),
+        'high': (AdminSemanticTone.red, 'High', Icons.priority_high_rounded),
         'veryHigh': (
           AdminSemanticTone.red,
           'Very high',
@@ -435,7 +430,11 @@ void main() {
         expect(presentation.tone, expectedTone, reason: 'tone for "$raw"');
         expect(presentation.label, expectedLabel, reason: 'label for "$raw"');
         expect(presentation.icon, expectedIcon, reason: 'icon for "$raw"');
-        expect(style.label, presentation.label, reason: 'style label for "$raw"');
+        expect(
+          style.label,
+          presentation.label,
+          reason: 'style label for "$raw"',
+        );
         expect(
           style.foreground,
           presentation.foregroundColor,

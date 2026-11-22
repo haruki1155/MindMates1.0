@@ -216,14 +216,13 @@ Future<void> _pumpPortal(
   await tester.pumpAndSettle();
 }
 
-List<({AdminSemanticTone tone, Color bg, Color fg, IconData icon, String label})>
+List<
+  ({AdminSemanticTone tone, Color bg, Color fg, IconData icon, String label})
+>
 _captureBadgeSignatures(WidgetTester tester) {
   final resultsFinder = find.byType(AdminAssessmentResultsPage);
   final badges = tester.widgetList<AdminStatusBadge>(
-    find.descendant(
-      of: resultsFinder,
-      matching: find.byType(AdminStatusBadge),
-    ),
+    find.descendant(of: resultsFinder, matching: find.byType(AdminStatusBadge)),
   );
   return badges
       .map(

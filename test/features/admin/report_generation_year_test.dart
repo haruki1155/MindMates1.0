@@ -41,26 +41,29 @@ class _ReportRepository extends AdminPortalRepository {
       'population': {
         'schoolYear': year,
         'configured': configured,
-        'status': statusOverride ?? (year == '2025-2026' ? 'closed' : 'current'),
+        'status':
+            statusOverride ?? (year == '2025-2026' ? 'closed' : 'current'),
         'departments': ['College of Computing'],
         'populations': {
           'College of Computing': year == '2025-2026' ? 120 : 240,
         },
         'totalPopulation': configured ? (year == '2025-2026' ? 120 : 240) : 0,
-        'years': customYears ?? [
-          {
-            'schoolYear': '2026-2027',
-            'startDate': '2026-06-01',
-            'endDate': '2027-05-31',
-            'status': 'current',
-          },
-          {
-            'schoolYear': '2025-2026',
-            'startDate': '2025-06-01',
-            'endDate': '2026-05-31',
-            'status': 'closed',
-          },
-        ],
+        'years':
+            customYears ??
+            [
+              {
+                'schoolYear': '2026-2027',
+                'startDate': '2026-06-01',
+                'endDate': '2027-05-31',
+                'status': 'current',
+              },
+              {
+                'schoolYear': '2025-2026',
+                'startDate': '2025-06-01',
+                'endDate': '2026-05-31',
+                'status': 'closed',
+              },
+            ],
       },
       'appointments': {
         'totalAppointments': year == '2025-2026' ? 12 : 24,
@@ -572,10 +575,14 @@ class _AutoSyncReportRepository extends AdminPortalRepository {
   }) async {
     rawRequestedYears.add(schoolYear);
     if (failForPlanned && schoolYear == '2027-2028') {
-      throw StateError('Planned academic years cannot generate official reports.');
+      throw StateError(
+        'Planned academic years cannot generate official reports.',
+      );
     }
     final returnUnknown = schoolYear == null && forceUnknownNext;
-    final resolvedYear = returnUnknown ? '2026-2027' : (schoolYear ?? '2025-2026');
+    final resolvedYear = returnUnknown
+        ? '2026-2027'
+        : (schoolYear ?? '2025-2026');
     return AdminReportAnalytics.fromJson({
       'generatedAt': '2026-09-19T00:00:00Z',
       'population': {
@@ -583,7 +590,9 @@ class _AutoSyncReportRepository extends AdminPortalRepository {
         'configured': !returnUnknown,
         'status': returnUnknown ? 'unknown' : 'current',
         'departments': ['College of Computing'],
-        'populations': returnUnknown ? <String, int>{} : {'College of Computing': 120},
+        'populations': returnUnknown
+            ? <String, int>{}
+            : {'College of Computing': 120},
         'totalPopulation': returnUnknown ? 0 : 120,
         'years': [
           {
@@ -641,7 +650,9 @@ class _ManualUnknownYearRepository extends AdminPortalRepository {
         'configured': !isManualUnknown,
         'status': isManualUnknown ? 'unknown' : 'current',
         'departments': ['College of Computing'],
-        'populations': isManualUnknown ? <String, int>{} : {'College of Computing': 120},
+        'populations': isManualUnknown
+            ? <String, int>{}
+            : {'College of Computing': 120},
         'totalPopulation': isManualUnknown ? 0 : 120,
         'years': [
           {
@@ -711,10 +722,7 @@ class _PlannedAndVoidedOnlyRepository extends AdminPortalRepository {
           },
         ],
       },
-      'appointments': {
-        'totalAppointments': 0,
-        'uniqueStudentsServed': 0,
-      },
+      'appointments': {'totalAppointments': 0, 'uniqueStudentsServed': 0},
     });
   }
 

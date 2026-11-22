@@ -491,7 +491,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('No app-user activity data available for the selected filters.'),
+        find.text(
+          'No app-user activity data available for the selected filters.',
+        ),
         findsOneWidget,
       );
       expect(find.text('100%'), findsNothing);
@@ -526,10 +528,7 @@ void main() {
               },
             ],
           },
-          'appointments': {
-            'totalAppointments': 0,
-            'uniqueStudentsServed': 0,
-          },
+          'appointments': {'totalAppointments': 0, 'uniqueStudentsServed': 0},
         }),
       );
 
@@ -573,10 +572,7 @@ void main() {
               },
             ],
           },
-          'appointments': {
-            'totalAppointments': 4,
-            'uniqueStudentsServed': 3,
-          },
+          'appointments': {'totalAppointments': 4, 'uniqueStudentsServed': 3},
         }),
       );
 
@@ -595,7 +591,10 @@ void main() {
       await tester.tap(find.text('Counseling appointments'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('fewer than 5 unique students'), findsOneWidget);
+      expect(
+        find.textContaining('fewer than 5 unique students'),
+        findsOneWidget,
+      );
     },
   );
 

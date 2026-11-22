@@ -1414,15 +1414,11 @@ String _normalizedKey(String? value) =>
     (value ?? '').trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
 String _v4ProfileLabel(String? value) => switch (_normalizedKey(value)) {
-  'generallysupported' ||
-  'supported' ||
-  'wellbeingappearsgenerallysupported' =>
+  'generallysupported' || 'supported' || 'wellbeingappearsgenerallysupported' =>
     'Well-being appears generally supported.',
-  'mostlysupported' ||
-  'mostlysupportedwithanareatoexplore' =>
+  'mostlysupported' || 'mostlysupportedwithanareatoexplore' =>
     'Mostly supported, with an area to explore.',
-  'someareasneedattention' ||
-  'someareasmaybenefitfromattention' =>
+  'someareasneedattention' || 'someareasmaybenefitfromattention' =>
     'Some areas may benefit from attention.',
   'supportmayhelp' ||
   'supportmaybehelpfulrightnow' => 'Support may be helpful right now.',
@@ -1456,14 +1452,12 @@ String _v4DomainStatusLabel(String? value) => switch (_normalizedKey(value)) {
   'supported' ||
   'generallysupported' ||
   'supportedatpresent' => 'Supported at present',
-  'mostlysupported' ||
-  'mostlysupportedsomeareastoexplore' =>
+  'mostlysupported' || 'mostlysupportedsomeareastoexplore' =>
     'Mostly supported; some areas to explore',
   'somestrain' ||
   'someareasneedattention' ||
   'somestrainindicated' => 'Some strain indicated',
-  'supportmayhelp' ||
-  'supportmaybehelpful' => 'Support may be helpful',
+  'supportmayhelp' || 'supportmaybehelpful' => 'Support may be helpful',
   _ => 'More responses needed',
 };
 

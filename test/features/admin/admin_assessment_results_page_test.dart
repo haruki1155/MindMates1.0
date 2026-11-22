@@ -425,7 +425,9 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.widgetWithText(OutlinedButton, 'Full Assessment'));
+        await tester.tap(
+          find.widgetWithText(OutlinedButton, 'Full Assessment'),
+        );
         await tester.pumpAndSettle();
 
         await tester.tap(
@@ -548,7 +550,10 @@ void main() {
       );
       expect(find.text('1 assessment records'), findsOneWidget);
       expect(find.text('Alice One'), findsOneWidget);
-      expect(find.text('No assessment records match your filters.'), findsNothing);
+      expect(
+        find.text('No assessment records match your filters.'),
+        findsNothing,
+      );
     },
   );
 

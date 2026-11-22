@@ -59,20 +59,21 @@ class _FakeActivityLogRepository extends AdminPortalRepository {
     if (throwError != null) {
       throw throwError!;
     }
-    final filtered = filterActivityLogEvents(
-      seedEvents,
-      roleFilter: roleFilter,
-      actorIdFilter: actorId,
-      categoryFilter: category,
-      actionFilter: action,
-      searchQuery: search,
-      after: after,
-      before: before,
-    ).where((e) {
-      if (cursor == null) return true;
-      final ts = e.createdAt;
-      return ts != null && ts.isBefore(cursor);
-    }).toList();
+    final filtered =
+        filterActivityLogEvents(
+          seedEvents,
+          roleFilter: roleFilter,
+          actorIdFilter: actorId,
+          categoryFilter: category,
+          actionFilter: action,
+          searchQuery: search,
+          after: after,
+          before: before,
+        ).where((e) {
+          if (cursor == null) return true;
+          final ts = e.createdAt;
+          return ts != null && ts.isBefore(cursor);
+        }).toList();
 
     final page = filtered.take(pageSize).toList();
     return (events: page, hasMore: filtered.length > pageSize);
@@ -220,19 +221,21 @@ void main() {
       () {
         final allStaff = filterActivityLogEvents(sampleEvents);
         // Excludes ev-student-ignored (appUser).
-        expect(
-          allStaff.map((e) => e.id).toList(),
-          ['ev-admin-1', 'ev-counselor-1', 'ev-counselor-pii', 'ev-staff-1'],
-        );
+        expect(allStaff.map((e) => e.id).toList(), [
+          'ev-admin-1',
+          'ev-counselor-1',
+          'ev-counselor-pii',
+          'ev-staff-1',
+        ]);
 
         final counselorsOnly = filterActivityLogEvents(
           sampleEvents,
           roleFilter: ActivityActorRoleFilter.counselor,
         );
-        expect(
-          counselorsOnly.map((e) => e.id).toList(),
-          ['ev-counselor-1', 'ev-counselor-pii'],
-        );
+        expect(counselorsOnly.map((e) => e.id).toList(), [
+          'ev-counselor-1',
+          'ev-counselor-pii',
+        ]);
 
         final systemOnly = filterActivityLogEvents(
           sampleEvents,
@@ -319,10 +322,7 @@ void main() {
             MaterialApp(
               theme: AdminTheme.data,
               home: Scaffold(
-                body: ActivityLogsPage(
-                  repository: repo,
-                  clock: () => fixedNow,
-                ),
+                body: ActivityLogsPage(repository: repo, clock: () => fixedNow),
               ),
             ),
           );
@@ -366,10 +366,7 @@ void main() {
 
           expect(tester.takeException(), isNull);
           expect(find.text('Activity Logs'), findsOneWidget);
-          expect(
-            find.text('Timezone: Asia/Manila (UTC+8)'),
-            findsOneWidget,
-          );
+          expect(find.text('Timezone: Asia/Manila (UTC+8)'), findsOneWidget);
           // First page of 2 events loaded: ev-admin-1 and ev-counselor-1.
           expect(find.text('Staff role changed'), findsOneWidget);
           expect(find.text('Inquiry escalated to counselor'), findsOneWidget);
@@ -390,7 +387,10 @@ void main() {
         // Test incremental pagination ("Load more activity").
         await tester.tap(find.text('Load more activity'));
         await tester.pumpAndSettle();
-        expect(find.text('Student personal information viewed'), findsOneWidget);
+        expect(
+          find.text('Student personal information viewed'),
+          findsOneWidget,
+        );
         expect(find.text('Announcement published'), findsOneWidget);
         // Student targetId is redacted; student name never appears.
         expect(find.textContaining('student••••9876'), findsOneWidget);
@@ -448,10 +448,7 @@ void main() {
         MaterialApp(
           theme: AdminTheme.data,
           home: Scaffold(
-            body: ActivityLogsPage(
-              repository: repo,
-              clock: () => fixedNow,
-            ),
+            body: ActivityLogsPage(repository: repo, clock: () => fixedNow),
           ),
         ),
       );
@@ -477,10 +474,7 @@ void main() {
         MaterialApp(
           theme: AdminTheme.data,
           home: Scaffold(
-            body: ActivityLogsPage(
-              repository: repo,
-              clock: () => fixedNow,
-            ),
+            body: ActivityLogsPage(repository: repo, clock: () => fixedNow),
           ),
         ),
       );

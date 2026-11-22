@@ -382,10 +382,7 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
   void _loadOlderMessages() {
     final uid = _activeController?.activeUid;
     final studentId = selectedUser;
-    if (uid == null ||
-        studentId == null ||
-        _loadingOlder ||
-        !_hasMoreOlder) {
+    if (uid == null || studentId == null || _loadingOlder || !_hasMoreOlder) {
       return;
     }
     setState(() {
@@ -556,9 +553,7 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
         text: text,
         expectedUid: uid,
       );
-      if (mounted &&
-          _sendSeq == sendToken &&
-          controller.activeUid == uid) {
+      if (mounted && _sendSeq == sendToken && controller.activeUid == uid) {
         if (_failedAutoMarkUid == uid) {
           _failedAutoMarkWatermarkByStudent.remove(studentId);
         }
@@ -567,9 +562,7 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
         }
       }
     } catch (_) {
-      if (mounted &&
-          _sendSeq == sendToken &&
-          controller.activeUid == uid) {
+      if (mounted && _sendSeq == sendToken && controller.activeUid == uid) {
         final list = _outgoingByThreadKey[threadKey];
         if (list != null) {
           final index = list.indexWhere((m) => m.localId == localId);
@@ -588,9 +581,7 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
         );
       }
     } finally {
-      if (mounted &&
-          _sendSeq == sendToken &&
-          controller.activeUid == uid) {
+      if (mounted && _sendSeq == sendToken && controller.activeUid == uid) {
         setState(() => sending = false);
       }
     }
@@ -671,8 +662,9 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
                     stream: _collegesStream,
                     builder: (context, collegeSnapshot) {
                       Widget header;
-                      String? effectiveCollege =
-                          selectedCollege == 'all' ? null : selectedCollege;
+                      String? effectiveCollege = selectedCollege == 'all'
+                          ? null
+                          : selectedCollege;
                       final collegeCodeById = <String, String>{};
                       final collegeLabelById = <String, String>{};
 
@@ -775,8 +767,9 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
                 Expanded(
                   child: _buildInboxBody(
                     controller: controller,
-                    collegeFilter:
-                        selectedCollege == 'all' ? null : selectedCollege,
+                    collegeFilter: selectedCollege == 'all'
+                        ? null
+                        : selectedCollege,
                     collegeCodeById: const {},
                     collegeLabelById: const {},
                   ),

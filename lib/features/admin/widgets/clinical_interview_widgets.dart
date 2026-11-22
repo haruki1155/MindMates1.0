@@ -36,8 +36,10 @@ class ClinicalInterviewEditor extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       const SizedBox(height: 16),
-      Text('Session attachments',
-          style: Theme.of(context).textTheme.titleMedium),
+      Text(
+        'Session attachments',
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
       const SizedBox(height: 6),
       const Text(
         'Private counseling files. Visible only to authorized clinical staff, not the student.',
@@ -60,8 +62,11 @@ class ClinicalInterviewEditor extends StatelessWidget {
         ListTile(
           dense: true,
           contentPadding: EdgeInsets.zero,
-          leading: Icon(files[index].contentType.startsWith('image/')
-              ? Icons.image_outlined : Icons.description_outlined),
+          leading: Icon(
+            files[index].contentType.startsWith('image/')
+                ? Icons.image_outlined
+                : Icons.description_outlined,
+          ),
           title: Text(files[index].name),
           subtitle: Text('${(files[index].size / 1024).toStringAsFixed(0)} KB'),
           trailing: IconButton(
@@ -190,9 +195,9 @@ class _ClinicalInterviewRecordViewerState
     } catch (error) {
       if (mounted) {
         final message = _describeDownloadError(error);
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          SnackBar(content: Text(message)),
-        );
+        ScaffoldMessenger.maybeOf(
+          context,
+        )?.showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
       if (mounted) setState(() => _downloading = false);
@@ -207,8 +212,9 @@ class _ClinicalInterviewRecordViewerState
       if (_future == null)
         OutlinedButton.icon(
           onPressed: () {
-            final request = widget.repository
-                .getClinicalSessionEvidence(widget.appointmentId);
+            final request = widget.repository.getClinicalSessionEvidence(
+              widget.appointmentId,
+            );
             setState(() {
               _future = request;
             });
@@ -223,17 +229,21 @@ class _ClinicalInterviewRecordViewerState
             if (snapshot.hasError) {
               return TextButton.icon(
                 onPressed: () {
-                  final request = widget.repository
-                      .getClinicalSessionEvidence(widget.appointmentId);
+                  final request = widget.repository.getClinicalSessionEvidence(
+                    widget.appointmentId,
+                  );
                   setState(() {
                     _future = request;
                   });
                 },
                 icon: const Icon(Icons.refresh),
-                label: const Text('Unable to load session documentation. Retry'),
+                label: const Text(
+                  'Unable to load session documentation. Retry',
+                ),
               );
             }
-            if (!snapshot.hasData && snapshot.connectionState != ConnectionState.done) {
+            if (!snapshot.hasData &&
+                snapshot.connectionState != ConnectionState.done) {
               return const CircularProgressIndicator();
             }
             final record = snapshot.data;
@@ -243,19 +253,25 @@ class _ClinicalInterviewRecordViewerState
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Private session documentation',
-                    style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Private session documentation',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 _PrivateField(label: 'Session summary', value: record.summary),
                 if (record.attachments.isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  const Text('Private attachments',
-                    style: TextStyle(fontWeight: FontWeight.w700)),
+                  const Text(
+                    'Private attachments',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                   for (final file in record.attachments)
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.attach_file_outlined),
                       title: Text(file.name),
-                      subtitle: Text('${(file.size / 1024).toStringAsFixed(0)} KB'),
+                      subtitle: Text(
+                        '${(file.size / 1024).toStringAsFixed(0)} KB',
+                      ),
                       trailing: IconButton(
                         tooltip: 'Download ${file.name}',
                         onPressed: _downloading ? null : () => _download(file),
@@ -282,8 +298,10 @@ class _PrivateField extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+        Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+        ),
         Text(value.isEmpty ? 'Not recorded' : value),
       ],
     ),

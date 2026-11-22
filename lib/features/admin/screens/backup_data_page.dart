@@ -503,7 +503,9 @@ class _SummarySection extends StatelessWidget {
               columns;
 
           final actionButton = FilledButton.icon(
-            onPressed: !enabled || busy || summary.hasRunning ? null : onRequest,
+            onPressed: !enabled || busy || summary.hasRunning
+                ? null
+                : onRequest,
             icon: busy
                 ? const SizedBox(
                     width: 16,

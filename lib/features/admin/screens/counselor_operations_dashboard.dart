@@ -1045,10 +1045,7 @@ class _Row extends StatelessWidget {
           ),
           ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 120, maxWidth: 220),
-            child: Text(
-              'Student ••••$suffix',
-              overflow: TextOverflow.ellipsis,
-            ),
+            child: Text('Student ••••$suffix', overflow: TextOverflow.ellipsis),
           ),
           if (isAssignedToMe)
             const _CaseloadStatChip(
