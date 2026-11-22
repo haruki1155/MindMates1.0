@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../repositories/admin_portal_repository.dart';
-import '../theme/admin_theme.dart';
+import 'admin_status_presentation.dart';
 
 enum AssessmentView { quick, full }
 
@@ -14,103 +14,12 @@ class AssessmentStatusStyle {
   final Color background;
 
   static AssessmentStatusStyle fromStored(String? raw) {
-    final value = (raw ?? '').trim();
-    final key = value.toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
-    switch (key) {
-      case 'low':
-      case 'normal':
-      case 'healthy':
-        return AssessmentStatusStyle(
-          key == 'low'
-              ? 'Low'
-              : key == 'normal'
-              ? 'Normal'
-              : 'Healthy',
-          AdminColors.greenFg,
-          AdminColors.greenBg,
-        );
-      case 'supported':
-      case 'generallysupported':
-      case 'wellbeingsupported':
-      case 'stable':
-        return const AssessmentStatusStyle(
-          'Supported',
-          AdminColors.greenFg,
-          AdminColors.greenBg,
-        );
-      case 'mostlysupported':
-      case 'generallysteady':
-      case 'mild':
-        return AssessmentStatusStyle(
-          key == 'mild' ? 'Mild' : 'Mostly supported',
-          AdminColors.blueFg,
-          AdminColors.blueBg,
-        );
-      case 'moderate':
-        return const AssessmentStatusStyle(
-          'Moderate',
-          AdminColors.amberFg,
-          AdminColors.amberBg,
-        );
-      case 'somestrain':
-      case 'someareasneedattention':
-      case 'needsattention':
-      case 'watchful':
-        return const AssessmentStatusStyle(
-          'Some areas need attention',
-          AdminColors.amberFg,
-          AdminColors.amberBg,
-        );
-      case 'high':
-        return const AssessmentStatusStyle(
-          'High',
-          AdminColors.redFg,
-          AdminColors.redBg,
-        );
-      case 'veryhigh':
-      case 'severe':
-      case 'extremelysevere':
-        return AssessmentStatusStyle(
-          key == 'veryhigh'
-              ? 'Very high'
-              : key == 'severe'
-              ? 'Severe'
-              : 'Extremely severe',
-          AdminColors.redFg,
-          AdminColors.redBg,
-        );
-      case 'supportmayhelp':
-      case 'elevated':
-      case 'highsupport':
-      case 'prioritysupport':
-      case 'atrisk':
-        return const AssessmentStatusStyle(
-          'Support may help',
-          AdminColors.redFg,
-          AdminColors.redBg,
-        );
-      case 'completed':
-      case 'submitted':
-        return AssessmentStatusStyle(
-          key == 'completed' ? 'Completed' : 'Submitted',
-          AdminColors.violetFg,
-          AdminColors.violetBg,
-        );
-      case 'insufficientresponses':
-      case 'resultunavailable':
-      case '':
-        return const AssessmentStatusStyle(
-          'Result unavailable',
-          AdminColors.muted,
-          AdminColors.surfaceMuted,
-        );
-      default:
-        return AssessmentStatusStyle(
-          value.replaceAll('_', ' '),
-          AdminColors.muted,
-          AdminColors.surfaceMuted,
-        );
-    }
+    final presentation = resolveAdminStatus(AdminStatusDomain.assessment, raw);
+    return AssessmentStatusStyle(
+      presentation.label,
+      presentation.foregroundColor,
+      presentation.backgroundColor,
+    );
   }
 }
 

@@ -91,6 +91,9 @@ class AdminStatusPresentation {
 String _normalizeKey(String? raw) =>
     (raw ?? '').trim().toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
 
+String _normalizeAssessmentKey(String? raw) =>
+    (raw ?? '').trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
 AdminStatusPresentation resolveAdminStatus(
   AdminStatusDomain domain,
   String? rawStatus, {
@@ -103,7 +106,10 @@ AdminStatusPresentation resolveAdminStatus(
     AdminStatusDomain.appointment => _resolveAppointment(key),
     AdminStatusDomain.inquiry => _resolveInquiry(key),
     AdminStatusDomain.account => _resolveAccount(key),
-    AdminStatusDomain.assessment => _resolveAssessment(key, raw),
+    AdminStatusDomain.assessment => _resolveAssessment(
+      _normalizeAssessmentKey(raw),
+      raw,
+    ),
     AdminStatusDomain.appointmentType => _resolveAppointmentType(key),
   };
 
@@ -251,16 +257,27 @@ AdminStatusPresentation _resolveAssessment(String key, String raw) =>
       'supported' ||
       'generallysupported' ||
       'wellbeingsupported' ||
-      'stable' => AdminStatusPresentation.fromTone(
+      'stable' ||
+      'thriving' ||
+      'thrivingpatterns' ||
+      'supportedatpresent' ||
+      'wellbeingappearsgenerallysupported' => AdminStatusPresentation.fromTone(
         tone: AdminSemanticTone.green,
         label: 'Supported',
         icon: Icons.check_circle_outline,
       ),
-      'mostlysupported' ||
-      'generallysteady' ||
       'mild' => AdminStatusPresentation.fromTone(
         tone: AdminSemanticTone.blue,
-        label: key == 'mild' ? 'Mild' : 'Mostly supported',
+        label: 'Mild',
+        icon: Icons.info_outline,
+      ),
+      'mostlysupported' ||
+      'generallysteady' ||
+      'balancedpatterns' ||
+      'mostlysupportedwithanareatoexplore' ||
+      'mostlysupportedsomeareastoexplore' => AdminStatusPresentation.fromTone(
+        tone: AdminSemanticTone.blue,
+        label: 'Mostly supported',
         icon: Icons.info_outline,
       ),
       'moderate' => AdminStatusPresentation.fromTone(
@@ -271,7 +288,11 @@ AdminStatusPresentation _resolveAssessment(String key, String raw) =>
       'somestrain' ||
       'someareasneedattention' ||
       'needsattention' ||
-      'watchful' => AdminStatusPresentation.fromTone(
+      'needsimprovement' ||
+      'watchful' ||
+      'areastostrengthen' ||
+      'somestrainindicated' ||
+      'someareasmaybenefitfromattention' => AdminStatusPresentation.fromTone(
         tone: AdminSemanticTone.amber,
         label: 'Some areas need attention',
         icon: Icons.warning_amber_outlined,
@@ -296,7 +317,10 @@ AdminStatusPresentation _resolveAssessment(String key, String raw) =>
       'elevated' ||
       'highsupport' ||
       'prioritysupport' ||
-      'atrisk' => AdminStatusPresentation.fromTone(
+      'atrisk' ||
+      'supportmaybeuseful' ||
+      'supportmaybehelpful' ||
+      'supportmaybehelpfulrightnow' => AdminStatusPresentation.fromTone(
         tone: AdminSemanticTone.red,
         label: 'Support may help',
         icon: Icons.priority_high_rounded,
@@ -307,12 +331,20 @@ AdminStatusPresentation _resolveAssessment(String key, String raw) =>
         icon: Icons.assignment_turned_in_outlined,
       ),
       'insufficientresponses' ||
+      'insufficient' ||
+      'moreresponsesneeded' ||
+      'moreresponsesareneededforacompleteprofile' =>
+        AdminStatusPresentation.fromTone(
+          tone: AdminSemanticTone.neutral,
+          label: 'Insufficient responses',
+          icon: Icons.help_outline,
+        ),
       'resultunavailable' ||
       'statusunavailable' ||
       'notclassified' ||
       '' => AdminStatusPresentation.fromTone(
         tone: AdminSemanticTone.neutral,
-        label: 'Status unavailable',
+        label: 'Result unavailable',
         icon: Icons.help_outline,
       ),
       _ => AdminStatusPresentation.fromTone(

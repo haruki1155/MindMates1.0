@@ -17,6 +17,7 @@ class AdminAssessmentResultsPage extends StatefulWidget {
     required this.repository,
     this.loadParticipants,
     this.onAssessmentOpen,
+    this.statusRepository,
   });
   final AdminPortalRepository repository;
   final Future<Map<String, AssessmentParticipantInfo>> Function(
@@ -25,6 +26,7 @@ class AdminAssessmentResultsPage extends StatefulWidget {
   loadParticipants;
   final void Function(AdminAssessmentRecord record, String name)?
   onAssessmentOpen;
+  final AdminStatusRepository? statusRepository;
 
   @override
   State<AdminAssessmentResultsPage> createState() =>
@@ -97,10 +99,20 @@ class _AdminAssessmentResultsPageState
           userId: record.userId,
           userLabel: displayName,
           assessmentId: record.id,
-          repository: AdminStatusRepository(),
+          repository: widget.statusRepository ?? AdminStatusRepository(),
         ),
       ),
     );
+  }
+
+  void _selectView(AssessmentView view) {
+    if (_view == view) return;
+    setState(() {
+      _view = view;
+      _year = 'All Years';
+      _status = 'All Statuses';
+      _role = 'All Roles';
+    });
   }
 
   @override
@@ -126,20 +138,44 @@ class _AdminAssessmentResultsPageState
       final scoped = all
           .where((record) => matchesAssessmentView(record, _view))
           .toList();
-      final years = scoped.map((r) => '${r.createdAt.year}').toSet().toList()
-        ..sort((a, b) => b.compareTo(a));
-      final statuses = scoped.map((r) => r.displayStatus).toSet().toList()
-        ..sort();
-      final roles = scoped.map((r) => r.role ?? 'Unknown').toSet().toList()
-        ..sort();
+      final years =
+          scoped
+              .map((r) => '${r.createdAt.year}')
+              .where((y) => y != 'All Years')
+              .toSet()
+              .toList()
+            ..sort((a, b) => b.compareTo(a));
+      final statuses =
+          scoped
+              .map((r) => AssessmentStatusStyle.fromStored(r.displayStatus).label)
+              .where((s) => s != 'All Statuses')
+              .toSet()
+              .toList()
+            ..sort();
+      final roles =
+          scoped
+              .map((r) => r.role ?? 'Unknown')
+              .where((r) => r != 'All Roles')
+              .toSet()
+              .toList()
+            ..sort();
+      final effectiveYear = years.contains(_year) ? _year : 'All Years';
+      final effectiveStatus =
+          statuses.contains(_status) ? _status : 'All Statuses';
+      final effectiveRole = roles.contains(_role) ? _role : 'All Roles';
       final filtered = scoped
           .where(
             (record) =>
                 record.isArchived == _showArchived &&
-                (_year == 'All Years' || '${record.createdAt.year}' == _year) &&
-                (_status == 'All Statuses' ||
-                    record.displayStatus == _status) &&
-                (_role == 'All Roles' || (record.role ?? 'Unknown') == _role),
+                (effectiveYear == 'All Years' ||
+                    '${record.createdAt.year}' == effectiveYear) &&
+                (effectiveStatus == 'All Statuses' ||
+                    AssessmentStatusStyle.fromStored(
+                          record.displayStatus,
+                        ).label ==
+                        effectiveStatus) &&
+                (effectiveRole == 'All Roles' ||
+                    (record.role ?? 'Unknown') == effectiveRole),
           )
           .toList();
       return FutureBuilder<Map<String, AssessmentParticipantInfo>>(
@@ -163,14 +199,12 @@ class _AdminAssessmentResultsPageState
                   _SectionTab(
                     label: 'Quick Assessment',
                     selected: _view == AssessmentView.quick,
-                    onPressed: () =>
-                        setState(() => _view = AssessmentView.quick),
+                    onPressed: () => _selectView(AssessmentView.quick),
                   ),
                   _SectionTab(
                     label: 'Full Assessment',
                     selected: _view == AssessmentView.full,
-                    onPressed: () =>
-                        setState(() => _view = AssessmentView.full),
+                    onPressed: () => _selectView(AssessmentView.full),
                   ),
                 ],
               ),
@@ -182,21 +216,19 @@ class _AdminAssessmentResultsPageState
                   children: [
                     _Selector(
                       label: 'Year',
-                      value: years.contains(_year) ? _year : 'All Years',
+                      value: effectiveYear,
                       choices: ['All Years', ...years],
                       onChanged: (s) => setState(() => _year = s),
                     ),
                     _Selector(
                       label: 'Status',
-                      value: statuses.contains(_status)
-                          ? _status
-                          : 'All Statuses',
+                      value: effectiveStatus,
                       choices: ['All Statuses', ...statuses],
                       onChanged: (s) => setState(() => _status = s),
                     ),
                     _Selector(
                       label: 'Role',
-                      value: roles.contains(_role) ? _role : 'All Roles',
+                      value: effectiveRole,
                       choices: ['All Roles', ...roles],
                       onChanged: (s) => setState(() => _role = s),
                     ),
@@ -350,7 +382,7 @@ class _Selector extends StatelessWidget {
   final ValueChanged<String> onChanged;
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 190,
+    width: label == 'Status' ? 235 : 190,
     child: DropdownButtonFormField<String>(
       key: ValueKey('$label:$value'),
       initialValue: value,

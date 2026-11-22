@@ -42,6 +42,7 @@ class AdminAssessmentRecord {
     required this.createdAt,
     this.score,
     this.status,
+    this.profileStatus,
     this.role,
     this.instrumentVersion,
     this.verificationStatus,
@@ -54,6 +55,7 @@ class AdminAssessmentRecord {
   final DateTime createdAt;
   final num? score;
   final String? status;
+  final String? profileStatus;
   final String? role;
   final String? instrumentVersion;
   final String? verificationStatus;
@@ -70,7 +72,12 @@ class AdminAssessmentRecord {
   }
 
   bool get isMainAssessment => !isQuickAssessment;
-  String get displayStatus => status ?? 'Result unavailable';
+  String get displayStatus {
+    final canonical = profileStatus?.trim() ?? '';
+    if (canonical.isNotEmpty) return canonical;
+    final stored = status?.trim() ?? '';
+    return stored.isNotEmpty ? stored : 'Result unavailable';
+  }
 
   factory AdminAssessmentRecord.fromJson(Map<String, dynamic> data) {
     final result = data['result'] is Map
@@ -79,24 +86,29 @@ class AdminAssessmentRecord {
     final instrument = data['instrument'] is Map
         ? Map<String, dynamic>.from(data['instrument'] as Map)
         : const <String, dynamic>{};
+    final profileStatus = _text(result['profileStatus']);
+    final status =
+        profileStatus ??
+        _text(data['overallLevel']) ??
+        _text(data['status']) ??
+        _text(data['wellBeingStatus']) ??
+        _text(data['responsePatternCode']);
     return AdminAssessmentRecord(
       id: data['id']?.toString() ?? '',
       userId: data['userId']?.toString() ?? '',
       type:
-          data['assessmentKind']?.toString() ??
-          data['type']?.toString() ??
+          _text(data['assessmentKind']) ??
+          _text(data['type']) ??
           'Assessment',
       createdAt: _date(data['createdAt']),
       score: data['score'] is num
           ? data['score'] as num
           : num.tryParse('${data['score']}'),
-      status: _text(
-        data['status'] ?? data['overallLevel'] ?? result['profileStatus'],
-      ),
-      role: _text(data['populationRole'] ?? data['role']),
-      instrumentVersion: _text(
-        instrument['version'] ?? data['questionSetVersion'],
-      ),
+      status: status,
+      profileStatus: profileStatus,
+      role: _text(data['populationRole']) ?? _text(data['role']),
+      instrumentVersion:
+          _text(instrument['version']) ?? _text(data['questionSetVersion']),
       verificationStatus: _text(data['verificationStatus']),
       archivedAt: data['archivedAt'] == null ? null : _date(data['archivedAt']),
     );
