@@ -474,12 +474,14 @@ class AdminPortalHome extends StatefulWidget {
     this.repository,
     this.registerUnload = registerUnloadGuard,
     this.removeUnload = removeUnloadGuard,
+    this.counselorInboxController,
   });
   final AdminPortalRepository? repository;
 
   /// Browser tab-close guard seams; the defaults are no-ops off the web.
   final UnloadGuardRegistrar registerUnload;
   final UnloadGuardRemover removeUnload;
+  final CounselorInboxUnreadController? counselorInboxController;
 
   @override
   State<AdminPortalHome> createState() => _AdminPortalHomeState();
@@ -496,13 +498,34 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   late final Stream<List<AppNotificationModel>> _notifications;
   final PaccScheduleEditorController _scheduleController =
       PaccScheduleEditorController();
+  CounselorInboxUnreadController? _ownedCounselorInboxController;
 
   Object? _unloadHandle;
+
+  CounselorInboxUnreadController? get _activeCounselorInboxController {
+    if (!canShowCounselorMessagingInInquiries(_repository.currentAccessRole)) {
+      return null;
+    }
+    return widget.counselorInboxController ?? _ownedCounselorInboxController;
+  }
+
+  void _syncCounselorInboxController() {
+    final isCounselor = canShowCounselorMessagingInInquiries(
+      _repository.currentAccessRole,
+    );
+    if (!isCounselor || widget.counselorInboxController != null) {
+      _ownedCounselorInboxController?.dispose();
+      _ownedCounselorInboxController = null;
+      return;
+    }
+    _ownedCounselorInboxController ??= CounselorInboxUnreadController();
+  }
 
   @override
   void initState() {
     super.initState();
     _notifications = _repository.watchPortalNotifications();
+    _syncCounselorInboxController();
     // Closing or refreshing the tab mid-import, or with slips still
     // undownloaded, loses plain codes that are never shown again.
     _unloadHandle = widget.registerUnload(
@@ -511,14 +534,24 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   }
 
   @override
+  void didUpdateWidget(covariant AdminPortalHome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncCounselorInboxController();
+  }
+
+  @override
   void dispose() {
+    _ownedCounselorInboxController?.dispose();
+    _ownedCounselorInboxController = null;
     widget.removeUnload(_unloadHandle);
     _unloadHandle = null;
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
+  Widget build(BuildContext context) {
+    final inboxController = _activeCounselorInboxController;
+    final body = LayoutBuilder(
     builder: (context, constraints) {
       final compact = constraints.maxWidth < 760;
       return Scaffold(
@@ -589,6 +622,11 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       );
     },
   );
+    if (inboxController != null) {
+      return CounselorInboxScope(notifier: inboxController, child: body);
+    }
+    return body;
+  }
 
   Future<void> _setPage(
     AdminPortalPage page, {
@@ -924,12 +962,38 @@ class PortalWorkspaceNavigation extends StatelessWidget {
                                     onTap: () => onChanged(item),
                                     child: SizedBox(
                                       height: 46,
-                                      child: Icon(
-                                        item.icon,
-                                        color: page == item
-                                            ? AdminColors.ink
-                                            : AdminColors.muted,
-                                        size: 21,
+                                      child: Center(
+                                        child: item == AdminPortalPage.inquiries &&
+                                                canShowCounselorMessagingInInquiries(
+                                                  accessRole,
+                                                )
+                                            ? Stack(
+                                                clipBehavior: Clip.none,
+                                                children: [
+                                                  Icon(
+                                                    item.icon,
+                                                    color: page == item
+                                                        ? AdminColors.ink
+                                                        : AdminColors.muted,
+                                                    size: 21,
+                                                  ),
+                                                  const Positioned(
+                                                    right: -9,
+                                                    top: -7,
+                                                    child:
+                                                        CounselorInboxUnreadBadge(
+                                                          compact: true,
+                                                        ),
+                                                  ),
+                                                ],
+                                              )
+                                            : Icon(
+                                                item.icon,
+                                                color: page == item
+                                                    ? AdminColors.ink
+                                                    : AdminColors.muted,
+                                                size: 21,
+                                              ),
                                       ),
                                     ),
                                   ),
@@ -5722,6 +5786,9 @@ class _AdminInquiriesPageState extends State<AdminInquiriesPage> {
         )
         ? CounselorInquiryWorkspace(
             messages: const CounselorMessagesPage(embedded: true),
+            messagesBadge: const CounselorInboxUnreadBadge(
+              margin: EdgeInsets.only(left: 8),
+            ),
             otherServices: _buildServiceInquiries(),
             initialSection: widget.initialSection,
           )

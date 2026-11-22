@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/screens/admin_portal.dart';
 import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/features/admin/widgets/counselor_inquiry_workspace.dart';
+import 'package:mind_mates/features/counseling/widgets/counselor_unread_badges.dart';
 
 void main() {
   testWidgets('Counselor Inquiries opens Messages and can switch to Other services', (tester) async {
@@ -63,5 +64,36 @@ void main() {
     expect(canShowCounselorMessagingInInquiries(AccessRole.admin), isFalse);
     expect(canShowCounselorMessagingInInquiries(AccessRole.portalStaff), isFalse);
     expect(canShowCounselorMessagingInInquiries(AccessRole.appUser), isFalse);
+  });
+
+  testWidgets('Messages tab displays optional messagesBadge when count > 0 and omits spacing when count is 0', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: CounselorInquiryWorkspace(
+            messages: Text('Inbox'),
+            otherServices: Text('Queue'),
+            messagesBadge: UnreadCountBadge(count: 4),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Messages'), findsOneWidget);
+    expect(find.text('4'), findsOneWidget);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: CounselorInquiryWorkspace(
+            messages: Text('Inbox'),
+            otherServices: Text('Queue'),
+            messagesBadge: UnreadCountBadge(count: 0),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Messages'), findsOneWidget);
+    expect(find.text('0'), findsNothing);
   });
 }
