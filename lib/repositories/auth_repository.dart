@@ -55,6 +55,11 @@ class AuthRepository {
   }
 
   Future<void> reloadCurrentUser() => _authService.reloadCurrentUser();
+
+  /// Reloads the account and forces a fresh ID token, so claims that changed on
+  /// the server (such as `email_verified` after recovery-email verification)
+  /// are visible to the app and to Firestore/Storage rules immediately.
+  Future<void> refreshSession() => _authService.refreshSession();
   Future<void> sendEmailVerification() => _authService.sendEmailVerification();
   Future<void> cancelPendingRegistration() async {
     await _functions.routedCallable('cancelPendingRegistration').call<void>();
@@ -62,6 +67,83 @@ class AuthRepository {
 
   static const _authEmailDomain = 'mindmate.local';
   static const institutionalEmailDomain = 'ucu.edu.ph';
+
+  /// Roster-activated students sign in with their Student ID. Their Firebase
+  /// Auth email is this deterministic alias (never shown to the student, never
+  /// used as a contact address); the real email is only a verified recovery
+  /// contact. Mirrors `studentAuthAliasEmail` in the Functions code, which
+  /// keeps the legacy [authEmailForSchoolId] alias untouched.
+  static const studentAuthAliasDomain = 'students.mindmate.local';
+
+  /// The single error code for every Student ID sign-in credential failure, so
+  /// an unknown ID, a wrong password and a disabled account look identical.
+  static const studentIdCredentialFailure = 'student-id-credential';
+  static const _studentIdCredentialFailures = {
+    'invalid-credential',
+    'invalid-login-credentials',
+    'wrong-password',
+    'user-not-found',
+    'user-disabled',
+    'invalid-email',
+  };
+
+  // JavaScript (the server) expands these characters to several ASCII letters
+  // when upper-casing; Dart does not. Mirroring them keeps the derived alias
+  // identical on both sides for every input.
+  static const _multiLetterUppercase = {
+    'ß': 'SS',
+    'ﬀ': 'FF',
+    'ﬁ': 'FI',
+    'ﬂ': 'FL',
+    'ﬃ': 'FFI',
+    'ﬄ': 'FFL',
+    'ﬅ': 'ST',
+    'ﬆ': 'ST',
+    'ŉ': 'N',
+    'ǰ': 'J',
+    'ẖ': 'H',
+    'ẗ': 'T',
+    'ẘ': 'W',
+    'ẙ': 'Y',
+    'ẚ': 'A',
+  };
+
+  static String studentAuthAliasEmail(String studentId) {
+    final upper = StringBuffer();
+    for (final rune in studentId.trim().runes) {
+      final character = String.fromCharCode(rune);
+      upper.write(
+        _multiLetterUppercase[character] ?? character.toUpperCase(),
+      );
+    }
+    final canonical = upper.toString().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    if (canonical.length < 3 || canonical.length > 40) {
+      throw FirebaseAuthException(code: studentIdCredentialFailure);
+    }
+    return '${canonical.toLowerCase()}@$studentAuthAliasDomain';
+  }
+
+  static bool isStudentAuthAlias(String? email) =>
+      email != null &&
+      email.trim().toLowerCase().endsWith('@$studentAuthAliasDomain');
+
+  /// Signs in with Student ID + password through Firebase Auth using the
+  /// derived alias. No server lookup is made and nothing is retried: an unknown
+  /// ID, wrong password or disabled account all fail with the same error.
+  Future<UserCredential> signInWithStudentId({
+    required String studentId,
+    required String password,
+  }) async {
+    final email = studentAuthAliasEmail(studentId);
+    try {
+      return await signInWithEmail(email: email, password: password);
+    } on FirebaseAuthException catch (error) {
+      if (_studentIdCredentialFailures.contains(error.code)) {
+        throw FirebaseAuthException(code: studentIdCredentialFailure);
+      }
+      rethrow;
+    }
+  }
 
   static bool isInstitutionalEmployeeEmail(String email) {
     final normalized = email.trim().toLowerCase();

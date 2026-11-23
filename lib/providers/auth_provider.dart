@@ -75,6 +75,16 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// True for a roster-activated student whose Firebase Auth email is the
+  /// internal Student ID alias.
+  bool get currentUserIsStudentAlias =>
+      AuthRepository.isStudentAuthAlias(currentUserEmail);
+
+  /// The Auth email to show or use as a contact address. It is null for the
+  /// internal Student ID alias, which must never be displayed or mailed.
+  String? get currentUserContactEmail =>
+      currentUserIsStudentAlias ? null : currentUserEmail;
+
   Future<void> reloadCurrentUser() => _repository.reloadCurrentUser();
   Future<void> sendEmailVerification() => _repository.sendEmailVerification();
   Future<void> cancelPendingRegistration() async {
@@ -106,6 +116,60 @@ class AuthProvider extends ChangeNotifier {
             'Unable to cancel this pending registration. Please try again.',
       );
       rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Student ID + password sign-in (the primary student credential).
+  Future<String?> signInWithStudentId({
+    required String studentId,
+    required String password,
+  }) async {
+    return _runAuthAction(() async {
+      final credential = await _repository.signInWithStudentId(
+        studentId: studentId,
+        password: password,
+      );
+      return credential.user?.uid ?? _repository.currentUserId;
+    }, signOutOnFailure: true);
+  }
+
+  /// Emails a one-time code to the signed-in student's recovery address.
+  Future<RecoveryCodeRequest> requestRecoveryEmailCode() =>
+      (_rosterRepository ?? StudentRosterRepository())
+          .requestRecoveryEmailCode();
+
+  /// Verifies the emailed code, then refreshes the session so the verified
+  /// state and fresh ID token are visible immediately.
+  Future<void> confirmRecoveryEmailCode(String code) async {
+    await (_rosterRepository ?? StudentRosterRepository())
+        .confirmRecoveryEmailCode(code);
+    await _repository.refreshSession();
+  }
+
+  /// Student ID password recovery. Always reports the same outcome for any
+  /// Student ID; the link goes only to a verified recovery email.
+  Future<bool> sendPasswordResetForStudentId(String studentId) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await (_rosterRepository ?? StudentRosterRepository())
+          .requestPasswordResetForStudentId(studentId);
+      return true;
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'Student ID password reset failed.',
+      );
+      _errorMessage = FirebaseErrorMessage.describe(
+        error,
+        fallback: 'Unable to send a password reset link. Please try again.',
+      );
+      return false;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -281,7 +345,12 @@ class AuthProvider extends ChangeNotifier {
         throw const StudentActivationSignInException();
       }
       try {
-        await _repository.sendEmailVerification();
+        // A Student ID account's Auth email is an internal alias that cannot
+        // receive mail; its recovery email is verified with an emailed code that
+        // the verification screen requests itself.
+        if (!AuthRepository.isStudentAuthAlias(activatedEmail)) {
+          await _repository.sendEmailVerification();
+        }
       } catch (error, stackTrace) {
         // Non-fatal: the verification screen offers a resend button.
         FirebaseErrorMessage.log(

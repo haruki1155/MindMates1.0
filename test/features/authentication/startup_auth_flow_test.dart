@@ -90,6 +90,36 @@ void main() {
     expect(find.text('student info target'), findsOneWidget);
   });
 
+  testWidgets('splash sends an unverified Student ID account to recovery-email verification', (
+    tester,
+  ) async {
+    final userRepository = _FakeUserRepository(
+      user: const UserModel(
+        id: 'user_1',
+        email: 'leo@example.com',
+        populationRole: PopulationRole.student,
+        personalInfoRequired: true,
+        profileVersion: 3,
+      ),
+    );
+    await tester.pumpWidget(
+      _SplashHarness(
+        authProvider: AuthProvider(
+          _FakeAuthRepository(
+            currentUserId: 'user_1',
+            email: '202012345@students.mindmate.local',
+            verified: false,
+          ),
+        ),
+        userProvider: UserProvider(userRepository),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 1901));
+    await tester.pumpAndSettle();
+    expect(find.text('verification target'), findsOneWidget);
+    expect(find.text('student info target'), findsNothing);
+  });
+
   test('post-auth destination opens onboarding before quick assessment', () {
     expect(
       destinationAfterAuthentication(hasCompletedQuickAssessment: false),
@@ -134,6 +164,8 @@ class _SplashHarness extends StatelessWidget {
               const _RouteMarker('student info target'),
           RouteNames.profileSetup: (_) =>
               const _RouteMarker('profile setup target'),
+          RouteNames.emailVerification: (_) =>
+              const _RouteMarker('verification target'),
         },
       ),
     );
@@ -152,10 +184,19 @@ class _RouteMarker extends StatelessWidget {
 }
 
 class _FakeAuthRepository extends AuthRepository {
-  _FakeAuthRepository({this.currentUserId}) : super(AuthService());
+  _FakeAuthRepository({this.currentUserId, this.email, this.verified = true})
+    : super(AuthService());
 
   @override
   final String? currentUserId;
+  final String? email;
+  final bool verified;
+
+  @override
+  String? get currentUserEmail => email;
+
+  @override
+  bool get currentUserEmailVerified => verified;
 }
 
 class _FakeUserRepository extends UserRepository {

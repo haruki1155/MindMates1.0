@@ -31,6 +31,18 @@ typedef AcademicOptions = ({
 
 typedef AcademicOptionsLoader = Future<AcademicOptions> Function();
 
+class RecoveryCodeRequest {
+  const RecoveryCodeRequest({
+    this.alreadyVerified = false,
+    this.maskedEmail = '',
+    this.expiresInSeconds = 0,
+  });
+
+  final bool alreadyVerified;
+  final String maskedEmail;
+  final int expiresInSeconds;
+}
+
 class StudentRosterRepository {
   StudentRosterRepository({
     FirebaseFunctions? functions,
@@ -89,7 +101,10 @@ class StudentRosterRepository {
 
   // ---------------------------------------------------------- activation
 
-  /// Returns the email the account was created with.
+  /// Returns the Firebase Auth email the account was created with. Students sign
+  /// in with their Student ID, so this is the internal alias the server returns
+  /// as `authEmail` (the real email is only a recovery contact). A server that
+  /// predates Student ID sign-in returns just `email`.
   Future<String> activate({
     required String studentNo,
     required String activationCode,
@@ -105,6 +120,8 @@ class StudentRosterRepository {
         'email': email,
         'password': password,
       });
+      final authEmail = asText(result['authEmail']);
+      if (authEmail.isNotEmpty) return authEmail;
       final returned = asText(result['email']);
       return returned.isEmpty ? email : returned;
     } on FirebaseFunctionsException catch (error) {
@@ -117,6 +134,28 @@ class StudentRosterRepository {
       );
     }
   }
+
+  // ------------------------------------------- recovery email and reset
+
+  /// Emails a one-time code to the student's recovery address. The response
+  /// carries only a masked address, never the code.
+  Future<RecoveryCodeRequest> requestRecoveryEmailCode() async {
+    final result = await _callMap('requestStudentRecoveryEmailCode');
+    final expires = result['expiresInSeconds'];
+    return RecoveryCodeRequest(
+      alreadyVerified: result['alreadyVerified'] == true,
+      maskedEmail: asText(result['maskedEmail']),
+      expiresInSeconds: expires is num ? expires.toInt() : 0,
+    );
+  }
+
+  Future<void> confirmRecoveryEmailCode(String code) =>
+      _call('confirmStudentRecoveryEmailCode', {'code': code});
+
+  /// Asks for a password-reset link to the student's verified recovery email.
+  /// The server answers identically for every Student ID.
+  Future<void> requestPasswordResetForStudentId(String studentId) =>
+      _call('requestStudentPasswordReset', {'studentId': studentId.trim()});
 
   // ------------------------------------------------- student information
 

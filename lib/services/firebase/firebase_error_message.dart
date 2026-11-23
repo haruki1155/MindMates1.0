@@ -87,6 +87,8 @@ class FirebaseErrorMessage {
         return 'Too many verification requests were sent. Wait a minute, then try again.';
       case 'invalid-email':
         return 'Enter a valid email address.';
+      case 'student-id-credential':
+        return 'Student ID or password is incorrect.';
       case 'invalid-credential':
       case 'wrong-password':
       case 'user-not-found':

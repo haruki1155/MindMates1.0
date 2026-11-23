@@ -15,6 +15,14 @@ class AuthService {
   User? get currentUser => _instance.currentUser;
   Future<void> reloadCurrentUser() =>
       _instance.currentUser?.reload() ?? Future.value();
+
+  /// Reloads the signed-in account and forces a fresh ID token.
+  Future<void> refreshSession() async {
+    final user = _instance.currentUser;
+    if (user == null) return;
+    await user.reload();
+    await _instance.currentUser?.getIdToken(true);
+  }
   String? get currentUserDisplayName => _instance.currentUser?.displayName;
   String? get currentUserPhotoUrl => _instance.currentUser?.photoURL;
   Stream<User?> get authStateChanges => _instance.authStateChanges();

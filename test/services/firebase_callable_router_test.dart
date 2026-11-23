@@ -39,6 +39,24 @@ void main() {
     );
   });
 
+  test('routes the Student ID recovery callables to their Staging aliases', () {
+    const environment = String.fromEnvironment(
+      'APP_ENV',
+      defaultValue: 'development',
+    );
+    for (final name in [
+      'requestStudentRecoveryEmailCode',
+      'confirmStudentRecoveryEmailCode',
+      'requestStudentPasswordReset',
+    ]) {
+      expect(
+        FirebaseCallableRouter.name(name),
+        environment == 'staging' ? '${name}Dev' : name,
+        reason: 'Staging has no App Check provider, so it uses the Dev alias.',
+      );
+    }
+  });
+
   test('does not rewrite an unknown callable', () {
     expect(FirebaseCallableRouter.name('unlistedCallable'), 'unlistedCallable');
   });
