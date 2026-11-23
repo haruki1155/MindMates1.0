@@ -115,23 +115,27 @@ void main() {
     expect(r.message, isNull);
   });
 
-  test('startAccountSetup sends identity without any activation code', () async {
-    final repo = build();
-    respond = (_) => _m({'ok': true, 'authEmail': 'a@students.mindmate.local'});
-    final email = await repo.startAccountSetup(
-      studentNo: '2021-00123',
-      firstName: 'Ana',
-      middleName: '',
-      lastName: 'Cruz',
-      dateOfBirthKey: '2003-04-05',
-      email: 'a@b.c',
-      password: 'pw',
-    );
-    expect(email, 'a@students.mindmate.local');
-    expect(calls.single.$1, 'startStudentAccountSetup');
-    expect(calls.single.$2['dateOfBirth'], '2003-04-05');
-    expect(calls.single.$2.containsKey('activationCode'), isFalse);
-  });
+  test(
+    'startAccountSetup sends identity without any activation code',
+    () async {
+      final repo = build();
+      respond = (_) =>
+          _m({'ok': true, 'authEmail': 'a@students.mindmate.local'});
+      final email = await repo.startAccountSetup(
+        studentNo: '2021-00123',
+        firstName: 'Ana',
+        middleName: '',
+        lastName: 'Cruz',
+        dateOfBirthKey: '2003-04-05',
+        email: 'a@b.c',
+        password: 'pw',
+      );
+      expect(email, 'a@students.mindmate.local');
+      expect(calls.single.$1, 'startStudentAccountSetup');
+      expect(calls.single.$2['dateOfBirth'], '2003-04-05');
+      expect(calls.single.$2.containsKey('activationCode'), isFalse);
+    },
+  );
 
   test('startAccountSetup maps the callable error code', () async {
     final repo = build();
@@ -164,11 +168,47 @@ void main() {
     }
   });
 
-  test('completeAccountSetup calls the finishing callable', () async {
+  test(
+    'completeAccountSetup reports waiting for approval unless approved',
+    () async {
+      final repo = build();
+      respond = (_) => _m({'ok': true, 'status': 'awaiting-approval'});
+      expect(await repo.completeAccountSetup(), 'awaiting-approval');
+      expect(calls.single.$1, 'completeStudentAccountSetup');
+      respond = (_) => _m({'ok': true, 'status': 'approved'});
+      expect(await repo.completeAccountSetup(), 'approved');
+      respond = (_) => _m({'ok': true});
+      expect(
+        await repo.completeAccountSetup(),
+        'awaiting-approval',
+        reason: 'never assume approval',
+      );
+    },
+  );
+
+  test('account claim review calls the administrator callables', () async {
     final repo = build();
+    respond = (_) => _m({
+      'claims': <Object?>[
+        _m({
+          'uid': 'u1',
+          'studentNo': '2021-001',
+          'name': 'Ana Cruz',
+          'email': 'a@b.c',
+          'submittedAt': '2026-11-20T00:00:00.000Z',
+        }),
+      ],
+    });
+    final claims = await repo.listAccountClaims();
+    expect(claims.single.uid, 'u1');
+    expect(claims.single.email, 'a@b.c');
+    expect(claims.single.rosterAlreadyClaimed, isFalse);
     respond = (_) => _m({'ok': true});
-    await repo.completeAccountSetup();
-    expect(calls.single.$1, 'completeStudentAccountSetup');
+    await repo.approveAccountClaim('u1');
+    expect(calls.last.$1, 'approveStudentAccountClaim');
+    expect(calls.last.$2, {'uid': 'u1'});
+    await repo.rejectAccountClaim('u1');
+    expect(calls.last.$1, 'rejectStudentAccountClaim');
   });
 
   test('listRoster maps rows and page token', () async {
@@ -276,116 +316,141 @@ void main() {
     expect((await repo.listLegacyNotInRoster()).single.schoolId, 's');
   });
 
-  test('commitImport sets extended timeout without altering unrelated callables', () async {
-    final recorded = <(String name, HttpsCallableOptions? options)>[];
-    final repo = StudentRosterRepository(
-      functions: _RecordingFirebaseFunctions((name, options) {
-        recorded.add((name, options));
-        if (name == 'importStudentRoster') {
-          return _m({'status': 'complete', 'importId': 'imp-1', 'counts': _m({'new': 1}), 'codes': <Object?>[]});
-        }
-        return _m({'imports': <Object?>[]});
-      }),
-    );
+  test(
+    'commitImport sets extended timeout without altering unrelated callables',
+    () async {
+      final recorded = <(String name, HttpsCallableOptions? options)>[];
+      final repo = StudentRosterRepository(
+        functions: _RecordingFirebaseFunctions((name, options) {
+          recorded.add((name, options));
+          if (name == 'importStudentRoster') {
+            return _m({
+              'status': 'complete',
+              'importId': 'imp-1',
+              'counts': _m({'new': 1}),
+              'codes': <Object?>[],
+            });
+          }
+          return _m({'imports': <Object?>[]});
+        }),
+      );
 
-    final result = await repo.commitImport('roster.xlsx', [{'studentNo': '1'}]);
-    expect(result.status, RosterImportStatus.complete);
-    expect(recorded.single.$1, 'importStudentRoster');
-    expect(recorded.single.$2?.timeout, const Duration(minutes: 10));
+      final result = await repo.commitImport('roster.xlsx', [
+        {'studentNo': '1'},
+      ]);
+      expect(result.status, RosterImportStatus.complete);
+      expect(recorded.single.$1, 'importStudentRoster');
+      expect(recorded.single.$2?.timeout, const Duration(minutes: 10));
 
-    await repo.listImports();
-    expect(recorded.last.$1, 'listStudentRosterImports');
-    expect(recorded.last.$2, isNull);
-  });
+      await repo.listImports();
+      expect(recorded.last.$1, 'listStudentRosterImports');
+      expect(recorded.last.$2, isNull);
+    },
+  );
 
-  test('RosterImportRecord.fromJson parses known statuses and tolerates legacy or malformed fields', () {
-    final complete = RosterImportRecord.fromJson(_m({
-      'id': 'imp-complete',
-      'fileName': 'complete.xlsx',
-      'status': 'complete',
-      'rowCount': 10,
-      'failedRowCount': 0,
-      'counts': _m({'new': 10, 'updated': 0, 'linked': 0}),
-      'importedByName': 'Admin A',
-      'importedAt': '2026-11-01T08:00:00.000Z',
-    }));
-    expect(complete.status, RosterImportHistoryStatus.complete);
-    expect(complete.rowCount, 10);
-    expect(complete.failedRowCount, 0);
-    expect(complete.failureCode, isNull);
+  test(
+    'RosterImportRecord.fromJson parses known statuses and tolerates legacy or malformed fields',
+    () {
+      final complete = RosterImportRecord.fromJson(
+        _m({
+          'id': 'imp-complete',
+          'fileName': 'complete.xlsx',
+          'status': 'complete',
+          'rowCount': 10,
+          'failedRowCount': 0,
+          'counts': _m({'new': 10, 'updated': 0, 'linked': 0}),
+          'importedByName': 'Admin A',
+          'importedAt': '2026-11-01T08:00:00.000Z',
+        }),
+      );
+      expect(complete.status, RosterImportHistoryStatus.complete);
+      expect(complete.rowCount, 10);
+      expect(complete.failedRowCount, 0);
+      expect(complete.failureCode, isNull);
 
-    final partial = RosterImportRecord.fromJson(_m({
-      'id': 'imp-partial',
-      'fileName': 'partial.xlsx',
-      'status': 'partial',
-      'rowCount': 12,
-      'failedRowCount': 4,
-      'failureCode': 'time-budget-exceeded',
-      'counts': _m({'new': 5, 'updated': 3, 'linked': 0}),
-      'importedByName': 'Admin A',
-      'importedAt': '2026-11-01T09:00:00.000Z',
-    }));
-    expect(partial.status, RosterImportHistoryStatus.partial);
-    expect(partial.rowCount, 12);
-    expect(partial.failedRowCount, 4);
-    expect(partial.failureCode, 'time-budget-exceeded');
+      final partial = RosterImportRecord.fromJson(
+        _m({
+          'id': 'imp-partial',
+          'fileName': 'partial.xlsx',
+          'status': 'partial',
+          'rowCount': 12,
+          'failedRowCount': 4,
+          'failureCode': 'time-budget-exceeded',
+          'counts': _m({'new': 5, 'updated': 3, 'linked': 0}),
+          'importedByName': 'Admin A',
+          'importedAt': '2026-11-01T09:00:00.000Z',
+        }),
+      );
+      expect(partial.status, RosterImportHistoryStatus.partial);
+      expect(partial.rowCount, 12);
+      expect(partial.failedRowCount, 4);
+      expect(partial.failureCode, 'time-budget-exceeded');
 
-    final pending = RosterImportRecord.fromJson(_m({
-      'id': 'imp-pending',
-      'fileName': 'pending.xlsx',
-      'status': 'pending',
-      'rowCount': 50,
-      'counts': _m({'new': 0, 'updated': 0, 'linked': 0}),
-      'importedByName': 'Admin A',
-      'importedAt': '2026-11-01T10:00:00.000Z',
-    }));
-    expect(pending.status, RosterImportHistoryStatus.pending);
-    expect(pending.rowCount, 50);
-    expect(pending.failedRowCount, isNull);
+      final pending = RosterImportRecord.fromJson(
+        _m({
+          'id': 'imp-pending',
+          'fileName': 'pending.xlsx',
+          'status': 'pending',
+          'rowCount': 50,
+          'counts': _m({'new': 0, 'updated': 0, 'linked': 0}),
+          'importedByName': 'Admin A',
+          'importedAt': '2026-11-01T10:00:00.000Z',
+        }),
+      );
+      expect(pending.status, RosterImportHistoryStatus.pending);
+      expect(pending.rowCount, 50);
+      expect(pending.failedRowCount, isNull);
 
-    final finFail = RosterImportRecord.fromJson(_m({
-      'id': 'imp-finfail',
-      'fileName': 'finfail.xlsx',
-      'status': 'partial',
-      'rowCount': 20,
-      'failedRowCount': 0,
-      'failureCode': 'finalization-failed',
-      'counts': _m({'new': 20, 'updated': 0, 'linked': 0}),
-      'importedByName': 'Admin A',
-      'importedAt': '2026-11-01T11:00:00.000Z',
-    }));
-    expect(finFail.status, RosterImportHistoryStatus.partial);
-    expect(finFail.failureCode, 'finalization-failed');
-    expect(finFail.needsAttention, isTrue);
+      final finFail = RosterImportRecord.fromJson(
+        _m({
+          'id': 'imp-finfail',
+          'fileName': 'finfail.xlsx',
+          'status': 'partial',
+          'rowCount': 20,
+          'failedRowCount': 0,
+          'failureCode': 'finalization-failed',
+          'counts': _m({'new': 20, 'updated': 0, 'linked': 0}),
+          'importedByName': 'Admin A',
+          'importedAt': '2026-11-01T11:00:00.000Z',
+        }),
+      );
+      expect(finFail.status, RosterImportHistoryStatus.partial);
+      expect(finFail.failureCode, 'finalization-failed');
+      expect(finFail.needsAttention, isTrue);
 
-    final legacy = RosterImportRecord.fromJson(_m({
-      'id': 'imp-legacy',
-      'fileName': 'legacy.xlsx',
-      'counts': _m({'new': 3, 'updated': 1, 'linked': 0}),
-      'importedByName': 'Admin A',
-      'importedAt': '2026-10-01T08:00:00.000Z',
-    }));
-    expect(legacy.status, RosterImportHistoryStatus.unknown);
-    expect(legacy.rowCount, isNull);
-    expect(legacy.failedRowCount, isNull);
-    expect(legacy.failureCode, isNull);
+      final legacy = RosterImportRecord.fromJson(
+        _m({
+          'id': 'imp-legacy',
+          'fileName': 'legacy.xlsx',
+          'counts': _m({'new': 3, 'updated': 1, 'linked': 0}),
+          'importedByName': 'Admin A',
+          'importedAt': '2026-10-01T08:00:00.000Z',
+        }),
+      );
+      expect(legacy.status, RosterImportHistoryStatus.unknown);
+      expect(legacy.rowCount, isNull);
+      expect(legacy.failedRowCount, isNull);
+      expect(legacy.failureCode, isNull);
 
-    final malformed = RosterImportRecord.fromJson(_m({
-      'id': 'imp-bad',
-      'fileName': 'bad.xlsx',
-      'status': 'corrupted-status',
-      'rowCount': -3,
-      'failedRowCount': 'NaN',
-      'failureCode': '',
-      'counts': 'not-a-map',
-      'importedByName': 42,
-      'importedAt': 'invalid-date',
-    }));
-    expect(malformed.status, RosterImportHistoryStatus.unknown);
-    expect(malformed.rowCount, isNull);
-    expect(malformed.failedRowCount, isNull);
-    expect(malformed.failureCode, isNull);
-  });
+      final malformed = RosterImportRecord.fromJson(
+        _m({
+          'id': 'imp-bad',
+          'fileName': 'bad.xlsx',
+          'status': 'corrupted-status',
+          'rowCount': -3,
+          'failedRowCount': 'NaN',
+          'failureCode': '',
+          'counts': 'not-a-map',
+          'importedByName': 42,
+          'importedAt': 'invalid-date',
+        }),
+      );
+      expect(malformed.status, RosterImportHistoryStatus.unknown);
+      expect(malformed.rowCount, isNull);
+      expect(malformed.failedRowCount, isNull);
+      expect(malformed.failureCode, isNull);
+    },
+  );
 }
 
 class _RecordingFirebaseFunctions extends Fake implements FirebaseFunctions {

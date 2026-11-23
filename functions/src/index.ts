@@ -2672,7 +2672,8 @@ export {importAcademicCatalog, previewAcademicCatalogImport} from "./academic_im
 export {activateStudentAccount, activateStudentAccountDev} from "./student_activation";
 export {
   startStudentAccountSetup, startStudentAccountSetupDev, completeStudentAccountSetup, completeStudentAccountSetupDev,
-  cancelStudentAccountSetup, cancelStudentAccountSetupDev,
+  cancelStudentAccountSetup, cancelStudentAccountSetupDev, listStudentAccountClaims, approveStudentAccountClaim,
+  rejectStudentAccountClaim,
 } from "./student_account_setup";
 export {
   requestStudentRecoveryEmailCode, requestStudentRecoveryEmailCodeDev,

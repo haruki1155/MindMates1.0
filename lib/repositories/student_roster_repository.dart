@@ -139,9 +139,30 @@ class StudentRosterRepository {
     }
   }
 
-  /// Creates the roster-linked profile once the recovery email is verified.
-  /// Safe to repeat: the server answers `alreadyComplete` for a finished setup.
-  Future<void> completeAccountSetup() => _call('completeStudentAccountSetup');
+  /// Submits the verified setup for PACC approval, or reports it approved.
+  /// Safe to repeat. Returns `approved` or `awaiting-approval`.
+  Future<String> completeAccountSetup() async {
+    final result = await _callMap('completeStudentAccountSetup');
+    return asText(result['status']) == 'approved'
+        ? 'approved'
+        : 'awaiting-approval';
+  }
+
+  // ---------------------------------------------- administrator review
+
+  Future<List<StudentAccountClaim>> listAccountClaims() async {
+    final result = await _callMap('listStudentAccountClaims');
+    return [
+      for (final c in asList(result['claims']))
+        StudentAccountClaim.fromJson(asStringMap(c)),
+    ];
+  }
+
+  Future<void> approveAccountClaim(String uid) =>
+      _call('approveStudentAccountClaim', {'uid': uid});
+
+  Future<void> rejectAccountClaim(String uid) =>
+      _call('rejectStudentAccountClaim', {'uid': uid});
 
   // ------------------------------------------- recovery email and reset
 

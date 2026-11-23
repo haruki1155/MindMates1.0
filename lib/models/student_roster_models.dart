@@ -293,3 +293,41 @@ class StudentActivationException implements Exception {
   @override
   String toString() => message ?? 'StudentActivationException($reason)';
 }
+
+/// A student's verified account setup waiting for PACC approval.
+class StudentAccountClaim {
+  const StudentAccountClaim({
+    required this.uid,
+    required this.studentNo,
+    required this.name,
+    required this.college,
+    required this.course,
+    required this.yearLevel,
+    required this.email,
+    required this.submittedAt,
+    required this.rosterAlreadyClaimed,
+  });
+
+  factory StudentAccountClaim.fromJson(Map<String, Object?> json) =>
+      StudentAccountClaim(
+        uid: asText(json['uid']),
+        studentNo: asText(json['studentNo']),
+        name: asText(json['name']),
+        college: asText(json['college']),
+        course: asText(json['course']),
+        yearLevel: asText(json['yearLevel']),
+        email: asText(json['email']),
+        submittedAt: DateTime.tryParse(asText(json['submittedAt'])),
+        rosterAlreadyClaimed: json['rosterAlreadyClaimed'] == true,
+      );
+
+  final String uid;
+  final String studentNo;
+  final String name;
+  final String college;
+  final String course;
+  final String yearLevel;
+  final String email;
+  final DateTime? submittedAt;
+  final bool rosterAlreadyClaimed;
+}

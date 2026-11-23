@@ -111,6 +111,49 @@ void main() {
     expect(auth.completions, greaterThan(1), reason: 'the finish step is repeated safely');
   });
 
+  testWidgets('a verified email that is not yet approved waits instead of opening the account', (
+    tester,
+  ) async {
+    final auth = _FakeAuthProvider()..completeStatus = 'awaiting-approval';
+    await _pump(tester, auth, gated: true);
+
+    await tester.enterText(find.byKey(const Key('recovery-code-field')), 'abcde-fghjk');
+    await tester.tap(find.byKey(const Key('recovery-verify-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('awaiting-approval-title')), findsOneWidget);
+    expect(find.text('student info target'), findsNothing);
+    expect(find.text('profile setup target'), findsNothing);
+    expect(find.text('home target'), findsNothing);
+
+    // Still waiting: the student stays on the waiting screen.
+    await tester.tap(find.byKey(const Key('awaiting-approval-check')));
+    await tester.pumpAndSettle();
+    expect(find.text('Still waiting for approval.'), findsOneWidget);
+
+    // Once approved, checking again opens the account.
+    auth.completeStatus = 'approved';
+    await tester.tap(find.byKey(const Key('awaiting-approval-check')));
+    await tester.pumpAndSettle();
+    expect(find.text('student info target'), findsOneWidget);
+  });
+
+  testWidgets('a waiting student can sign out', (tester) async {
+    final auth = _FakeAuthProvider()
+      ..completeStatus = 'awaiting-approval'
+      ..alreadyVerified = true;
+    await _pump(tester, auth);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('awaiting-approval-title')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('awaiting-approval-sign-out')));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(auth.signOuts, 1);
+    expect(find.text('login target'), findsOneWidget);
+  });
+
   testWidgets('a wrong code shows the server message and stays on the screen', (tester) async {
     final auth = _FakeAuthProvider()
       ..confirmError = FirebaseFunctionsException(
@@ -222,6 +265,7 @@ Future<void> _pump(
           RouteNames.studentInformation: (_) => const Scaffold(body: Text('student info target')),
           RouteNames.studentActivation: (_) => const Scaffold(body: Text('activation target')),
           RouteNames.home: (_) => const Scaffold(body: Text('home target')),
+          RouteNames.login: (_) => const Scaffold(body: Text('login target')),
         },
         home: useGate ? const EmailVerificationGate() : const StudentRecoveryVerificationScreen(),
       ),
@@ -313,9 +357,17 @@ class _FakeAuthProvider extends AuthProvider {
   int completions = 0;
   final order = <String>[];
 
+  String completeStatus = 'approved';
+
   @override
-  Future<void> completeStudentAccountSetup() async {
+  Future<String> completeStudentAccountSetup() async {
     completions++;
     order.add('complete');
+    return completeStatus;
   }
+
+  int signOuts = 0;
+
+  @override
+  Future<void> signOut() async => signOuts++;
 }

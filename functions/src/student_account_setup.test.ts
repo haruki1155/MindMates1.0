@@ -4,7 +4,9 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {Timestamp, getFirestore} from "firebase-admin/firestore";
 
-import {cancelAccountSetup, completeAccountSetup, startAccountSetup} from "./student_account_setup";
+import {
+  approveAccountClaim, cancelAccountSetup, completeAccountSetup, listAccountClaims, rejectAccountClaim, startAccountSetup,
+} from "./student_account_setup";
 import {RecoveryDeps, RecoveryMail, confirmRecoveryEmailCode, requestRecoveryEmailCode} from "./student_account_recovery";
 import {studentAuthAliasEmail} from "./student_auth_alias";
 import {CLAIM_PENDING, RECOVERY_CONTACTS, RECOVERY_EMAILS, RECOVERY_VERIFICATIONS, recoveryEmailHash} from "./student_recovery_contacts";
@@ -25,6 +27,9 @@ const start = (data: unknown, ip = nextIp()) => startAccountSetup({auth: null, d
 let ipSeq = 0;
 function nextIp() { return `10.7.${(ipSeq >> 8) & 255}.${ipSeq++ & 255}`; }
 
+const REVIEWER = {id: `${run}-reviewer`, name: "PACC Reviewer", role: "admin"};
+const approve = (uid: string) => approveAccountClaim(REVIEWER, uid, {now: () => clock.t});
+
 const mails: RecoveryMail[] = [];
 const recoveryDeps: RecoveryDeps = {
   sendMail: async (m) => { mails.push(m); },
@@ -36,7 +41,7 @@ const recoveryDeps: RecoveryDeps = {
 
 const docs: FirebaseFirestore.DocumentReference[] = [];
 const authEmails = new Set<string>();
-const uids: string[] = [];
+const uids: string[] = [`${run}-reviewer`];
 
 async function seedRow(tag: string, extra: Record<string, unknown> = {}) {
   const studentNo = `${run}-${tag}`;
@@ -131,8 +136,17 @@ test("start, verify the personal email, then complete: the claim is created only
   const verifiedPending = (await db.collection(CLAIM_PENDING).doc(uid).get()).data() ?? {};
   assert.equal(verifiedPending.expiresAt.toMillis(), clock.t + 24 * 60 * 60 * 1000, "a verified setup has a day to finish");
 
+  // Verifying the email does not claim anything: it only submits the setup for administrator approval.
   const done = await completeAccountSetup({...as(uid)}, {now: () => clock.t});
-  assert.deepEqual(done, {ok: true, alreadyComplete: false});
+  assert.deepEqual(done, {ok: true, alreadyComplete: false, status: "awaiting-approval"});
+  assert.equal(await exists(db.collection("users").doc(uid)), false, "still no profile before approval");
+  assert.equal((await s.ref.get()).data()?.activated, false);
+  assert.deepEqual(await completeAccountSetup({...as(uid)}, {now: () => clock.t}), {ok: true, alreadyComplete: false, status: "awaiting-approval"});
+  const queued = (await listAccountClaims()).claims.find((c) => c.uid === uid);
+  assert.ok(queued, "the request is in the administrator queue");
+  assert.equal(queued.studentNo, s.studentNo);
+  assert.equal(queued.email, address);
+  assert.deepEqual(await approve(uid), {ok: true});
   const profile = (await db.collection("users").doc(uid).get()).data() ?? {};
   assert.equal(profile.schoolId, s.studentNo);
   assert.equal(profile.email, address, "the profile keeps the real contact email");
@@ -148,12 +162,12 @@ test("start, verify the personal email, then complete: the claim is created only
   assert.equal(row.userId, uid);
   assert.equal(row.claimMethod, "self-roster-match");
   assert.equal(await exists(db.collection(CLAIM_PENDING).doc(uid)), false);
-  const audits = (await db.collection("admin_audit_logs").where("actorId", "==", uid).get()).docs.map((d) => d.data());
-  assert.ok(audits.some((a) => a.action === "STUDENT_ACCOUNT_CLAIMED" && a.targetId === s.key));
+  const audits = (await db.collection("admin_audit_logs").where("actorId", "==", REVIEWER.id).get()).docs.map((d) => d.data());
+  assert.ok(audits.some((a) => a.action === "STUDENT_ACCOUNT_CLAIMED" && a.targetId === s.key && a.metadata.approvedBy === REVIEWER.id));
   assert.ok(!JSON.stringify(audits).includes(address) && !JSON.stringify(audits).includes("mindmate.local"));
 
   // Safe to repeat.
-  assert.deepEqual(await completeAccountSetup({...as(uid)}, {now: () => clock.t}), {ok: true, alreadyComplete: true});
+  assert.deepEqual(await completeAccountSetup({...as(uid)}, {now: () => clock.t}), {ok: true, alreadyComplete: true, status: "approved"});
 });
 
 test("every mismatch returns the identical generic error and creates nothing", async () => {
@@ -307,6 +321,7 @@ test("cancelling a pending setup removes only that setup and frees the email and
   // A claimed account (profile exists) cannot be cancelled this way.
   await authedConfirm(otherUid);
   await completeAccountSetup({...as(otherUid)}, {now: () => clock.t});
+  await approve(otherUid);
   await rejects(cancelAccountSetup({...as(otherUid)}), "failed-precondition");
   assert.equal((await getAuth().getUser(otherUid)).email, other.alias);
 });
@@ -334,7 +349,8 @@ test("each half of email verification is required on its own, and a held Student
   const uidC = await track(c, email("hv3"));
   await authedConfirm(uidC);
   await db.collection("student_id_reservations").doc(c.key).set({userId: "another-uid", studentId: c.studentNo});
-  await rejects(completeAccountSetup({...as(uidC)}, {now: () => clock.t}), "not-found", GENERIC);
+  await completeAccountSetup({...as(uidC)}, {now: () => clock.t});
+  await rejects(approve(uidC), "failed-precondition");
   assert.equal((await db.collection("student_id_reservations").doc(c.key).get()).data()?.userId, "another-uid");
   assert.equal((await c.ref.get()).data()?.activated, false);
 
@@ -345,4 +361,112 @@ test("each half of email verification is required on its own, and a held Student
   await authedConfirm(uidD);
   await db.collection(CLAIM_PENDING).doc(uidD).update({expiresAt: Timestamp.fromMillis(clock.t - 1000)});
   await rejects(completeAccountSetup({...as(uidD)}, {now: () => clock.t}), "failed-precondition");
+});
+
+test("RELEASE BLOCKER: knowing a Student ID, name and birth date and owning an email must not claim the roster record", async () => {
+  const s = await seedRow("ATK1");
+  const attackerEmail = email("atk1");
+  clock.t = Date.now();
+  // The attacker is not the student: they only know public-ish facts about them and own their own mailbox.
+  await start(payload(s, attackerEmail));
+  const uid = await track(s, attackerEmail);
+  await authedConfirm(uid);
+  const finished = await completeAccountSetup({...as(uid)}, {now: () => clock.t}) as {ok: boolean; status?: string};
+
+  const row = (await s.ref.get()).data()!;
+  assert.equal(row.activated, false, "the roster record must not be activated by email ownership alone");
+  assert.equal(row.userId, null, "the roster record must not be linked to the attacker");
+  assert.equal(await exists(db.collection("users").doc(uid)), false, "no student profile may exist before approval");
+  assert.equal(await exists(db.collection("student_id_reservations").doc(s.key)), false, "the Student ID must stay unreserved");
+  assert.equal(finished.status, "awaiting-approval");
+});
+
+async function submitted(tag: string) {
+  const s = await seedRow(tag);
+  const address = email(tag.toLowerCase());
+  clock.t = Date.now();
+  await start(payload(s, address));
+  const uid = await track(s, address);
+  await authedConfirm(uid);
+  await completeAccountSetup({...as(uid)}, {now: () => clock.t});
+  return {s, uid, address};
+}
+
+test("an administrator can approve only a submitted, email-verified request", async () => {
+  const s = await seedRow("AP1");
+  clock.t = Date.now();
+  await start(payload(s, email("ap1")));
+  const uid = await track(s, email("ap1"));
+  await rejects(approve(uid), "failed-precondition", "This claim is no longer available.");
+  await authedConfirm(uid);
+  await rejects(approve(uid), "failed-precondition", "This claim is no longer available.");
+  await completeAccountSetup({...as(uid)}, {now: () => clock.t});
+  await rejects(approve(""), "invalid-argument");
+  await rejects(approve("no-such-user"), "failed-precondition");
+  await approve(uid);
+  await rejects(approve(uid), "failed-precondition", "This claim is no longer available.");
+  assert.equal((await s.ref.get()).data()?.userId, uid);
+});
+
+test("approval re-checks the roster, the reservation and the expiry", async () => {
+  const changed = await submitted("AP2");
+  await changed.s.ref.update({surname: "Different"});
+  await rejects(approve(changed.uid), "failed-precondition");
+  assert.equal(await exists(db.collection("users").doc(changed.uid)), false);
+
+  const raced = await submitted("AP3");
+  await raced.s.ref.update({activated: true, userId: "someone-else"});
+  await rejects(approve(raced.uid), "failed-precondition");
+  assert.equal((await raced.s.ref.get()).data()?.userId, "someone-else");
+
+  const held = await submitted("AP4");
+  await db.collection("student_id_reservations").doc(held.s.key).set({userId: "another-uid", studentId: held.s.studentNo});
+  await rejects(approve(held.uid), "failed-precondition");
+  assert.equal(await exists(db.collection("users").doc(held.uid)), false);
+
+  const late = await submitted("AP5");
+  await rejects(approveAccountClaim(REVIEWER, late.uid, {now: () => clock.t + 15 * 24 * 60 * 60 * 1000}), "failed-precondition");
+});
+
+test("rejecting a request removes only that unapproved setup and frees the Student ID and email", async () => {
+  const mine = await submitted("RJ1");
+  const other = await submitted("RJ2");
+  assert.deepEqual(await rejectAccountClaim(REVIEWER, mine.uid), {ok: true});
+  await assert.rejects(getAuth().getUser(mine.uid), (e: {code?: string}) => e.code === "auth/user-not-found");
+  assert.equal(await exists(db.collection(CLAIM_PENDING).doc(mine.uid)), false);
+  assert.equal(await exists(db.collection(RECOVERY_CONTACTS).doc(mine.uid)), false);
+  assert.equal(await exists(db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(mine.address))), false);
+  assert.equal((await mine.s.ref.get()).data()?.activated, false);
+  const audits = (await db.collection("admin_audit_logs").where("actorId", "==", REVIEWER.id).get()).docs.map((d) => d.data());
+  assert.ok(audits.some((a) => a.action === "STUDENT_ACCOUNT_CLAIM_REJECTED" && a.targetId === mine.s.key));
+  // The real student can now set up with their own email.
+  await start(payload(mine.s, email("rj1-real")));
+  await track(mine.s, email("rj1-real"));
+  // The other request is untouched, and an approved account can never be rejected this way.
+  assert.equal(await exists(db.collection(CLAIM_PENDING).doc(other.uid)), true);
+  await approve(other.uid);
+  await rejects(rejectAccountClaim(REVIEWER, other.uid), "failed-precondition");
+  assert.equal((await getAuth().getUser(other.uid)).email, other.s.alias);
+  await rejects(rejectAccountClaim(REVIEWER, "no-such-user"), "failed-precondition");
+  const stranger = await getAuth().createUser({email: email("rj-stranger"), password: PASSWORD});
+  uids.push(stranger.uid);
+  await rejects(rejectAccountClaim(REVIEWER, stranger.uid), "failed-precondition");
+  assert.equal((await getAuth().getUser(stranger.uid)).email, email("rj-stranger"));
+});
+
+test("the attacker's submission only reaches the queue, and rejecting it leaves the real student free to claim", async () => {
+  const s = await seedRow("ATK2");
+  clock.t = Date.now();
+  await start(payload(s, email("atk2")));
+  const uid = await track(s, email("atk2"));
+  await authedConfirm(uid);
+  await completeAccountSetup({...as(uid)}, {now: () => clock.t});
+  assert.equal((await s.ref.get()).data()?.activated, false);
+  await rejectAccountClaim(REVIEWER, uid);
+  await start(payload(s, email("atk2-real")));
+  const realUid = await track(s, email("atk2-real"));
+  await authedConfirm(realUid);
+  await completeAccountSetup({...as(realUid)}, {now: () => clock.t});
+  await approve(realUid);
+  assert.equal((await s.ref.get()).data()?.userId, realUid);
 });

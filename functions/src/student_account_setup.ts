@@ -3,6 +3,7 @@ import {getAuth} from "firebase-admin/auth";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 
+import {requireAdmin} from "./access";
 import {AUDIT_CATEGORIES, writeAudit} from "./audit";
 import {
   assertDevEndpointAllowed, callerIp, consumeWindow, currentProjectId,
@@ -33,6 +34,8 @@ const db = () => getFirestore();
 const PENDING_WINDOW_MS = 15 * 60 * 1000;
 const START_IP_LIMIT = 20;
 const CLAIM_METHOD = "self-roster-match";
+const APPROVAL_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+const AWAITING = "awaiting-approval";
 const GENERIC = "We couldn't verify these details. Check them and try again.";
 
 export type SetupDeps = {now: () => number};
@@ -150,8 +153,14 @@ async function createSetupUser(
   }
 }
 
-// ------------------------------------------------------------------ complete
+// ------------------------------------------------------------------ complete (submit for approval)
 
+/**
+ * Called after the personal email was verified. Email ownership proves only that the student controls a mailbox, not
+ * that they are the person on the roster record (the name and birth date are knowledge, not secrets), so this does
+ * NOT claim the record. It submits the setup for approval by a PACC administrator; the claim becomes active only in
+ * {@link approveAccountClaim}.
+ */
 export async function completeAccountSetup(request: Req, deps: SetupDeps = defaultSetupDeps) {
   const uid = requireUid(request);
   const now = deps.now();
@@ -162,7 +171,7 @@ export async function completeAccountSetup(request: Req, deps: SetupDeps = defau
   const profileRef = db().collection("users").doc(uid);
   const existing = (await profileRef.get()).data();
   if (existing?.rosterLinked === true && typeof existing.schoolId === "string") {
-    return {ok: true, alreadyComplete: true};
+    return {ok: true, alreadyComplete: true, status: "approved"};
   }
   const pendingRef = db().collection(CLAIM_PENDING).doc(uid);
   const contactRef = db().collection(RECOVERY_CONTACTS).doc(uid);
@@ -176,20 +185,82 @@ export async function completeAccountSetup(request: Req, deps: SetupDeps = defau
   if (!contact.verifiedAt || !user.emailVerified) {
     throw new HttpsError("failed-precondition", "Verify your email address first.");
   }
+  const live = (await db().collection("student_roster").doc(String(pending.studentKey)).get()).data();
+  if (!eligible(live) || !storedIdentityMatches(pending.identity, live)) throw mismatch();
 
-  const key = String(pending.studentKey);
-  const rosterRef = db().collection("student_roster").doc(key);
-  const reservationRef = db().collection("student_id_reservations").doc(key);
-  const name = await db().runTransaction(async (transaction) => {
-    const [roster, reservation, profile, livePending] = await Promise.all([
-      transaction.get(rosterRef), transaction.get(reservationRef), transaction.get(profileRef), transaction.get(pendingRef),
+  await db().runTransaction(async (transaction) => {
+    const snap = await transaction.get(pendingRef);
+    if (!snap.exists) throw new HttpsError("failed-precondition", "No account setup is in progress.");
+    if (snap.data()?.status === AWAITING) return;
+    transaction.update(pendingRef, {
+      status: AWAITING, submittedAt: FieldValue.serverTimestamp(), expiresAt: Timestamp.fromMillis(now + APPROVAL_WINDOW_MS),
+    });
+  });
+  return {ok: true, alreadyComplete: false, status: "awaiting-approval"};
+}
+
+// ------------------------------------------------------------------ administrator review
+
+/** Pending submissions an administrator can review: who asked, for which record, with which email. */
+export async function listAccountClaims() {
+  const snap = await db().collection(CLAIM_PENDING).where("status", "==", AWAITING).limit(200).get();
+  const items = await Promise.all(snap.docs.map(async (doc) => {
+    const pending = doc.data();
+    const [contact, roster] = await Promise.all([
+      db().collection(RECOVERY_CONTACTS).doc(doc.id).get(), db().collection("student_roster").doc(String(pending.studentKey)).get(),
     ]);
-    if (profile.exists) return null;
-    if (!livePending.exists) throw new HttpsError("failed-precondition", "No account setup is in progress.");
+    const row = roster.data() ?? {};
+    const toIso = (v: unknown) => (v instanceof Timestamp ? v.toDate().toISOString() : "");
+    return {
+      uid: doc.id, studentNo: String(row.studentNo ?? pending.studentKey),
+      name: [row.firstName, row.middleName, row.surname].map((v) => String(v ?? "")).filter(Boolean).join(" "),
+      college: String(row.college ?? ""), course: String(row.course ?? ""), yearLevel: String(row.yearLevel ?? ""),
+      email: String(contact.data()?.email ?? ""), submittedAt: toIso(pending.submittedAt),
+      rosterAlreadyClaimed: row.activated === true,
+    };
+  }));
+  items.sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+  return {claims: items};
+}
+
+type Reviewer = {id: string; name: string; role: string};
+
+export async function approveAccountClaim(reviewer: Reviewer, rawUid: unknown, deps: SetupDeps = defaultSetupDeps) {
+  const uid = typeof rawUid === "string" ? rawUid.trim() : "";
+  if (!uid || uid.length > 128) throw new HttpsError("invalid-argument", "A claim to approve is required.");
+  const now = deps.now();
+  const user = await getAuth().getUser(uid).catch(() => null);
+  if (!user || !isStudentAuthAlias(user.email)) throw new HttpsError("failed-precondition", "This claim is no longer available.");
+  const profileRef = db().collection("users").doc(uid);
+  const pendingRef = db().collection(CLAIM_PENDING).doc(uid);
+  const contactRef = db().collection(RECOVERY_CONTACTS).doc(uid);
+
+  await db().runTransaction(async (transaction) => {
+    const [profile, pendingSnap, contactSnap] = await Promise.all([
+      transaction.get(profileRef), transaction.get(pendingRef), transaction.get(contactRef),
+    ]);
+    const pending = pendingSnap.data();
+    const contact = contactSnap.data();
+    if (profile.exists || !pending || !contact || pending.status !== AWAITING) {
+      throw new HttpsError("failed-precondition", "This claim is no longer available.");
+    }
+    const expiresAt = pending.expiresAt instanceof Timestamp ? pending.expiresAt.toMillis() : 0;
+    if (expiresAt <= now) throw new HttpsError("failed-precondition", "This request has expired. The student must start again.");
+    // Both halves of email ownership are still required at approval time.
+    if (!contact.verifiedAt || !user.emailVerified) throw new HttpsError("failed-precondition", "The student's email is not verified.");
+
+    const key = String(pending.studentKey);
+    const rosterRef = db().collection("student_roster").doc(key);
+    const reservationRef = db().collection("student_id_reservations").doc(key);
+    const [roster, reservation] = await Promise.all([transaction.get(rosterRef), transaction.get(reservationRef)]);
     const live = roster.data();
-    // Re-evaluate the identity captured at the start against the current roster, so a stale precheck cannot claim.
-    if (!eligible(live) || live.studentKey !== key || !storedIdentityMatches(pending.identity, live)) throw mismatch();
-    if (reservation.exists && reservation.data()?.userId !== uid) throw mismatch();
+    // Re-evaluate the identity captured at the start against the current roster, so a stale request cannot claim.
+    if (!eligible(live) || live.studentKey !== key || !storedIdentityMatches(pending.identity, live)) {
+      throw new HttpsError("failed-precondition", "This record can no longer be claimed. Reject the request.");
+    }
+    if (reservation.exists && reservation.data()?.userId !== uid) {
+      throw new HttpsError("failed-precondition", "This Student ID is already claimed. Reject the request.");
+    }
 
     const studentNo = String(live.studentNo ?? key);
     transaction.create(profileRef, rosterStudentProfile(live, {
@@ -203,15 +274,37 @@ export async function completeAccountSetup(request: Req, deps: SetupDeps = defau
       activatedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
     });
     transaction.delete(pendingRef);
-    const display = [live.firstName, live.middleName, live.surname].map((v) => String(v ?? "")).filter(Boolean).join(" ");
     writeAudit(transaction, db(), {
-      actorId: uid, actorNameSnapshot: display, actorRoleSnapshot: "student",
+      actorId: reviewer.id, actorNameSnapshot: reviewer.name, actorRoleSnapshot: reviewer.role,
       action: "STUDENT_ACCOUNT_CLAIMED", category: AUDIT_CATEGORIES.userManagement,
-      targetType: "student", targetId: key, metadata: {studentNo, userId: uid, claimMethod: CLAIM_METHOD},
+      targetType: "student", targetId: key, metadata: {studentNo, userId: uid, claimMethod: CLAIM_METHOD, approvedBy: reviewer.id},
     });
-    return display;
   });
-  return {ok: true, alreadyComplete: name === null};
+  return {ok: true};
+}
+
+export async function rejectAccountClaim(reviewer: Reviewer, rawUid: unknown) {
+  const uid = typeof rawUid === "string" ? rawUid.trim() : "";
+  if (!uid || uid.length > 128) throw new HttpsError("invalid-argument", "A claim to reject is required.");
+  const pendingRef = db().collection(CLAIM_PENDING).doc(uid);
+  const [pending, profile] = await Promise.all([pendingRef.get(), db().collection("users").doc(uid).get()]);
+  // Only the system's own unapproved setup can be rejected: never an approved account or an unrelated one.
+  if (!pending.exists || profile.exists) throw new HttpsError("failed-precondition", "This claim is no longer available.");
+  const studentKey = String(pending.data()?.studentKey ?? "");
+  await getAuth().deleteUser(uid).catch((e) => {
+    if ((e as {code?: string})?.code !== "auth/user-not-found") throw e;
+  });
+  await db().runTransaction(async (transaction) => {
+    const records = await readRecoveryRecords(transaction, uid);
+    releaseRecoveryRecords(transaction, uid, records);
+    transaction.delete(pendingRef);
+    writeAudit(transaction, db(), {
+      actorId: reviewer.id, actorNameSnapshot: reviewer.name, actorRoleSnapshot: reviewer.role,
+      action: "STUDENT_ACCOUNT_CLAIM_REJECTED", category: AUDIT_CATEGORIES.userManagement,
+      targetType: "student", targetId: studentKey, metadata: {userId: uid, rejectedBy: reviewer.id},
+    });
+  });
+  return {ok: true};
 }
 
 // ------------------------------------------------------------------ cancel
@@ -253,3 +346,19 @@ export const cancelStudentAccountSetupDev = onCall({enforceAppCheck: false}, (re
   assertDevEndpointAllowed(currentProjectId());
   return cancelAccountSetup(request);
 });
+
+async function reviewerOf(request: Req): Promise<Reviewer> {
+  const id = requireUid(request);
+  const actor = await requireAdmin(id);
+  const name = [actor.firstName, actor.lastName].map((v) => String(v ?? "")).filter(Boolean).join(" ") || String(actor.displayName ?? "");
+  return {id, name: name || "PACC administrator", role: String(actor.accessRole ?? "admin")};
+}
+
+export const listStudentAccountClaims = onCall(async (request) => {
+  await reviewerOf(request);
+  return listAccountClaims();
+});
+export const approveStudentAccountClaim = onCall(async (request) =>
+  approveAccountClaim(await reviewerOf(request), (request.data as {uid?: unknown} | undefined)?.uid));
+export const rejectStudentAccountClaim = onCall(async (request) =>
+  rejectAccountClaim(await reviewerOf(request), (request.data as {uid?: unknown} | undefined)?.uid));

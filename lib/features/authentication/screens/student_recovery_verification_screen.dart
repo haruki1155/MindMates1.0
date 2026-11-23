@@ -56,6 +56,8 @@ class _StudentRecoveryVerificationScreenState
   bool _verified = false;
   bool _finishing = false;
   bool _finishFailed = false;
+  bool _awaiting = false;
+  bool _checkedAgain = false;
   String? _message;
   bool _messageIsError = false;
 
@@ -192,15 +194,17 @@ class _StudentRecoveryVerificationScreenState
   static const _finishAttempts = 3;
   static const _finishRetryDelay = Duration(milliseconds: 700);
 
-  /// Claims the roster record, loads the new profile and routes to the first-
-  /// login gate (Student Information first). A failure never falls through to
-  /// a stale or empty profile: the student can retry, and the finish step is
-  /// idempotent on the server.
+  /// Submits the verified setup for PACC approval. Once an administrator has
+  /// approved it, loads the new profile and routes to the first-login gate
+  /// (Student Information first). A failure never falls through to a stale or
+  /// empty profile: the student can retry, and the step is idempotent.
   Future<void> _continue() async {
     if (_finishing) return;
+    final rechecking = _awaiting;
     setState(() {
       _finishing = true;
       _finishFailed = false;
+      _awaiting = false;
     });
     final auth = context.read<AuthProvider>();
     final userProvider = context.read<UserProvider>();
@@ -213,9 +217,18 @@ class _StudentRecoveryVerificationScreenState
       if (attempt > 0) await Future<void>.delayed(_finishRetryDelay);
       if (!mounted) return;
       try {
-        await auth.completeStudentAccountSetup();
+        final status = await auth.completeStudentAccountSetup();
+        if (status == 'awaiting-approval') {
+          if (!mounted) return;
+          setState(() {
+            _finishing = false;
+            _awaiting = true;
+            _checkedAgain = rechecking;
+          });
+          return;
+        }
       } catch (_) {
-        // Already complete, expired or transient: the profile load decides.
+        // Legacy account, expired or transient: the profile load decides.
       }
       try {
         final userId = auth.userId;
@@ -289,8 +302,86 @@ class _StudentRecoveryVerificationScreenState
     }
   }
 
+  Future<void> _signOutWhileWaiting() async {
+    final navigator = Navigator.of(context);
+    await context.read<AuthProvider>().signOut();
+    navigator.pushNamedAndRemoveUntil(RouteNames.login, (route) => false);
+  }
+
+  Widget _buildAwaiting() {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 430),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Icon(
+                    Icons.hourglass_top_rounded,
+                    size: 44,
+                    color: AppColors.primary,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Waiting for PACC approval',
+                    key: Key('awaiting-approval-title'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Your email is verified. The PACC office will confirm that this Student ID is yours before your account opens. Check back later; you can close the app.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      height: 1.4,
+                    ),
+                  ),
+                  if (_checkedAgain) ...[
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Still waiting for approval.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                  const SizedBox(height: 22),
+                  FilledButton(
+                    key: const Key('awaiting-approval-check'),
+                    onPressed: _finishing ? null : _continue,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(50),
+                      backgroundColor: AppColors.primary,
+                    ),
+                    child: Text(_finishing ? 'Checking…' : 'Check again'),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    key: const Key('awaiting-approval-sign-out'),
+                    onPressed: _finishing ? null : _signOutWhileWaiting,
+                    child: const Text('Sign out'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_awaiting) return _buildAwaiting();
     final resendLabel = _resendSeconds > 0
         ? 'Resend in ${_resendSeconds}s'
         : _sending

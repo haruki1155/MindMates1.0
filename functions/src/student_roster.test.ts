@@ -11,7 +11,10 @@ import {
   updateStudentRosterRecord,
 } from "./index";
 import {rosterTestHooks} from "./student_roster";
-import {completeAccountSetup, startAccountSetup} from "./student_account_setup";
+import {
+  approveAccountClaim, approveStudentAccountClaim, completeAccountSetup, listStudentAccountClaims, rejectStudentAccountClaim,
+  startAccountSetup,
+} from "./student_account_setup";
 import {studentAuthAliasEmail} from "./student_auth_alias";
 import {RECOVERY_CONTACTS, RECOVERY_EMAILS, recoveryEmailHash} from "./student_recovery_contacts";
 import {ensureAuthUser} from "./test_auth_helper";
@@ -296,6 +299,7 @@ async function claimRow(n: string, tag: string): Promise<{uid: string; email: st
   await db.collection(RECOVERY_CONTACTS).doc(uid).update({verifiedAt: Timestamp.now()});
   await getAuth().updateUser(uid, {emailVerified: true});
   await completeAccountSetup({auth: {uid}}, {now: () => Date.now()});
+  await approveAccountClaim({id: adminUid, name: "Test Admin", role: "admin"}, uid, {now: () => Date.now()});
   created.push(db.collection("users").doc(uid), db.collection("student_id_reservations").doc(keyOf(studentNo)),
     db.collection("student_activation_attempts").doc(keyOf(studentNo)), db.collection(RECOVERY_CONTACTS).doc(uid),
     db.collection("student_claim_pending").doc(uid), db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(address)));
@@ -602,6 +606,16 @@ test("Step 11.3G.1 Test A: listStudentRosterImports returns safe status, rowCoun
   } finally {
     await Promise.all(refs.map((r) => r.delete().catch(() => undefined)));
   }
+});
+
+test("claim review callables are administrator-only", async () => {
+  const review = [listStudentAccountClaims, approveStudentAccountClaim, rejectStudentAccountClaim].map(asCallable);
+  for (const fn of review) {
+    await denied(fn.run({data: {uid: "x"}}), "unauthenticated");
+    await denied(fn.run({auth: {uid: `${run}-not-an-admin`}, data: {uid: "x"}}), "permission-denied");
+  }
+  const list = await review[0].run({auth, data: {}}) as {claims: unknown[]};
+  assert.ok(Array.isArray(list.claims));
 });
 
 test("issueStudentActivationCodes is disabled: activation codes are no longer used", async () => {

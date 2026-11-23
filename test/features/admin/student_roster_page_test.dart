@@ -155,6 +155,26 @@ class _Repo extends StudentRosterRepository {
     calls.add('lock:$studentNo');
   }
 
+  List<StudentAccountClaim> claims = [];
+
+  @override
+  Future<List<StudentAccountClaim>> listAccountClaims() async {
+    calls.add('claims');
+    return List.of(claims);
+  }
+
+  @override
+  Future<void> approveAccountClaim(String uid) async {
+    calls.add('approve:$uid');
+    claims.removeWhere((c) => c.uid == uid);
+  }
+
+  @override
+  Future<void> rejectAccountClaim(String uid) async {
+    calls.add('reject:$uid');
+    claims.removeWhere((c) => c.uid == uid);
+  }
+
   @override
   Future<void> revokeActivation(String studentNo, String reason) async {
     calls.add('revoke:$studentNo');
@@ -352,24 +372,25 @@ void main() {
     expect(_button(tester, 'Import').onPressed, isNull);
   });
 
-  testWidgets('import sends one call per chunk and summarises, with no activation codes', (
-    tester,
-  ) async {
-    final repo = _Repo();
-    await _pump(
-      tester,
-      repo,
-      file: _csvFile([for (var i = 0; i < 2500; i++) _csvRow('S-$i')]),
-    );
-    await _chooseAndPreview(tester);
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'import sends one call per chunk and summarises, with no activation codes',
+    (tester) async {
+      final repo = _Repo();
+      await _pump(
+        tester,
+        repo,
+        file: _csvFile([for (var i = 0; i < 2500; i++) _csvRow('S-$i')]),
+      );
+      await _chooseAndPreview(tester);
+      await tester.tap(find.widgetWithText(FilledButton, 'Import'));
+      await tester.pumpAndSettle();
 
-    expect(repo.commitSizes, [1000, 1000, 500]);
-    expect(find.text('2500 new · 0 updated · 0 linked'), findsOneWidget);
-    expect(find.textContaining('activation slips'), findsNothing);
-    expect(find.textContaining('Activation code'), findsNothing);
-  });
+      expect(repo.commitSizes, [1000, 1000, 500]);
+      expect(find.text('2500 new · 0 updated · 0 linked'), findsOneWidget);
+      expect(find.textContaining('activation slips'), findsNothing);
+      expect(find.textContaining('Activation code'), findsNothing);
+    },
+  );
 
   testWidgets('no further chunks are sent once the page is disposed', (
     tester,
@@ -525,9 +546,7 @@ void main() {
     expect(repo.calls, contains('status:2021-005:active'));
   });
 
-  testWidgets('revoke needs a reason and issues no code', (
-    tester,
-  ) async {
+  testWidgets('revoke needs a reason and issues no code', (tester) async {
     final repo = _Repo();
     await _pump(tester, repo);
     await openMenu(tester, '2021-002', 'Revoke activation');
@@ -547,6 +566,51 @@ void main() {
     expect(find.textContaining('can set up the account again'), findsOneWidget);
     expect(find.textContaining('activation slips'), findsNothing);
   });
+
+  testWidgets(
+    'account requests: an administrator approves or rejects each one',
+    (tester) async {
+      StudentAccountClaim claim(String uid, String no) => StudentAccountClaim(
+        uid: uid,
+        studentNo: no,
+        name: 'Ana Cruz',
+        college: 'CITE',
+        course: 'BSIT',
+        yearLevel: '1st Year',
+        email: '$uid@example.com',
+        submittedAt: DateTime.utc(2026, 11, 20),
+        rosterAlreadyClaimed: false,
+      );
+      final repo = _Repo()
+        ..claims = [claim('u1', '2021-001'), claim('u2', '2021-002')];
+      await _pump(tester, repo);
+      await tester.tap(find.text('Account requests'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Personal email: u1@example.com'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('does not prove it'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Approve').first);
+      await tester.pumpAndSettle();
+      expect(
+        repo.calls.where((c) => c.startsWith('approve')),
+        isEmpty,
+        reason: 'asks first',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Approve').last);
+      await tester.pumpAndSettle();
+      expect(repo.calls, contains('approve:u1'));
+
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Reject').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Reject').last);
+      await tester.pumpAndSettle();
+      expect(repo.calls, contains('reject:u2'));
+      expect(find.text('No account requests are waiting.'), findsOneWidget);
+    },
+  );
 
   testWidgets('corrections: reject needs a reason, approve works', (
     tester,

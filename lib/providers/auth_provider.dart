@@ -357,8 +357,9 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Claims the roster record after the personal email was verified. Idempotent.
-  Future<void> completeStudentAccountSetup() =>
+  /// Submits the verified setup for PACC approval. Returns `approved` once an
+  /// administrator has approved it, otherwise `awaiting-approval`. Idempotent.
+  Future<String> completeStudentAccountSetup() =>
       (_rosterRepository ?? StudentRosterRepository()).completeAccountSetup();
 
   Future<String?> signInWithGoogle() {

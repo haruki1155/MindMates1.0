@@ -110,7 +110,7 @@ class StudentRosterPage extends StatefulWidget {
   State<StudentRosterPage> createState() => _StudentRosterPageState();
 }
 
-enum _Tab { roster, import, corrections, history, legacy }
+enum _Tab { roster, claims, import, corrections, history, legacy }
 
 class _StudentRosterPageState extends State<StudentRosterPage> {
   late final StudentRosterRepository _repo =
@@ -150,6 +150,9 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   String? _importsError;
   List<LegacyStudent>? _legacy;
   String? _legacyError;
+  List<StudentAccountClaim>? _claims;
+  String? _claimsError;
+  final Set<String> _busyClaims = {};
 
   @override
   void initState() {
@@ -196,6 +199,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
           const SizedBox(height: 20),
           switch (_tab) {
             _Tab.roster => _rosterTab(),
+            _Tab.claims => _claimsTab(),
             _Tab.import => _importTab(),
             _Tab.corrections => _correctionsTab(),
             _Tab.history => _historyTab(),
@@ -209,6 +213,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   Widget _tabBar() {
     const labels = {
       _Tab.roster: 'Roster',
+      _Tab.claims: 'Account requests',
       _Tab.import: 'Import',
       _Tab.corrections: 'Corrections',
       _Tab.history: 'Import history',
@@ -231,6 +236,8 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   void _openTab(_Tab tab) {
     setState(() => _tab = tab);
     switch (tab) {
+      case _Tab.claims:
+        _loadClaims();
       case _Tab.corrections:
         if (_corrections == null) _loadCorrections();
       case _Tab.history:
@@ -1292,6 +1299,128 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         ),
       ),
     );
+  }
+
+  // ===================================================================
+  // Account requests tab
+  // ===================================================================
+
+  Future<void> _loadClaims() async {
+    setState(() => _claimsError = null);
+    try {
+      final list = await _repo.listAccountClaims();
+      if (mounted) setState(() => _claims = list);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _claims ??= const [];
+          _claimsError = _errorText(e);
+        });
+      }
+    }
+  }
+
+  Widget _claimsTab() {
+    final list = _claims;
+    if (list == null) return _loading();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Students who matched a roster record and verified a personal '
+          'email. Approve a request only when you have confirmed the student '
+          'is the person on the record; the email alone does not prove it.',
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _loadClaims,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh'),
+          ),
+        ),
+        if (_claimsError != null) _error(_claimsError!),
+        if (list.isEmpty && _claimsError == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text('No account requests are waiting.'),
+          ),
+        for (final c in list) _claimTile(c),
+      ],
+    );
+  }
+
+  Widget _claimTile(StudentAccountClaim c) {
+    final busy = _busyClaims.contains(c.uid);
+    return Card(
+      margin: const EdgeInsets.only(top: 8),
+      child: ListTile(
+        isThreeLine: true,
+        title: Text(
+          '${c.name} · ${c.studentNo}',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          '${c.college} · ${c.course} · ${c.yearLevel}\n'
+          'Personal email: ${c.email}'
+          '${c.rosterAlreadyClaimed ? '\nThis record is already claimed: reject the request.' : ''}',
+        ),
+        trailing: busy
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Wrap(
+                spacing: 8,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => _reviewClaim(c, approve: false),
+                    child: const Text('Reject'),
+                  ),
+                  FilledButton(
+                    onPressed: c.rosterAlreadyClaimed
+                        ? null
+                        : () => _reviewClaim(c, approve: true),
+                    child: const Text('Approve'),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Future<void> _reviewClaim(
+    StudentAccountClaim c, {
+    required bool approve,
+  }) async {
+    final ok = await _confirm(
+      title: approve ? 'Approve this account?' : 'Reject this request?',
+      body: approve
+          ? '${c.name} (${c.studentNo}) will own this roster record and '
+                'can sign in with ${c.email} as their recovery email.'
+          : 'The request is deleted and the Student ID is free for the real '
+                'student to set up. Nothing else changes.',
+      confirmLabel: approve ? 'Approve' : 'Reject',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busyClaims.add(c.uid));
+    try {
+      if (approve) {
+        await _repo.approveAccountClaim(c.uid);
+        _toast('Approved ${c.studentNo}.');
+      } else {
+        await _repo.rejectAccountClaim(c.uid);
+        _toast('Rejected the request for ${c.studentNo}.');
+      }
+      if (mounted) setState(() => _claims?.removeWhere((x) => x.uid == c.uid));
+    } catch (e) {
+      _toast(_errorText(e));
+    } finally {
+      if (mounted) setState(() => _busyClaims.remove(c.uid));
+    }
+    if (mounted) await _loadClaims();
   }
 
   Future<void> _loadLegacy() async {
