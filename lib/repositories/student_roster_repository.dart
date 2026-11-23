@@ -105,35 +105,43 @@ class StudentRosterRepository {
   /// in with their Student ID, so this is the internal alias the server returns
   /// as `authEmail` (the real email is only a recovery contact). A server that
   /// predates Student ID sign-in returns just `email`.
-  Future<String> activate({
+  Future<String> startAccountSetup({
     required String studentNo,
-    required String activationCode,
+    required String firstName,
+    required String middleName,
+    required String lastName,
     required String dateOfBirthKey,
     required String email,
     required String password,
   }) async {
     try {
-      final result = await _callMap('activateStudentAccount', {
+      final result = await _callMap('startStudentAccountSetup', {
         'studentNo': studentNo,
-        'activationCode': activationCode,
+        'firstName': firstName,
+        'middleName': middleName,
+        'lastName': lastName,
         'dateOfBirth': dateOfBirthKey,
         'email': email,
         'password': password,
       });
       final authEmail = asText(result['authEmail']);
-      if (authEmail.isNotEmpty) return authEmail;
-      final returned = asText(result['email']);
-      return returned.isEmpty ? email : returned;
+      if (authEmail.isEmpty) {
+        throw const StudentActivationException(
+          StudentActivationFailure.unknown,
+        );
+      }
+      return authEmail;
     } on FirebaseFunctionsException catch (error) {
-      final details = error.details;
       throw StudentActivationException(
-        StudentActivationFailure.parse(
-          details is Map ? details['reason'] : null,
-        ),
+        StudentActivationFailure.fromCode(error.code),
         message: error.message,
       );
     }
   }
+
+  /// Creates the roster-linked profile once the recovery email is verified.
+  /// Safe to repeat: the server answers `alreadyComplete` for a finished setup.
+  Future<void> completeAccountSetup() => _call('completeStudentAccountSetup');
 
   // ------------------------------------------- recovery email and reset
 
@@ -245,10 +253,7 @@ class StudentRosterRepository {
   ) async {
     final result = await _callMap(
       'importStudentRoster',
-      {
-        'fileName': fileName,
-        'rows': rows,
-      },
+      {'fileName': fileName, 'rows': rows},
       HttpsCallableOptions(timeout: const Duration(minutes: 10)),
     );
     final message = asText(result['message']);
@@ -283,41 +288,12 @@ class StudentRosterRepository {
 
   // ---------------------------------------------------------- roster
 
-  Future<
-    ({
-      List<IssuedActivationCode> codes,
-      List<({String studentNo, String reason})> skipped,
-    })
-  >
-  issueActivationCodes(List<String> studentNos) async {
-    final result = await _callMap('issueStudentActivationCodes', {
-      'studentNos': studentNos,
-    });
-    return (
-      codes: [
-        for (final c in asList(result['codes']))
-          IssuedActivationCode.fromJson(asStringMap(c)),
-      ],
-      skipped: [
-        for (final s in asList(result['skipped']))
-          (
-            studentNo: asText(asStringMap(s)['studentNo']),
-            reason: asText(asStringMap(s)['reason']),
-          ),
-      ],
-    );
-  }
-
-  Future<IssuedActivationCode> revokeActivation(
-    String studentNo,
-    String reason,
-  ) async {
-    final result = await _callMap('revokeStudentActivation', {
-      'studentNo': studentNo,
-      'reason': reason,
-    });
-    return IssuedActivationCode.fromJson(asStringMap(result['code']));
-  }
+  /// Releases the student's claim so they can set up the account again. No
+  /// code is issued.
+  Future<void> revokeActivation(String studentNo, String reason) => _call(
+    'revokeStudentActivation',
+    {'studentNo': studentNo, 'reason': reason},
+  );
 
   Future<({List<RosterRowView> rows, String? nextPageToken})> listRoster({
     String? search,

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/models/student_roster_models.dart';
 import 'package:mind_mates/repositories/student_roster_repository.dart';
 
 void main() {
@@ -14,21 +15,15 @@ void main() {
 
   setUp(() => calls = []);
 
-  group('activation sign-in email', () {
-    const base = {
-      'studentNo': '2021-00123',
-      'activationCode': 'ABCDE-23456',
-      'dateOfBirthKey': '2005-03-15',
-      'email': 'Ana@Example.com',
-      'password': 'Secret!1',
-    };
-
-    Future<String> activate(StudentRosterRepository r) => r.activate(
-      studentNo: base['studentNo']!,
-      activationCode: base['activationCode']!,
-      dateOfBirthKey: base['dateOfBirthKey']!,
-      email: base['email']!,
-      password: base['password']!,
+  group('account setup sign-in email', () {
+    Future<String> start(StudentRosterRepository r) => r.startAccountSetup(
+      studentNo: '2021-00123',
+      firstName: 'Ana',
+      middleName: '',
+      lastName: 'Cruz',
+      dateOfBirthKey: '2005-03-15',
+      email: 'Ana@Example.com',
+      password: 'Secret!1',
     );
 
     test('signs in with the Auth email the server created, not the recovery email', () async {
@@ -39,13 +34,15 @@ void main() {
           'authEmail': '202100123@students.mindmate.local',
         },
       );
-      expect(await activate(r), '202100123@students.mindmate.local');
-      expect(calls.single['name'], 'activateStudentAccount');
+      expect(await start(r), '202100123@students.mindmate.local');
+      expect(calls.single['name'], 'startStudentAccountSetup');
     });
 
-    test('falls back to the returned email for a server that predates Student ID sign-in', () async {
-      expect(await activate(repo((_) => {'ok': true, 'email': 'ana@example.com'})), 'ana@example.com');
-      expect(await activate(repo((_) => {'ok': true})), 'Ana@Example.com');
+    test('a response without an Auth email is a failure, never a guessed sign-in', () async {
+      await expectLater(
+        start(repo((_) => {'ok': true, 'email': 'ana@example.com'})),
+        throwsA(isA<StudentActivationException>()),
+      );
     });
   });
 

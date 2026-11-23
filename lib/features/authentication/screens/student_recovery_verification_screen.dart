@@ -54,10 +54,12 @@ class _StudentRecoveryVerificationScreenState
   bool _verifying = false;
   bool _cancelling = false;
   bool _verified = false;
+  bool _finishing = false;
+  bool _finishFailed = false;
   String? _message;
   bool _messageIsError = false;
 
-  bool get _busy => _sending || _verifying || _cancelling || _verified;
+  bool get _busy => _sending || _verifying || _cancelling || _finishing;
 
   @override
   void initState() {
@@ -88,14 +90,18 @@ class _StudentRecoveryVerificationScreenState
       _message = null;
     });
     try {
-      final result = await context.read<AuthProvider>().requestRecoveryEmailCode();
+      final result = await context
+          .read<AuthProvider>()
+          .requestRecoveryEmailCode();
       if (!mounted) return;
       if (result.alreadyVerified) {
         await _continue();
         return;
       }
       setState(() => _maskedEmail = result.maskedEmail);
-      _show('Check your inbox and spam folder. The code expires in 15 minutes.');
+      _show(
+        'Check your inbox and spam folder. The code expires in 15 minutes.',
+      );
       _startCooldown();
     } catch (error) {
       if (!mounted) return;
@@ -183,21 +189,58 @@ class _StudentRecoveryVerificationScreenState
     return base;
   }
 
-  /// The first-login gate for the profile (Student Information first), falling
-  /// back to profile setup.
+  static const _finishAttempts = 3;
+  static const _finishRetryDelay = Duration(milliseconds: 700);
+
+  /// Claims the roster record, loads the new profile and routes to the first-
+  /// login gate (Student Information first). A failure never falls through to
+  /// a stale or empty profile: the student can retry, and the finish step is
+  /// idempotent on the server.
   Future<void> _continue() async {
-    var route = RouteNames.profileSetup;
-    try {
-      final userProvider = context.read<UserProvider>();
-      final userId = context.read<AuthProvider>().userId;
-      if (userId != null && await userProvider.loadProfile(userId)) {
-        final user = userProvider.user;
-        if (user != null) route = gateRouteForUser(user) ?? route;
+    if (_finishing) return;
+    setState(() {
+      _finishing = true;
+      _finishFailed = false;
+    });
+    final auth = context.read<AuthProvider>();
+    final userProvider = context.read<UserProvider>();
+    String? route;
+    for (
+      var attempt = 0;
+      attempt < _finishAttempts && route == null;
+      attempt++
+    ) {
+      if (attempt > 0) await Future<void>.delayed(_finishRetryDelay);
+      if (!mounted) return;
+      try {
+        await auth.completeStudentAccountSetup();
+      } catch (_) {
+        // Already complete, expired or transient: the profile load decides.
       }
-    } catch (_) {
-      // Fall through to profile setup.
+      try {
+        final userId = auth.userId;
+        if (userId != null && await userProvider.loadProfile(userId)) {
+          final user = userProvider.user;
+          if (user != null) {
+            route = gateRouteForUser(user) ?? RouteNames.profileSetup;
+          }
+        }
+      } catch (_) {
+        // Retried below.
+      }
     }
     if (!mounted) return;
+    if (route == null) {
+      setState(() {
+        _finishing = false;
+        _finishFailed = true;
+      });
+      _show(
+        'Your email is verified, but we could not finish setting up your account. Check your connection and try again.',
+        error: true,
+      );
+      return;
+    }
     Navigator.of(context).pushNamedAndRemoveUntil(route, (route) => false);
   }
 
@@ -208,7 +251,7 @@ class _StudentRecoveryVerificationScreenState
           builder: (dialogContext) => AlertDialog(
             title: const Text('Use another email?'),
             content: const Text(
-              'This removes your unfinished activation, including your reserved Student ID. You can then activate again with the correct email.',
+              'This removes your unfinished setup, including your reserved Student ID. You can then start again with the correct email.',
             ),
             actions: [
               TextButton(
@@ -231,15 +274,14 @@ class _StudentRecoveryVerificationScreenState
     try {
       await context.read<AuthProvider>().cancelPendingRegistration();
       if (!mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        RouteNames.studentActivation,
-        (route) => false,
-      );
+      Navigator.of(
+        context,
+      ).pushNamedAndRemoveUntil(RouteNames.studentActivation, (route) => false);
     } catch (_) {
       if (!mounted) return;
       _show(
         context.read<AuthProvider>().errorMessage ??
-            'Unable to cancel this pending activation. Please try again.',
+            'Unable to cancel this pending setup. Please try again.',
         error: true,
       );
     } finally {
@@ -304,7 +346,9 @@ class _StudentRecoveryVerificationScreenState
                     textCapitalization: TextCapitalization.characters,
                     textInputAction: TextInputAction.done,
                     inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9 -]')),
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'[A-Za-z0-9 -]'),
+                      ),
                       LengthLimitingTextInputFormatter(14),
                     ],
                     onSubmitted: (_) => _verify(),
@@ -333,25 +377,38 @@ class _StudentRecoveryVerificationScreenState
                     ),
                   ],
                   const SizedBox(height: 18),
-                  FilledButton(
-                    key: const Key('recovery-verify-button'),
-                    onPressed: _busy ? null : _verify,
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(50),
-                      backgroundColor: AppColors.primary,
+                  if (_finishFailed)
+                    FilledButton(
+                      key: const Key('recovery-finish-retry'),
+                      onPressed: _continue,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                        backgroundColor: AppColors.primary,
+                      ),
+                      child: const Text('Try again'),
+                    )
+                  else
+                    FilledButton(
+                      key: const Key('recovery-verify-button'),
+                      onPressed: _busy || _verified ? null : _verify,
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                        backgroundColor: AppColors.primary,
+                      ),
+                      child: Text(
+                        _verified
+                            ? 'Verified'
+                            : _verifying
+                            ? 'Verifying…'
+                            : 'Verify email',
+                      ),
                     ),
-                    child: Text(
-                      _verified
-                          ? 'Verified'
-                          : _verifying
-                          ? 'Verifying…'
-                          : 'Verify email',
-                    ),
-                  ),
                   const SizedBox(height: 8),
                   TextButton(
                     key: const Key('recovery-resend-button'),
-                    onPressed: _busy || _resendSeconds > 0 ? null : _requestCode,
+                    onPressed: _busy || _verified || _resendSeconds > 0
+                        ? null
+                        : _requestCode,
                     child: Text(resendLabel),
                   ),
                   TextButton(

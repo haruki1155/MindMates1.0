@@ -115,8 +115,6 @@ enum _Tab { roster, import, corrections, history, legacy }
 class _StudentRosterPageState extends State<StudentRosterPage> {
   late final StudentRosterRepository _repo =
       widget.repository ?? StudentRosterRepository();
-  late final StudentRosterLeaveGuard _guard =
-      widget.leaveGuard ?? StudentRosterLeaveGuard();
 
   _Tab _tab = _Tab.roster;
 
@@ -128,7 +126,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   String? _nextPageToken;
   bool _rosterLoading = false;
   String? _rosterError;
-  final Set<String> _selected = {};
   final Set<String> _busyRows = {};
 
   // ----------------------------------------------------------- import tab
@@ -138,14 +135,11 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   Map<String, int> _previewCounts = const {};
   bool _previewing = false;
   bool _importing = false;
-  int _codeCalls = 0;
   String _progress = '';
   String? _importError;
   Map<String, int>? _importCounts;
   RosterImportResult? _partial;
   int _partialFailedCount = 0;
-  final List<IssuedActivationCode> _codes = [];
-  bool _codesDownloaded = true;
 
   // ------------------------------------------------------- other tabs
   List<StudentCorrection>? _corrections;
@@ -165,15 +159,8 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
 
   @override
   void dispose() {
-    _guard.hasUndownloadedCodes = false;
-    _guard.codesInFlight = false;
     _search.dispose();
     super.dispose();
-  }
-
-  void _syncGuard() {
-    _guard.hasUndownloadedCodes = _codes.isNotEmpty && !_codesDownloaded;
-    _guard.codesInFlight = _importing || _codeCalls > 0;
   }
 
   void _toast(String message) {
@@ -189,42 +176,32 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !_guard.hasUndownloadedCodes,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        final navigator = Navigator.of(context);
-        if (await _guard.confirmLeave(context)) {
-          _guard.hasUndownloadedCodes = false;
-          navigator.pop();
-        }
-      },
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(28, 28, 28, 40),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Student Roster',
-              style: Theme.of(context).textTheme.headlineLarge,
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Import the registrar roster, issue one-time activation codes '
-              'and manage student records.',
-            ),
-            const SizedBox(height: 20),
-            _tabBar(),
-            const SizedBox(height: 20),
-            switch (_tab) {
-              _Tab.roster => _rosterTab(),
-              _Tab.import => _importTab(),
-              _Tab.corrections => _correctionsTab(),
-              _Tab.history => _historyTab(),
-              _Tab.legacy => _legacyTab(),
-            },
-          ],
-        ),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(28, 28, 28, 40),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Student Roster',
+            style: Theme.of(context).textTheme.headlineLarge,
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Import the registrar roster and manage student records. Students '
+            'set up their own accounts with their Student No., name and date '
+            'of birth.',
+          ),
+          const SizedBox(height: 20),
+          _tabBar(),
+          const SizedBox(height: 20),
+          switch (_tab) {
+            _Tab.roster => _rosterTab(),
+            _Tab.import => _importTab(),
+            _Tab.corrections => _correctionsTab(),
+            _Tab.history => _historyTab(),
+            _Tab.legacy => _legacyTab(),
+          },
+        ],
       ),
     );
   }
@@ -296,7 +273,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
       setState(() {
         _rosterRows = more ? [..._rosterRows, ...page.rows] : page.rows;
         _nextPageToken = page.nextPageToken;
-        if (!more) _selected.clear();
       });
     } catch (e) {
       if (mounted) setState(() => _rosterError = _errorText(e));
@@ -306,7 +282,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   }
 
   Widget _rosterTab() {
-    final selectable = _rosterRows.where((r) => !r.activated).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -381,34 +356,8 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
               icon: const Icon(Icons.refresh),
               label: const Text('Refresh'),
             ),
-            if (_selected.isNotEmpty)
-              FilledButton.icon(
-                onPressed: _issueSelected,
-                icon: const Icon(Icons.vpn_key_outlined),
-                label: Text('Issue activation codes (${_selected.length})'),
-              ),
           ],
         ),
-        if (selectable.isNotEmpty)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              onPressed: () => setState(() {
-                if (_selected.length == selectable.length) {
-                  _selected.clear();
-                } else {
-                  _selected
-                    ..clear()
-                    ..addAll(selectable.map((r) => r.studentNo));
-                }
-              }),
-              child: Text(
-                _selected.length == selectable.length
-                    ? 'Clear selection'
-                    : 'Select all not activated',
-              ),
-            ),
-          ),
         const SizedBox(height: 8),
         if (_rosterError != null) _error(_rosterError!),
         if (_rosterRows.isEmpty && !_rosterLoading && _rosterError == null)
@@ -442,16 +391,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        leading: row.activated
-            ? const SizedBox(width: 40)
-            : Checkbox(
-                value: _selected.contains(row.studentNo),
-                onChanged: (v) => setState(() {
-                  v == true
-                      ? _selected.add(row.studentNo)
-                      : _selected.remove(row.studentNo);
-                }),
-              ),
         title: Text(
           '${row.name} · ${row.studentNo}',
           style: const TextStyle(fontWeight: FontWeight.w700),
@@ -472,16 +411,11 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
                 onSelected: (v) => _rowAction(row, v),
                 itemBuilder: (_) => [
                   const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                  if (!row.activated) ...[
+                  if (!row.activated)
                     const PopupMenuItem(
                       value: 'lock',
-                      child: Text('Reset activation lock'),
+                      child: Text('Reset setup lock'),
                     ),
-                    const PopupMenuItem(
-                      value: 'issue',
-                      child: Text('Issue new activation code'),
-                    ),
-                  ],
                   if (row.activated)
                     const PopupMenuItem(
                       value: 'revoke',
@@ -510,10 +444,8 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
       case 'lock':
         await _guarded(row.studentNo, () async {
           await _repo.resetActivationLock(row.studentNo);
-          _toast('Activation lock reset for ${row.studentNo}.');
+          _toast('Setup lock reset for ${row.studentNo}.');
         });
-      case 'issue':
-        await _issueCodes([row.studentNo]);
       case 'revoke':
         await _revoke(row);
       case 'toggle':
@@ -591,130 +523,28 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         _ReasonDialog(title: title, body: body, confirmLabel: confirmLabel),
   );
 
-  // -------------------------------------------------- codes (issue/revoke)
-
-  Future<void> _issueSelected() => _issueCodes(_selected.toList());
-
-  void _codeCallStarted() {
-    _codeCalls++;
-    _syncGuard();
-  }
-
-  void _codeCallEnded() {
-    if (_codeCalls > 0) _codeCalls--;
-    _syncGuard();
-  }
-
-  Future<void> _issueCodes(List<String> studentNos) async {
-    final multiple = studentNos.length > 1;
-    final ok = await _confirm(
-      title: 'Issue new activation code${multiple ? 's' : ''}?',
-      body: multiple
-          ? 'New one-time codes will be issued for ${studentNos.length} '
-                'students. Any earlier code for them stops working.'
-          : 'A new one-time code will be issued for ${studentNos.single}. '
-                'Any earlier code stops working.',
-      confirmLabel: 'Issue',
-    );
-    if (!ok || !mounted) return;
-    setState(() {
-      _busyRows.addAll(studentNos);
-      _codeCallStarted();
-    });
-    try {
-      final result = await _repo.issueActivationCodes(studentNos);
-      if (!mounted) return;
-      setState(() {
-        _selected.removeAll(studentNos);
-        _busyRows.removeAll(studentNos);
-        _codeCallEnded();
-      });
-      await _showCodesDialog(
-        title: 'Activation codes issued',
-        codes: result.codes,
-        showCodes: false,
-        skipped: result.skipped,
-      );
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busyRows.removeAll(studentNos);
-          _codeCallEnded();
-        });
-      }
-      _toast(_errorText(e));
-    }
-  }
+  // ------------------------------------------------------------ revoke
 
   Future<void> _revoke(RosterRowView row) async {
     final reason = await _askReason(
       title: 'Revoke activation?',
       body:
           '${row.name} (${row.studentNo}) will lose access to the claimed '
-          'account. The data is kept and a new activation code is issued. '
-          'Enter the reason for the audit log.',
+          'account. The data is kept and the student can set up the account '
+          'again. Enter the reason for the audit log.',
       confirmLabel: 'Revoke activation',
     );
     if (reason == null || !mounted) return;
-    setState(() {
-      _busyRows.add(row.studentNo);
-      _codeCallStarted();
-    });
+    setState(() => _busyRows.add(row.studentNo));
     try {
-      final code = await _repo.revokeActivation(row.studentNo, reason);
+      await _repo.revokeActivation(row.studentNo, reason);
       if (!mounted) return;
-      setState(() {
-        _busyRows.remove(row.studentNo);
-        _codeCallEnded();
-      });
-      await _showCodesDialog(
-        title: 'Activation revoked',
-        codes: [code],
-        showCodes: true,
-      );
-      if (mounted) await _loadRoster();
+      setState(() => _busyRows.remove(row.studentNo));
+      _toast('Activation revoked. The student can set up the account again.');
+      await _loadRoster();
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busyRows.remove(row.studentNo);
-          _codeCallEnded();
-        });
-      }
+      if (mounted) setState(() => _busyRows.remove(row.studentNo));
       _toast(_errorText(e));
-    }
-  }
-
-  Future<void> _showCodesDialog({
-    required String title,
-    required List<IssuedActivationCode> codes,
-    required bool showCodes,
-    List<({String studentNo, String reason})> skipped = const [],
-  }) async {
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _CodesDialog(
-        title: title,
-        codes: codes,
-        showCodes: showCodes,
-        skipped: skipped,
-        onDownload: () => _downloadSlips(codes),
-      ),
-    );
-  }
-
-  /// Returns true when the browser download was started.
-  bool _downloadSlips(List<IssuedActivationCode> codes) {
-    try {
-      widget.download(
-        'activation_slips_${DateTime.now().toIso8601String().substring(0, 10)}.xlsx',
-        buildActivationSlipsXlsx(codes),
-        _xlsxMime,
-      );
-      return true;
-    } catch (_) {
-      _toast('The download could not be started.');
-      return false;
     }
   }
 
@@ -844,39 +674,12 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         _importing) {
       return;
     }
-    if (_codes.isNotEmpty && !_codesDownloaded) {
-      final discard = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Discard undownloaded codes?'),
-          content: const Text(
-            'Activation codes from the previous import have not been '
-            'downloaded. Starting a new import removes them for good. '
-            '$codesShownOnceWarning',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Go back'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Discard and import'),
-            ),
-          ],
-        ),
-      );
-      if (discard != true || !mounted) return;
-    }
     final chunks = chunkRows(parsed.rows);
     setState(() {
       _importing = true;
-      _syncGuard();
       _importError = null;
       _importCounts = null;
       _partial = null;
-      _codes.clear();
-      _codesDownloaded = true;
     });
     final totals = <String, int>{};
     try {
@@ -892,7 +695,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         for (final e in result.counts.entries) {
           totals[e.key] = (totals[e.key] ?? 0) + e.value;
         }
-        _codes.addAll(result.codes);
         if (result.isPartial) {
           if (mounted) {
             setState(() {
@@ -924,24 +726,13 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
           _importCounts = totals.isEmpty && _importError != null
               ? null
               : totals;
-          _codesDownloaded = _codes.isEmpty;
           _parsed = null;
           _previewRows = null;
           _file = null;
-          _syncGuard();
         });
         _imports = null;
         _loadRoster();
       }
-    }
-  }
-
-  void _downloadImportSlips() {
-    if (_downloadSlips(List.of(_codes))) {
-      setState(() {
-        _codesDownloaded = true;
-        _syncGuard();
-      });
     }
   }
 
@@ -972,7 +763,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         if (_importError != null) _error(_importError!),
         if (_partial != null) _partialBanner(_partial!),
         if (_importCounts != null) _summaryCard(),
-        if (_codes.isNotEmpty && !_importing) _slipsCard(),
         if (parsed != null && file != null) ...[
           const SizedBox(height: 16),
           _fileCard(file, parsed),
@@ -1011,8 +801,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
           Text('Committed: ${_countsLine(_importCounts ?? result.counts)}'),
           Text('$_partialFailedCount row(s) were not imported.'),
           const Text(
-            'No further parts were sent. Download the slips for the rows that '
-            'were imported, then fix the file and import it again.',
+            'No further parts were sent. Fix the file and import it again.',
           ),
         ],
       ),
@@ -1030,33 +819,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
             _countsLine(_importCounts!),
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
           ),
-        ],
-      ),
-    ),
-  );
-
-  Widget _slipsCard() => Card(
-    margin: const EdgeInsets.only(top: 16),
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            codesShownOnceWarning,
-            style: const TextStyle(color: AdminColors.danger),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: _downloadImportSlips,
-            icon: const Icon(Icons.download),
-            label: Text('Download activation slips (${_codes.length})'),
-          ),
-          if (_codesDownloaded)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('Activation slips downloaded.'),
-            ),
         ],
       ),
     ),
@@ -1506,9 +1268,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
                   decoration: BoxDecoration(
                     color: style.bg,
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: style.fg.withValues(alpha: 0.25),
-                    ),
+                    border: Border.all(color: style.fg.withValues(alpha: 0.25)),
                   ),
                   child: Text(
                     style.label,
@@ -1634,104 +1394,6 @@ class _ReasonDialogState extends State<_ReasonDialog> {
             : () => Navigator.pop(context, _controller.text.trim()),
         child: Text(widget.confirmLabel),
       ),
-    ],
-  );
-}
-
-class _CodesDialog extends StatefulWidget {
-  const _CodesDialog({
-    required this.title,
-    required this.codes,
-    required this.showCodes,
-    required this.skipped,
-    required this.onDownload,
-  });
-  final String title;
-  final List<IssuedActivationCode> codes;
-  final bool showCodes;
-  final List<({String studentNo, String reason})> skipped;
-  final bool Function() onDownload;
-
-  @override
-  State<_CodesDialog> createState() => _CodesDialogState();
-}
-
-class _CodesDialogState extends State<_CodesDialog> {
-  bool _downloaded = false;
-
-  Future<void> _close() async {
-    if (!_downloaded && widget.codes.isNotEmpty) {
-      final leave = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Close without downloading?'),
-          content: const Text(codesShownOnceWarning),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Go back'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Close anyway'),
-            ),
-          ],
-        ),
-      );
-      if (leave != true || !mounted) return;
-    }
-    if (mounted) Navigator.pop(context);
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.title),
-    content: SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (widget.codes.isEmpty)
-            const Text('No codes were issued.')
-          else ...[
-            Text('${widget.codes.length} code(s) issued.'),
-            const SizedBox(height: 8),
-            const Text(
-              codesShownOnceWarning,
-              style: TextStyle(color: AdminColors.danger),
-            ),
-          ],
-          if (widget.showCodes)
-            for (final c in widget.codes)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: SelectableText(
-                  '${c.studentNo}: ${c.code}',
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-          for (final s in widget.skipped)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text('Skipped ${s.studentNo}: ${s.reason}'),
-            ),
-        ],
-      ),
-    ),
-    actions: [
-      if (widget.codes.isNotEmpty)
-        FilledButton.icon(
-          onPressed: () {
-            if (widget.onDownload()) setState(() => _downloaded = true);
-          },
-          icon: const Icon(Icons.download),
-          label: Text('Download activation slips (${widget.codes.length})'),
-        ),
-      TextButton(onPressed: _close, child: const Text('Close')),
     ],
   );
 }

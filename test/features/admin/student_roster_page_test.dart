@@ -26,17 +26,6 @@ AdminImportFile _csvFile(List<String> rows, {String name = 'roster.csv'}) =>
       bytes: Uint8List.fromList(utf8.encode('$_header\n${rows.join('\n')}\n')),
     );
 
-IssuedActivationCode _code(String studentNo, String code) =>
-    IssuedActivationCode(
-      studentNo: studentNo,
-      name: 'Student $studentNo',
-      college: 'CITE',
-      course: 'BSIT',
-      yearLevel: '1st Year',
-      code: code,
-      expiresAt: DateTime.utc(2027, 1, 12),
-    );
-
 RosterRowView _rosterRow(
   String no, {
   bool activated = false,
@@ -69,7 +58,6 @@ class _Repo extends StudentRosterRepository {
   Object? importsError;
   Future<void>? importsDelay;
   var _commitCalls = 0;
-  var _codeSeq = 0;
   Map<String, String>? lastUpdateFields;
   String? lastReviewReason;
   String? lastRevokeReason;
@@ -127,18 +115,11 @@ class _Repo extends StudentRosterRepository {
     await beforeCommit?.call(index);
     final override = commitOverride?.call(index);
     if (override != null) return override;
-    final codes = [
-      for (final r in rows)
-        _code(
-          r['studentNo']!,
-          'CODE${(_codeSeq++).toString().padLeft(5, '0')}',
-        ),
-    ];
     return RosterImportResult(
       status: RosterImportStatus.complete,
       importId: 'imp-$index',
       counts: {'new': rows.length, 'updated': 0, 'linked': 0},
-      codes: codes,
+      codes: const [],
     );
   }
 
@@ -175,28 +156,9 @@ class _Repo extends StudentRosterRepository {
   }
 
   @override
-  Future<
-    ({
-      List<IssuedActivationCode> codes,
-      List<({String studentNo, String reason})> skipped,
-    })
-  >
-  issueActivationCodes(List<String> studentNos) async {
-    calls.add('issue:${studentNos.join('|')}');
-    return (
-      codes: [for (final n in studentNos) _code(n, 'ISSUE${n.length}')],
-      skipped: const <({String studentNo, String reason})>[],
-    );
-  }
-
-  @override
-  Future<IssuedActivationCode> revokeActivation(
-    String studentNo,
-    String reason,
-  ) async {
+  Future<void> revokeActivation(String studentNo, String reason) async {
     calls.add('revoke:$studentNo');
     lastRevokeReason = reason;
-    return _code(studentNo, 'REVOKE-NEWCODE');
   }
 
   @override
@@ -390,95 +352,23 @@ void main() {
     expect(_button(tester, 'Import').onPressed, isNull);
   });
 
-  testWidgets(
-    'import sends one call per chunk, summarises and offers every code once',
-    (tester) async {
-      final repo = _Repo();
-      final downloads = _Downloads();
-      final guard = StudentRosterLeaveGuard();
-      await _pump(
-        tester,
-        repo,
-        downloads: downloads,
-        guard: guard,
-        file: _csvFile([for (var i = 0; i < 2500; i++) _csvRow('S-$i')]),
-      );
-      await _chooseAndPreview(tester);
-      await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-      await tester.pumpAndSettle();
-
-      expect(repo.commitSizes, [1000, 1000, 500]);
-      expect(find.text('2500 new · 0 updated · 0 linked'), findsOneWidget);
-      expect(find.text('Download activation slips (2500)'), findsOneWidget);
-      expect(find.text(codesShownOnceWarning), findsOneWidget);
-      expect(guard.hasUndownloadedCodes, isTrue);
-
-      // Leaving with undownloaded codes asks first.
-      final context = tester.element(find.byType(StudentRosterPage));
-      var left = true;
-      final pending = guard.confirmLeave(context).then((v) => left = v);
-      await tester.pumpAndSettle();
-      expect(find.text('Leave without downloading?'), findsOneWidget);
-      await tester.tap(find.text('Stay on page'));
-      await tester.pumpAndSettle();
-      await pending;
-      expect(left, isFalse);
-
-      await tester.tap(find.text('Download activation slips (2500)'));
-      await tester.pumpAndSettle();
-      expect(downloads.files, hasLength(1));
-      expect(guard.hasUndownloadedCodes, isFalse);
-      expect(await guard.confirmLeave(context), isTrue);
-
-      final book = excel.Excel.decodeBytes(downloads.files.single.bytes);
-      final rows = book.tables.values.first.rows
-          .skip(1)
-          .map((r) => r[5]?.value.toString())
-          .toList();
-      expect(rows, hasLength(2500));
-      expect(rows.toSet(), hasLength(2500));
-      expect(rows.first, 'CODE00000');
-      expect(rows.last, 'CODE02499');
-    },
-  );
-
-  testWidgets('codes are never written to debug logs', (tester) async {
-    final logged = <String>[];
-    final original = debugPrint;
-    debugPrint = (String? message, {int? wrapWidth}) =>
-        logged.add(message ?? '');
-    final repo = _Repo();
-    await _pump(tester, repo, file: _csvFile([_csvRow('S-1'), _csvRow('S-2')]));
-    await _chooseAndPreview(tester);
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Download activation slips (2)'));
-    await tester.pumpAndSettle();
-    debugPrint = original;
-    expect(logged.where((l) => l.contains('CODE0')), isEmpty);
-  });
-
-  testWidgets('an in-flight import counts as codes at risk for leaving', (
+  testWidgets('import sends one call per chunk and summarises, with no activation codes', (
     tester,
   ) async {
-    final gate = Completer<void>();
-    final repo = _Repo()..beforeCommit = (i) => gate.future;
-    final guard = StudentRosterLeaveGuard();
-    await _pump(tester, repo, guard: guard, file: _csvFile([_csvRow('S-1')]));
+    final repo = _Repo();
+    await _pump(
+      tester,
+      repo,
+      file: _csvFile([for (var i = 0; i < 2500; i++) _csvRow('S-$i')]),
+    );
     await _chooseAndPreview(tester);
     await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pump();
-    expect(guard.hasUndownloadedCodes, isTrue);
-    final context = tester.element(find.byType(StudentRosterPage));
-    final pending = guard.confirmLeave(context);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Leave without downloading?'), findsOneWidget);
-    await tester.tap(find.text('Stay on page'));
-    await tester.pump();
-    expect(await pending, isFalse);
-    gate.complete();
     await tester.pumpAndSettle();
+
+    expect(repo.commitSizes, [1000, 1000, 500]);
+    expect(find.text('2500 new · 0 updated · 0 linked'), findsOneWidget);
+    expect(find.textContaining('activation slips'), findsNothing);
+    expect(find.textContaining('Activation code'), findsNothing);
   });
 
   testWidgets('no further chunks are sent once the page is disposed', (
@@ -501,48 +391,14 @@ void main() {
     expect(repo.commitSizes, [1000]);
   });
 
-  testWidgets('slips stay available after choosing a new file and a new '
-      'import asks before discarding undownloaded codes', (tester) async {
-    final repo = _Repo();
-    final guard = StudentRosterLeaveGuard();
-    await _pump(tester, repo, guard: guard, file: _csvFile([_csvRow('S-1')]));
-    await _chooseAndPreview(tester);
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pumpAndSettle();
-    expect(find.text('Download activation slips (1)'), findsOneWidget);
-
-    await tester.tap(find.text('Choose roster file'));
-    await tester.pumpAndSettle();
-    expect(find.text('Download activation slips (1)'), findsOneWidget);
-    expect(guard.hasUndownloadedCodes, isTrue);
-
-    await tester.tap(find.text('Preview'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pumpAndSettle();
-    expect(find.text('Discard undownloaded codes?'), findsOneWidget);
-    await tester.tap(find.text('Go back'));
-    await tester.pumpAndSettle();
-    expect(repo.commitSizes, [1]);
-    expect(find.text('Download activation slips (1)'), findsOneWidget);
-
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Discard and import'));
-    await tester.pumpAndSettle();
-    expect(repo.commitSizes, [1, 1]);
-  });
-
-  testWidgets('a partial result stops, warns and still offers the slips', (
-    tester,
-  ) async {
+  testWidgets('a partial result stops and warns', (tester) async {
     final repo = _Repo()
       ..commitOverride = (i) => i == 1
           ? RosterImportResult(
               status: RosterImportStatus.partial,
               importId: 'imp-1',
               counts: const {'new': 400, 'updated': 0, 'linked': 0},
-              codes: [_code('S-1000', 'PARTIAL001')],
+              codes: const [],
               failedRows: const [
                 RosterFailedRow(index: 400, studentNo: 'S-1400'),
                 RosterFailedRow(index: 401, studentNo: 'S-1401'),
@@ -550,11 +406,9 @@ void main() {
               message: 'A batch failed. 400 rows were committed.',
             )
           : null;
-    final guard = StudentRosterLeaveGuard();
     await _pump(
       tester,
       repo,
-      guard: guard,
       file: _csvFile([for (var i = 0; i < 2500; i++) _csvRow('S-$i')]),
     );
     await _chooseAndPreview(tester);
@@ -572,8 +426,7 @@ void main() {
       findsWidgets,
     );
     expect(find.text('2 row(s) were not imported.'), findsOneWidget);
-    expect(find.text('Download activation slips (1001)'), findsOneWidget);
-    expect(guard.hasUndownloadedCodes, isTrue);
+    expect(find.textContaining('slips'), findsNothing);
   });
 
   testWidgets('Download template produces the header row', (tester) async {
@@ -617,15 +470,15 @@ void main() {
     await _pump(tester, _Repo());
     await tester.tap(find.byTooltip('Actions for 2021-001'));
     await tester.pumpAndSettle();
-    expect(find.text('Issue new activation code'), findsOneWidget);
-    expect(find.text('Reset activation lock'), findsOneWidget);
+    expect(find.text('Reset setup lock'), findsOneWidget);
+    expect(find.textContaining('activation code'), findsNothing);
     expect(find.text('Revoke activation'), findsNothing);
     await tester.tapAt(const Offset(5, 5));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Actions for 2021-002'));
     await tester.pumpAndSettle();
     expect(find.text('Revoke activation'), findsOneWidget);
-    expect(find.text('Issue new activation code'), findsNothing);
+    expect(find.textContaining('activation code'), findsNothing);
   });
 
   testWidgets('edit, reset lock and deactivate call the repository', (
@@ -634,7 +487,7 @@ void main() {
     final repo = _Repo();
     await _pump(tester, repo);
 
-    await openMenu(tester, '2021-001', 'Reset activation lock');
+    await openMenu(tester, '2021-001', 'Reset setup lock');
     expect(repo.calls, contains('lock:2021-001'));
 
     await openMenu(tester, '2021-001', 'Edit');
@@ -672,42 +525,11 @@ void main() {
     expect(repo.calls, contains('status:2021-005:active'));
   });
 
-  testWidgets('issue new code per row and in bulk offers slips', (
-    tester,
-  ) async {
-    final repo = _Repo()
-      ..roster = [_rosterRow('2021-001'), _rosterRow('2021-003')];
-    final downloads = _Downloads();
-    await _pump(tester, repo, downloads: downloads);
-
-    await openMenu(tester, '2021-001', 'Issue new activation code');
-    await tester.tap(find.widgetWithText(FilledButton, 'Issue'));
-    await tester.pumpAndSettle();
-    expect(repo.calls, contains('issue:2021-001'));
-    expect(find.text(codesShownOnceWarning), findsOneWidget);
-    await tester.tap(find.text('Download activation slips (1)'));
-    await tester.pumpAndSettle();
-    expect(downloads.files, hasLength(1));
-    await tester.tap(find.text('Close'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byType(Checkbox).at(0));
-    await tester.tap(find.byType(Checkbox).at(1));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Issue activation codes (2)'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Issue'));
-    await tester.pumpAndSettle();
-    expect(repo.calls, contains('issue:2021-001|2021-003'));
-    expect(find.text('Download activation slips (2)'), findsOneWidget);
-  });
-
-  testWidgets('revoke needs a reason, then shows the new code to download', (
+  testWidgets('revoke needs a reason and issues no code', (
     tester,
   ) async {
     final repo = _Repo();
-    final downloads = _Downloads();
-    await _pump(tester, repo, downloads: downloads);
+    await _pump(tester, repo);
     await openMenu(tester, '2021-002', 'Revoke activation');
 
     final confirm = find.widgetWithText(FilledButton, 'Revoke activation');
@@ -722,10 +544,8 @@ void main() {
 
     expect(repo.calls, contains('revoke:2021-002'));
     expect(repo.lastRevokeReason, 'Wrong person');
-    expect(find.textContaining('REVOKE-NEWCODE'), findsOneWidget);
-    await tester.tap(find.text('Download activation slips (1)'));
-    await tester.pumpAndSettle();
-    expect(downloads.files, hasLength(1));
+    expect(find.textContaining('can set up the account again'), findsOneWidget);
+    expect(find.textContaining('activation slips'), findsNothing);
   });
 
   testWidgets('corrections: reject needs a reason, approve works', (

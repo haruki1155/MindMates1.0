@@ -267,18 +267,17 @@ class BackfillResult {
 
 enum StudentActivationFailure {
   mismatch,
-  expired,
-  alreadyActivated,
   emailInUse,
   invalidInput,
+  inProgress,
   unknown;
 
-  static StudentActivationFailure parse(Object? reason) => switch (reason) {
-    'mismatch' => StudentActivationFailure.mismatch,
-    'expired' => StudentActivationFailure.expired,
-    'already-activated' => StudentActivationFailure.alreadyActivated,
-    'email-in-use' => StudentActivationFailure.emailInUse,
-    'invalid-input' => StudentActivationFailure.invalidInput,
+  /// Maps the callable error code of the no-code account setup.
+  static StudentActivationFailure fromCode(String code) => switch (code) {
+    'not-found' => StudentActivationFailure.mismatch,
+    'already-exists' => StudentActivationFailure.emailInUse,
+    'resource-exhausted' => StudentActivationFailure.inProgress,
+    'invalid-argument' => StudentActivationFailure.invalidInput,
     _ => StudentActivationFailure.unknown,
   };
 }

@@ -18,6 +18,8 @@ class FirebaseCallableRouter {
     'previewAssessmentDomain',
     'sendMindAidMessage',
     'activateStudentAccount',
+    'startStudentAccountSetup',
+    'completeStudentAccountSetup',
     'requestStudentRecoveryEmailCode',
     'confirmStudentRecoveryEmailCode',
     'requestStudentPasswordReset',

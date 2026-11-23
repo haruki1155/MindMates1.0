@@ -111,6 +111,14 @@ class _LoginBodyState extends State<_LoginBody> {
       final profileLoaded = await userProvider.loadProfile(userId);
       if (!mounted) return;
       if (!profileLoaded || userProvider.user == null) {
+        if (authProvider.currentUserIsStudentAlias) {
+          // Verified but never finished: the verification screen completes it.
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            RouteNames.emailVerification,
+            (route) => false,
+          );
+          return;
+        }
         throw StateError('Your profile could not be loaded.');
       }
       final gateRoute = gateRouteForUser(userProvider.user!);

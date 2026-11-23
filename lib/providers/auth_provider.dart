@@ -287,13 +287,16 @@ class AuthProvider extends ChangeNotifier {
     }, signOutOnFailure: true);
   }
 
-  /// Activates a roster record, signs in with the new credentials and sends
-  /// the verification email. Throws [StudentActivationException] when the
-  /// server rejects the activation and [StudentActivationSignInException]
-  /// when the account was created but the follow-up sign-in failed.
-  Future<void> activateStudentAccount({
+  /// Starts no-code account setup for a roster record and signs in with the
+  /// new credentials. The roster record is only claimed once the personal email
+  /// is verified ([completeStudentAccountSetup]). Throws
+  /// [StudentActivationException] when the server rejects the details and
+  /// [StudentActivationSignInException] when the sign-in afterwards failed.
+  Future<void> startStudentAccountSetup({
     required String studentNo,
-    required String activationCode,
+    required String firstName,
+    required String middleName,
+    required String lastName,
     required String dateOfBirthKey,
     required String email,
     required String password,
@@ -306,9 +309,11 @@ class AuthProvider extends ChangeNotifier {
       final repository = _rosterRepository ?? StudentRosterRepository();
       final String activatedEmail;
       try {
-        activatedEmail = await repository.activate(
+        activatedEmail = await repository.startAccountSetup(
           studentNo: studentNo,
-          activationCode: activationCode,
+          firstName: firstName,
+          middleName: middleName,
+          lastName: lastName,
           dateOfBirthKey: dateOfBirthKey,
           email: email,
           password: password,
@@ -344,26 +349,17 @@ class AuthProvider extends ChangeNotifier {
         );
         throw const StudentActivationSignInException();
       }
-      try {
-        // A Student ID account's Auth email is an internal alias that cannot
-        // receive mail; its recovery email is verified with an emailed code that
-        // the verification screen requests itself.
-        if (!AuthRepository.isStudentAuthAlias(activatedEmail)) {
-          await _repository.sendEmailVerification();
-        }
-      } catch (error, stackTrace) {
-        // Non-fatal: the verification screen offers a resend button.
-        FirebaseErrorMessage.log(
-          error,
-          stackTrace,
-          area: 'Verification email after student activation failed.',
-        );
-      }
+      // The alias cannot receive mail: the verification screen requests the
+      // emailed code for the personal email itself.
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
+
+  /// Claims the roster record after the personal email was verified. Idempotent.
+  Future<void> completeStudentAccountSetup() =>
+      (_rosterRepository ?? StudentRosterRepository()).completeAccountSetup();
 
   Future<String?> signInWithGoogle() {
     return _runAuthAction(() async {

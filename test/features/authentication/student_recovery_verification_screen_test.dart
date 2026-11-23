@@ -70,6 +70,47 @@ void main() {
     expect(find.text('home target'), findsNothing);
   });
 
+  testWidgets('a verified email finishes the setup before loading the profile', (
+    tester,
+  ) async {
+    final auth = _FakeAuthProvider();
+    await _pump(tester, auth, gated: true);
+
+    await tester.enterText(find.byKey(const Key('recovery-code-field')), 'abcde-fghjk');
+    await tester.tap(find.byKey(const Key('recovery-verify-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pumpAndSettle();
+
+    expect(auth.completions, 1);
+    expect(find.text('student info target'), findsOneWidget);
+  });
+
+  testWidgets('a profile that cannot be loaded offers Try again and never opens profile setup', (
+    tester,
+  ) async {
+    final auth = _FakeAuthProvider();
+    final users = _FakeUserRepository(gated: true, failLoads: 3);
+    await _pump(tester, auth, users: users);
+
+    await tester.enterText(find.byKey(const Key('recovery-code-field')), 'abcde-fghjk');
+    await tester.tap(find.byKey(const Key('recovery-verify-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+
+    expect(users.loads, 3, reason: 'bounded retries');
+    expect(find.text('profile setup target'), findsNothing);
+    expect(find.byKey(const Key('recovery-finish-retry')), findsOneWidget);
+    expect(find.textContaining('could not finish setting up'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('recovery-finish-retry')));
+    await tester.pumpAndSettle();
+    expect(find.text('student info target'), findsOneWidget);
+    expect(auth.completions, greaterThan(1), reason: 'the finish step is repeated safely');
+  });
+
   testWidgets('a wrong code shows the server message and stays on the screen', (tester) async {
     final auth = _FakeAuthProvider()
       ..confirmError = FirebaseFunctionsException(
@@ -163,6 +204,7 @@ Future<void> _pump(
   _FakeAuthProvider auth, {
   bool gated = false,
   bool useGate = false,
+  _FakeUserRepository? users,
 }) async {
   await tester.binding.setSurfaceSize(const Size(600, 1400));
   addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -171,7 +213,7 @@ Future<void> _pump(
       providers: [
         ChangeNotifierProvider<AuthProvider>.value(value: auth),
         ChangeNotifierProvider<UserProvider>(
-          create: (_) => UserProvider(_FakeUserRepository(gated: gated)),
+          create: (_) => UserProvider(users ?? _FakeUserRepository(gated: gated)),
         ),
       ],
       child: MaterialApp(
@@ -197,11 +239,22 @@ class _FakeAuthRepository extends AuthRepository {
 }
 
 class _FakeUserRepository extends UserRepository {
-  _FakeUserRepository({required this.gated});
+  _FakeUserRepository({required this.gated, this.failLoads = 0});
   final bool gated;
+  int failLoads;
+  int loads = 0;
 
   @override
-  Future<UserModel?> fetchUserProfile(String uid) async => UserModel(
+  Future<UserModel?> fetchUserProfile(String uid) async {
+    loads++;
+    if (failLoads > 0) {
+      failLoads--;
+      throw FirebaseFunctionsException(code: 'unavailable', message: 'offline');
+    }
+    return _profile(uid);
+  }
+
+  UserModel _profile(String uid) => UserModel(
     id: uid,
     email: 'ana@example.com',
     populationRole: PopulationRole.student,
@@ -256,4 +309,13 @@ class _FakeAuthProvider extends AuthProvider {
 
   @override
   Future<void> cancelPendingRegistration() async => cancelled++;
+
+  int completions = 0;
+  final order = <String>[];
+
+  @override
+  Future<void> completeStudentAccountSetup() async {
+    completions++;
+    order.add('complete');
+  }
 }

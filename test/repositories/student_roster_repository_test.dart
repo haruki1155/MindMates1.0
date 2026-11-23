@@ -115,63 +115,60 @@ void main() {
     expect(r.message, isNull);
   });
 
-  test('activate sends payload and returns email', () async {
+  test('startAccountSetup sends identity without any activation code', () async {
     final repo = build();
-    respond = (_) => _m({'ok': true, 'email': 'a@b.c'});
-    final email = await repo.activate(
+    respond = (_) => _m({'ok': true, 'authEmail': 'a@students.mindmate.local'});
+    final email = await repo.startAccountSetup(
       studentNo: '2021-00123',
-      activationCode: 'ABCD-EFGH',
+      firstName: 'Ana',
+      middleName: '',
+      lastName: 'Cruz',
       dateOfBirthKey: '2003-04-05',
       email: 'a@b.c',
       password: 'pw',
     );
-    expect(email, 'a@b.c');
-    expect(calls.single.$1, 'activateStudentAccount');
+    expect(email, 'a@students.mindmate.local');
+    expect(calls.single.$1, 'startStudentAccountSetup');
     expect(calls.single.$2['dateOfBirth'], '2003-04-05');
+    expect(calls.single.$2.containsKey('activationCode'), isFalse);
   });
 
-  test('activate maps details.reason to StudentActivationException', () async {
+  test('startAccountSetup maps the callable error code', () async {
     final repo = build();
-    const reasons = {
-      'mismatch': StudentActivationFailure.mismatch,
-      'expired': StudentActivationFailure.expired,
-      'already-activated': StudentActivationFailure.alreadyActivated,
-      'email-in-use': StudentActivationFailure.emailInUse,
-      'invalid-input': StudentActivationFailure.invalidInput,
+    const codes = {
+      'not-found': StudentActivationFailure.mismatch,
+      'already-exists': StudentActivationFailure.emailInUse,
+      'resource-exhausted': StudentActivationFailure.inProgress,
+      'invalid-argument': StudentActivationFailure.invalidInput,
+      'internal': StudentActivationFailure.unknown,
     };
-    Future<void> call() => repo.activate(
-      studentNo: 's',
-      activationCode: 'c',
-      dateOfBirthKey: 'd',
-      email: 'e',
-      password: 'p',
-    );
-    for (final e in reasons.entries) {
-      respond = (_) => FirebaseFunctionsException(
-        code: 'not-found',
-        message: 'server says ${e.key}',
-        details: _m({'reason': e.key}),
-      );
+    for (final e in codes.entries) {
+      respond = (_) =>
+          FirebaseFunctionsException(code: e.key, message: 'server ${e.key}');
       await expectLater(
-        call(),
+        repo.startAccountSetup(
+          studentNo: 's',
+          firstName: 'f',
+          middleName: '',
+          lastName: 'l',
+          dateOfBirthKey: 'd',
+          email: 'e',
+          password: 'p',
+        ),
         throwsA(
           isA<StudentActivationException>()
               .having((x) => x.reason, 'reason', e.value)
-              .having((x) => x.message, 'message', 'server says ${e.key}'),
+              .having((x) => x.message, 'message', 'server ${e.key}'),
         ),
       );
     }
-    respond = (_) => FirebaseFunctionsException(code: 'internal', message: 'm');
-    await expectLater(
-      call(),
-      throwsA(
-        isA<StudentActivationException>().having(
-          (x) => x.reason,
-          'reason',
-          StudentActivationFailure.unknown,
-        ),
-      ),
-    );
+  });
+
+  test('completeAccountSetup calls the finishing callable', () async {
+    final repo = build();
+    respond = (_) => _m({'ok': true});
+    await repo.completeAccountSetup();
+    expect(calls.single.$1, 'completeStudentAccountSetup');
   });
 
   test('listRoster maps rows and page token', () async {
@@ -199,20 +196,11 @@ void main() {
     expect(calls.single.$2, {'search': 'cruz', 'pageToken': 'p'});
   });
 
-  test('issue codes, revoke, backfill, corrections', () async {
+  test('revoke, backfill, corrections', () async {
     final repo = build();
-    respond = (_) => _m({
-      'codes': <Object?>[codeJson],
-      'skipped': <Object?>[
-        _m({'studentNo': '2', 'reason': 'Deactivated.'}),
-      ],
-    });
-    final issued = await repo.issueActivationCodes(['1', '2']);
-    expect(issued.codes.single.code, 'ABCD-EFGH');
-    expect(issued.skipped.single.reason, 'Deactivated.');
-
-    respond = (_) => _m({'code': codeJson});
-    expect((await repo.revokeActivation('1', 'why')).code, 'ABCD-EFGH');
+    respond = (_) => _m({'ok': true});
+    await repo.revokeActivation('1', 'why');
+    expect(calls.last.$1, 'revokeStudentActivation');
     expect(calls.last.$2, {'studentNo': '1', 'reason': 'why'});
 
     respond = (_) => _m({'flagged': 3, 'notInRoster': 2});

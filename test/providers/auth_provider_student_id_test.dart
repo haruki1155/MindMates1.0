@@ -115,10 +115,12 @@ void main() {
     });
   });
 
-  group('activation', () {
-    Future<void> activate() => provider.activateStudentAccount(
+  group('account setup', () {
+    Future<void> start() => provider.startStudentAccountSetup(
       studentNo: '2021-00123',
-      activationCode: 'ABCDE-23456',
+      firstName: 'Ana',
+      middleName: '',
+      lastName: 'Cruz',
       dateOfBirthKey: '2005-03-15',
       email: 'ana@example.com',
       password: 'Secret!1',
@@ -130,22 +132,18 @@ void main() {
         'email': 'ana@example.com',
         'authEmail': '202100123@students.mindmate.local',
       };
-      await activate();
+      await start();
       expect(repository.events, [
-        'callable:activateStudentAccount',
+        'callable:startStudentAccountSetup',
         'email:202100123@students.mindmate.local',
       ]);
       expect(repository.events, isNot(contains('firebaseVerification')));
     });
 
-    test('a server that predates Student ID sign-in keeps the Firebase verification email', () async {
-      respond = (_) => {'ok': true, 'email': 'ana@example.com'};
-      await activate();
-      expect(repository.events, [
-        'callable:activateStudentAccount',
-        'email:ana@example.com',
-        'firebaseVerification',
-      ]);
+    test('completing setup calls the finishing callable', () async {
+      respond = (_) => {'ok': true};
+      await provider.completeStudentAccountSetup();
+      expect(repository.events, ['callable:completeStudentAccountSetup']);
     });
   });
 

@@ -23,7 +23,7 @@ void main() {
       invoker: (name, data) async {
         calls?.add({'name': name, ...data});
         if (error != null) throw error;
-        return {'email': 'Leo@Example.com'};
+        return {'ok': true, 'authEmail': '202100123@students.mindmate.local'};
       },
     );
     final provider = AuthProvider(
@@ -53,8 +53,12 @@ void main() {
       '2021-00123',
     );
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Activation code'),
-      'abcde-23456',
+      find.widgetWithText(TextFormField, 'First name'),
+      'Leo',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Last name'),
+      'Santos',
     );
     await tester.tap(find.text('Select date'));
     await tester.pumpAndSettle();
@@ -71,7 +75,7 @@ void main() {
 
   Future<void> fillStep2(WidgetTester tester) async {
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Email Address'),
+      find.widgetWithText(TextFormField, 'Personal email address'),
       'leo@example.com',
     );
     await tester.enterText(
@@ -85,35 +89,29 @@ void main() {
   }
 
   Future<void> submit(WidgetTester tester) async {
-    await tester.tap(find.text('Activate account'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
     await tester.pumpAndSettle();
   }
 
-  FirebaseFunctionsException failure(String code, String reason, String msg) =>
-      FirebaseFunctionsException(
-        code: code,
-        message: msg,
-        details: {'reason': reason},
+  FirebaseFunctionsException failure(String code, String msg) =>
+      FirebaseFunctionsException(code: code, message: msg);
+
+  testWidgets(
+    'step 1 has no activation code and gates Continue on the identity',
+    (tester) async {
+      await pump(tester);
+
+      expect(find.text('Activation code'), findsNothing);
+      expect(find.text('Middle name (optional)'), findsOneWidget);
+      FilledButton continueButton() => tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Continue'),
       );
+      expect(continueButton().onPressed, isNull);
 
-  testWidgets('step 1 shows hint, helper and gates Continue', (tester) async {
-    await pump(tester);
-
-    expect(find.text('XXXXX-XXXXX'), findsOneWidget);
-    expect(
-      find.text('Your activation code is on the slip from the PACC office.'),
-      findsOneWidget,
-    );
-    FilledButton continueButton() => tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Continue'),
-    );
-    expect(continueButton().onPressed, isNull);
-
-    await fillStep1(tester);
-    expect(continueButton().onPressed, isNotNull);
-    // Auto-uppercase.
-    expect(find.text('ABCDE-23456'), findsOneWidget);
-  });
+      await fillStep1(tester);
+      expect(continueButton().onPressed, isNotNull);
+    },
+  );
 
   testWidgets('step 2 requires valid email and matching passwords', (
     tester,
@@ -123,7 +121,7 @@ void main() {
     await toStep2(tester);
 
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Email Address'),
+      find.widgetWithText(TextFormField, 'Personal email address'),
       'not-an-email',
     );
     await tester.enterText(
@@ -142,29 +140,33 @@ void main() {
     expect(calls, isEmpty);
   });
 
-  testWidgets('success activates, signs in and opens email verification', (
-    tester,
-  ) async {
-    final calls = <Map<String, Object?>>[];
-    final auth = _FakeAuthRepository();
-    await pump(tester, calls: calls, auth: auth);
-    await toStep2(tester);
-    await fillStep2(tester);
-    await submit(tester);
+  testWidgets(
+    'success starts setup, signs in with the alias and opens email verification',
+    (tester) async {
+      final calls = <Map<String, Object?>>[];
+      final auth = _FakeAuthRepository();
+      await pump(tester, calls: calls, auth: auth);
+      await toStep2(tester);
+      await fillStep2(tester);
+      await submit(tester);
 
-    expect(calls.single['name'], 'activateStudentAccount');
-    expect(calls.single['studentNo'], '2021-00123');
-    expect(calls.single['activationCode'], 'ABCDE-23456');
-    expect(calls.single['dateOfBirth'], matches(RegExp(r'^\d{4}-\d{2}-15$')));
-    expect(auth.signedInEmail, 'Leo@Example.com');
-    expect(auth.verificationSent, isTrue);
-    expect(find.text('verify target'), findsOneWidget);
-  });
+      expect(calls.single['name'], 'startStudentAccountSetup');
+      expect(calls.single['studentNo'], '2021-00123');
+      expect(calls.single['firstName'], 'Leo');
+      expect(calls.single['lastName'], 'Santos');
+      expect(calls.single['middleName'], '');
+      expect(calls.single.containsKey('activationCode'), isFalse);
+      expect(calls.single['dateOfBirth'], matches(RegExp(r'^\d{4}-\d{2}-15$')));
+      expect(auth.signedInEmail, '202100123@students.mindmate.local');
+      expect(auth.verificationSent, isFalse);
+      expect(find.text('verify target'), findsOneWidget);
+    },
+  );
 
   testWidgets('not-found shows exactly the generic mismatch copy', (
     tester,
   ) async {
-    await pump(tester, error: failure('not-found', 'mismatch', 'server text'));
+    await pump(tester, error: failure('not-found', 'server text'));
     await toStep2(tester);
     await fillStep2(tester);
     await submit(tester);
@@ -173,65 +175,34 @@ void main() {
     expect(find.text('verify target'), findsNothing);
   });
 
-  testWidgets('deadline-exceeded shows the expired copy', (tester) async {
-    await pump(
-      tester,
-      error: failure('deadline-exceeded', 'expired', 'server text'),
+  testWidgets('email already registered shows its own copy', (tester) async {
+    await pump(tester, error: failure('already-exists', 'server text'));
+    await toStep2(tester);
+    await fillStep2(tester);
+    await submit(tester);
+
+    expect(
+      find.text("That email address can't be used. Try a different one."),
+      findsOneWidget,
     );
+  });
+
+  testWidgets('setup already in progress shows its own copy', (tester) async {
+    await pump(tester, error: failure('resource-exhausted', 'server text'));
     await toStep2(tester);
     await fillStep2(tester);
     await submit(tester);
 
     expect(
       find.text(
-        'This activation code has expired. Ask the PACC office for a new one.',
+        'Setup for this record is already in progress. Wait a few minutes and try again.',
       ),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('already activated shows copy plus a Sign in button', (
-    tester,
-  ) async {
-    await pump(
-      tester,
-      error: failure('already-exists', 'already-activated', 'server text'),
-    );
-    await toStep2(tester);
-    await fillStep2(tester);
-    await submit(tester);
-
-    expect(
-      find.text(
-        'This account is already activated. Sign in or use Forgot password.',
-      ),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('Sign in'));
-    await tester.pumpAndSettle();
-    expect(find.text('login target'), findsOneWidget);
-  });
-
-  testWidgets('email in use shows its own copy', (tester) async {
-    await pump(
-      tester,
-      error: failure('already-exists', 'email-in-use', 'server text'),
-    );
-    await toStep2(tester);
-    await fillStep2(tester);
-    await submit(tester);
-
-    expect(
-      find.text('This email address is already registered.'),
       findsOneWidget,
     );
   });
 
   testWidgets('invalid input shows the server message', (tester) async {
-    await pump(
-      tester,
-      error: failure('invalid-argument', 'invalid-input', 'Check the date.'),
-    );
+    await pump(tester, error: failure('invalid-argument', 'Check the date.'));
     await toStep2(tester);
     await fillStep2(tester);
     await submit(tester);
@@ -255,7 +226,7 @@ void main() {
 
     expect(
       find.text(
-        "We couldn't complete activation right now. Check your connection and try again.",
+        "We couldn't complete setup right now. Check your connection and try again.",
       ),
       findsOneWidget,
     );
