@@ -968,4 +968,175 @@ void main() {
       expect(find.textContaining('FirebaseFunctionsException'), findsNothing);
     },
   );
+
+  testWidgets(
+    'bulk manual input: interactive row entry validates, previews, imports, and offers slips',
+    (tester) async {
+      final repo = _Repo();
+      final downloads = _Downloads();
+      final guard = StudentRosterLeaveGuard();
+      await _pump(tester, repo, downloads: downloads, guard: guard);
+      await _openTab(tester, 'Import');
+
+      await tester.tap(find.text('Bulk manual input'));
+      await tester.pumpAndSettle();
+
+      Future<void> fillRow(int rowIndex, List<String> values) async {
+        final rowBox = find.byKey(Key('manual_row_$rowIndex'));
+        final fields = find.descendant(
+          of: rowBox,
+          matching: find.byType(TextField),
+        );
+        for (var i = 0; i < values.length; i++) {
+          await tester.enterText(fields.at(i), values[i]);
+        }
+        await tester.pumpAndSettle();
+      }
+
+      await fillRow(0, [
+        '2021-901',
+        'Santos',
+        'Ana',
+        'M',
+        '02/15/2005',
+        'CITE',
+        'BSIT',
+        '1st Year',
+      ]);
+      expect(find.text('Ready 1/1'), findsOneWidget);
+
+      await tester.tap(find.text('Add row'));
+      await tester.pumpAndSettle();
+
+      // Enter duplicate Student No. first to confirm blocking indicator.
+      await fillRow(1, [
+        '2021-901',
+        'Reyes',
+        'Carlo',
+        '',
+        '07/21/2004',
+        'CITE',
+        'BSIT',
+        '2nd Year',
+      ]);
+      expect(find.text('Duplicate Student No. 1'), findsOneWidget);
+      expect(
+        _button(tester, 'Preview').onPressed,
+        isNull,
+        reason: 'Duplicate Student No. in manual grid must block Preview',
+      );
+
+      // Fix second Student No. so both rows are ready.
+      final secondRowFields = find.descendant(
+        of: find.byKey(const Key('manual_row_1')),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(secondRowFields.first, '2021-902');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ready 2/2'), findsOneWidget);
+      await tester.ensureVisible(_buttonFinder(tester, 'Preview'));
+      await tester.tap(_buttonFinder(tester, 'Preview'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('New 2'), findsOneWidget);
+      await tester.ensureVisible(_buttonFinder(tester, 'Import'));
+      await tester.tap(_buttonFinder(tester, 'Import'));
+      await tester.pumpAndSettle();
+
+      expect(repo.commitSizes, [2]);
+      expect(find.text('2 new · 0 updated · 0 linked'), findsOneWidget);
+      expect(guard.hasUndownloadedCodes, isTrue);
+
+      await tester.tap(find.text('Download activation slips (2)'));
+      await tester.pumpAndSettle();
+      expect(downloads.files, hasLength(1));
+      expect(guard.hasUndownloadedCodes, isFalse);
+    },
+  );
+
+  testWidgets(
+    'bulk manual input: spreadsheet paste populates rows matching template',
+    (tester) async {
+      final repo = _Repo();
+      await _pump(tester, repo);
+      await _openTab(tester, 'Import');
+
+      await tester.tap(find.text('Bulk manual input'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('toggle_bulk_paste_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('bulk_paste_textfield')),
+        '2022-101\tDela Cruz\tMaria\tP\t03/10/2005\tCITE\tBSIT\t1st Year\n'
+        '2022-102\tLim\tPaolo\t\t09/22/2004\tCBA\tBSBA\t2nd Year',
+      );
+      await tester.tap(find.byKey(const Key('apply_bulk_paste_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ready 2/2'), findsOneWidget);
+      expect(find.textContaining('Loaded 2 row(s)'), findsOneWidget);
+
+      await tester.ensureVisible(_buttonFinder(tester, 'Preview'));
+      await tester.tap(_buttonFinder(tester, 'Preview'));
+      await tester.pumpAndSettle();
+      expect(find.text('New 2'), findsOneWidget);
+
+      await tester.ensureVisible(_buttonFinder(tester, 'Import'));
+      await tester.tap(_buttonFinder(tester, 'Import'));
+      await tester.pumpAndSettle();
+      expect(find.text('2 new · 0 updated · 0 linked'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'roster summary strip quick-filters loaded records and responds across viewports with reduced motion',
+    (tester) async {
+      final repo = _Repo();
+      for (final size in const [
+        Size(390, 844),
+        Size(768, 1024),
+        Size(1280, 900),
+      ]) {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(disableAnimations: true),
+            child: MaterialApp(
+              theme: AdminTheme.data,
+              home: Scaffold(
+                body: StudentRosterPage(
+                  key: ValueKey(size),
+                  repository: repo,
+                  pickFile: () async => null,
+                  download: (_, _, _) {},
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Awaiting activation'));
+        await tester.pumpAndSettle();
+        expect(repo.rosterStatuses.last, 'notActivated');
+
+        await tester.tap(find.text('Import'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Bulk manual input'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
 }
+
+Finder _buttonFinder(WidgetTester tester, String label) =>
+    find.widgetWithText(FilledButton, label);
