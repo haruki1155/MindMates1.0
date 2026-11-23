@@ -44,6 +44,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
   DateTime? _displayedMonth;
   String? _selectedDateKey;
   Timer? _midnightTimer;
+  bool _calendarExpanded = false;
 
   List<StudentAcademicYear> _academicYears = const [];
   String? _selectedSchoolYear;
@@ -405,6 +406,19 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
     return null;
   }
 
+  void _expandCalendar() {
+    final route = ModalRoute.of(context);
+    if (route == null || _calendarExpanded) return;
+    route.addLocalHistoryEntry(
+      LocalHistoryEntry(
+        onRemove: () {
+          if (mounted) setState(() => _calendarExpanded = false);
+        },
+      ),
+    );
+    setState(() => _calendarExpanded = true);
+  }
+
   Widget _buildAcademicFilterBar(BuildContext context, String uid) {
     final activeYear = _activeAcademicYear;
     final activeSemester = _activeSemester;
@@ -414,8 +428,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
 
     return Container(
       key: const Key('mood-academic-filter-bar'),
-      decoration: HomeDecor.card(),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -616,9 +629,9 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
     return Scaffold(
       backgroundColor: HomePalette.background,
       appBar: AppBar(
-        title: const Text(
-          'My Mood Journey',
-          style: TextStyle(fontWeight: FontWeight.w800),
+        title: Text(
+          _calendarExpanded ? 'Mood Calendar' : 'My Mood Journey',
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         backgroundColor: HomePalette.surface,
         foregroundColor: HomePalette.text,
@@ -629,93 +642,102 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
           ? const Center(
               child: Text('Mood history is not available right now.'),
             )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Text(
-                  'Your feelings, over time',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
+          : LayoutBuilder(
+              builder: (context, constraints) => ListView(
+                key: ValueKey(_calendarExpanded),
+                padding: EdgeInsets.fromLTRB(
+                  ((constraints.maxWidth - 620) / 2).clamp(
+                    16.0,
+                    double.infinity,
                   ),
+                  12,
+                  ((constraints.maxWidth - 620) / 2).clamp(
+                    16.0,
+                    double.infinity,
+                  ),
+                  24 + MediaQuery.paddingOf(context).bottom,
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Notice your emotional patterns and small shifts throughout your days.',
-                ),
-                if (_academicYears.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  _buildAcademicFilterBar(context, uid),
-                ],
-                const SizedBox(height: 10),
-                MoodJourneyCalendar(
-                  displayedMonth: displayedMonth,
-                  selectedDateKey: selectedDateKey,
-                  todayDateKey: _todayDateKey,
-                  history: safeCalendarHistory,
-                  isLoading: isCalendarLoading,
-                  errorMessage: calendarError,
-                  permittedRange: filterRange,
-                  onRetry: () => _loadHistoryAndCalendar(uid, displayedMonth),
-                  onMonthChanged: (next) => _handleMonthChanged(uid, next),
-                  onDaySelected: (dayKey) => _handleDaySelected(uid, dayKey),
-                  onTodayPressed: () => _handleTodayPressed(uid),
-                ),
-                if (safeCalendarHistory != null) ...[
-                  const SizedBox(height: 10),
-                  MoodV2HistoryPanel(
+                children: [
+                  MoodJourneyCalendar(
+                    displayedMonth: displayedMonth,
+                    selectedDateKey: selectedDateKey,
+                    todayDateKey: _todayDateKey,
                     history: safeCalendarHistory,
                     isLoading: isCalendarLoading,
-                    showPersonalDetails: true,
-                    selectedDateKey: selectedDateKey,
+                    errorMessage: calendarError,
                     permittedRange: filterRange,
-                    referenceInstant: _now,
-                    v2PersonalNotes: mood?.v2PersonalNotes ?? const {},
-                    v2NoteLoadingDays: mood?.v2NoteLoadingDays ?? const {},
-                    v2NoteErrorDays: mood?.v2NoteErrorDays ?? const {},
-                    onExpandDay: (day) => mood?.loadMoodV2DayNotes(uid, day),
+                    expanded: _calendarExpanded,
+                    onExpand: _calendarExpanded ? null : _expandCalendar,
+                    filters: _academicYears.isEmpty
+                        ? null
+                        : _buildAcademicFilterBar(context, uid),
                     onRetry: () => _loadHistoryAndCalendar(uid, displayedMonth),
-                    hasMore: false,
-                    isLoadingMore: false,
-                    paginationErrorMessage: null,
+                    onMonthChanged: (next) => _handleMonthChanged(uid, next),
+                    onDaySelected: (dayKey) => _handleDaySelected(uid, dayKey),
+                    onTodayPressed: () => _handleTodayPressed(uid),
                   ),
-                  const SizedBox(height: 10),
-                  MoodJourneySummary(
-                    key: ValueKey(uid),
-                    history: safeCalendarHistory,
-                    streakHistory: safeRecentHistory ?? safeCalendarHistory,
-                    now: _now,
-                    selectedDateKey: selectedDateKey,
-                    displayedMonth: displayedMonth,
-                    academicFilterRange: filterRange,
-                    academicFilterLabel: _activeAcademicFilterLabel,
-                    showWeekRecap: true,
-                    milestoneDays: widget.milestoneDays,
-                  ),
-                ],
-                const SizedBox(height: 16),
-                const Card(
-                  color: HomePalette.surface,
-                  child: ListTile(
-                    leading: Icon(Icons.self_improvement),
-                    title: Text('Mindful Essentials'),
-                    subtitle: Text(
-                      'Sleep Quality and Mindful Breathing · Coming together soon',
+                  if (safeCalendarHistory != null) ...[
+                    const SizedBox(height: 20),
+                    MoodV2HistoryPanel(
+                      history: safeCalendarHistory,
+                      isLoading: isCalendarLoading,
+                      showPersonalDetails: true,
+                      selectedDateKey: selectedDateKey,
+                      permittedRange: filterRange,
+                      referenceInstant: _now,
+                      v2PersonalNotes: mood?.v2PersonalNotes ?? const {},
+                      v2NoteLoadingDays: mood?.v2NoteLoadingDays ?? const {},
+                      v2NoteErrorDays: mood?.v2NoteErrorDays ?? const {},
+                      onExpandDay: (day) => mood?.loadMoodV2DayNotes(uid, day),
+                      onRetry: () =>
+                          _loadHistoryAndCalendar(uid, displayedMonth),
+                      hasMore: false,
+                      isLoadingMore: false,
+                      paginationErrorMessage: null,
                     ),
-                  ),
-                ),
-                Card(
-                  color: HomePalette.surface,
-                  child: ListTile(
-                    leading: const Icon(Icons.favorite_outline),
-                    title: const Text('Mental Health Support'),
-                    subtitle: const Text('Open inSIGHT'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(
-                      context,
-                    ).pushNamed(RouteNames.mentalHealthInsights),
-                  ),
-                ),
-              ],
+                  ],
+                  if (!_calendarExpanded) ...[
+                    if (safeCalendarHistory != null) ...[
+                      const SizedBox(height: 20),
+                      MoodJourneySummary(
+                        key: ValueKey(uid),
+                        history: safeCalendarHistory,
+                        streakHistory: safeRecentHistory ?? safeCalendarHistory,
+                        now: _now,
+                        selectedDateKey: selectedDateKey,
+                        displayedMonth: displayedMonth,
+                        academicFilterRange: filterRange,
+                        academicFilterLabel: _activeAcademicFilterLabel,
+                        showWeekRecap: true,
+                        milestoneDays: widget.milestoneDays,
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Card(
+                      color: HomePalette.surface,
+                      child: ListTile(
+                        leading: const Icon(Icons.favorite_outline),
+                        title: const Text('Mental Health Support'),
+                        subtitle: const Text('Open inSIGHT'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(
+                          context,
+                        ).pushNamed(RouteNames.mentalHealthInsights),
+                      ),
+                    ),
+                    const Card(
+                      color: HomePalette.surface,
+                      child: ListTile(
+                        leading: Icon(Icons.self_improvement),
+                        title: Text('Mindful Essentials'),
+                        subtitle: Text(
+                          'Sleep Quality and Mindful Breathing · Coming together soon',
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
     );
   }
