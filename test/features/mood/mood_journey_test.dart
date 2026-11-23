@@ -671,6 +671,41 @@ void main() {
     expect(find.text('A private note'), findsOneWidget);
     expect(find.text('Based on loaded entries'), findsOneWidget);
   });
+
+  testWidgets(
+    'partial calendar error preserves loaded selected-day check-ins without duplicate error banner',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+            ChangeNotifierProvider<MoodProvider>.value(
+              value: _PartialErrorJourneyMood(),
+            ),
+          ],
+          child: MaterialApp(
+            home: MoodJourneyScreen(
+              nowProvider: () => DateTime.utc(2026, 11, 18, 4),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Calendar displays the inline retryable error banner once.
+      expect(find.byKey(const Key('mood-calendar-error')), findsOneWidget);
+      expect(find.text('Retry history'), findsNothing);
+      // Loaded check-ins for the selected day (Nov 18) remain visible and expandable.
+      expect(
+        find.byKey(const Key('mood-selected-day-heading')),
+        findsOneWidget,
+      );
+      expect(find.byType(ExpansionTile), findsOneWidget);
+    },
+  );
 }
 
 class _JourneyAuth extends ChangeNotifier implements AuthProvider {
@@ -846,4 +881,26 @@ class _AcademicFilterMood extends _JourneyMood {
       ),
     ],
   );
+}
+
+class _PartialErrorJourneyMood extends _JourneyMood {
+  @override
+  MoodHistoryWindow get v2History => MoodHistoryWindow(
+    coverage: MoodHistoryCoverage.partial,
+    events: [
+      NormalizedMoodEvent(
+        id: 'nov-18',
+        userId: 'account-a',
+        level: 4,
+        dateKey: '2026-11-18',
+        occurredAt: DateTime.utc(2026, 11, 18, 2),
+        source: MoodEventSource.v2,
+        label: 'Okay',
+      ),
+    ],
+  );
+
+  @override
+  String? get moodCalendarRangeError =>
+      'Some mood history could not be loaded. Try again.';
 }

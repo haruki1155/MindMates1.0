@@ -445,22 +445,27 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
-                        'Academic year: ',
-                        style: TextStyle(
-                          color: HomePalette.muted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
                       Flexible(
-                        child: Text(
-                          yearLabel,
-                          style: const TextStyle(
-                            color: HomePalette.text,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
-                          ),
+                        child: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            const Text(
+                              'Academic year: ',
+                              style: TextStyle(
+                                color: HomePalette.muted,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              yearLabel,
+                              style: const TextStyle(
+                                color: HomePalette.text,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -512,22 +517,27 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text(
-                          'Semester: ',
-                          style: TextStyle(
-                            color: HomePalette.muted,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
                         Flexible(
-                          child: Text(
-                            semesterLabel,
-                            style: const TextStyle(
-                              color: HomePalette.text,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
-                            ),
+                          child: Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              const Text(
+                                'Semester: ',
+                                style: TextStyle(
+                                  color: HomePalette.muted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                semesterLabel,
+                                style: const TextStyle(
+                                  color: HomePalette.text,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         if (semesters.isNotEmpty) ...[
@@ -636,25 +646,24 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                   onDaySelected: (dayKey) => _handleDaySelected(uid, dayKey),
                   onTodayPressed: () => _handleTodayPressed(uid),
                 ),
-                const SizedBox(height: 10),
-                MoodV2HistoryPanel(
-                  history: safeCalendarHistory,
-                  isLoading: isCalendarLoading,
-                  errorMessage: calendarError,
-                  showPersonalDetails: true,
-                  selectedDateKey: selectedDateKey,
-                  permittedRange: filterRange,
-                  referenceInstant: _now,
-                  v2PersonalNotes: mood?.v2PersonalNotes ?? const {},
-                  v2NoteLoadingDays: mood?.v2NoteLoadingDays ?? const {},
-                  v2NoteErrorDays: mood?.v2NoteErrorDays ?? const {},
-                  onExpandDay: (day) => mood?.loadMoodV2DayNotes(uid, day),
-                  onRetry: () => _loadHistoryAndCalendar(uid, displayedMonth),
-                  hasMore: false,
-                  isLoadingMore: false,
-                  paginationErrorMessage: null,
-                ),
                 if (safeCalendarHistory != null) ...[
+                  const SizedBox(height: 10),
+                  MoodV2HistoryPanel(
+                    history: safeCalendarHistory,
+                    isLoading: isCalendarLoading,
+                    showPersonalDetails: true,
+                    selectedDateKey: selectedDateKey,
+                    permittedRange: filterRange,
+                    referenceInstant: _now,
+                    v2PersonalNotes: mood?.v2PersonalNotes ?? const {},
+                    v2NoteLoadingDays: mood?.v2NoteLoadingDays ?? const {},
+                    v2NoteErrorDays: mood?.v2NoteErrorDays ?? const {},
+                    onExpandDay: (day) => mood?.loadMoodV2DayNotes(uid, day),
+                    onRetry: () => _loadHistoryAndCalendar(uid, displayedMonth),
+                    hasMore: false,
+                    isLoadingMore: false,
+                    paginationErrorMessage: null,
+                  ),
                   const SizedBox(height: 10),
                   MoodJourneySummary(
                     key: ValueKey(uid),

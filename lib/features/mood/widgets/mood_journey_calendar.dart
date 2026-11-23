@@ -140,7 +140,7 @@ class MoodJourneyCalendar extends StatelessWidget {
               _buildHeader(
                 context,
                 monthTitle: monthTitle,
-                stackToday: isTightWidth && largeText,
+                stackToday: constraints.maxWidth < 340 && largeText,
               ),
               const SizedBox(height: 4),
               Row(

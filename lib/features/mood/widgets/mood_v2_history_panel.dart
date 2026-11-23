@@ -55,7 +55,7 @@ class MoodV2HistoryPanel extends StatelessWidget {
     if (isLoading && history == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (errorMessage != null) {
+    if (errorMessage != null && history == null) {
       return Column(
         children: [
           _HistoryMessage(
