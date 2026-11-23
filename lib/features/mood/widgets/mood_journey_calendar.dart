@@ -133,10 +133,7 @@ class MoodJourneyCalendar extends StatelessWidget {
         return Container(
           key: const Key('mood-journey-calendar'),
           decoration: HomeDecor.card(radius: HomeMetrics.radiusLarge),
-          padding: EdgeInsets.symmetric(
-            horizontal: horizontalPad,
-            vertical: 12,
-          ),
+          padding: EdgeInsets.symmetric(horizontal: horizontalPad, vertical: 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -145,14 +142,14 @@ class MoodJourneyCalendar extends StatelessWidget {
                 monthTitle: monthTitle,
                 stackToday: isTightWidth && largeText,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               Row(
                 children: [
                   for (final label in _weekdayHeaders)
                     Expanded(
                       child: Center(
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.symmetric(vertical: 2),
                           child: FittedBox(
                             fit: BoxFit.scaleDown,
                             child: Text(
@@ -169,7 +166,7 @@ class MoodJourneyCalendar extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               for (var row = 0; row < rowCount; row++)
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -275,7 +272,7 @@ class MoodJourneyCalendar extends StatelessWidget {
                   ],
                 ),
               ],
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
               _buildLegend(),
             ],
           ),
@@ -475,11 +472,11 @@ class MoodJourneyCalendar extends StatelessWidget {
                 }
               : null,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 40, minHeight: 48),
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
             child: AnimatedContainer(
               duration: HomeMotion.duration(context, 140),
-              margin: const EdgeInsets.all(1.5),
-              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+              margin: const EdgeInsets.symmetric(horizontal: 1, vertical: 0.5),
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
               decoration: BoxDecoration(
                 color: backgroundColor,
                 borderRadius: BorderRadius.circular(10),
@@ -495,7 +492,8 @@ class MoodJourneyCalendar extends StatelessWidget {
                       '${day.day}',
                       style: TextStyle(
                         color: textColor,
-                        fontSize: 13,
+                        fontSize: 12,
+                        height: 1.1,
                         fontWeight: isSelected || isToday || checkInCount > 0
                             ? FontWeight.w900
                             : FontWeight.w600,
@@ -505,20 +503,20 @@ class MoodJourneyCalendar extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 1),
                   if (checkInCount > 0)
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          MoodGlyphIcon(label: latestEvent?.label, size: 16),
+                          MoodGlyphIcon(label: latestEvent?.label, size: 14),
                           if (checkInCount > 1) ...[
                             const SizedBox(width: 2),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 3,
-                                vertical: 1,
+                                vertical: 0.5,
                               ),
                               decoration: BoxDecoration(
                                 color: HomePalette.sun.withValues(alpha: 0.45),
@@ -528,7 +526,7 @@ class MoodJourneyCalendar extends StatelessWidget {
                                 '+${checkInCount - 1}',
                                 style: const TextStyle(
                                   color: HomePalette.text,
-                                  fontSize: 10,
+                                  fontSize: 9,
                                   fontWeight: FontWeight.w900,
                                 ),
                               ),
@@ -538,7 +536,7 @@ class MoodJourneyCalendar extends StatelessWidget {
                       ),
                     )
                   else
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                 ],
               ),
             ),
