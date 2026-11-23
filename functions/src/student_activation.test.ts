@@ -461,7 +461,7 @@ test("a recently created alias holder is never treated as abandoned, and neither
   const fresh = await seed("SQ2");
   const freshHolder = await getAuth().createUser({email: aliasOf(fresh.studentNo), password: PASSWORD});
   extraUids.push(freshHolder.uid);
-  // Default age threshold (10 minutes): a just-created account might be a concurrent activation in flight.
+  // Default age threshold (2 minutes): a just-created account might be a concurrent activation in flight.
   await rejectsWith(activate.run({data: {studentNo: fresh.studentNo, activationCode: fresh.code, dateOfBirth: DOB,
     email: email("sq2"), password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
   assert.equal((await getAuth().getUser(freshHolder.uid)).email, aliasOf(fresh.studentNo));

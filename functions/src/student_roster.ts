@@ -5,7 +5,7 @@ import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {requireAdmin, requireUid, roleOf} from "./access";
 import {canonicalLoginId} from "./account_recovery";
-import {RECOVERY_CONTACTS, releaseRecoveryRecords} from "./student_recovery_contacts";
+import {readRecoveryRecords, releaseRecoveryRecords} from "./student_recovery_contacts";
 import {
   applyStudentAppointmentsCollegeScopeInTransaction,
   readStudentAppointmentsForScopeSyncInTransaction,
@@ -1237,10 +1237,10 @@ export const revokeStudentActivation = onCall(async (request) => {
   try {
     await db.runTransaction(async (transaction) => {
       const userRef = uid ? db.collection("users").doc(uid) : null;
-      const [snap, reservation, user, recoveryContact] = await Promise.all([
+      const [snap, reservation, user] = await Promise.all([
         transaction.get(rosterRef), transaction.get(reservationRef), userRef ? transaction.get(userRef) : Promise.resolve(null),
-        uid ? transaction.get(db.collection(RECOVERY_CONTACTS).doc(uid)) : Promise.resolve(null),
       ]);
+      const recoveryRecords = uid ? await readRecoveryRecords(transaction, uid) : null;
       const live = snap.data();
       if (!live || live.activated !== true || String(live.userId ?? "") !== uid) {
         throw new HttpsError("failed-precondition", "The roster row changed. Refresh and try again.");
@@ -1251,10 +1251,7 @@ export const revokeStudentActivation = onCall(async (request) => {
         revokedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), updatedBy: actorId,
       });
       if (uid && reservation.exists && reservation.data()?.userId === uid) transaction.delete(reservationRef);
-      if (uid && recoveryContact?.exists) {
-        const hash = recoveryContact.data()?.emailHash;
-        releaseRecoveryRecords(transaction, uid, typeof hash === "string" ? hash : null);
-      }
+      if (uid && recoveryRecords) releaseRecoveryRecords(transaction, uid, recoveryRecords);
       if (userRef && user?.exists) {
         transaction.update(userRef, {accountStatus: "revoked", rosterLinked: false,
           revokedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()});

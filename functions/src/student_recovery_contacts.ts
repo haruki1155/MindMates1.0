@@ -34,12 +34,30 @@ export function maskEmail(email: string): string {
   return `${email[0]}***${email.slice(at)}`;
 }
 
-/** Deletes a student's recovery records inside a transaction. Reads must already have happened. */
-export function releaseRecoveryRecords(transaction: Transaction, uid: string, emailHash: string | null): void {
+export type RecoveryRecords = {hasContact: boolean; emailHash: string | null; ownsEmailReservation: boolean};
+
+/** Reads the records a student owns. Must run in the transaction's read phase, before any write. */
+export async function readRecoveryRecords(transaction: Transaction, uid: string): Promise<RecoveryRecords> {
+  const db = getFirestore();
+  const contact = await transaction.get(db.collection(RECOVERY_CONTACTS).doc(uid));
+  const stored = contact.data()?.emailHash;
+  const emailHash = typeof stored === "string" ? stored : null;
+  const reservation = emailHash ? await transaction.get(db.collection(RECOVERY_EMAILS).doc(emailHash)) : null;
+  return {hasContact: contact.exists, emailHash, ownsEmailReservation: reservation?.data()?.uid === uid};
+}
+
+/**
+ * Deletes only what belongs to `uid`: its own contact and pending verification (both keyed by its uid), and the
+ * recovery-address reservation only when that reservation is recorded as owned by the same uid.
+ */
+export function releaseRecoveryRecords(transaction: Transaction, uid: string, records: RecoveryRecords): void {
+  if (!records.hasContact) return;
   const db = getFirestore();
   transaction.delete(db.collection(RECOVERY_CONTACTS).doc(uid));
   transaction.delete(db.collection(RECOVERY_VERIFICATIONS).doc(uid));
-  if (emailHash) transaction.delete(db.collection(RECOVERY_EMAILS).doc(emailHash));
+  if (records.emailHash && records.ownsEmailReservation) {
+    transaction.delete(db.collection(RECOVERY_EMAILS).doc(records.emailHash));
+  }
 }
 
 /**

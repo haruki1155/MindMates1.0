@@ -174,7 +174,7 @@ async function createAliasUser(
  * still in flight (which creates the Auth user a moment before its profile).
  */
 async function isAbandonedAlias(occupant: {uid: string; metadata: {creationTime: string}}, key: string): Promise<boolean> {
-  const minAgeMs = Number(process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS ?? 10 * 60 * 1000);
+  const minAgeMs = Number(process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS ?? 2 * 60 * 1000);
   const created = Date.parse(occupant.metadata.creationTime);
   if (!Number.isFinite(created) || Date.now() - created < minAgeMs) return false;
   const db = database();

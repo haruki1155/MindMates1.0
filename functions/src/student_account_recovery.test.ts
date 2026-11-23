@@ -284,6 +284,23 @@ test("a code is bound to the signed-in student and to the exact recovery address
   await rejects(confirmRecoveryEmailCode(as(undefined, {code: "WWWWW-XXXXX"}), deps), "unauthenticated");
 });
 
+test("two simultaneous redemptions of the same code verify once, audit once, and leave nothing pending", async () => {
+  reset();
+  const s = await seedStudent("CF7");
+  codes = ["MMMMM-NNNNN"];
+  await requestRecoveryEmailCode(as(s.uid), deps);
+  const results = await Promise.allSettled([1, 2].map(() => confirmRecoveryEmailCode(as(s.uid, {code: "MMMMM-NNNNN"}), deps)));
+  assert.ok(results.some((r) => r.status === "fulfilled"), "at least one redemption succeeds");
+  for (const r of results) {
+    if (r.status === "rejected") assert.equal((r.reason as Err).code, "failed-precondition");
+  }
+  assert.equal((await getAuth().getUser(s.uid)).emailVerified, true);
+  const audits = (await db.collection("admin_audit_logs").where("actorId", "==", s.uid).get()).docs
+    .filter((d) => d.data().action === "STUDENT_RECOVERY_EMAIL_VERIFIED");
+  assert.equal(audits.length, 1, "the verification is recorded once");
+  assert.equal((await verificationDoc(s.uid).get()).exists, false);
+});
+
 test("confirming after the contact was verified but the Auth flag was not set repairs it safely", async () => {
   reset();
   const s = await seedStudent("CF6");

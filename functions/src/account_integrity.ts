@@ -5,7 +5,7 @@ import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {canonicalLoginId} from "./account_recovery";
-import {RECOVERY_CONTACTS, releaseRecoveryRecords} from "./student_recovery_contacts";
+import {readRecoveryRecords, releaseRecoveryRecords} from "./student_recovery_contacts";
 import {
   applyStudentAppointmentsCollegeScopeInTransaction,
   readStudentAppointmentsForScopeSyncInTransaction,
@@ -248,7 +248,7 @@ async function cancelPendingRegistrationHandler(request: CallableRequest) {
       }
       const roster = rosterRef ? await transaction.get(rosterRef) : null;
       // Student ID accounts hold server-only recovery records; release them so the address can be reused.
-      const recoveryContact = await transaction.get(db.collection(RECOVERY_CONTACTS).doc(uid));
+      const recoveryRecords = await readRecoveryRecords(transaction, uid);
       if (requestRef) {
         const accessRequest = await transaction.get(requestRef);
         if (!accessRequest.exists || accessRequest.data()?.applicantUserId !== uid) {
@@ -274,10 +274,7 @@ async function cancelPendingRegistrationHandler(request: CallableRequest) {
       }
       transaction.delete(reservationRef);
       transaction.delete(profileRef);
-      if (recoveryContact.exists) {
-        const hash = recoveryContact.data()?.emailHash;
-        releaseRecoveryRecords(transaction, uid, typeof hash === "string" ? hash : null);
-      }
+      releaseRecoveryRecords(transaction, uid, recoveryRecords);
       transaction.set(markerRef, {
         uid,
         reason: CANCELLATION_REASON,
