@@ -10,6 +10,10 @@ import {AUDIT_CATEGORIES, writeAudit} from "./audit";
 import {
   StoredActivationCode, hashActivationCode, normalizeActivationCode, parseDateKey, verifyActivationCode,
 } from "./student_roster_domain";
+import {studentAuthAliasEmail} from "./student_auth_alias";
+import {
+  RECOVERY_CONTACTS, RECOVERY_EMAILS, normalizeRecoveryContactEmail, recoveryEmailHash, releaseStudentAlias,
+} from "./student_recovery_contacts";
 
 if (!getApps().length) initializeApp();
 
@@ -23,7 +27,6 @@ const LOCK_MS = 30 * 60 * 1000;
  * than that protects nothing, because the lock has long since lapsed and a lapsed lock starts a fresh window.
  */
 const ATTEMPT_TTL_MS = LOCK_MS + 24 * 60 * 60 * 1000;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type Reason = "mismatch" | "expired" | "already-activated" | "email-in-use" | "invalid-input";
 
@@ -74,8 +77,8 @@ type Input = {studentNo: unknown; activationCode: string | null; dateOfBirthKey:
 function readInput(data: unknown): Input {
   if (!data || typeof data !== "object" || Array.isArray(data)) throw invalidInput("Enter your activation details.");
   const raw = data as Record<string, unknown>;
-  const email = typeof raw.email === "string" ? raw.email.trim().toLowerCase() : "";
-  if (!EMAIL_PATTERN.test(email) || email.length > 254) throw invalidInput("Enter a valid email address.");
+  const email = normalizeRecoveryContactEmail(raw.email);
+  if (!email) throw invalidInput("Enter a valid email address.");
   const password = typeof raw.password === "string" ? raw.password : "";
   if (password.length < 8 || password.length > 4096) throw invalidInput("Password must be at least 8 characters.");
   const dateOfBirthKey = parseDateKey(raw.dateOfBirth);
@@ -123,6 +126,37 @@ async function reserveAttempt(key: string): Promise<boolean> {
 
 async function clearAttempts(key: string): Promise<void> {
   await database().collection("student_activation_attempts").doc(key).delete();
+}
+
+/** True when any Firebase Auth account (employee, legacy or pre-alias student) already uses this address. */
+async function authEmailTaken(address: string): Promise<boolean> {
+  try {
+    await getAuth().getUserByEmail(address);
+    return true;
+  } catch (error) {
+    if ((error as {code?: string})?.code === "auth/user-not-found") return false;
+    throw error;
+  }
+}
+
+/**
+ * Creates the student's alias account. If the alias is still held by a disabled account that an administrator
+ * revoked for this same roster row, that account is moved off the alias first (it stays disabled) and the
+ * creation is retried once, so a revoke followed by a new code always works. Anything else holding the alias
+ * is left alone and surfaces as auth/email-already-exists.
+ */
+async function createAliasUser(authEmail: string, password: string, row: FirebaseFirestore.DocumentData): Promise<string> {
+  const create = () => getAuth().createUser({email: authEmail, password, emailVerified: false, disabled: false});
+  try {
+    return (await create()).uid;
+  } catch (error) {
+    if ((error as {code?: string})?.code !== "auth/email-already-exists") throw error;
+    const occupant = await getAuth().getUserByEmail(authEmail).catch(() => null);
+    const revoked = Array.isArray(row.revokedUserIds) ? row.revokedUserIds : [];
+    if (!occupant || !occupant.disabled || !revoked.includes(occupant.uid)) throw error;
+    await releaseStudentAlias(occupant.uid);
+    return (await create()).uid;
+  }
 }
 
 async function deleteAuthUser(uid: string, correlationId: string): Promise<void> {
@@ -186,15 +220,20 @@ async function activateStudentAccountHandler(request: CallableRequest) {
     throw activationError("already-activated");
   }
 
-  // 4. Create the Auth user.
+  // 4. Create the Auth user. The student signs in with the Student ID, so the Auth account uses the
+  // deterministic alias derived from it; the real email is only a recovery contact (never an Auth email).
+  // A real address that already belongs to any Auth account stays rejected, as before.
   const name = [row.firstName, row.middleName, row.surname].map((v) => String(v ?? "")).filter(Boolean).join(" ");
+  const authEmail = studentAuthAliasEmail(key);
+  const recoveryHash = recoveryEmailHash(input.email);
+  if (await authEmailTaken(input.email)) throw activationError("email-in-use");
   let uid: string;
   try {
-    uid = (await getAuth().createUser({email: input.email, password: input.password, emailVerified: false,
-      disabled: false})).uid;
+    uid = await createAliasUser(authEmail, input.password, row);
   } catch (error) {
     const code = (error as {code?: string})?.code ?? "";
-    if (code === "auth/email-already-exists") throw activationError("email-in-use");
+    // The alias is derived from the roster key, so a clash means this Student ID is already taken.
+    if (code === "auth/email-already-exists") throw activationError("already-activated");
     if (code === "auth/invalid-email") throw invalidInput("Enter a valid email address.");
     if (code === "auth/invalid-password") throw invalidInput("Password must be at least 8 characters.");
     console.error("student_activation_auth_create_failed", {correlationId, code});
@@ -205,19 +244,25 @@ async function activateStudentAccountHandler(request: CallableRequest) {
   const verifiedHash = String((stored as StoredActivationCode).hash);
   const profileRef = db.collection("users").doc(uid);
   const reservationRef = db.collection("student_id_reservations").doc(key);
+  const contactRef = db.collection(RECOVERY_CONTACTS).doc(uid);
+  const recoveryEmailRef = db.collection(RECOVERY_EMAILS).doc(recoveryHash);
   try {
     await db.runTransaction(async (transaction) => {
-      const [current, reservation] = await Promise.all([transaction.get(rosterRef), transaction.get(reservationRef)]);
+      const [current, reservation, recoveryEmail] = await Promise.all([
+        transaction.get(rosterRef), transaction.get(reservationRef), transaction.get(recoveryEmailRef),
+      ]);
       const live = current.data();
       if (live?.activated === true) throw activationError("already-activated");
       if (!live || live.status !== "active" || live.activationCode?.hash !== verifiedHash) {
         throw activationError("mismatch");
       }
       if (reservation.exists && reservation.data()?.userId !== uid) throw activationError("already-activated");
+      // One recovery address backs exactly one student (compared case-insensitively).
+      if (recoveryEmail.exists && recoveryEmail.data()?.uid !== uid) throw activationError("email-in-use");
 
       const studentNo = String(live.studentNo ?? key);
       transaction.create(profileRef, {
-        id: uid, email: input.email, emailVerified: false, schoolId: studentNo,
+        id: uid, email: input.email, emailVerified: false, studentIdLogin: true, schoolId: studentNo,
         firstName: String(live.firstName ?? ""), middleName: String(live.middleName ?? ""), lastName: String(live.surname ?? ""),
         name: [live.firstName, live.middleName, live.surname].map((v) => String(v ?? "")).filter(Boolean).join(" "),
         populationRole: "student", declaredRole: "student", role: "student",
@@ -236,6 +281,11 @@ async function activateStudentAccountHandler(request: CallableRequest) {
       if (!reservation.exists) {
         transaction.create(reservationRef, {userId: uid, studentId: studentNo, createdAt: FieldValue.serverTimestamp()});
       }
+      transaction.create(contactRef, {
+        uid, studentKey: key, email: input.email, emailHash: recoveryHash, verifiedAt: null,
+        createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      });
+      transaction.create(recoveryEmailRef, {uid, studentKey: key, createdAt: FieldValue.serverTimestamp()});
       transaction.update(rosterRef, {
         activated: true, userId: uid, activationCode: null,
         // Kept (hash only, never the plain code) so a cancelled unverified activation can restore the slip.
@@ -262,7 +312,7 @@ async function activateStudentAccountHandler(request: CallableRequest) {
   }
 
   console.info("student_activation_succeeded", {correlationId});
-  return {ok: true, email: input.email};
+  return {ok: true, email: input.email, authEmail};
 }
 
 export const activateStudentAccount = onCall({enforceAppCheck: true}, activateStudentAccountHandler);

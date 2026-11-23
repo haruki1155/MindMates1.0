@@ -12,6 +12,8 @@ import {
 } from "./index";
 import {issueCodesFor, rosterTestHooks} from "./student_roster";
 import {verifyActivationCode} from "./student_roster_domain";
+import {studentAuthAliasEmail} from "./student_auth_alias";
+import {RECOVERY_CONTACTS, RECOVERY_EMAILS, recoveryEmailHash} from "./student_recovery_contacts";
 import {ensureAuthUser} from "./test_auth_helper";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
@@ -312,10 +314,11 @@ async function activateRow(n: string, tag: string, code: string): Promise<{uid: 
   const address = `${run.toLowerCase()}-${tag}@example.com`;
   await activate.run({data: {studentNo: `${run}-${n}`, activationCode: code, dateOfBirth: "2004-05-06", email: address,
     password: "Str0ngPass!"}});
-  const uid = (await getAuth().getUserByEmail(address)).uid;
+  const uid = (await getAuth().getUserByEmail(studentAuthAliasEmail(`${run}-${n}`))).uid;
   authUids.push(uid);
   created.push(db.collection("users").doc(uid), db.collection("student_id_reservations").doc(keyOf(`${run}-${n}`)),
-    db.collection("student_activation_attempts").doc(keyOf(`${run}-${n}`)));
+    db.collection("student_activation_attempts").doc(keyOf(`${run}-${n}`)),
+    db.collection(RECOVERY_CONTACTS).doc(uid), db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(address)));
   return {uid, email: address};
 }
 
@@ -663,6 +666,12 @@ test("revokeStudentActivation disables the claimant, frees the Student No., and 
   assert.equal(u.rosterLinked, false);
   assert.equal(u.firstName, "Juan");
   assert.equal(u.email, first.email);
+  // The revoked account stays disabled and keeps its alias until the Student ID is activated again; its recovery
+  // records are released immediately so the address can be reused.
+  const alias = studentAuthAliasEmail(`${run}-RV1`);
+  assert.equal((await getAuth().getUser(first.uid)).email, alias);
+  assert.equal((await db.collection(RECOVERY_CONTACTS).doc(first.uid).get()).exists, false);
+  assert.equal((await db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(first.email)).get()).exists, false);
   assert.equal((await db.collection("student_id_reservations").doc(keyOf(`${run}-RV1`)).get()).exists, false);
   const r = (await roster("RV1").get()).data()!;
   assert.equal(r.activated, false);
@@ -677,7 +686,11 @@ test("revokeStudentActivation disables the claimant, frees the Student No., and 
 
   const second = await activateRow("RV1", "rv1b", out.code.code);
   assert.notEqual(second.uid, first.uid);
-  assert.deepEqual(await resolveEmail.run({data: {schoolId: `${run}-RV1`}}), {email: second.email});
+  assert.equal((await getAuth().getUser(second.uid)).email, alias);
+  const retired = await getAuth().getUser(first.uid);
+  assert.notEqual(retired.email, alias, "the revoked account was moved off the alias");
+  assert.equal(retired.disabled, true, "and it stays disabled");
+  assert.deepEqual(await resolveEmail.run({data: {schoolId: `${run}-RV1`}}), {email: alias});
 
   await denied(revoke.run({auth, data: {studentNo: `${run}-S1`, reason: "nope"}}), "failed-precondition");
 });

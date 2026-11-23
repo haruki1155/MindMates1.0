@@ -5,6 +5,7 @@ import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {canonicalLoginId} from "./account_recovery";
+import {RECOVERY_CONTACTS, releaseRecoveryRecords} from "./student_recovery_contacts";
 import {
   applyStudentAppointmentsCollegeScopeInTransaction,
   readStudentAppointmentsForScopeSyncInTransaction,
@@ -246,6 +247,8 @@ async function cancelPendingRegistrationHandler(request: CallableRequest) {
         throw cancellationError("Registration ownership could not be verified.");
       }
       const roster = rosterRef ? await transaction.get(rosterRef) : null;
+      // Student ID accounts hold server-only recovery records; release them so the address can be reused.
+      const recoveryContact = await transaction.get(db.collection(RECOVERY_CONTACTS).doc(uid));
       if (requestRef) {
         const accessRequest = await transaction.get(requestRef);
         if (!accessRequest.exists || accessRequest.data()?.applicantUserId !== uid) {
@@ -271,6 +274,10 @@ async function cancelPendingRegistrationHandler(request: CallableRequest) {
       }
       transaction.delete(reservationRef);
       transaction.delete(profileRef);
+      if (recoveryContact.exists) {
+        const hash = recoveryContact.data()?.emailHash;
+        releaseRecoveryRecords(transaction, uid, typeof hash === "string" ? hash : null);
+      }
       transaction.set(markerRef, {
         uid,
         reason: CANCELLATION_REASON,

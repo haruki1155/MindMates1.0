@@ -6,6 +6,8 @@ import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {activateStudentAccountDev, cancelPendingRegistrationDev} from "./index";
 import {generateActivationCode, hashActivationCode} from "./student_roster_domain";
+import {studentAuthAliasEmail} from "./student_auth_alias";
+import {RECOVERY_CONTACTS, RECOVERY_EMAILS, RECOVERY_VERIFICATIONS, recoveryEmailHash} from "./student_recovery_contacts";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
 
@@ -25,6 +27,9 @@ const EMAIL_IN_USE = "This email address is already registered.";
 const DOB = "2004-05-06";
 const PASSWORD = "Str0ngPass!";
 const keyOf = (n: string) => n.toUpperCase().replace(/[^A-Z0-9]/g, "");
+const aliasOf = (studentNo: string) => studentAuthAliasEmail(studentNo);
+const recoveryEmailRef = (address: string) => db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(address.toLowerCase()));
+const contactRef = (uid: string) => db.collection(RECOVERY_CONTACTS).doc(uid);
 const emails = new Set<string>();
 const extraDocs: FirebaseFirestore.DocumentReference[] = [];
 const nextCode = generateActivationCode;
@@ -38,6 +43,7 @@ function email(tag: string): string {
 async function seed(n: string, extra: Record<string, unknown> = {}, opts: {expired?: boolean; code?: string | null} = {}) {
   const studentNo = `${run}-${n}`;
   const key = keyOf(studentNo);
+  emails.add(aliasOf(studentNo));
   const code = opts.code === undefined ? nextCode() : opts.code;
   let activationCode: Record<string, unknown> | null = null;
   if (code) {
@@ -105,6 +111,9 @@ after(async () => {
   await Promise.all([
     ...rosters.docs, ...attempts.docs, ...reservations.docs, ...audits.docs,
   ].map((d) => d.ref.delete()).concat(uids.map((uid) => db.collection("users").doc(uid).delete()))
+    .concat(uids.map((uid) => contactRef(uid).delete()))
+    .concat(uids.map((uid) => db.collection(RECOVERY_VERIFICATIONS).doc(uid).delete()))
+    .concat([...emails].map((address) => recoveryEmailRef(address).delete()))
     .concat(extraDocs.map((r) => r.delete())));
 });
 
@@ -122,11 +131,21 @@ test("success creates Auth user, profile, reservation, roster link and audit", a
   const s = await seed("OK1");
   const address = email("ok1");
   const result = await activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB,
-    email: address, password: PASSWORD}}) as {ok: boolean; email: string};
-  assert.deepEqual(result, {ok: true, email: address});
+    email: address, password: PASSWORD}}) as {ok: boolean; email: string; authEmail: string};
+  assert.deepEqual(result, {ok: true, email: address, authEmail: aliasOf(s.studentNo)});
 
-  const user = await getAuth().getUserByEmail(address);
+  // Student ID sign-in: the Auth account is the deterministic alias, never the real email.
+  const user = await getAuth().getUserByEmail(aliasOf(s.studentNo));
+  assert.equal(user.email, aliasOf(s.studentNo));
   assert.equal(user.emailVerified, false);
+  assert.equal(await authUserExists(address), false);
+  const contact = (await contactRef(user.uid).get()).data() ?? {};
+  assert.equal(contact.email, address);
+  assert.equal(contact.emailHash, recoveryEmailHash(address));
+  assert.equal(contact.studentKey, s.key);
+  assert.equal(contact.verifiedAt, null);
+  assert.equal((await recoveryEmailRef(address).get()).data()?.uid, user.uid);
+  assert.equal((await db.collection(RECOVERY_VERIFICATIONS).doc(user.uid).get()).exists, false);
   const profile = (await db.collection("users").doc(user.uid).get()).data() ?? {};
   assert.equal(profile.accessRole, "appUser");
   assert.equal(profile.verificationStatus, "verified");
@@ -140,7 +159,9 @@ test("success creates Auth user, profile, reservation, roster link and audit", a
   assert.deepEqual(profile.activeDateKeys, []);
   assert.equal(profile.populationRole, "student");
   assert.equal(profile.schoolId, s.studentNo);
-  assert.equal(profile.email, address);
+  assert.equal(profile.email, address, "the profile keeps the real contact email, never the alias");
+  assert.equal(profile.studentIdLogin, true);
+  assert.ok(!JSON.stringify(profile).includes("mindmate.local"), "the alias is never stored on the profile");
   assert.equal(profile.firstName, "Juan");
   assert.equal(profile.middleName, "Santos");
   assert.equal(profile.lastName, "Dela Cruz OK1");
@@ -163,6 +184,7 @@ test("success creates Auth user, profile, reservation, roster link and audit", a
     d.data().category === "USER_MANAGEMENT" && d.data().targetId === s.key));
   const auditText = JSON.stringify(audits.docs.map((d) => d.data()));
   assert.ok(!auditText.includes(s.code.replace("-", "")) && !auditText.includes(DOB) && !auditText.includes(PASSWORD));
+  assert.ok(!auditText.includes(address) && !auditText.includes("mindmate.local"), "audit never holds either email");
 });
 
 test("formatted Student No. and loosely typed code hit the canonical roster key", async () => {
@@ -175,9 +197,10 @@ test("formatted Student No. and loosely typed code hit the canonical roster key"
     userId: null, activationCode: {hash: stored.hash, salt: stored.salt, issuedAt: Timestamp.fromDate(stored.issuedAt),
       expiresAt: Timestamp.fromDate(stored.expiresAt)}});
   const address = email("fmt");
+  emails.add(aliasOf(`${run}2021-00123`));
   await activate.run({data: {studentNo: `${runLower} 2021 00123`, activationCode: ` ${code.replace("-", "").toLowerCase()} `,
     dateOfBirth: DOB, email: address, password: PASSWORD}});
-  const user = await getAuth().getUserByEmail(address);
+  const user = await getAuth().getUserByEmail(aliasOf(`${run}2021-00123`));
   assert.equal((await rosterRef(key).get()).data()?.userId, user.uid);
   assert.equal((await db.collection("student_id_reservations").doc(key).get()).data()?.userId, user.uid);
 });
@@ -198,6 +221,7 @@ test("every mismatch kind returns the identical generic error", async () => {
   for (const tag of ["m1a", "m1b", "m1c", "m1d", "m1e", "m2", "m3"]) {
     assert.equal(await authUserExists(`${runLower}-${tag}@example.com`), false);
   }
+  for (const s of [good, nullCode, deactivated]) assert.equal(await authUserExists(aliasOf(s.studentNo)), false);
   assert.equal((await attemptsRef(good.key).get()).data()?.failedCount, 3);
   assert.ok((await attemptsRef(good.key).get()).data()?.expiresAt instanceof Timestamp, "expiresAt is set on a first failure");
   assert.equal((await attemptsRef(keyOf(`${run}-UNKNOWN`)).get()).data()?.failedCount, 1);
@@ -212,7 +236,7 @@ test("expiry is only revealed after a full match", async () => {
   await mismatch(activate.run({data: {...data, dateOfBirth: "2004-05-07"}}));
   assert.equal((await attemptsRef(s.key).get()).data()?.failedCount, 1);
   await rejectsWith(activate.run({data}), "deadline-exceeded", "expired", EXPIRED);
-  assert.equal(await authUserExists(data.email), false);
+  assert.equal(await authUserExists(aliasOf(s.studentNo)), false);
   assert.equal((await rosterRef(s.key).get()).data()?.activated, false);
 });
 
@@ -221,7 +245,7 @@ test("five failures lock the Student No.; an expired lock allows success and cle
   const data = {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: email("l1"), password: PASSWORD};
   for (let i = 0; i < 5; i++) await mismatch(activate.run({data: {...data, dateOfBirth: "2004-05-07"}}));
   await mismatch(activate.run({data}));
-  assert.equal(await authUserExists(data.email), false);
+  assert.equal(await authUserExists(aliasOf(s.studentNo)), false);
   const locked = (await attemptsRef(s.key).get()).data() ?? {};
   assert.ok(locked.lockedUntil instanceof Timestamp && locked.lockedUntil.toMillis() > Date.now());
   // Every attempt doc carries a TTL so this unauthenticated-write collection cannot grow without bound.
@@ -230,7 +254,7 @@ test("five failures lock the Student No.; an expired lock allows success and cle
     "the TTL outlives the lockout window");
   await attemptsRef(s.key).update({lockedUntil: Timestamp.fromMillis(Date.now() - 1000)});
   await activate.run({data});
-  assert.equal(await authUserExists(data.email), true);
+  assert.equal(await authUserExists(aliasOf(s.studentNo)), true);
   assert.equal((await attemptsRef(s.key).get()).exists, false);
 });
 
@@ -238,7 +262,7 @@ test("already activated row returns the activated copy after a full match", asyn
   const s = await seed("A1", {activated: true, userId: `${run}-existing`});
   const data = {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: email("a1"), password: PASSWORD};
   await rejectsWith(activate.run({data}), "already-exists", "already-activated", ACTIVATED);
-  assert.equal(await authUserExists(data.email), false);
+  assert.equal(await authUserExists(aliasOf(s.studentNo)), false);
 });
 
 test("email used by another Auth user is rejected without roster change", async () => {
@@ -259,7 +283,8 @@ test("transaction failure deletes the orphaned Auth user", async () => {
   const address = email("o1");
   await assert.rejects(activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address,
     password: PASSWORD}}));
-  await assert.rejects(getAuth().getUserByEmail(address), (e: {code?: string}) => e.code === "auth/user-not-found");
+  await assert.rejects(getAuth().getUserByEmail(aliasOf(s.studentNo)), (e: {code?: string}) => e.code === "auth/user-not-found");
+  assert.equal((await recoveryEmailRef(address).get()).exists, false, "a failed activation reserves nothing");
   assert.equal((await rosterRef(s.key).get()).data()?.activated, false);
   assert.equal((await reservation.get()).data()?.userId, "someone-else");
 });
@@ -272,9 +297,11 @@ test("two simultaneous activations: exactly one wins and the loser's Auth user i
   assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
   const loser = results[0].status === "rejected" ? a : b;
   const winner = loser === a ? b : a;
-  assert.equal(await authUserExists(loser), false);
-  const winnerUser = await getAuth().getUserByEmail(winner);
+  const winnerUser = await getAuth().getUserByEmail(aliasOf(s.studentNo));
   assert.equal((await rosterRef(s.key).get()).data()?.userId, winnerUser.uid);
+  assert.equal((await contactRef(winnerUser.uid).get()).data()?.email, winner);
+  assert.equal((await recoveryEmailRef(winner).get()).data()?.uid, winnerUser.uid);
+  assert.equal((await recoveryEmailRef(loser).get()).exists, false, "the loser reserves no recovery address");
 });
 
 test("R6: redeemed code is kept as consumedActivationCode; re-entering the slip says already activated", async () => {
@@ -286,7 +313,7 @@ test("R6: redeemed code is kept as consumedActivationCode; re-entering the slip 
   assert.equal(typeof rosterData.consumedActivationCode?.hash, "string");
   assert.equal(typeof rosterData.consumedActivationCode?.salt, "string");
   assert.ok(rosterData.consumedActivationCode?.consumedAt instanceof Timestamp);
-  assert.equal(rosterData.consumedActivationCode?.userId, (await getAuth().getUserByEmail(data.email)).uid);
+  assert.equal(rosterData.consumedActivationCode?.userId, (await getAuth().getUserByEmail(aliasOf(s.studentNo))).uid);
   assert.ok(!JSON.stringify(rosterData).includes(s.code.replace("-", "")));
 
   await mismatch(activate.run({data: {...data, email: email("c1b"), dateOfBirth: "2004-05-07"}}));
@@ -300,11 +327,13 @@ test("R6: cancelling an unverified activation resets the roster row so the same 
   const s = await seed("X1");
   const first = email("x1a");
   await activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: first, password: PASSWORD}});
-  const firstUid = (await getAuth().getUserByEmail(first)).uid;
+  const firstUid = (await getAuth().getUserByEmail(aliasOf(s.studentNo))).uid;
   extraUids.push(firstUid);
 
   assert.deepEqual(await cancel.run({auth: {uid: firstUid}, data: {}}), {ok: true});
-  assert.equal(await authUserExists(first), false);
+  assert.equal(await authUserExists(aliasOf(s.studentNo)), false);
+  assert.equal((await contactRef(firstUid).get()).exists, false, "the recovery contact is released");
+  assert.equal((await recoveryEmailRef(first).get()).exists, false, "the recovery address is released");
   assert.equal((await db.collection("users").doc(firstUid).get()).exists, false);
   assert.equal((await db.collection("student_id_reservations").doc(s.key).get()).exists, false);
   const reset = (await rosterRef(s.key).get()).data() ?? {};
@@ -318,7 +347,7 @@ test("R6: cancelling an unverified activation resets the roster row so the same 
 
   const second = email("x1b");
   await activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: second, password: PASSWORD}});
-  const secondUid = (await getAuth().getUserByEmail(second)).uid;
+  const secondUid = (await getAuth().getUserByEmail(aliasOf(s.studentNo))).uid;
   assert.notEqual(secondUid, firstUid);
   assert.equal((await rosterRef(s.key).get()).data()?.userId, secondUid);
 });
@@ -327,7 +356,7 @@ test("R6: cancelling leaves a roster row owned by someone else untouched", async
   const s = await seed("X2");
   const address = email("x2");
   await activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address, password: PASSWORD}});
-  const uid = (await getAuth().getUserByEmail(address)).uid;
+  const uid = (await getAuth().getUserByEmail(aliasOf(s.studentNo))).uid;
   extraUids.push(uid);
   await rosterRef(s.key).update({userId: `${run}-other`});
   await cancel.run({auth: {uid}, data: {}});
@@ -379,4 +408,57 @@ test("cancelling a roster-linked legacy student resets the roster row for reissu
   assert.equal(rosterData.activated, false);
   assert.equal(rosterData.userId, null);
   assert.equal(rosterData.activationCode, null);
+});
+
+test("the same recovery email cannot back two students, in any letter case, and a rejected activation leaves nothing behind", async () => {
+  const first = await seed("U1");
+  const second = await seed("U2");
+  const address = email("shared");
+  await activate.run({data: {studentNo: first.studentNo, activationCode: first.code, dateOfBirth: DOB, email: address, password: PASSWORD}});
+  const owner = await getAuth().getUserByEmail(aliasOf(first.studentNo));
+  for (const variant of [address, address.toUpperCase(), ` ${address} `]) {
+    await rejectsWith(activate.run({data: {studentNo: second.studentNo, activationCode: second.code, dateOfBirth: DOB,
+      email: variant, password: PASSWORD}}), "already-exists", "email-in-use", EMAIL_IN_USE);
+  }
+  assert.equal(await authUserExists(aliasOf(second.studentNo)), false, "no orphan Auth user");
+  assert.equal((await rosterRef(second.key).get()).data()?.activated, false);
+  assert.ok((await rosterRef(second.key).get()).data()?.activationCode, "the second student's code is not consumed");
+  assert.equal((await recoveryEmailRef(address).get()).data()?.uid, owner.uid, "the reservation still belongs to the first student");
+});
+
+test("an alias that is already taken fails closed as already activated and leaves nothing behind", async () => {
+  const s = await seed("T1");
+  const taken = await getAuth().createUser({email: aliasOf(s.studentNo), password: PASSWORD});
+  extraUids.push(taken.uid);
+  const address = email("t1");
+  await rejectsWith(activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address,
+    password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
+  assert.equal((await recoveryEmailRef(address).get()).exists, false);
+  assert.equal((await rosterRef(s.key).get()).data()?.activated, false);
+  assert.equal((await getAuth().getUser(taken.uid)).email, aliasOf(s.studentNo), "the pre-existing account is untouched");
+});
+
+test("a disabled account that was not revoked for this roster row never loses the alias", async () => {
+  const s = await seed("T2");
+  const holder = await getAuth().createUser({email: aliasOf(s.studentNo), password: PASSWORD, disabled: true});
+  extraUids.push(holder.uid);
+  await rosterRef(s.key).update({revokedUserIds: ["someone-else"]});
+  await rejectsWith(activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: email("t2"),
+    password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
+  assert.equal((await getAuth().getUser(holder.uid)).email, aliasOf(s.studentNo));
+});
+
+test("a student's real email can be reused for a new activation after an unverified activation is cancelled", async () => {
+  const s = await seed("RE1");
+  const address = email("re1");
+  const data = {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address, password: PASSWORD};
+  await activate.run({data});
+  const firstUid = (await getAuth().getUserByEmail(aliasOf(s.studentNo))).uid;
+  extraUids.push(firstUid);
+  await cancel.run({auth: {uid: firstUid}, data: {}});
+  await activate.run({data});
+  const secondUid = (await getAuth().getUserByEmail(aliasOf(s.studentNo))).uid;
+  assert.notEqual(secondUid, firstUid);
+  assert.equal((await contactRef(secondUid).get()).data()?.email, address);
+  assert.equal((await recoveryEmailRef(address).get()).data()?.uid, secondUid);
 });
