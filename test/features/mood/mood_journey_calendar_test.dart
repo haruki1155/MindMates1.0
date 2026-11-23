@@ -158,6 +158,30 @@ void main() {
         findsOneWidget,
       );
 
+      // 1b. Unloaded with null history and isLoading=false -> still announces loading check-ins, never 'no check-ins'.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: MoodJourneyCalendar(
+                displayedMonth: DateTime.utc(2026, 11, 1),
+                selectedDateKey: '2026-11-18',
+                todayDateKey: '2026-11-18',
+                history: null,
+                isLoading: false,
+                onMonthChanged: (_) {},
+                onDaySelected: (_) {},
+                onTodayPressed: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(
+        find.bySemanticsLabel(RegExp(r'Nov 18.*loading check-ins')),
+        findsOneWidget,
+      );
+
       // 2. Error state -> shows error message and retry action.
       await tester.pumpWidget(
         MaterialApp(

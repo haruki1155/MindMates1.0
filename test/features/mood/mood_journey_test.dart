@@ -508,6 +508,63 @@ void main() {
         await tester.tap(find.text('2025-2026').last);
         await tester.pumpAndSettle();
         expect(find.text('June 2025'), findsOneWidget);
+
+        // Tapping Today while viewing historical year 2025-2026 switches back to 2026-2027 and Dec 2026.
+        await tester.tap(find.byKey(const Key('mood-calendar-today-button')));
+        await tester.pumpAndSettle();
+        expect(find.text('December 2026'), findsOneWidget);
+        expect(find.text('2026-2027'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('mood-selected-week-card')),
+            matching: find.text('3 check-ins · 2 mood-active days'),
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'clamps initial calendar month when default academic year does not include today',
+      (tester) async {
+        final academicRepo = StudentAcademicCalendarRepository(
+          caller: () async => {
+            'years': [
+              {
+                'schoolYear': '2025-2026',
+                'startDateKey': '2025-06-01',
+                'endExclusiveDateKey': '2026-06-01',
+                'status': 'closed',
+                'semesterRanges': const [],
+              },
+            ],
+          },
+        );
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+              ChangeNotifierProvider<MoodProvider>.value(
+                value: _AcademicFilterMood(),
+              ),
+            ],
+            child: MaterialApp(
+              home: MoodJourneyScreen(
+                nowProvider: () => DateTime.utc(2026, 12, 2, 2),
+                academicCalendarRepository: academicRepo,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('2025-2026'), findsOneWidget);
+        expect(find.text('June 2025'), findsOneWidget);
+        expect(
+          find.text('This date is outside the selected academic period.'),
+          findsNothing,
+        );
       },
     );
 

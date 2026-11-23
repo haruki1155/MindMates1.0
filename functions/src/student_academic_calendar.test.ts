@@ -130,6 +130,90 @@ test("pure builder omits voided, unknown, and malformed years and strips sensiti
   }
 });
 
+test("pure builder handles short (<6 month) academic years, valid configured semesters, and fails closed on malformed configured semesters", () => {
+  const years = buildStudentAcademicCalendarYears([
+    {
+      id: "2026-2027",
+      data: {
+        schoolYear: "2026-2027",
+        startDate: "2026-06-01",
+        endDate: "2026-10-31", // < 6 months -> no 6-month reportGrouping split
+        status: "current",
+      },
+    },
+    {
+      id: "2025-2026",
+      data: {
+        schoolYear: "2025-2026",
+        startDate: "2025-06-01",
+        endDate: "2026-05-31",
+        status: "closed",
+        semesterRanges: [
+          {
+            id: "first_sem",
+            label: "1st Semester",
+            startDate: "2025-06-01",
+            endDate: "2025-10-31",
+          },
+          {
+            id: "second_sem",
+            label: "2nd Semester",
+            startDateKey: "2025-11-15",
+            endExclusiveDateKey: "2026-04-01",
+          },
+        ],
+      },
+    },
+    {
+      id: "2024-2025",
+      data: {
+        schoolYear: "2024-2025",
+        startDate: "2024-06-01",
+        endDate: "2025-05-31",
+        status: "closed",
+        // Malformed configured semester (inverted dates) must fail closed to []
+        // rather than silently inventing a 6-month reportGrouping split.
+        semesterRanges: [
+          {
+            id: "bad_sem",
+            label: "Broken Semester",
+            startDateKey: "2024-12-01",
+            endExclusiveDateKey: "2024-06-01",
+          },
+        ],
+      },
+    },
+  ]);
+
+  assert.equal(years.length, 3);
+  // Short academic year (< 6 months) has empty semesterRanges (All year only).
+  assert.equal(years[0].schoolYear, "2026-2027");
+  assert.deepEqual(years[0].semesterRanges, []);
+
+  // Valid configured semesters preserve configured source and convert inclusive endDate to endExclusiveDateKey.
+  assert.equal(years[1].schoolYear, "2025-2026");
+  assert.deepEqual(years[1].semesterRanges, [
+    {
+      id: "first_sem",
+      label: "1st Semester",
+      startDateKey: "2025-06-01",
+      endExclusiveDateKey: "2025-11-01",
+      source: "configured",
+    },
+    {
+      id: "second_sem",
+      label: "2nd Semester",
+      startDateKey: "2025-11-15",
+      endExclusiveDateKey: "2026-04-01",
+      source: "configured",
+    },
+  ]);
+
+  // Malformed configured semesters fail closed to [] (All year only).
+  assert.equal(years[2].schoolYear, "2024-2025");
+  assert.deepEqual(years[2].semesterRanges, []);
+});
+
 const accounts: Record<
   string,
   {verified: boolean; disabled?: boolean; profile: Record<string, unknown> | null}

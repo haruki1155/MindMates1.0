@@ -162,14 +162,21 @@ export function buildStudentAcademicCalendarYears(
 
     const startDateKey = startDate;
     const endExclusiveDateKey = addDaysToIsoDate(endDate, 1);
-    const configuredSemesters = parseConfiguredSemesterRanges(
-      doc.data.semesterRanges ?? doc.data.semesters,
-      startDateKey,
-      endExclusiveDateKey,
-    );
-    const semesterRanges =
-        configuredSemesters ??
-        deriveReportGroupingSemesters(startDateKey, endExclusiveDateKey);
+    const rawSemesters = doc.data.semesterRanges ?? doc.data.semesters;
+    const hasConfiguredSemestersField =
+      rawSemesters !== undefined &&
+      rawSemesters !== null &&
+      (!Array.isArray(rawSemesters) || rawSemesters.length > 0);
+    const configuredSemesters = hasConfiguredSemestersField
+      ? parseConfiguredSemesterRanges(
+        rawSemesters,
+        startDateKey,
+        endExclusiveDateKey,
+      )
+      : null;
+    const semesterRanges = hasConfiguredSemestersField
+      ? (configuredSemesters ?? [])
+      : deriveReportGroupingSemesters(startDateKey, endExclusiveDateKey);
 
     result.push({
       schoolYear,

@@ -400,8 +400,7 @@ class MoodJourneyCalendar extends StatelessWidget {
     final aggregate = aggregatesByDay[dateKey];
     final checkInCount = aggregate?.entryCount ?? 0;
     final latestEvent = aggregate?.latestEvent;
-    final isUnknownState =
-        history == null && (isLoading || errorMessage != null);
+    final isUnknownState = history == null;
 
     final semanticParts = <String>[
       '${_fullWeekdayNames[day.weekday - 1]}, ${_shortMonthNames[day.month - 1]} ${day.day}, ${day.year}',
@@ -412,7 +411,7 @@ class MoodJourneyCalendar extends StatelessWidget {
       else if (isOutOfPermittedRange)
         'outside selected academic period'
       else if (isUnknownState)
-        isLoading ? 'loading check-ins' : 'check-ins unavailable'
+        errorMessage != null ? 'check-ins unavailable' : 'loading check-ins'
       else if (checkInCount == 0)
         'no check-ins'
       else if (checkInCount == 1)

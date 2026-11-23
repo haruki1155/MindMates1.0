@@ -151,14 +151,22 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
       }
       final todayKey = _todayDateKey;
       final defaultYear =
-          years.where((y) => y.isCurrent).firstOrNull ??
+          years
+              .where(
+                (y) => y.isCurrent && y.startDateKey.compareTo(todayKey) <= 0,
+              )
+              .firstOrNull ??
           years.where((y) => y.range.includes(todayKey)).firstOrNull ??
+          years.where((y) => y.isCurrent).firstOrNull ??
           years.first;
       setState(() {
         _academicYears = years;
-        _selectedSchoolYear = defaultYear.schoolYear;
-        _selectedSemesterId = null;
       });
+      _applyFilterPeriodSelection(
+        uid,
+        schoolYear: defaultYear.schoolYear,
+        semesterId: null,
+      );
     } catch (_) {
       if (!mounted || generation != _academicGeneration || _loadedUser != uid) {
         return;
@@ -205,13 +213,12 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
     _displayedMonth = DateTime.utc(today.year, today.month, 1);
     _selectedDateKey = _todayDateKey;
     if (uid != null) {
-      final monthToLoad = _effectiveDisplayedMonth;
       unawaited(_loadAcademicCalendar(uid));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
             _provider<AuthProvider>(listen: false)?.authenticatedUserId ==
                 uid) {
-          _loadHistoryAndCalendar(uid, monthToLoad);
+          _loadHistoryAndCalendar(uid, _effectiveDisplayedMonth);
         }
       });
     }
@@ -301,7 +308,27 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
     final monthChanged =
         todayMonth.year != _effectiveDisplayedMonth.year ||
         todayMonth.month != _effectiveDisplayedMonth.month;
+    final filterRange = _activeAcademicFilterRange;
     setState(() {
+      if (filterRange != null && !filterRange.includes(todayKey)) {
+        final activeYear = _activeAcademicYear;
+        if (activeYear != null && activeYear.range.includes(todayKey)) {
+          _selectedSemesterId = activeYear.semesterRanges
+              .where((sem) => sem.range.includes(todayKey))
+              .firstOrNull
+              ?.id;
+        } else {
+          final matchingYear =
+              _academicYears
+                  .where((y) => y.isCurrent && y.range.includes(todayKey))
+                  .firstOrNull ??
+              _academicYears
+                  .where((y) => y.range.includes(todayKey))
+                  .firstOrNull;
+          _selectedSchoolYear = matchingYear?.schoolYear;
+          _selectedSemesterId = null;
+        }
+      }
       _selectedDateKey = todayKey;
       _displayedMonth = todayMonth;
     });
