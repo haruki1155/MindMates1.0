@@ -438,55 +438,61 @@ test("an alias that is already taken fails closed as already activated and leave
   assert.equal((await getAuth().getUser(taken.uid)).email, aliasOf(s.studentNo), "the pre-existing account is untouched");
 });
 
-test("an abandoned alias held by an unrelated account with no profile is released so the real student can activate", async () => {
-  const s = await seed("SQ1");
-  const squatter = await getAuth().createUser({email: aliasOf(s.studentNo), password: "Squatter!1"});
-  extraUids.push(squatter.uid);
-  const previous = process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS;
-  process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS = "0";
-  try {
-    const address = email("sq1");
-    await activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address, password: PASSWORD}});
-    const owner = await getAuth().getUserByEmail(aliasOf(s.studentNo));
-    assert.notEqual(owner.uid, squatter.uid);
-    await assert.rejects(getAuth().getUser(squatter.uid), (e: {code?: string}) => e.code === "auth/user-not-found");
-    assert.equal((await rosterRef(s.key).get()).data()?.userId, owner.uid);
-  } finally {
-    if (previous === undefined) delete process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS;
-    else process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS = previous;
-  }
-});
+async function canSignIn(address: string, password: string): Promise<boolean> {
+  const host = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+  const response = await fetch(`http://${host}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-key`, {
+    method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({email: address, password, returnSecureToken: true}),
+  });
+  return response.ok;
+}
 
-test("a recently created alias holder is never treated as abandoned, and neither is one that has a profile or contact", async () => {
-  const fresh = await seed("SQ2");
-  const freshHolder = await getAuth().createUser({email: aliasOf(fresh.studentNo), password: PASSWORD});
-  extraUids.push(freshHolder.uid);
-  // Default age threshold (2 minutes): a just-created account might be a concurrent activation in flight.
-  await rejectsWith(activate.run({data: {studentNo: fresh.studentNo, activationCode: fresh.code, dateOfBirth: DOB,
-    email: email("sq2"), password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
-  assert.equal((await getAuth().getUser(freshHolder.uid)).email, aliasOf(fresh.studentNo));
+test("an unrelated account holding a student's alias is never modified, whatever its age or records", async () => {
+  const day = 24 * 60 * 60 * 1000;
+  const scenarios: Array<{tag: string; ageMs: number; records: "none" | "profile" | "contact"}> = [
+    {tag: "UH1", ageMs: 0, records: "none"},
+    {tag: "UH2", ageMs: day, records: "none"},
+    {tag: "UH3", ageMs: day, records: "profile"},
+    {tag: "UH4", ageMs: day, records: "contact"},
+  ];
+  for (const scenario of scenarios) {
+    const s = await seed(scenario.tag);
+    const alias = aliasOf(s.studentNo);
+    let holderUid: string;
+    if (scenario.ageMs === 0) {
+      holderUid = (await getAuth().createUser({email: alias, password: "Squatter!1"})).uid;
+    } else {
+      // The emulator accepts a backdated creation time on import, so an old unrelated account can be represented.
+      holderUid = `${run}-old-${scenario.tag}`;
+      await getAuth().importUsers([{uid: holderUid, email: alias, metadata: {creationTime: new Date(Date.now() - scenario.ageMs).toUTCString()}}]);
+    }
+    extraUids.push(holderUid);
+    if (scenario.records === "profile") await db.collection("users").doc(holderUid).set({schoolId: s.studentNo, note: "kept"});
+    if (scenario.records === "contact") await contactRef(holderUid).set({uid: holderUid, studentKey: s.key, note: "kept"});
+    const before = await getAuth().getUser(holderUid);
+    const ageBefore = Date.now() - Date.parse(before.metadata.creationTime);
+    assert.ok(scenario.ageMs === 0 ? ageBefore < 120_000 : ageBefore > 120_000, `${scenario.tag} has the intended age`);
 
-  const previous = process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS;
-  process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS = "0";
-  try {
-    const withProfile = await seed("SQ3");
-    const holder = await getAuth().createUser({email: aliasOf(withProfile.studentNo), password: PASSWORD});
-    extraUids.push(holder.uid);
-    await db.collection("users").doc(holder.uid).set({schoolId: withProfile.studentNo});
-    await rejectsWith(activate.run({data: {studentNo: withProfile.studentNo, activationCode: withProfile.code, dateOfBirth: DOB,
-      email: email("sq3"), password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
-    assert.equal((await getAuth().getUser(holder.uid)).email, aliasOf(withProfile.studentNo));
+    const address = email(scenario.tag.toLowerCase());
+    await rejectsWith(activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address,
+      password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
 
-    const withContact = await seed("SQ4");
-    const holder2 = await getAuth().createUser({email: aliasOf(withContact.studentNo), password: PASSWORD});
-    extraUids.push(holder2.uid);
-    await contactRef(holder2.uid).set({uid: holder2.uid, studentKey: withContact.key});
-    await rejectsWith(activate.run({data: {studentNo: withContact.studentNo, activationCode: withContact.code, dateOfBirth: DOB,
-      email: email("sq4"), password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
-    assert.equal((await getAuth().getUser(holder2.uid)).email, aliasOf(withContact.studentNo));
-  } finally {
-    if (previous === undefined) delete process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS;
-    else process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS = previous;
+    // The account survives untouched: same uid, email and creation time, and its credentials still work.
+    const after = await getAuth().getUserByEmail(alias);
+    assert.equal(after.uid, holderUid, scenario.tag);
+    assert.equal(after.email, alias);
+    assert.equal(after.metadata.creationTime, before.metadata.creationTime);
+    assert.equal(after.disabled, before.disabled);
+    if (scenario.ageMs === 0) assert.equal(await canSignIn(alias, "Squatter!1"), true, "its password still works");
+    // Nothing was stolen or created: no reservation, no recovery record for this address, no consumed code.
+    const row = (await rosterRef(s.key).get()).data() ?? {};
+    assert.equal(row.activated, false);
+    assert.equal(row.userId, null);
+    assert.ok(row.activationCode, "the student's code is intact");
+    assert.equal((await db.collection("student_id_reservations").doc(s.key).get()).exists, false);
+    assert.equal((await recoveryEmailRef(address).get()).exists, false);
+    if (scenario.records === "profile") assert.equal((await db.collection("users").doc(holderUid).get()).data()?.note, "kept");
+    if (scenario.records === "contact") assert.equal((await contactRef(holderUid).get()).data()?.note, "kept");
+    if (scenario.records === "none") assert.equal((await contactRef(holderUid).get()).exists, false);
   }
 });
 

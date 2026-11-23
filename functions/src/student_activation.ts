@@ -140,50 +140,25 @@ async function authEmailTaken(address: string): Promise<boolean> {
 }
 
 /**
- * Creates the student's alias account. If the alias is still held by a disabled account that an administrator
- * revoked for this same roster row, that account is moved off the alias first (it stays disabled) and the
- * creation is retried once, so a revoke followed by a new code always works. Anything else holding the alias
- * is left alone and surfaces as auth/email-already-exists.
+ * Creates the student's alias account. If the alias is held by a disabled account that an administrator revoked
+ * for this same roster row (its uid is recorded in the row's revokedUserIds), that account is moved off the alias
+ * (it stays disabled) and the creation is retried once, so a revoke followed by a new code always works.
+ *
+ * Any other holder is an unrelated account: it is never modified or deleted, whatever its age or records, and the
+ * activation fails closed (auth/email-already-exists).
  */
-async function createAliasUser(
-  authEmail: string, password: string, row: FirebaseFirestore.DocumentData, key: string,
-): Promise<string> {
+async function createAliasUser(authEmail: string, password: string, row: FirebaseFirestore.DocumentData): Promise<string> {
   const create = () => getAuth().createUser({email: authEmail, password, emailVerified: false, disabled: false});
   try {
     return (await create()).uid;
   } catch (error) {
     if ((error as {code?: string})?.code !== "auth/email-already-exists") throw error;
     const occupant = await getAuth().getUserByEmail(authEmail).catch(() => null);
-    if (!occupant) throw error;
     const revoked = Array.isArray(row.revokedUserIds) ? row.revokedUserIds : [];
-    if (occupant.disabled && revoked.includes(occupant.uid)) {
-      await releaseStudentAlias(occupant.uid);
-    } else if (await isAbandonedAlias(occupant, key)) {
-      // Anyone can create a Firebase Auth user with a guessable alias; such an account has no profile, contact or
-      // reservation and must not be able to block the real student. Removing it frees the alias.
-      await getAuth().deleteUser(occupant.uid);
-    } else {
-      throw error;
-    }
+    if (!occupant || !occupant.disabled || !revoked.includes(occupant.uid)) throw error;
+    await releaseStudentAlias(occupant.uid);
     return (await create()).uid;
   }
-}
-
-/**
- * An alias holder that nothing in the system refers to and that is old enough not to be a concurrent activation
- * still in flight (which creates the Auth user a moment before its profile).
- */
-async function isAbandonedAlias(occupant: {uid: string; metadata: {creationTime: string}}, key: string): Promise<boolean> {
-  const minAgeMs = Number(process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS ?? 2 * 60 * 1000);
-  const created = Date.parse(occupant.metadata.creationTime);
-  if (!Number.isFinite(created) || Date.now() - created < minAgeMs) return false;
-  const db = database();
-  const [profile, contact, reservation] = await Promise.all([
-    db.collection("users").doc(occupant.uid).get(),
-    db.collection(RECOVERY_CONTACTS).doc(occupant.uid).get(),
-    db.collection("student_id_reservations").doc(key).get(),
-  ]);
-  return !profile.exists && !contact.exists && reservation.data()?.userId !== occupant.uid;
 }
 
 async function deleteAuthUser(uid: string, correlationId: string): Promise<void> {
@@ -256,7 +231,7 @@ async function activateStudentAccountHandler(request: CallableRequest) {
   if (await authEmailTaken(input.email)) throw activationError("email-in-use");
   let uid: string;
   try {
-    uid = await createAliasUser(authEmail, input.password, row, key);
+    uid = await createAliasUser(authEmail, input.password, row);
   } catch (error) {
     const code = (error as {code?: string})?.code ?? "";
     // The alias is derived from the roster key, so a clash means this Student ID is already taken.
