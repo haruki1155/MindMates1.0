@@ -21,6 +21,7 @@ class FirebaseCallableRouter {
     // Staging installs no App Check provider, so the protected
     // `createMoodEntry` (enforceAppCheck: true) always refuses there.
     'createMoodEntry',
+    'getStudentAcademicCalendar',
   };
 
   static String name(String protectedName) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +9,7 @@ import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/features/mood/widgets/mood_v2_history_panel.dart';
 import 'package:mind_mates/features/mood/screens/mood_journey_screen.dart';
 import 'package:mind_mates/features/mood/widgets/mood_journey_summary.dart';
+import 'package:mind_mates/repositories/student_academic_calendar_repository.dart';
 import 'package:mind_mates/routes/route_names.dart';
 
 void main() {
@@ -380,6 +383,187 @@ void main() {
     expect(find.textContaining('Sign in'), findsOneWidget);
   });
 
+  group('academic year and semester filtering', () {
+    testWidgets(
+      'clips week and month summaries to selected academic year and semester report grouping, and navigates to historical year',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(900, 1800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+
+        final academicRepo = StudentAcademicCalendarRepository(
+          caller: () async => {
+            'years': [
+              {
+                'schoolYear': '2026-2027',
+                'startDateKey': '2026-06-01',
+                'endExclusiveDateKey': '2027-06-01',
+                'status': 'current',
+                'semesterRanges': [
+                  {
+                    'id': 'semester_1',
+                    'label': 'Semester 1 (report grouping)',
+                    'startDateKey': '2026-06-01',
+                    'endExclusiveDateKey': '2026-12-01',
+                    'source': 'reportGrouping',
+                  },
+                  {
+                    'id': 'semester_2',
+                    'label': 'Semester 2 (report grouping)',
+                    'startDateKey': '2026-12-01',
+                    'endExclusiveDateKey': '2027-06-01',
+                    'source': 'reportGrouping',
+                  },
+                ],
+              },
+              {
+                'schoolYear': '2025-2026',
+                'startDateKey': '2025-06-01',
+                'endExclusiveDateKey': '2026-06-01',
+                'status': 'closed',
+                'semesterRanges': const [],
+              },
+            ],
+          },
+        );
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+              ChangeNotifierProvider<MoodProvider>.value(
+                value: _AcademicFilterMood(),
+              ),
+            ],
+            child: MaterialApp(
+              home: MoodJourneyScreen(
+                nowProvider: () => DateTime.utc(2026, 12, 2, 2),
+                academicCalendarRepository: academicRepo,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Filter bar appears and defaults to current academic year 2026-2027, All year.
+        expect(
+          find.byKey(const Key('mood-academic-filter-bar')),
+          findsOneWidget,
+        );
+        expect(find.text('2026-2027'), findsOneWidget);
+        expect(find.text('All year'), findsOneWidget);
+
+        // Week of Nov 30 - Dec 6 has 1 check-in on Nov 30 (Okay) and 2 check-ins on Dec 1 (Great).
+        // Under "All year", the selected week has 3 check-ins across 2 mood-active days.
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('mood-selected-week-card')),
+            matching: find.text('3 check-ins · 2 mood-active days'),
+          ),
+          findsOneWidget,
+        );
+
+        // Select "Semester 1 (report grouping)" (ends exclusive 2026-12-01).
+        await tester.tap(
+          find.byKey(const Key('mood-academic-semester-selector')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Semester 1 (report grouping)').last);
+        await tester.pumpAndSettle();
+
+        // Shows approximate dates disclosure and clips the week to Nov 30 only (1 check-in).
+        expect(
+          find.byKey(const Key('mood-academic-approximate-notice')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('mood-selected-week-card')),
+            matching: find.text('1 check-in · 1 mood-active day'),
+          ),
+          findsOneWidget,
+        );
+
+        // Switch to "Semester 2 (report grouping)" (starts 2026-12-01).
+        await tester.tap(
+          find.byKey(const Key('mood-academic-semester-selector')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Semester 2 (report grouping)').last);
+        await tester.pumpAndSettle();
+
+        // Select Dec 1 and verify week is clipped to Dec 1..Dec 6 (2 check-ins).
+        await tester.tap(find.byKey(const Key('mood-calendar-day-2026-12-01')));
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('mood-selected-week-card')),
+            matching: find.text('2 check-ins · 1 mood-active day'),
+          ),
+          findsOneWidget,
+        );
+
+        // Select historical year 2025-2026 (which has no term dates -> resets to All year).
+        await tester.tap(find.byKey(const Key('mood-academic-year-selector')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('2025-2026').last);
+        await tester.pumpAndSettle();
+        expect(find.text('June 2025'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'fails closed when academic calendar throws or returns stale response after account switch',
+      (tester) async {
+        final auth = _JourneyAuth();
+        final pending = Completer<Map<String, dynamic>>();
+        var shouldThrow = false;
+        final academicRepo = StudentAcademicCalendarRepository(
+          caller: () {
+            if (shouldThrow) throw StateError('callable unavailable');
+            return pending.future;
+          },
+        );
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AuthProvider>.value(value: auth),
+              ChangeNotifierProvider<MoodProvider>.value(value: _PeriodMood()),
+            ],
+            child: MaterialApp(
+              home: MoodJourneyScreen(
+                nowProvider: () => DateTime.utc(2026, 11, 12),
+                academicCalendarRepository: academicRepo,
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Switch account while account-a's academic calendar request is still pending.
+        shouldThrow = true;
+        auth.switchTo('account-b');
+        await tester.pump();
+
+        pending.complete({
+          'years': [
+            {
+              'schoolYear': '2026-2027',
+              'startDateKey': '2026-06-01',
+              'endExclusiveDateKey': '2027-06-01',
+              'status': 'current',
+            },
+          ],
+        });
+        await tester.pumpAndSettle();
+
+        // Filter bar remains hidden (fail closed) and mood calendar still renders safely.
+        expect(find.byKey(const Key('mood-academic-filter-bar')), findsNothing);
+        expect(find.byKey(const Key('mood-journey-calendar')), findsOneWidget);
+      },
+    );
+  });
+
   testWidgets('personal journey shows each same-day mood and its note', (
     tester,
   ) async {
@@ -562,6 +746,47 @@ class _RecapMood extends _JourneyMood {
       _event('wed-1', 11, 2, 'Stressed'),
       _event('wed-2', 11, 2, 'Stressed'),
       _event('thu', 12, 4, 'Okay'),
+    ],
+  );
+}
+
+class _AcademicFilterMood extends _JourneyMood {
+  @override
+  String? get loadedMoodCalendarStartKey => null;
+  @override
+  String? get loadedMoodCalendarEndExclusiveKey => null;
+
+  @override
+  MoodHistoryWindow get v2History => MoodHistoryWindow(
+    coverage: MoodHistoryCoverage.complete,
+    events: [
+      NormalizedMoodEvent(
+        id: 'nov-30',
+        userId: 'account-a',
+        level: 3,
+        dateKey: '2026-11-30',
+        occurredAt: DateTime.utc(2026, 11, 30, 2),
+        source: MoodEventSource.v2,
+        label: 'Okay',
+      ),
+      NormalizedMoodEvent(
+        id: 'dec-1a',
+        userId: 'account-a',
+        level: 5,
+        dateKey: '2026-12-01',
+        occurredAt: DateTime.utc(2026, 12, 1, 2),
+        source: MoodEventSource.v2,
+        label: 'Great',
+      ),
+      NormalizedMoodEvent(
+        id: 'dec-1b',
+        userId: 'account-a',
+        level: 5,
+        dateKey: '2026-12-01',
+        occurredAt: DateTime.utc(2026, 12, 1, 4),
+        source: MoodEventSource.v2,
+        label: 'Great',
+      ),
     ],
   );
 }

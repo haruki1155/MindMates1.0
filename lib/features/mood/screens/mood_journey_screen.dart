@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../../../providers/auth_provider.dart';
 import '../../../providers/mood_provider.dart';
+import '../../../repositories/student_academic_calendar_repository.dart';
 import '../../../routes/route_names.dart';
 import '../../home/widgets/home_dashboard_widgets.dart';
 import '../domain/mood_journey_period.dart';
@@ -14,17 +15,28 @@ import '../widgets/mood_journey_summary.dart';
 import '../widgets/mood_v2_history_panel.dart';
 
 class MoodJourneyScreen extends StatefulWidget {
-  const MoodJourneyScreen({super.key, this.nowProvider, this.milestoneDays});
+  const MoodJourneyScreen({
+    super.key,
+    this.nowProvider,
+    this.milestoneDays,
+    this.academicCalendarRepository,
+  });
+
   final DateTime Function()? nowProvider;
 
   /// Set when opened from the Home milestone "View recap" (item 38).
   final int? milestoneDays;
+
+  final StudentAcademicCalendarRepository? academicCalendarRepository;
 
   @override
   State<MoodJourneyScreen> createState() => _MoodJourneyScreenState();
 }
 
 class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
+  static const String _allYearsValue = '__all_years__';
+  static const String _allYearSemestersValue = '__all_semesters__';
+
   DateTime get _now => widget.nowProvider?.call() ?? DateTime.now();
   String get _todayDateKey => MoodManilaCalendar.dateKeyForInstant(_now);
 
@@ -33,6 +45,11 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
   String? _selectedDateKey;
   Timer? _midnightTimer;
 
+  List<StudentAcademicYear> _academicYears = const [];
+  String? _selectedSchoolYear;
+  String? _selectedSemesterId;
+  int _academicGeneration = 0;
+
   DateTime get _effectiveDisplayedMonth {
     if (_displayedMonth != null) return _displayedMonth!;
     final today = MoodManilaCalendar.dateForKey(_todayDateKey);
@@ -40,6 +57,37 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
   }
 
   String get _effectiveSelectedDateKey => _selectedDateKey ?? _todayDateKey;
+
+  StudentAcademicYear? get _activeAcademicYear {
+    if (_selectedSchoolYear == null) return null;
+    return _academicYears
+        .where((year) => year.schoolYear == _selectedSchoolYear)
+        .firstOrNull;
+  }
+
+  StudentSemesterRange? get _activeSemester {
+    final year = _activeAcademicYear;
+    if (year == null || _selectedSemesterId == null) return null;
+    return year.semesterRanges
+        .where((sem) => sem.id == _selectedSemesterId)
+        .firstOrNull;
+  }
+
+  MoodWeekRange? get _activeAcademicFilterRange =>
+      _activeSemester?.range ?? _activeAcademicYear?.range;
+
+  String? get _activeAcademicFilterLabel {
+    final year = _activeAcademicYear;
+    if (year == null) return null;
+    final semester = _activeSemester;
+    if (semester == null) {
+      return 'Academic year ${year.schoolYear} · All year';
+    }
+    final approx = semester.isApproximateReportGrouping
+        ? ' · Approximate dates'
+        : '';
+    return 'Academic year ${year.schoolYear} · ${semester.label}$approx';
+  }
 
   void _scheduleMidnight() {
     _midnightTimer?.cancel();
@@ -79,6 +127,50 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
     );
   }
 
+  Future<void> _loadAcademicCalendar(String uid) async {
+    final generation = ++_academicGeneration;
+    final repo =
+        widget.academicCalendarRepository ??
+        _provider<StudentAcademicCalendarRepository>(listen: false);
+    if (repo == null) return;
+    try {
+      final years = await repo.fetchAcademicYears();
+      if (!mounted ||
+          generation != _academicGeneration ||
+          _loadedUser != uid ||
+          _provider<AuthProvider>(listen: false)?.authenticatedUserId != uid) {
+        return;
+      }
+      if (years.isEmpty) {
+        setState(() {
+          _academicYears = const [];
+          _selectedSchoolYear = null;
+          _selectedSemesterId = null;
+        });
+        return;
+      }
+      final todayKey = _todayDateKey;
+      final defaultYear =
+          years.where((y) => y.isCurrent).firstOrNull ??
+          years.where((y) => y.range.includes(todayKey)).firstOrNull ??
+          years.first;
+      setState(() {
+        _academicYears = years;
+        _selectedSchoolYear = defaultYear.schoolYear;
+        _selectedSemesterId = null;
+      });
+    } catch (_) {
+      if (!mounted || generation != _academicGeneration || _loadedUser != uid) {
+        return;
+      }
+      setState(() {
+        _academicYears = const [];
+        _selectedSchoolYear = null;
+        _selectedSemesterId = null;
+      });
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -105,11 +197,16 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
     final uid = _provider<AuthProvider>()?.authenticatedUserId;
     if (uid == _loadedUser) return;
     _loadedUser = uid;
+    _academicGeneration++;
+    _academicYears = const [];
+    _selectedSchoolYear = null;
+    _selectedSemesterId = null;
     final today = MoodManilaCalendar.dateForKey(_todayDateKey);
     _displayedMonth = DateTime.utc(today.year, today.month, 1);
     _selectedDateKey = _todayDateKey;
     if (uid != null) {
       final monthToLoad = _effectiveDisplayedMonth;
+      unawaited(_loadAcademicCalendar(uid));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
             _provider<AuthProvider>(listen: false)?.authenticatedUserId ==
@@ -117,6 +214,50 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
           _loadHistoryAndCalendar(uid, monthToLoad);
         }
       });
+    }
+  }
+
+  void _applyFilterPeriodSelection(
+    String uid, {
+    required String? schoolYear,
+    required String? semesterId,
+  }) {
+    final currentMonth = _effectiveDisplayedMonth;
+    final schoolYearChanged = schoolYear != _selectedSchoolYear;
+    setState(() {
+      _selectedSchoolYear = schoolYear;
+      _selectedSemesterId = semesterId;
+    });
+    final filterRange = _activeAcademicFilterRange;
+    if (filterRange == null) return;
+
+    final currentSelected = _effectiveSelectedDateKey;
+    if (!filterRange.includes(currentSelected)) {
+      final String nextSelected;
+      if (schoolYearChanged) {
+        nextSelected = filterRange.includes(_todayDateKey)
+            ? _todayDateKey
+            : filterRange.startDateKey;
+      } else if (currentSelected.compareTo(filterRange.startDateKey) < 0) {
+        nextSelected = filterRange.startDateKey;
+      } else {
+        final lastDay = MoodManilaCalendar.dateForKey(
+          filterRange.endExclusiveDateKey,
+        ).subtract(const Duration(days: 1));
+        nextSelected = MoodManilaCalendar.dateKeyForDate(lastDay);
+      }
+      final nextDate = MoodManilaCalendar.dateForKey(nextSelected);
+      final nextMonth = DateTime.utc(nextDate.year, nextDate.month, 1);
+      final monthChanged =
+          nextMonth.year != currentMonth.year ||
+          nextMonth.month != currentMonth.month;
+      setState(() {
+        _selectedDateKey = nextSelected;
+        _displayedMonth = nextMonth;
+      });
+      if (monthChanged) {
+        _loadCalendarRange(uid, nextMonth);
+      }
     }
   }
 
@@ -130,6 +271,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
       _selectedDateKey = defaultSelectedDateKeyForMonth(
         displayedMonth: normalized,
         todayDateKey: _todayDateKey,
+        filterRange: _activeAcademicFilterRange,
       );
     });
     if (changed) {
@@ -222,6 +364,177 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
     return null;
   }
 
+  Widget _buildAcademicFilterBar(BuildContext context, String uid) {
+    final activeYear = _activeAcademicYear;
+    final activeSemester = _activeSemester;
+    final yearLabel = activeYear?.schoolYear ?? 'All history';
+    final semesterLabel = activeSemester?.label ?? 'All year';
+    final semesters = activeYear?.semesterRanges ?? const [];
+
+    return Container(
+      key: const Key('mood-academic-filter-bar'),
+      decoration: HomeDecor.card(),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              PopupMenuButton<String>(
+                key: const Key('mood-academic-year-selector'),
+                tooltip: 'Change academic year',
+                onSelected: (value) {
+                  final nextYear = value == _allYearsValue ? null : value;
+                  _applyFilterPeriodSelection(
+                    uid,
+                    schoolYear: nextYear,
+                    semesterId: null,
+                  );
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem<String>(
+                    value: _allYearsValue,
+                    child: Text('All history'),
+                  ),
+                  for (final year in _academicYears)
+                    PopupMenuItem<String>(
+                      value: year.schoolYear,
+                      child: Text(year.schoolYear),
+                    ),
+                ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: HomePalette.surfaceWarm,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: HomePalette.outlineStrong),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Academic year: ',
+                        style: TextStyle(
+                          color: HomePalette.muted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Flexible(
+                        child: Text(
+                          yearLabel,
+                          style: const TextStyle(
+                            color: HomePalette.text,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(
+                        Icons.arrow_drop_down,
+                        size: 18,
+                        color: HomePalette.text,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (activeYear != null)
+                PopupMenuButton<String>(
+                  key: const Key('mood-academic-semester-selector'),
+                  tooltip: 'Change semester',
+                  enabled: semesters.isNotEmpty,
+                  onSelected: (value) {
+                    final nextSem = value == _allYearSemestersValue
+                        ? null
+                        : value;
+                    _applyFilterPeriodSelection(
+                      uid,
+                      schoolYear: activeYear.schoolYear,
+                      semesterId: nextSem,
+                    );
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem<String>(
+                      value: _allYearSemestersValue,
+                      child: Text('All year'),
+                    ),
+                    for (final sem in semesters)
+                      PopupMenuItem<String>(
+                        value: sem.id,
+                        child: Text(sem.label),
+                      ),
+                  ],
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: HomePalette.surfaceWarm,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: HomePalette.outlineStrong),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Semester: ',
+                          style: TextStyle(
+                            color: HomePalette.muted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Flexible(
+                          child: Text(
+                            semesterLabel,
+                            style: const TextStyle(
+                              color: HomePalette.text,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        if (semesters.isNotEmpty) ...[
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.arrow_drop_down,
+                            size: 18,
+                            color: HomePalette.text,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (activeSemester != null &&
+              activeSemester.isApproximateReportGrouping) ...[
+            const SizedBox(height: 6),
+            const Text(
+              'Approximate dates (6-month report grouping)',
+              key: Key('mood-academic-approximate-notice'),
+              style: TextStyle(
+                color: HomePalette.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final uid = _provider<AuthProvider>()?.authenticatedUserId;
@@ -235,6 +548,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
         : null;
     final displayedMonth = _effectiveDisplayedMonth;
     final selectedDateKey = _effectiveSelectedDateKey;
+    final filterRange = _activeAcademicFilterRange;
     final safeCalendarHistory = _resolveCalendarHistory(
       uid: uid,
       mood: mood,
@@ -265,7 +579,6 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
               child: Text('Mood history is not available right now.'),
             )
           : ListView(
-              cacheExtent: 1800,
               padding: const EdgeInsets.all(16),
               children: [
                 Text(
@@ -278,6 +591,10 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                 const Text(
                   'Notice your emotional patterns and small shifts throughout your days.',
                 ),
+                if (_academicYears.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  _buildAcademicFilterBar(context, uid),
+                ],
                 const SizedBox(height: 10),
                 MoodJourneyCalendar(
                   displayedMonth: displayedMonth,
@@ -286,6 +603,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                   history: safeCalendarHistory,
                   isLoading: isCalendarLoading,
                   errorMessage: calendarError,
+                  permittedRange: filterRange,
                   onRetry: () => _loadHistoryAndCalendar(uid, displayedMonth),
                   onMonthChanged: (next) => _handleMonthChanged(uid, next),
                   onDaySelected: (dayKey) => _handleDaySelected(uid, dayKey),
@@ -298,6 +616,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                   errorMessage: calendarError,
                   showPersonalDetails: true,
                   selectedDateKey: selectedDateKey,
+                  permittedRange: filterRange,
                   referenceInstant: _now,
                   v2PersonalNotes: mood?.v2PersonalNotes ?? const {},
                   v2NoteLoadingDays: mood?.v2NoteLoadingDays ?? const {},
@@ -317,6 +636,8 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                     now: _now,
                     selectedDateKey: selectedDateKey,
                     displayedMonth: displayedMonth,
+                    academicFilterRange: filterRange,
+                    academicFilterLabel: _activeAcademicFilterLabel,
                     showWeekRecap: true,
                     milestoneDays: widget.milestoneDays,
                   ),
