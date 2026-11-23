@@ -706,6 +706,44 @@ void main() {
       expect(find.byType(ExpansionTile), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'Manila midnight rollover advances selected today date and month and forwards nowProvider to loadMoodV2History',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      // 2026-11-30 23:59:50 Manila == 2026-11-30 15:59:50 UTC (10s before midnight).
+      var now = DateTime.utc(2026, 11, 30, 15, 59, 50);
+      final mood = _MidnightJourneyMood();
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+            ChangeNotifierProvider<MoodProvider>.value(value: mood),
+          ],
+          child: MaterialApp(home: MoodJourneyScreen(nowProvider: () => now)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('November 2026'), findsOneWidget);
+      expect(find.text('Nov 30 · Your check-ins'), findsOneWidget);
+      expect(mood.lastHistoryNow, DateTime.utc(2026, 11, 30, 15, 59, 50));
+
+      // Cross Manila midnight into Dec 1, 2026 (2026-11-30 16:00:01 UTC).
+      now = DateTime.utc(2026, 11, 30, 16, 0, 1);
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpAndSettle();
+
+      expect(find.text('December 2026'), findsOneWidget);
+      expect(find.text('Dec 1 · Your check-ins'), findsOneWidget);
+      expect(mood.lastHistoryNow, DateTime.utc(2026, 11, 30, 16, 0, 1));
+      expect(mood.lastCalendarStartKey, '2026-11-30');
+      expect(mood.lastCalendarEndExclusiveKey, '2027-01-04');
+    },
+  );
 }
 
 class _JourneyAuth extends ChangeNotifier implements AuthProvider {
@@ -903,4 +941,31 @@ class _PartialErrorJourneyMood extends _JourneyMood {
   @override
   String? get moodCalendarRangeError =>
       'Some mood history could not be loaded. Try again.';
+}
+
+class _MidnightJourneyMood extends _JourneyMood {
+  DateTime? lastHistoryNow;
+  String? lastCalendarStartKey;
+  String? lastCalendarEndExclusiveKey;
+
+  @override
+  String? get loadedMoodCalendarStartKey => lastCalendarStartKey;
+
+  @override
+  String? get loadedMoodCalendarEndExclusiveKey => lastCalendarEndExclusiveKey;
+
+  @override
+  Future<void> loadMoodV2History(String userId, {DateTime? now}) async {
+    lastHistoryNow = now;
+  }
+
+  @override
+  Future<void> loadMoodCalendarRange(
+    String userId, {
+    required String startDateKey,
+    required String endExclusiveDateKey,
+  }) async {
+    lastCalendarStartKey = startDateKey;
+    lastCalendarEndExclusiveKey = endExclusiveDateKey;
+  }
 }

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import {createServer} from "node:http";
+import {AddressInfo} from "node:net";
 import {after, before, beforeEach, test} from "node:test";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore} from "firebase-admin/firestore";
@@ -349,3 +351,57 @@ test(
     assert.deepEqual(devRes, res);
   },
 );
+
+test("protected HTTP wrapper rejects missing App Check before the callable handler while Dev alias reaches auth check", async () => {
+  async function invokeHttpCallable(
+    callableFn: unknown,
+  ): Promise<{status: number; message: string}> {
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      Object.assign(request, {
+        body: JSON.parse(Buffer.concat(chunks).toString()),
+        header: (name: string) =>
+          request.headers[name.toLowerCase()]?.toString(),
+      });
+      Object.assign(response, {
+        status: (code: number) => {
+          response.statusCode = code;
+          return response;
+        },
+        send: (body: unknown) => response.end(JSON.stringify(body)),
+      });
+      await (callableFn as (req: never, res: never) => Promise<void>)(
+        request as never,
+        response as never,
+      );
+    });
+    try {
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      const address = server.address() as AddressInfo;
+      const result = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({data: {}}),
+      });
+      const body = (await result.json()) as {error: {message: string}};
+      return {status: result.status, message: body.error.message};
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  }
+
+  // Protected callable rejects at the App Check middleware ("Unauthenticated") before requireUid.
+  const protectedResult = await invokeHttpCallable(getStudentAcademicCalendar);
+  assert.equal(protectedResult.status, 401);
+  assert.equal(protectedResult.message, "Unauthenticated");
+
+  // Staging Dev callable bypasses App Check middleware and reaches requireUid ("Sign in is required.").
+  const devResult = await invokeHttpCallable(getStudentAcademicCalendarDev);
+  assert.equal(devResult.status, 401);
+  assert.equal(devResult.message, "Sign in is required.");
+});

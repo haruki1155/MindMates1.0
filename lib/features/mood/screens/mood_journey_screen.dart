@@ -92,6 +92,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
   void _scheduleMidnight() {
     _midnightTimer?.cancel();
     final now = _now.toUtc();
+    final scheduledTodayKey = MoodManilaCalendar.dateKeyForInstant(now);
     final manila = now.add(const Duration(hours: 8));
     final next = DateTime.utc(
       manila.year,
@@ -100,11 +101,24 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
     ).subtract(const Duration(hours: 8));
     _midnightTimer = Timer(next.difference(now), () {
       if (!mounted) return;
+      final newTodayKey = _todayDateKey;
+      final filterRange = _activeAcademicFilterRange;
+      final shouldFollowToday =
+          _selectedDateKey == null ||
+          _selectedDateKey == scheduledTodayKey ||
+          _selectedDateKey == newTodayKey;
+      setState(() {
+        if (shouldFollowToday &&
+            (filterRange == null || filterRange.includes(newTodayKey))) {
+          final newToday = MoodManilaCalendar.dateForKey(newTodayKey);
+          _selectedDateKey = newTodayKey;
+          _displayedMonth = DateTime.utc(newToday.year, newToday.month, 1);
+        }
+      });
       final uid = _provider<AuthProvider>(listen: false)?.authenticatedUserId;
       if (uid != null) {
         _loadHistoryAndCalendar(uid, _effectiveDisplayedMonth);
       }
-      setState(() {});
       _scheduleMidnight();
     });
   }
@@ -112,7 +126,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
   void _loadHistoryAndCalendar(String uid, DateTime month) {
     final mood = _provider<MoodProvider>(listen: false);
     if (mood == null) return;
-    mood.loadMoodV2History(uid);
+    mood.loadMoodV2History(uid, now: _now);
     _loadCalendarRange(uid, month);
   }
 
