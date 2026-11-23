@@ -1,7 +1,7 @@
 # My Mood Journey V3 — Calendar and Insights Design
 
-**Status:** Product direction approved 2026-11-23; implementation pending.  
-**Repository checked:** `haruki1155/MindMates1.0`, `main` at `fc028e009762c1d1f54c46449785e89d15114f6f` (recheck before execution).  
+**Status:** Product direction approved 2026-11-23; implementation pending.<br>
+**Repository checked:** `haruki1155/MindMates1.0`, `main` at `fc028e009762c1d1f54c46449785e89d15114f6f` (recheck before execution).<br>
 **Owner-facing goal:** Make each student's existing MindMate mood history easier to understand week by week, month by month, and by academic period, with a Flo-inspired calendar interaction but MindMate visual identity.
 
 ## 1. Scope and guardrails
