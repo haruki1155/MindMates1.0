@@ -175,6 +175,8 @@ function diff(value: OfficialFields, existing: Doc): Record<string, {from: strin
   for (const [field, next, prev] of DIFF_FIELDS) {
     if (next(value) !== prev(existing)) changes[field] = {from: prev(existing), to: next(value)};
   }
+  const previousEmail = String(existing.contactEmail ?? "");
+  if (value.contactEmail && value.contactEmail !== previousEmail) changes.email = {from: previousEmail, to: value.contactEmail};
   return changes;
 }
 
@@ -217,6 +219,8 @@ function officialFields(v: OfficialFields): Record<string, unknown> {
     dateOfBirth: Timestamp.fromDate(new Date(`${v.dateOfBirthKey}T00:00:00Z`)), dateOfBirthKey: v.dateOfBirthKey,
     collegeId: v.collegeId, college: v.college, courseId: v.courseId, course: v.course,
     departmentId: v.departmentId, department: v.department, yearLevel: v.yearLevel,
+    // Only written when the file supplied one, so an import without the optional column never erases an address.
+    ...(v.contactEmail ? {contactEmail: v.contactEmail} : {}),
   };
 }
 
@@ -963,7 +967,7 @@ export const updateStudentRosterRecord = onCall(async (request) => {
     const merged: RosterRowInput = {
       studentNo: live.studentNo, surname: live.surname, firstName: live.firstName, middleName: live.middleName,
       dateOfBirth: live.dateOfBirthKey, college: live.college, course: live.course, yearLevel: live.yearLevel,
-      ...fields,
+      email: live.contactEmail, ...fields,
     };
     const [result] = validateRosterRows([merged], index);
     if (!result.ok) throw new HttpsError("invalid-argument", "Please correct the record.", {errors: result.errors});

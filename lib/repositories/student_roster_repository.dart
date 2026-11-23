@@ -111,17 +111,18 @@ class StudentRosterRepository {
     required String middleName,
     required String lastName,
     required String dateOfBirthKey,
-    required String email,
+    String? email,
     required String password,
   }) async {
     try {
+      // The email is only sent when PACC has none on file for the record; otherwise the server uses its own.
       final result = await _callMap('startStudentAccountSetup', {
         'studentNo': studentNo,
         'firstName': firstName,
         'middleName': middleName,
         'lastName': lastName,
         'dateOfBirth': dateOfBirthKey,
-        'email': email,
+        if (email != null && email.trim().isNotEmpty) 'email': email.trim(),
         'password': password,
       });
       final authEmail = asText(result['authEmail']);
@@ -132,8 +133,13 @@ class StudentRosterRepository {
       }
       return authEmail;
     } on FirebaseFunctionsException catch (error) {
+      final details = error.details;
+      final emailRequired =
+          details is Map && details['reason'] == 'email-required';
       throw StudentActivationException(
-        StudentActivationFailure.fromCode(error.code),
+        emailRequired
+            ? StudentActivationFailure.emailRequired
+            : StudentActivationFailure.fromCode(error.code),
         message: error.message,
       );
     }
@@ -160,8 +166,10 @@ class StudentRosterRepository {
 
   /// The server refuses unless the administrator attests they verified the
   /// student's identity.
-  Future<void> approveAccountClaim(String uid) =>
-      _call('approveStudentAccountClaim', {'uid': uid, 'identityVerified': true});
+  Future<void> approveAccountClaim(String uid) => _call(
+    'approveStudentAccountClaim',
+    {'uid': uid, 'identityVerified': true},
+  );
 
   Future<void> rejectAccountClaim(String uid) =>
       _call('rejectStudentAccountClaim', {'uid': uid});

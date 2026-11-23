@@ -18,7 +18,7 @@ import {
 } from "./student_claim_domain";
 import {rosterStudentProfile} from "./student_profile";
 import {
-  CLAIM_PENDING, RECOVERY_CONTACTS, RECOVERY_EMAILS, normalizeRecoveryContactEmail, readRecoveryRecords,
+  CLAIM_PENDING, RECOVERY_CONTACTS, RECOVERY_EMAILS, maskEmail, normalizeRecoveryContactEmail, readRecoveryRecords,
   recoveryEmailHash, releaseRecoveryRecords,
 } from "./student_recovery_contacts";
 
@@ -26,9 +26,11 @@ if (!getApps().length) initializeApp();
 
 /**
  * No-code student account setup. A student is found in the imported roster by Student Number + full name + date of
- * birth (knowledge, not secrets), chooses a personal email and a password, and proves control of that email with an
- * emailed code (student_account_recovery.ts). Only then is the roster record claimed. Until that final step nothing
- * about the roster, the Student ID reservation or a profile changes.
+ * birth (knowledge, not secrets) and chooses a password. The verification code is emailed to the address PACC holds
+ * for that student (student_account_recovery.ts); entering it proves the person is the student, and the record is
+ * then claimed automatically. A record with no email on file falls back to an address the student supplies, and that
+ * setup waits for a PACC administrator. Until the claim, nothing about the roster, the Student ID reservation or a
+ * profile changes.
  */
 const db = () => getFirestore();
 const PENDING_WINDOW_MS = 15 * 60 * 1000;
@@ -64,10 +66,6 @@ export async function startAccountSetup(request: Req, deps: SetupDeps = defaultS
   const raw = request.data;
   const input = readStudentClaimInput(raw);
   const fields = raw as Record<string, unknown>;
-  const email = normalizeRecoveryContactEmail(fields.email);
-  if (!email || !isAllowedPersonalEmail(email)) {
-    throw new HttpsError("invalid-argument", "Enter a valid personal email address.");
-  }
   const password = readSetupPassword(fields.password);
   const now = deps.now();
 
@@ -79,6 +77,20 @@ export async function startAccountSetup(request: Req, deps: SetupDeps = defaultS
   if (!eligible(row) || !claimIdentityMatches(input, row)) throw mismatch();
   await clearAttempts(input.studentKey);
 
+  // The verification code goes to the email PACC holds for this student, never to an address the requester typed:
+  // that is what proves the person completing setup is the student on the record. Only a record with no email on file
+  // uses the address the student supplies, and that setup is then approved by a PACC administrator instead.
+  const onFile = rosterEmail(row);
+  let email = onFile;
+  if (!email) {
+    email = normalizeRecoveryContactEmail(fields.email);
+    if (fields.email === undefined || fields.email === null || fields.email === "") {
+      throw new HttpsError("failed-precondition", "Enter your personal email address.", {reason: "email-required"});
+    }
+    if (!email || !isAllowedPersonalEmail(email)) {
+      throw new HttpsError("invalid-argument", "Enter a valid personal email address.");
+    }
+  }
   if (await authEmailTaken(email)) throw emailUnusable();
 
   const alias = studentAuthAliasEmail(input.studentKey);
@@ -108,7 +120,14 @@ export async function startAccountSetup(request: Req, deps: SetupDeps = defaultS
     await getAuth().deleteUser(uid).catch(() => undefined);
     throw error;
   }
-  return {ok: true, authEmail: alias, email};
+  // A roster address is shown masked: the requester only knows a name and a birth date.
+  return {ok: true, authEmail: alias, email: onFile ? maskEmail(email) : email, emailOnFile: !!onFile};
+}
+
+/** The school's registered email for the record, or null when the row has none (or an unusable one). */
+function rosterEmail(row: FirebaseFirestore.DocumentData | undefined): string | null {
+  const email = normalizeRecoveryContactEmail(row?.contactEmail);
+  return email && isAllowedPersonalEmail(email) ? email : null;
 }
 
 /**
@@ -161,10 +180,10 @@ async function createSetupUser(
 // ------------------------------------------------------------------ complete (submit for approval)
 
 /**
- * Called after the personal email was verified. Email ownership proves only that the student controls a mailbox, not
- * that they are the person on the roster record (the name and birth date are knowledge, not secrets), so this does
- * NOT claim the record. It submits the setup for approval by a PACC administrator; the claim becomes active only in
- * {@link approveAccountClaim}.
+ * Called after the email was verified. Controlling a mailbox only proves identity when PACC chose that mailbox, so:
+ * - the email came from the roster record (and still matches it): the claim is approved here, with no administrator;
+ * - the email was typed by the student: this only submits the setup for approval by a PACC administrator.
+ * Either way the claim becomes active only in {@link approveAccountClaim}.
  */
 export async function completeAccountSetup(request: Req, deps: SetupDeps = defaultSetupDeps) {
   const uid = requireUid(request);
@@ -202,6 +221,18 @@ export async function completeAccountSetup(request: Req, deps: SetupDeps = defau
       status: AWAITING, submittedAt: FieldValue.serverTimestamp(), expiresAt: Timestamp.fromMillis(now + APPROVAL_WINDOW_MS),
     });
   });
+
+  // The code was delivered to the email PACC has on file for this record and the student proved they can read it, so
+  // there is nothing left for an administrator to check. Any other setup (an address the student supplied) waits for
+  // review. If the automatic approval cannot finish, the request simply stays in the review queue.
+  if (rosterEmail(live) !== null && rosterEmail(live) === normalizeRecoveryContactEmail(contact.email)) {
+    try {
+      await approveAccountClaim(AUTO_REVIEWER, uid, deps, ROSTER_EMAIL_BASIS);
+      return {ok: true, alreadyComplete: false, status: "approved"};
+    } catch (error) {
+      if (!(error instanceof HttpsError)) throw error;
+    }
+  }
   return {ok: true, alreadyComplete: false, status: "awaiting-approval"};
 }
 
@@ -230,15 +261,18 @@ export async function listAccountClaims() {
 }
 
 type Reviewer = {id: string; name: string; role: string};
+const ROSTER_EMAIL_BASIS = "roster-email";
+const AUTO_REVIEWER: Reviewer = {id: "system", name: "Automatic approval (roster email)", role: "system"};
 
 /**
  * `identityVerified` is the administrator's explicit statement that they confirmed, independently of what the student
  * typed, that this person is the student on the record. Approval is refused without it and it is kept in the audit log.
  */
 export async function approveAccountClaim(
-  reviewer: Reviewer, rawUid: unknown, deps: SetupDeps = defaultSetupDeps, identityVerified = false,
+  reviewer: Reviewer, rawUid: unknown, deps: SetupDeps = defaultSetupDeps, identityVerified: boolean | "roster-email" = false,
 ) {
-  if (identityVerified !== true) {
+  const byRosterEmail = identityVerified === ROSTER_EMAIL_BASIS;
+  if (identityVerified !== true && !byRosterEmail) {
     throw new HttpsError("failed-precondition", "Confirm the student's identity before approving.");
   }
   const uid = typeof rawUid === "string" ? rawUid.trim() : "";
@@ -278,6 +312,10 @@ export async function approveAccountClaim(
     if (reservation.exists && reservation.data()?.userId !== uid) {
       throw new HttpsError("failed-precondition", "This Student ID is already claimed. Reject the request.");
     }
+    // Automatic approval is only ever justified by the verified email being the one PACC has on file right now.
+    if (byRosterEmail && (rosterEmail(live) === null || rosterEmail(live) !== normalizeRecoveryContactEmail(contact.email))) {
+      throw unavailableClaim();
+    }
 
     const studentNo = String(live.studentNo ?? key);
     transaction.create(profileRef, rosterStudentProfile(live, {
@@ -294,7 +332,8 @@ export async function approveAccountClaim(
     writeAudit(transaction, db(), {
       actorId: reviewer.id, actorNameSnapshot: reviewer.name, actorRoleSnapshot: reviewer.role,
       action: "STUDENT_ACCOUNT_CLAIMED", category: AUDIT_CATEGORIES.userManagement,
-      targetType: "student", targetId: key, metadata: {studentNo, userId: uid, claimMethod: CLAIM_METHOD, approvedBy: reviewer.id, identityVerifiedByAdmin: true},
+      targetType: "student", targetId: key, metadata: {studentNo, userId: uid, claimMethod: CLAIM_METHOD, approvedBy: reviewer.id,
+        ...(byRosterEmail ? {autoApproved: true, basis: ROSTER_EMAIL_BASIS} : {identityVerifiedByAdmin: true})},
     });
   });
   return {ok: true};

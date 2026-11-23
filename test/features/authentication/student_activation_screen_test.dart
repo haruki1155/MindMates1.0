@@ -75,10 +75,6 @@ void main() {
 
   Future<void> fillStep2(WidgetTester tester) async {
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Personal email address'),
-      'leo@example.com',
-    );
-    await tester.enterText(
       find.widgetWithText(TextFormField, 'Password'),
       'password123',
     );
@@ -113,16 +109,17 @@ void main() {
     },
   );
 
-  testWidgets('step 2 requires valid email and matching passwords', (
+  testWidgets('step 2 asks for no email and requires matching passwords', (
     tester,
   ) async {
     final calls = <Map<String, Object?>>[];
     await pump(tester, calls: calls);
     await toStep2(tester);
 
-    await tester.enterText(
+    // The code goes to the email PACC has on file, so none is typed here.
+    expect(
       find.widgetWithText(TextFormField, 'Personal email address'),
-      'not-an-email',
+      findsNothing,
     );
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Password'),
@@ -134,7 +131,6 @@ void main() {
     );
     await submit(tester);
 
-    expect(find.text('Enter a valid email address'), findsOneWidget);
     expect(find.text('Password must be at least 8 characters'), findsOneWidget);
     expect(find.text('Passwords do not match'), findsOneWidget);
     expect(calls, isEmpty);
@@ -156,12 +152,68 @@ void main() {
       expect(calls.single['lastName'], 'Santos');
       expect(calls.single['middleName'], '');
       expect(calls.single.containsKey('activationCode'), isFalse);
+      expect(calls.single.containsKey('email'), isFalse);
       expect(calls.single['dateOfBirth'], matches(RegExp(r'^\d{4}-\d{2}-15$')));
       expect(auth.signedInEmail, '202100123@students.mindmate.local');
       expect(auth.verificationSent, isFalse);
       expect(find.text('verify target'), findsOneWidget);
     },
   );
+
+  testWidgets('a record with no email on file asks for one, then sends it', (
+    tester,
+  ) async {
+    final calls = <Map<String, Object?>>[];
+    final auth = _FakeAuthRepository();
+    var attempts = 0;
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final repo = StudentRosterRepository(
+      invoker: (name, data) async {
+        calls.add({'name': name, ...data});
+        if (attempts++ == 0) {
+          throw FirebaseFunctionsException(
+            code: 'failed-precondition',
+            message: 'Enter your personal email address.',
+            details: {'reason': 'email-required'},
+          );
+        }
+        return {'ok': true, 'authEmail': '202100123@students.mindmate.local'};
+      },
+    );
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AuthProvider>.value(
+        value: AuthProvider(auth, rosterRepository: repo),
+        child: MaterialApp(
+          home: const StudentActivationScreen(),
+          routes: {
+            RouteNames.emailVerification: (_) =>
+                const Scaffold(body: Center(child: Text('verify target'))),
+          },
+        ),
+      ),
+    );
+    await toStep2(tester);
+    await fillStep2(tester);
+    await submit(tester);
+
+    // The server asked for an email: the field appears and nothing is claimed yet.
+    expect(
+      find.widgetWithText(TextFormField, 'Personal email address'),
+      findsOneWidget,
+    );
+    expect(find.text('verify target'), findsNothing);
+
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Personal email address'),
+      'leo@example.com',
+    );
+    await submit(tester);
+
+    expect(calls.first.containsKey('email'), isFalse);
+    expect(calls.last['email'], 'leo@example.com');
+    expect(find.text('verify target'), findsOneWidget);
+  });
 
   testWidgets('not-found shows exactly the generic mismatch copy', (
     tester,

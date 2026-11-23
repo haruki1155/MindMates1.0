@@ -137,6 +137,47 @@ void main() {
     },
   );
 
+  test(
+    'startAccountSetup sends no email unless one is given, and maps email-required',
+    () async {
+      final repo = build();
+      respond = (_) =>
+          _m({'ok': true, 'authEmail': 'a@students.mindmate.local'});
+      await repo.startAccountSetup(
+        studentNo: '2021-00123',
+        firstName: 'Ana',
+        middleName: '',
+        lastName: 'Cruz',
+        dateOfBirthKey: '2003-04-05',
+        password: 'pw',
+      );
+      expect(calls.single.$2.containsKey('email'), isFalse);
+
+      respond = (_) => FirebaseFunctionsException(
+        code: 'failed-precondition',
+        message: 'Enter your personal email address.',
+        details: {'reason': 'email-required'},
+      );
+      await expectLater(
+        repo.startAccountSetup(
+          studentNo: 's',
+          firstName: 'f',
+          middleName: '',
+          lastName: 'l',
+          dateOfBirthKey: 'd',
+          password: 'p',
+        ),
+        throwsA(
+          isA<StudentActivationException>().having(
+            (x) => x.reason,
+            'reason',
+            StudentActivationFailure.emailRequired,
+          ),
+        ),
+      );
+    },
+  );
+
   test('startAccountSetup maps the callable error code', () async {
     final repo = build();
     const codes = {

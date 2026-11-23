@@ -41,6 +41,9 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
   String? _error;
   bool _alreadyActivated = false;
 
+  /// Shown only when PACC has no email on file for this record.
+  bool _needsEmail = false;
+
   @override
   void initState() {
     super.initState();
@@ -117,11 +120,18 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
         middleName: _middleNameController.text.trim(),
         lastName: _lastNameController.text.trim(),
         dateOfBirthKey: _dateKey(dob),
-        email: _emailController.text.trim(),
+        email: _needsEmail ? _emailController.text.trim() : null,
         password: _passwordController.text,
       );
     } on StudentActivationException catch (error) {
       if (!mounted) return;
+      if (error.reason == StudentActivationFailure.emailRequired) {
+        setState(() {
+          _needsEmail = true;
+          _error = null;
+        });
+        return;
+      }
       setState(() {
         _error = _copyFor(error);
       });
@@ -151,6 +161,8 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
         return _mismatchCopy;
       case StudentActivationFailure.inProgress:
         return _inProgressCopy;
+      case StudentActivationFailure.emailRequired:
+        return _unknownCopy;
       case StudentActivationFailure.emailInUse:
         return _emailInUseCopy;
       case StudentActivationFailure.invalidInput:
@@ -285,28 +297,31 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const _StepHeader(
+          _StepHeader(
             step: 'Step 2 of 2',
-            text:
-                'Enter your personal email and choose a password. We will email you a code to verify it.',
+            text: _needsEmail
+                ? 'PACC has no email on file for you. Enter your personal email and choose a password. We will email you a code to verify it, then a PACC administrator will approve your account.'
+                : 'Choose a password. We will email a verification code to the email address PACC has on file for you.',
           ),
           const SizedBox(height: 16),
-          _ActivationField(
-            controller: _emailController,
-            label: 'Personal email address',
-            icon: Icons.email_outlined,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.next,
-            validator: (value) {
-              final text = value?.trim() ?? '';
-              if (text.isEmpty) return 'Email address is required';
-              if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(text)) {
-                return 'Enter a valid email address';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 14),
+          if (_needsEmail) ...[
+            _ActivationField(
+              controller: _emailController,
+              label: 'Personal email address',
+              icon: Icons.email_outlined,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.next,
+              validator: (value) {
+                final text = value?.trim() ?? '';
+                if (text.isEmpty) return 'Email address is required';
+                if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(text)) {
+                  return 'Enter a valid email address';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+          ],
           _ActivationField(
             controller: _passwordController,
             label: 'Password',

@@ -113,6 +113,38 @@ void main() {
       });
     });
 
+    test(
+      'an optional Email column is read, and a file without it still parses',
+      () {
+        final withEmail = parseRosterFile(
+          'roster.csv',
+          _csv(
+            [
+              'Student No.,Surname,First Name,Middle Name,Date of Birth (MM/DD/YYYY),College,Course,Year Level,Email',
+              '2021-001,Santos,Ana,M,02/15/2005,CITE,BSIT,2,ana@school.edu',
+              '2021-002,Reyes,Ben,,02/16/2005,CITE,BSIT,2,',
+              '',
+            ].join('\n'),
+          ),
+        );
+        expect(withEmail.fileErrors, isEmpty);
+        expect(withEmail.rows[0]['email'], 'ana@school.edu');
+        expect(withEmail.rows[1].containsKey('email'), isFalse);
+        final without = parseRosterFile(
+          'roster.csv',
+          _csv(
+            [
+              'Student No.,Surname,First Name,Middle Name,Date of Birth (MM/DD/YYYY),College,Course,Year Level',
+              '2021-001,Santos,Ana,M,02/15/2005,CITE,BSIT,2',
+              '',
+            ].join('\n'),
+          ),
+        );
+        expect(without.fileErrors, isEmpty);
+        expect(without.rows.single.containsKey('email'), isFalse);
+      },
+    );
+
     test('reports missing headers by name', () {
       final result = parseRosterFile(
         'roster.csv',
@@ -306,6 +338,7 @@ void main() {
         'College',
         'Course',
         'Year Level',
+        'Email',
       ]);
     });
 

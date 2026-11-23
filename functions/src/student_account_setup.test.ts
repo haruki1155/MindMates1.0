@@ -111,7 +111,7 @@ test("start, verify the personal email, then complete: the claim is created only
   const address = email("ok1");
   clock.t = Date.now();
   const started = await start({...payload(s, address), activationCode: "IGNORED-CODE"}) as {ok: boolean; authEmail: string; email: string};
-  assert.deepEqual(started, {ok: true, authEmail: s.alias, email: address});
+  assert.deepEqual(started, {ok: true, authEmail: s.alias, email: address, emailOnFile: false});
   const uid = await track(s, address);
 
   // Setup has started: a login exists but nothing is claimed.
@@ -547,4 +547,115 @@ test("the Student ID and Firebase UID stay one identity across retries, restarts
   await rejects(approve(uid), "failed-precondition");
   assert.equal((await getAuth().getUserByEmail(s.alias)).uid, uid);
   assert.equal((await db.collection("users").doc(uid).get()).data()?.schoolId, s.studentNo);
+});
+
+// ------------------------------------------------------------------ roster email: automatic approval
+
+const ONFILE = (tag: string) => `${runLower}-onfile-${tag}@school.example`;
+const withoutEmail = (s: {studentNo: string}, patch: Record<string, unknown> = {}) => {
+  const {email: _omit, ...rest} = payload(s, "x@example.com", patch);
+  return rest;
+};
+
+test("a record with an email on file is approved automatically once that email code is entered, with no administrator step", async () => {
+  const address = ONFILE("a1");
+  const s = await seedRow("AUTO1", {contactEmail: address});
+  clock.t = Date.now();
+  const started = await start(withoutEmail(s)) as {ok: boolean; email: string; emailOnFile: boolean};
+  assert.equal(started.emailOnFile, true);
+  assert.notEqual(started.email, address, "the on-file address is shown masked, never in full");
+  assert.ok(started.email.includes("*"));
+  const uid = await track(s, address);
+  assert.equal(await exists(db.collection("users").doc(uid)), false, "nothing is claimed before the code is entered");
+
+  await authedConfirm(uid);
+  assert.equal(mails.at(-1)!.to, address, "the code goes to the address on file");
+
+  const done = await completeAccountSetup({...as(uid)}, {now: () => clock.t});
+  assert.deepEqual(done, {ok: true, alreadyComplete: false, status: "approved"});
+  const profile = (await db.collection("users").doc(uid).get()).data()!;
+  assert.equal(profile.schoolId, s.studentNo);
+  assert.equal(profile.rosterLinked, true);
+  assert.equal((await db.collection("student_id_reservations").doc(s.key).get()).data()?.userId, uid);
+  const row = (await s.ref.get()).data()!;
+  assert.equal(row.activated, true);
+  assert.equal(row.userId, uid);
+  assert.equal(await exists(db.collection(CLAIM_PENDING).doc(uid)), false);
+  const audits = await db.collection("admin_audit_logs").where("targetId", "==", s.key).where("action", "==", "STUDENT_ACCOUNT_CLAIMED").get();
+  assert.equal(audits.size, 1);
+  assert.equal(audits.docs[0].data().metadata.autoApproved, true);
+  assert.equal(audits.docs[0].data().metadata.basis, "roster-email");
+  audits.docs.forEach((d) => docs.push(d.ref));
+  // Asking again is a no-op that keeps the same identity.
+  assert.deepEqual(await completeAccountSetup({...as(uid)}, {now: () => clock.t}), {ok: true, alreadyComplete: true, status: "approved"});
+});
+
+test("someone who knows a classmate's details cannot redirect the code to their own mailbox", async () => {
+  const address = ONFILE("a2");
+  const s = await seedRow("AUTO2", {contactEmail: address});
+  clock.t = Date.now();
+  const attacker = email("attacker");
+  await start(payload(s, attacker));
+  const uid = await track(s, address);
+  const contact = (await db.collection(RECOVERY_CONTACTS).doc(uid).get()).data()!;
+  assert.equal(contact.email, address, "the typed address is ignored");
+  assert.equal(await exists(db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(attacker))), false);
+  mails.length = 0;
+  await requestRecoveryEmailCode({...as(uid)}, recoveryDeps);
+  assert.ok(mails.every((m) => m.to === address), "no code is ever sent to the attacker's address");
+  // Without the emailed code the setup cannot finish, so nothing is claimed.
+  await rejects(completeAccountSetup({...as(uid)}, {now: () => clock.t}), "failed-precondition");
+  assert.equal(await exists(db.collection("users").doc(uid)), false);
+  assert.equal((await s.ref.get()).data()!.activated, false);
+});
+
+test("a record with no email on file asks for one and creates nothing until it is given", async () => {
+  const s = await seedRow("AUTO3");
+  clock.t = Date.now();
+  await assert.rejects(start(withoutEmail(s)), (e: Err & {details?: {reason?: string}}) => {
+    assert.equal(e.code, "failed-precondition");
+    assert.equal(e.details?.reason, "email-required");
+    return true;
+  });
+  await assert.rejects(getAuth().getUserByEmail(s.alias), (e: {code?: string}) => e.code === "auth/user-not-found");
+  // With an address, the old route still applies and still waits for an administrator.
+  await start(payload(s, email("auto3")));
+  const uid = await track(s, email("auto3"));
+  await authedConfirm(uid);
+  assert.deepEqual(await completeAccountSetup({...as(uid)}, {now: () => clock.t}),
+    {ok: true, alreadyComplete: false, status: "awaiting-approval"});
+  assert.equal(await exists(db.collection("users").doc(uid)), false);
+});
+
+test("an identity mismatch on a record with an email on file reveals nothing about that email", async () => {
+  const address = ONFILE("a4");
+  const s = await seedRow("AUTO4", {contactEmail: address});
+  clock.t = Date.now();
+  await rejects(start(withoutEmail(s, {lastName: "Someone Else"})), "not-found", GENERIC);
+  await assert.rejects(getAuth().getUserByEmail(s.alias), (e: {code?: string}) => e.code === "auth/user-not-found");
+});
+
+test("if the email on file changes before the code is entered, the setup is not auto-approved and waits for review", async () => {
+  const address = ONFILE("a5");
+  const s = await seedRow("AUTO5", {contactEmail: address});
+  clock.t = Date.now();
+  await start(withoutEmail(s));
+  const uid = await track(s, address);
+  await authedConfirm(uid);
+  await s.ref.update({contactEmail: ONFILE("changed")});
+  assert.deepEqual(await completeAccountSetup({...as(uid)}, {now: () => clock.t}),
+    {ok: true, alreadyComplete: false, status: "awaiting-approval"});
+  assert.equal(await exists(db.collection("users").doc(uid)), false, "no profile without the matching roster email");
+});
+
+test("the automatic basis cannot approve a setup whose email was supplied by the student", async () => {
+  const s = await seedRow("AUTO6");
+  clock.t = Date.now();
+  await start(payload(s, email("auto6")));
+  const uid = await track(s, email("auto6"));
+  await authedConfirm(uid);
+  await completeAccountSetup({...as(uid)}, {now: () => clock.t});
+  await rejects(approveAccountClaim({id: "system", name: "x", role: "system"}, uid, {now: () => clock.t}, "roster-email"), "failed-precondition");
+  await rejects(approveAccountClaim(REVIEWER, uid, {now: () => clock.t}, false), "failed-precondition");
+  assert.equal(await exists(db.collection("users").doc(uid)), false);
 });

@@ -298,7 +298,7 @@ class AuthProvider extends ChangeNotifier {
     required String middleName,
     required String lastName,
     required String dateOfBirthKey,
-    required String email,
+    String? email,
     required String password,
   }) async {
     _requiresExplicitReauthentication = false;

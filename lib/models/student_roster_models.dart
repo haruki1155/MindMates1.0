@@ -270,6 +270,9 @@ enum StudentActivationFailure {
   emailInUse,
   invalidInput,
   inProgress,
+
+  /// The record has no email on file at PACC, so the student must supply one.
+  emailRequired,
   unknown;
 
   /// Maps the callable error code of the no-code account setup.

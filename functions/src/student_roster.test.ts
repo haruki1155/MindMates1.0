@@ -726,3 +726,12 @@ after(async () => {
     await Promise.all(audits.docs.map((d) => d.ref.delete()));
   }
 });
+
+test("an optional school email is stored on the roster row, and a later import without one keeps it", async () => {
+  await commit.run({auth, data: {fileName: "e.xlsx", rows: [row("EM1", {email: "Student.One@School.example"})]}});
+  assert.equal((await roster("EM1").get()).data()!.contactEmail, "student.one@school.example");
+  await commit.run({auth, data: {fileName: "e2.xlsx", rows: [row("EM1", {yearLevel: "3rd Year"})]}});
+  const after = (await roster("EM1").get()).data()!;
+  assert.equal(after.yearLevel, "3rd Year");
+  assert.equal(after.contactEmail, "student.one@school.example", "an import without the column never erases the address");
+});
