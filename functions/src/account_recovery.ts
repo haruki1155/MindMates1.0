@@ -30,7 +30,7 @@ const DEVELOPMENT_ADMIN_WEB_HOSTS = new Set([
 ]);
 
 const db = getFirestore();
-const smtpAppPassword = defineSecret("SMTP_APP_PASSWORD");
+export const smtpAppPassword = defineSecret("SMTP_APP_PASSWORD");
 const adminWebUrl = defineString("ADMIN_WEB_URL", {
   default: "https://mindmate-admin-staging.vercel.app",
 });
@@ -90,7 +90,7 @@ const smtpPort = defineString("SMTP_PORT", {default: "587"});
 const smtpUsername = defineString("SMTP_USERNAME", {
   default: "dev.guntang@gmail.com",
 });
-const smtpSender = defineString("SMTP_SENDER", {
+export const smtpSender = defineString("SMTP_SENDER", {
   default: "dev.guntang@gmail.com",
 });
 
@@ -265,7 +265,7 @@ function escapeHtml(value: string): string {
   })[character] ?? character);
 }
 
-function accountEmailTransporter() {
+export function accountEmailTransporter() {
   return nodemailer.createTransport({
     host: smtpHost.value().trim(),
     port: Number(smtpPort.value()),

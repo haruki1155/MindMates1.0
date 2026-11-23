@@ -2671,6 +2671,11 @@ export {
 export {importAcademicCatalog, previewAcademicCatalogImport} from "./academic_import";
 export {activateStudentAccount, activateStudentAccountDev} from "./student_activation";
 export {
+  requestStudentRecoveryEmailCode, requestStudentRecoveryEmailCodeDev,
+  confirmStudentRecoveryEmailCode, confirmStudentRecoveryEmailCodeDev,
+  requestStudentPasswordReset, requestStudentPasswordResetDev,
+} from "./student_account_recovery";
+export {
   getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
   reviewStudentCorrection, saveStudentPersonalInfo,
 } from "./student_personal_info";
