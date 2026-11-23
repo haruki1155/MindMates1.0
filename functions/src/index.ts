@@ -1217,14 +1217,36 @@ export const getAuditLogPage = onCall(async (request) => {
   const filterActorId = typeof request.data?.filterActorId === "string" ? request.data.filterActorId.trim() : "";
   const search = typeof request.data?.search === "string" ? request.data.search.trim().toLowerCase() : "";
   const beforeMillis = typeof request.data?.beforeMillis === "number" ? request.data.beforeMillis : null;
-  let query: FirebaseFirestore.Query = db.collection("admin_audit_logs")
-    .orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc");
-  if (afterMillis != null) query = query.where("createdAt", ">=", Timestamp.fromMillis(afterMillis));
-  if (beforeMillis != null) query = query.where("createdAt", "<", Timestamp.fromMillis(beforeMillis + 1));
-  if (request.data?.cursor != null) query = query.startAfter(...auditFeedCursor(request.data.cursor));
-
+  const parsedCursor = request.data?.cursor != null ? auditFeedCursor(request.data.cursor) : null;
   const batchLimit = Math.min(Math.max(pageSize * 6, 120), 400);
-  const snapshot = await query.limit(batchLimit).get();
+
+  let snapshot: FirebaseFirestore.QuerySnapshot;
+  try {
+    let query: FirebaseFirestore.Query = db.collection("admin_audit_logs")
+      .orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc");
+    if (afterMillis != null) query = query.where("createdAt", ">=", Timestamp.fromMillis(afterMillis));
+    if (beforeMillis != null) query = query.where("createdAt", "<", Timestamp.fromMillis(beforeMillis + 1));
+    if (parsedCursor != null) query = query.startAfter(...parsedCursor);
+    snapshot = await query.limit(batchLimit).get();
+  } catch (err: unknown) {
+    const code = typeof err === "object" && err !== null && "code" in err ? (err as {code?: unknown}).code : undefined;
+    const msg = err instanceof Error ? err.message : String(err ?? "");
+    if (code !== 9 && code !== "failed-precondition" && !msg.toLowerCase().includes("index")) {
+      throw err;
+    }
+    // Real Cloud Firestore single-field automatic indexes use (createdAt DESC, __name__ ASC)
+    // unless a composite index on (createdAt DESC, __name__ DESC) is deployed. Fall back to
+    // single-field orderBy("createdAt", "desc") with DocumentSnapshot cursor tie-breaking.
+    let fallbackQuery: FirebaseFirestore.Query = db.collection("admin_audit_logs").orderBy("createdAt", "desc");
+    if (afterMillis != null) fallbackQuery = fallbackQuery.where("createdAt", ">=", Timestamp.fromMillis(afterMillis));
+    if (beforeMillis != null) fallbackQuery = fallbackQuery.where("createdAt", "<", Timestamp.fromMillis(beforeMillis + 1));
+    if (parsedCursor != null) {
+      const [cursorTs, cursorDocId] = parsedCursor;
+      const cursorSnap = await db.collection("admin_audit_logs").doc(cursorDocId).get();
+      fallbackQuery = cursorSnap.exists ? fallbackQuery.startAfter(cursorSnap) : fallbackQuery.startAfter(cursorTs);
+    }
+    snapshot = await fallbackQuery.limit(batchLimit).get();
+  }
   const matched: Array<Record<string, unknown>> = [];
   let scanned = 0;
 

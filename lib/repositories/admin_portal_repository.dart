@@ -972,37 +972,76 @@ class AdminPortalRepository {
             'Super-administrator access is required to view system activity logs.',
       );
     }
-    final result = await FirebaseFunctions.instance
-        .httpsCallable('getAuditLogPage')
-        .call<Map<String, dynamic>>({
-          if (roleFilter != ActivityActorRoleFilter.all)
-            'actorRole': roleFilter.code,
-          if (actorId.trim().isNotEmpty) 'filterActorId': actorId.trim(),
-          if (category.trim().isNotEmpty) 'category': category.trim(),
-          if (action.trim().isNotEmpty) 'action': action.trim(),
-          if (search.trim().isNotEmpty) 'search': search.trim(),
-          if (after != null) 'afterMillis': after.millisecondsSinceEpoch,
-          if (before != null) 'beforeMillis': before.millisecondsSinceEpoch,
-          'cursor': ?cursor,
-          'pageSize': pageSize,
-        });
-    final raw = result.data['events'];
-    final events = raw is List
-        ? raw
-              .whereType<Map>()
-              .map(
-                (item) => sanitizeAuditEventForDisplay(
-                  AdminAuditEvent.fromJson(Map<String, dynamic>.from(item)),
-                ),
-              )
-              .toList()
-        : <AdminAuditEvent>[];
-    final nextCursor = result.data['nextCursor'] as String?;
-    return (
-      events: events,
-      hasMore: nextCursor != null,
-      nextCursor: nextCursor,
-    );
+    try {
+      final data = await _callCallable('getAuditLogPage', {
+        if (roleFilter != ActivityActorRoleFilter.all)
+          'actorRole': roleFilter.code,
+        if (actorId.trim().isNotEmpty) 'filterActorId': actorId.trim(),
+        if (category.trim().isNotEmpty) 'category': category.trim(),
+        if (action.trim().isNotEmpty) 'action': action.trim(),
+        if (search.trim().isNotEmpty) 'search': search.trim(),
+        if (after != null) 'afterMillis': after.millisecondsSinceEpoch,
+        if (before != null) 'beforeMillis': before.millisecondsSinceEpoch,
+        'cursor': ?cursor,
+        'pageSize': pageSize,
+      });
+      final payload = data is Map
+          ? Map<String, dynamic>.from(data)
+          : const <String, dynamic>{};
+      final raw = payload['events'];
+      final events = raw is List
+          ? raw
+                .whereType<Map>()
+                .map(
+                  (item) => sanitizeAuditEventForDisplay(
+                    AdminAuditEvent.fromJson(Map<String, dynamic>.from(item)),
+                  ),
+                )
+                .toList()
+          : <AdminAuditEvent>[];
+      final nextCursor = payload['nextCursor'] as String?;
+      return (
+        events: events,
+        hasMore: nextCursor != null,
+        nextCursor: nextCursor,
+      );
+    } catch (error) {
+      final text = '$error'.toLowerCase();
+      if (text.contains('permission-denied') ||
+          text.contains('permission_denied') ||
+          text.contains('unauthenticated') ||
+          text.contains('unauthorized')) {
+        rethrow;
+      }
+      // Fall back to the protected Super-Admin Firestore read while the
+      // updated getAuditLogPage callable or index is propagating on staging.
+      final scanLimit = min(max(pageSize * 6, 150), 400);
+      final items = await _firestoreService.getDocuments(
+        FirestoreCollections.adminAuditLogs,
+        orderBy: 'createdAt',
+        descending: true,
+        limit: scanLimit,
+      );
+      final filtered = filterActivityLogEvents(
+        items.map(AdminAuditEvent.fromJson),
+        roleFilter: roleFilter,
+        actorIdFilter: actorId,
+        categoryFilter: category,
+        actionFilter: action,
+        searchQuery: search,
+        after: after,
+        before: before,
+      );
+      final offset = int.tryParse(cursor ?? '') ?? 0;
+      final page = filtered.skip(offset).take(pageSize).toList(growable: false);
+      final nextOffset = offset + page.length;
+      final hasMore = filtered.length > nextOffset;
+      return (
+        events: page,
+        hasMore: hasMore,
+        nextCursor: hasMore ? '$nextOffset' : null,
+      );
+    }
   }
 
   Future<void> recordAuditEvent({
