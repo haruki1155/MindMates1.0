@@ -11,7 +11,7 @@ From the repository root, run:
 flutter pub get
 flutter test test/app_bootstrap_test.dart
 flutter analyze
-flutter build web --release --target lib/admin_main.dart --dart-define=RECAPTCHA_V3_SITE_KEY=YOUR_RECAPTCHA_V3_SITE_KEY
+flutter build web --release --target lib/admin_main.dart --dart-define=RECAPTCHA_ENTERPRISE_SITE_KEY=YOUR_RECAPTCHA_ENTERPRISE_SITE_KEY
 ```
 
 For the staging Admin portal, explicitly select the staging Firebase project:

@@ -21,7 +21,20 @@ jobs:
       - run: flutter pub get
       - run: flutter test test/app_bootstrap_test.dart
       - name: Build staging admin web portal
-        run: flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=staging --dart-define=RECAPTCHA_V3_SITE_KEY=${{ secrets.RECAPTCHA_V3_SITE_KEY_STAGING }}
+        env:
+          RECAPTCHA_ENTERPRISE_SITE_KEY: ${{ secrets.RECAPTCHA_ENTERPRISE_SITE_KEY_STAGING }}
+        run: |
+          # The app reads RECAPTCHA_ENTERPRISE_SITE_KEY and otherwise silently falls back to a built-in key that is
+          # not registered for the Staging site, so a missing or wrong secret must stop the build.
+          if ! printf '%s' "$RECAPTCHA_ENTERPRISE_SITE_KEY" | grep -Eq '^6L[A-Za-z0-9_-]{38}$'; then
+            echo "::error::Secret RECAPTCHA_ENTERPRISE_SITE_KEY_STAGING is missing or is not a reCAPTCHA site key. It must hold the reCAPTCHA Enterprise key registered for mindmate-staging.web.app."
+            exit 1
+          fi
+          flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=staging --dart-define=RECAPTCHA_ENTERPRISE_SITE_KEY="$RECAPTCHA_ENTERPRISE_SITE_KEY"
+          if ! grep -q -F -- "$RECAPTCHA_ENTERPRISE_SITE_KEY" build/web/main.dart.js; then
+            echo "::error::The Staging reCAPTCHA Enterprise key was not compiled into the build."
+            exit 1
+          fi
       - name: Verify staging Firebase Hosting service account
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING }}
