@@ -44,6 +44,29 @@ enum InquiryRoutingStatus {
   };
 }
 
+enum InquiryEscalationType {
+  counselorConfirmation,
+  staffReasoned;
+
+  String get storedValue => switch (this) {
+    InquiryEscalationType.counselorConfirmation => 'counselor_confirmation',
+    InquiryEscalationType.staffReasoned => 'staff_reasoned',
+  };
+
+  String get label => switch (this) {
+    InquiryEscalationType.counselorConfirmation =>
+      'Counselor requested administrator review',
+    InquiryEscalationType.staffReasoned => 'Staff escalation',
+  };
+
+  static InquiryEscalationType? fromValue(Object? value) =>
+      switch (value?.toString().trim()) {
+        'counselor_confirmation' => InquiryEscalationType.counselorConfirmation,
+        'staff_reasoned' => InquiryEscalationType.staffReasoned,
+        _ => null,
+      };
+}
+
 /// One bounded batch of the super-administrator backfill for unrouted
 /// inquiries. When [done] is false, pass [nextCursor] to continue.
 class InquiryRoutingBackfillResult {
@@ -116,6 +139,7 @@ class AdminInquiryModel {
     this.monitoringStaffLabels = const {},
     this.ownerId,
     this.escalationStatus,
+    this.escalationType,
     this.escalationReason,
     this.operationalLabel = '',
     this.isOperationalProjection = false,
@@ -159,6 +183,7 @@ class AdminInquiryModel {
   final Map<String, String> monitoringStaffLabels;
   final String? ownerId;
   final String? escalationStatus;
+  final InquiryEscalationType? escalationType;
   final String? escalationReason;
   final String operationalLabel;
   final bool isOperationalProjection;
@@ -192,6 +217,46 @@ class AdminInquiryModel {
 
   String get displayName =>
       (name ?? '').trim().isNotEmpty ? name!.trim() : email;
+
+  AdminInquiryModel copyWith({InquiryStatus? status}) => AdminInquiryModel(
+    id: id,
+    userId: userId,
+    subject: subject,
+    message: message,
+    category: category,
+    email: email,
+    createdAt: createdAt,
+    status: status ?? this.status,
+    name: name,
+    role: role,
+    formType: formType,
+    formData: formData,
+    acknowledgedAt: acknowledgedAt,
+    assignedStaffId: assignedStaffId,
+    collegeId: collegeId,
+    routingStatus: routingStatus,
+    routingReason: routingReason,
+    routingMode: routingMode,
+    routingRevision: routingRevision,
+    assigneeIds: assigneeIds,
+    assigneeLabels: assigneeLabels,
+    monitoringStaffIds: monitoringStaffIds,
+    monitoringStaffLabels: monitoringStaffLabels,
+    ownerId: ownerId,
+    escalationStatus: escalationStatus,
+    escalationType: escalationType,
+    escalationReason: escalationReason,
+    operationalLabel: operationalLabel,
+    isOperationalProjection: isOperationalProjection,
+    firstResponseAt: firstResponseAt,
+    lastResponseAt: lastResponseAt,
+    lastResponseByName: lastResponseByName,
+    lastResponseRole: lastResponseRole,
+    responseCount: responseCount,
+    takeoverByName: takeoverByName,
+    takeoverReason: takeoverReason,
+    isTakenOverFlag: isTakenOverFlag,
+  );
 
   factory AdminInquiryModel.fromJson(Map<String, dynamic> json, {String? id}) {
     final parsedCategory = json['category']?.toString() ?? 'General';
@@ -230,6 +295,9 @@ class AdminInquiryModel {
       ownerId: _optional(json['ownerId']),
       escalationStatus: json['escalation'] is Map
           ? _optional((json['escalation'] as Map)['status'])
+          : null,
+      escalationType: json['escalation'] is Map
+          ? InquiryEscalationType.fromValue((json['escalation'] as Map)['type'])
           : null,
       escalationReason: json['escalation'] is Map
           ? _optional((json['escalation'] as Map)['reason'])
@@ -296,6 +364,7 @@ class AdminInquiryModel {
       monitoringStaffLabels: _stringMap(json['monitoringStaffLabels']),
       ownerId: _optional(json['ownerId']),
       escalationStatus: _optional(json['escalationStatus']),
+      escalationType: null,
       escalationReason: null,
       firstResponseAt: dateTimeFromFirestore(json['firstResponseAt']),
       lastResponseAt: dateTimeFromFirestore(json['lastResponseAt']),

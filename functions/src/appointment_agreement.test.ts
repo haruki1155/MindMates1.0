@@ -16,6 +16,7 @@ test.after(() => {
   else process.env.SUPER_ADMIN_UID = previousSuperAdmin;
 });
 const student = "agreement-student";
+const agreementCollege = "agreement-college";
 function call(uid: string, data: Input): Promise<unknown> {
   const callable = (functions as unknown as Record<string, {run: (r: unknown) => Promise<unknown>}>).changeAppointmentAgreement;
   assert.ok(callable, "two-way agreement callable must exist");
@@ -29,7 +30,9 @@ async function seed(id: string, status = "confirmed") {
   const b = a + 3600000;
   const c = a + 7200000;
   await ensureAuthUser(staff, true);
-  await db.doc(`users/${staff}`).set({accessRole: "admin"});
+  await db.doc(`colleges/${agreementCollege}`).set({name: "Agreement College", code: "AC", active: true});
+  await db.doc(`users/${student}`).set({accessRole: "appUser", verificationStatus: "verified", collegeId: agreementCollege});
+  await db.doc(`users/${staff}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [agreementCollege]});
   await db.doc("pacc_availability/current").set({openDays: [1,2,3,4,5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, blackoutDates: []});
   await db.doc(`appointments/${id}`).set({userId: student, status, scheduledAt: Timestamp.fromMillis(a), scheduledTime: "09:00 AM", scheduleRevision: 0, concern: "PRIVATE CONCERN"});
   await db.doc(`appointment_slots/pacc_${a}`).set({appointmentId: id});
@@ -216,17 +219,20 @@ test("two-way agreement enforces assigned-college eligibility and super-admin ex
   await call(cAssigned, {...base, action: "propose", scheduledAt: b, requestId: `${prefix}_assigned`});
   await call(cStudent, {...base, expectedProposalRevision: 1, action: "accept", requestId: `${prefix}_student_accept`});
 
-  // Student counter-proposes; super-admin requires exceptionReason to override a staffed college,
-  // and keeps exceptionReason out of student-readable history.
+  // Student counter-proposes; administrators are read-only and denied even with exceptionReason,
+  // while the assigned college counselor accepts cleanly.
   await call(cStudent, {appointmentId: apptId, expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 2, action: "propose", scheduledAt: c, requestId: `${prefix}_student_counter`});
   await assert.rejects(
     call(staff, {appointmentId: apptId, expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 3, action: "accept", requestId: `${prefix}_admin_no_reason`}),
-    {code: "failed-precondition"},
+    {code: "permission-denied"},
   );
-  await call(staff, {appointmentId: apptId, expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 3, action: "accept", requestId: `${prefix}_admin_override`, exceptionReason: "Assigned counselor unavailable"});
+  await assert.rejects(
+    call(staff, {appointmentId: apptId, expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 3, action: "accept", requestId: `${prefix}_admin_override`, exceptionReason: "Assigned counselor unavailable"}),
+    {code: "permission-denied"},
+  );
+  await call(cAssigned, {appointmentId: apptId, expectedScheduledAt: b, expectedScheduleRevision: 1, expectedProposalRevision: 3, action: "accept", requestId: `${prefix}_counselor_accept`});
   const history = (await db.collection(`appointments/${apptId}/history`).get()).docs.map((d) => d.data());
-  const overrideEntry = history.find((entry) => entry.approvalMode === "admin_override");
-  assert.ok(overrideEntry);
-  assert.equal(overrideEntry.approvalExceptionReason, undefined);
-  assert.ok(!JSON.stringify(overrideEntry).includes("counselor unavailable"));
+  const acceptedEntry = history.find((entry) => entry.type === "appointment_schedule_agreed" && entry.approvalMode === "college");
+  assert.ok(acceptedEntry);
+  assert.equal(acceptedEntry.approvalExceptionReason, undefined);
 });

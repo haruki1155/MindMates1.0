@@ -2,9 +2,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import '../database/firestore_collections.dart';
@@ -23,6 +23,7 @@ import '../models/student_case_history_model.dart';
 import '../models/pacc_availability_model.dart';
 import 'appointment_repository.dart';
 import 'pacc_availability_repository.dart';
+import '../features/admin/domain/admin_activity_log_presentation.dart';
 import '../features/admin/domain/admin_management_models.dart';
 import '../features/admin/domain/appointment_approvals.dart';
 import '../features/admin/domain/backup_export.dart';
@@ -41,6 +42,7 @@ class AdminAssessmentRecord {
     required this.createdAt,
     this.score,
     this.status,
+    this.profileStatus,
     this.role,
     this.instrumentVersion,
     this.verificationStatus,
@@ -53,6 +55,7 @@ class AdminAssessmentRecord {
   final DateTime createdAt;
   final num? score;
   final String? status;
+  final String? profileStatus;
   final String? role;
   final String? instrumentVersion;
   final String? verificationStatus;
@@ -69,7 +72,12 @@ class AdminAssessmentRecord {
   }
 
   bool get isMainAssessment => !isQuickAssessment;
-  String get displayStatus => status ?? 'Result unavailable';
+  String get displayStatus {
+    final canonical = profileStatus?.trim() ?? '';
+    if (canonical.isNotEmpty) return canonical;
+    final stored = status?.trim() ?? '';
+    return stored.isNotEmpty ? stored : 'Result unavailable';
+  }
 
   factory AdminAssessmentRecord.fromJson(Map<String, dynamic> data) {
     final result = data['result'] is Map
@@ -78,24 +86,29 @@ class AdminAssessmentRecord {
     final instrument = data['instrument'] is Map
         ? Map<String, dynamic>.from(data['instrument'] as Map)
         : const <String, dynamic>{};
+    final profileStatus = _text(result['profileStatus']);
+    final status =
+        profileStatus ??
+        _text(data['overallLevel']) ??
+        _text(data['status']) ??
+        _text(data['wellBeingStatus']) ??
+        _text(data['responsePatternCode']);
     return AdminAssessmentRecord(
       id: data['id']?.toString() ?? '',
       userId: data['userId']?.toString() ?? '',
       type:
-          data['assessmentKind']?.toString() ??
-          data['type']?.toString() ??
+          _text(data['assessmentKind']) ??
+          _text(data['type']) ??
           'Assessment',
       createdAt: _date(data['createdAt']),
       score: data['score'] is num
           ? data['score'] as num
           : num.tryParse('${data['score']}'),
-      status: _text(
-        data['status'] ?? data['overallLevel'] ?? result['profileStatus'],
-      ),
-      role: _text(data['populationRole'] ?? data['role']),
-      instrumentVersion: _text(
-        instrument['version'] ?? data['questionSetVersion'],
-      ),
+      status: status,
+      profileStatus: profileStatus,
+      role: _text(data['populationRole']) ?? _text(data['role']),
+      instrumentVersion:
+          _text(instrument['version']) ?? _text(data['questionSetVersion']),
       verificationStatus: _text(data['verificationStatus']),
       archivedAt: data['archivedAt'] == null ? null : _date(data['archivedAt']),
     );
@@ -440,6 +453,8 @@ class AdminPortalRepository {
     _currentAccessRole = role;
     if (role == AccessRole.admin) {
       _isSuperAdmin = await _confirmSuperAdmin();
+    } else {
+      _isSuperAdmin = false;
     }
     await _tryRecordAudit(
       action: 'STAFF_SIGNED_IN',
@@ -896,7 +911,15 @@ class AdminPortalRepository {
     } catch (_) {
       // Never report "no views" when the access-log query itself failed (for
       // example a missing index); the client-side fallback cannot filter it.
-      if (action == 'STUDENT_PERSONAL_INFO_VIEWED') rethrow;
+      if (const {
+        'STUDENT_PERSONAL_INFO_VIEWED',
+        'COUNSELING_HISTORY_VIEWED',
+        'CASE_REMARKS_VIEWED',
+        'CASE_REMARKS_UPDATED',
+        'CLINICAL_ATTACHMENT_DOWNLOADED',
+      }.contains(action)) {
+        rethrow;
+      }
       // The caller is already an authorized portal administrator. Fall back to
       // the protected Firestore read while a callable/index is propagating.
       final items = await _firestoreService.getDocuments(
@@ -922,6 +945,102 @@ class AdminPortalRepository {
             matchesBefore;
       }).toList();
       return (events: events, hasMore: false);
+    }
+  }
+
+  /// Fetches a paginated, sanitized page of Admin-wide activity logs monitoring
+  /// Administrator, Counselor, and PAACC Staff actions.
+  ///
+  /// Restricted strictly to Super-Administrators on both client and server.
+  Future<({List<AdminAuditEvent> events, bool hasMore, String? nextCursor})>
+  fetchActivityLogPage({
+    ActivityActorRoleFilter roleFilter = ActivityActorRoleFilter.all,
+    String actorId = '',
+    String category = '',
+    String action = '',
+    String search = '',
+    DateTime? after,
+    DateTime? before,
+    String? cursor,
+    int pageSize = 25,
+  }) async {
+    if (!isSuperAdmin) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'permission-denied',
+        message:
+            'Super-administrator access is required to view system activity logs.',
+      );
+    }
+    try {
+      final data = await _callCallable('getAuditLogPage', {
+        if (roleFilter != ActivityActorRoleFilter.all)
+          'actorRole': roleFilter.code,
+        if (actorId.trim().isNotEmpty) 'filterActorId': actorId.trim(),
+        if (category.trim().isNotEmpty) 'category': category.trim(),
+        if (action.trim().isNotEmpty) 'action': action.trim(),
+        if (search.trim().isNotEmpty) 'search': search.trim(),
+        if (after != null) 'afterMillis': after.millisecondsSinceEpoch,
+        if (before != null) 'beforeMillis': before.millisecondsSinceEpoch,
+        'cursor': ?cursor,
+        'pageSize': pageSize,
+      });
+      final payload = data is Map
+          ? Map<String, dynamic>.from(data)
+          : const <String, dynamic>{};
+      final raw = payload['events'];
+      final events = raw is List
+          ? raw
+                .whereType<Map>()
+                .map(
+                  (item) => sanitizeAuditEventForDisplay(
+                    AdminAuditEvent.fromJson(Map<String, dynamic>.from(item)),
+                  ),
+                )
+                .toList()
+          : <AdminAuditEvent>[];
+      final nextCursor = payload['nextCursor'] as String?;
+      return (
+        events: events,
+        hasMore: nextCursor != null,
+        nextCursor: nextCursor,
+      );
+    } catch (error) {
+      final text = '$error'.toLowerCase();
+      if (text.contains('permission-denied') ||
+          text.contains('permission_denied') ||
+          text.contains('unauthenticated') ||
+          text.contains('unauthorized')) {
+        rethrow;
+      }
+      // Fall back to the protected Super-Admin Firestore read while the
+      // updated getAuditLogPage callable or index is propagating on staging.
+      final scanLimit = min(max(pageSize * 6, 150), 400);
+      final items = await _firestoreService.getDocuments(
+        FirestoreCollections.adminAuditLogs,
+        orderBy: 'createdAt',
+        descending: true,
+        limit: scanLimit,
+      );
+      final filtered = filterActivityLogEvents(
+        items.map(AdminAuditEvent.fromJson),
+        roleFilter: roleFilter,
+        actorIdFilter: actorId,
+        categoryFilter: category,
+        actionFilter: action,
+        searchQuery: search,
+        after: after,
+        before: before,
+      );
+      final offset = int.tryParse(cursor ?? '') ?? 0;
+      final page = filtered.skip(offset).take(pageSize).toList(growable: false);
+      final nextOffset = offset + page.length;
+      final hasMore = filtered.length > nextOffset;
+      return (
+        events: page,
+        hasMore: hasMore,
+        nextCursor: hasMore ? '$nextOffset' : null,
+      );
     }
   }
 
@@ -1456,19 +1575,17 @@ class AdminPortalRepository {
     if (!currentAccessRole.canAccessClinicalData) {
       throw StateError('Counselor or administrator access is required.');
     }
-    final result = await FirebaseFunctions.instance
-        .httpsCallable('getReportAnalytics')
-        .call<Map<String, dynamic>>({
-          'userCategory': userCategory,
-          'appointmentDepartment': appointmentDepartment,
-          'program': program,
-          'schoolYear': ?schoolYear,
-          'periodLabel': ?periodLabel,
-          'startDate': ?startDate?.toUtc().toIso8601String(),
-          'endDate': ?endDate?.toUtc().toIso8601String(),
-          'emotionalSource': emotionalSource,
-        });
-    final raw = result.data['report'];
+    final data = await _callCallable('getReportAnalytics', {
+      'userCategory': userCategory,
+      'appointmentDepartment': appointmentDepartment,
+      'program': program,
+      'schoolYear': ?schoolYear,
+      'periodLabel': ?periodLabel,
+      'startDate': ?startDate?.toUtc().toIso8601String(),
+      'endDate': ?endDate?.toUtc().toIso8601String(),
+      'emotionalSource': emotionalSource,
+    });
+    final raw = data is Map ? data['report'] : null;
     if (raw is! Map) {
       throw StateError('The report service returned an invalid response.');
     }
@@ -1885,17 +2002,52 @@ class AdminPortalRepository {
     return data == null ? null : SessionEvidenceRecord.fromJson(data);
   }
 
-  /// No public Storage download token is produced. The authenticated SDK
-  /// checks Storage rules for every file read.
-  Future<Uint8List> getClinicalEvidenceBytes(String path) async {
-    if (!path.startsWith('counseling_session_files/')) {
+  static final RegExp _clinicalEvidencePathPattern = RegExp(
+    r'^counseling_session_files/([A-Za-z0-9_-]{1,120})/([A-Za-z0-9_-]{1,120})/([a-f0-9]{32}\.(jpg|jpeg|png|pdf|doc|docx))$',
+  );
+
+  /// Downloads private session evidence through the server-authorized callable.
+  /// No public Storage download token or signed URL is produced.
+  Future<Uint8List> getClinicalEvidenceBytes(
+    String path, {
+    String? appointmentId,
+  }) async {
+    if (path.contains('..') ||
+        path.contains('\\') ||
+        path.contains('%') ||
+        RegExp(r'[\x00-\x1f]').hasMatch(path)) {
       throw const FormatException('Not a clinical attachment path.');
     }
-    final data = await FirebaseStorage.instance
-        .ref(path)
-        .getData(maxSessionEvidenceFileBytes);
-    if (data == null) throw StateError('Attachment unavailable.');
-    return data;
+    final match = _clinicalEvidencePathPattern.firstMatch(path);
+    if (match == null) {
+      throw const FormatException('Not a clinical attachment path.');
+    }
+    final pathAppointmentId = match.group(1)!;
+    final resolvedAppointmentId = appointmentId == null
+        ? pathAppointmentId
+        : appointmentId.trim();
+    if (resolvedAppointmentId.isEmpty ||
+        resolvedAppointmentId != pathAppointmentId) {
+      throw const FormatException(
+        'Attachment does not belong to this appointment.',
+      );
+    }
+    final raw = await _callCallable('downloadClinicalSessionEvidence', {
+      'appointmentId': resolvedAppointmentId,
+      'path': path,
+    });
+    if (raw is! Map) {
+      throw StateError('Attachment unavailable.');
+    }
+    final encoded = raw['dataBase64'];
+    if (encoded is! String || encoded.trim().isEmpty) {
+      throw StateError('Attachment unavailable.');
+    }
+    final bytes = base64Decode(encoded.trim());
+    if (bytes.isEmpty || bytes.length > maxSessionEvidenceFileBytes) {
+      throw StateError('Attachment unavailable.');
+    }
+    return bytes;
   }
 
   /// Uploads are immutable and bound to the currently authenticated clinician.
@@ -1927,19 +2079,22 @@ class AdminPortalRepository {
           file.size > maxSessionEvidenceFileBytes) {
         throw const FormatException('Unsupported file or file size.');
       }
-      final path = buildSessionEvidencePath(appointmentId, uid, file.name);
-      await FirebaseStorage.instance
-          .ref(path)
-          .putData(
-            file.bytes,
-            SettableMetadata(
-              contentType: file.contentType,
-              customMetadata: {
-                'uploadedBy': uid,
-                'appointmentId': appointmentId,
-              },
-            ),
-          );
+      final result = await _callCallable('uploadClinicalSessionEvidence', {
+        'appointmentId': appointmentId,
+        'name': file.name,
+        'contentType': file.contentType,
+        'size': file.size,
+        'dataBase64': base64Encode(file.bytes),
+      });
+      final path = result is Map ? result['path'] : null;
+      final match = path is String
+          ? _clinicalEvidencePathPattern.firstMatch(path)
+          : null;
+      if (path is! String ||
+          match?.group(1) != appointmentId ||
+          match?.group(2) != uid) {
+        throw StateError('Attachment upload could not be verified.');
+      }
       attachments.add(
         SessionEvidenceAttachment(
           path: path,
@@ -2190,6 +2345,14 @@ class AdminPortalRepository {
     'expectedRevision': ?expectedRevision,
   });
 
+  /// Marks an acknowledged (in-progress) inquiry as resolved server-side.
+  /// Pass [expectedRevision] to reject the change if someone acted first.
+  Future<void> resolveInquiry(String id, {int? expectedRevision}) =>
+      _callCallable('resolveInquiry', {
+        'inquiryId': id,
+        'expectedRevision': ?expectedRevision,
+      });
+
   /// Assignee or super-administrator posts an authored reply; returns the
   /// new revision. [requestId] makes retries return the original reply.
   Future<int> replyToInquiry(
@@ -2261,13 +2424,51 @@ class AdminPortalRepository {
   /// Assignee asks the super-administrator to review the inquiry.
   Future<void> escalateInquiry(
     String id, {
-    required String reason,
+    InquiryEscalationType? escalationType,
+    String? reason,
     int? expectedRevision,
-  }) => _callCallable('escalateInquiry', {
-    'inquiryId': id,
-    'reason': reason,
-    'expectedRevision': ?expectedRevision,
-  });
+  }) {
+    final trimmedReason = reason?.trim();
+    if (trimmedReason != null && trimmedReason.isNotEmpty) {
+      if (trimmedReason.length < 3 || trimmedReason.length > 500) {
+        throw ArgumentError.value(
+          reason,
+          'reason',
+          'Reason must be 3-500 characters.',
+        );
+      }
+      if (escalationType == InquiryEscalationType.counselorConfirmation) {
+        throw ArgumentError.value(
+          escalationType,
+          'escalationType',
+          'counselorConfirmation cannot include a free-text reason.',
+        );
+      }
+    } else if (reason != null) {
+      throw ArgumentError.value(
+        reason,
+        'reason',
+        'Reason must be 3-500 characters.',
+      );
+    } else if (escalationType != InquiryEscalationType.counselorConfirmation) {
+      throw escalationType == InquiryEscalationType.staffReasoned
+          ? ArgumentError.value(
+              reason,
+              'reason',
+              'Reason must be 3-500 characters.',
+            )
+          : ArgumentError(
+              'Either escalationType or a 3-500 character reason is required.',
+            );
+    }
+    return _callCallable('escalateInquiry', {
+      'inquiryId': id,
+      if (escalationType != null) 'escalationType': escalationType.storedValue,
+      if (trimmedReason != null && trimmedReason.isNotEmpty)
+        'reason': trimmedReason,
+      'expectedRevision': ?expectedRevision,
+    });
+  }
 
   /// Super-administrator replaces the clinical counselors (and optionally
   /// operational monitoring staff); returns the new revision.

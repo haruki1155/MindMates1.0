@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../repositories/admin_portal_repository.dart';
-import '../theme/admin_theme.dart';
+import 'admin_status_presentation.dart';
 
 enum AssessmentView { quick, full }
 
@@ -14,80 +14,12 @@ class AssessmentStatusStyle {
   final Color background;
 
   static AssessmentStatusStyle fromStored(String? raw) {
-    final value = (raw ?? '').trim();
-    final key = value.toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
-    switch (key) {
-      case 'low':
-        return const AssessmentStatusStyle(
-          'Low',
-          Color(0xFF226B4D),
-          Color(0xFFE1F3E8),
-        );
-      case 'supported':
-      case 'generallysupported':
-      case 'wellbeingsupported':
-      case 'stable':
-        return const AssessmentStatusStyle(
-          'Supported',
-          Color(0xFF226B4D),
-          Color(0xFFE1F3E8),
-        );
-      case 'mostlysupported':
-      case 'generallysteady':
-        return const AssessmentStatusStyle(
-          'Mostly supported',
-          Color(0xFF245D86),
-          Color(0xFFE2EFF9),
-        );
-      case 'moderate':
-        return const AssessmentStatusStyle(
-          'Moderate',
-          Color(0xFF815314),
-          Color(0xFFFFEED1),
-        );
-      case 'somestrain':
-      case 'someareasneedattention':
-      case 'watchful':
-        return const AssessmentStatusStyle(
-          'Some areas need attention',
-          Color(0xFF815314),
-          Color(0xFFFFEED1),
-        );
-      case 'high':
-        return const AssessmentStatusStyle(
-          'High',
-          Color(0xFF9A3B29),
-          Color(0xFFFFE7DE),
-        );
-      case 'veryhigh':
-        return const AssessmentStatusStyle(
-          'Very high',
-          Color(0xFF9A3B29),
-          Color(0xFFFFE7DE),
-        );
-      case 'supportmayhelp':
-      case 'elevated':
-      case 'highsupport':
-        return const AssessmentStatusStyle(
-          'Support may help',
-          Color(0xFF9A3B29),
-          Color(0xFFFFE7DE),
-        );
-      case 'insufficientresponses':
-      case 'resultunavailable':
-      case '':
-        return const AssessmentStatusStyle(
-          'Result unavailable',
-          AdminColors.muted,
-          AdminColors.surfaceMuted,
-        );
-      default:
-        return AssessmentStatusStyle(
-          value.replaceAll('_', ' '),
-          AdminColors.muted,
-          AdminColors.surfaceMuted,
-        );
-    }
+    final presentation = resolveAdminStatus(AdminStatusDomain.assessment, raw);
+    return AssessmentStatusStyle(
+      presentation.label,
+      presentation.foregroundColor,
+      presentation.backgroundColor,
+    );
   }
 }
 

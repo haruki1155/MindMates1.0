@@ -67,17 +67,18 @@ test("the assigned counselor approves college-scoped appointments; others are re
   }
 });
 
-test("only the configured super-admin handles exceptions, and overrides need a written reason", () => {
-  const admin = {role: "admin", isSuperAdmin: true, assignedCollegeIds: []};
-  assert.deepEqual(decideApprovalAuthority({actor: admin, scope: exception}), {mode: "admin_triage", collegeId: "", scopeReason: "missing_college", exceptionReason: null});
-  assert.throws(() => decideApprovalAuthority({actor: admin, scope: college}), code("override_reason_required"));
-  assert.throws(() => decideApprovalAuthority({actor: admin, scope: college, exceptionReason: "  no "}), code("override_reason_required"));
-  assert.deepEqual(
-    decideApprovalAuthority({actor: admin, scope: college, exceptionReason: "  Counselor on leave this week  "}),
-    {mode: "admin_override", collegeId: "cite", scopeReason: null, exceptionReason: "Counselor on leave this week"},
+test("administrators are read-only for appointments and cannot approve or override", () => {
+  const admin = {role: "admin", isSuperAdmin: true, assignedCollegeIds: ["cite"]};
+  assert.throws(() => decideApprovalAuthority({actor: admin, scope: exception}), code("admin_read_only"));
+  assert.throws(() => decideApprovalAuthority({actor: admin, scope: college}), code("admin_read_only"));
+  assert.throws(
+    () => decideApprovalAuthority({actor: admin, scope: college, exceptionReason: "Counselor on leave this week"}),
+    code("admin_read_only"),
   );
-  assert.throws(() => decideApprovalAuthority({actor: admin, scope: college, exceptionReason: "x".repeat(501)}), code("override_reason_required"));
-  const otherAdmin = {role: "admin", isSuperAdmin: false, assignedCollegeIds: []};
-  assert.throws(() => decideApprovalAuthority({actor: otherAdmin, scope: exception}), code("not_super_admin"));
-  assert.throws(() => decideApprovalAuthority({actor: otherAdmin, scope: college, exceptionReason: "Counselor on leave"}), code("not_super_admin"));
+  const otherAdmin = {role: "admin", isSuperAdmin: false, assignedCollegeIds: ["cite"]};
+  assert.throws(() => decideApprovalAuthority({actor: otherAdmin, scope: exception}), code("admin_read_only"));
+  assert.throws(
+    () => decideApprovalAuthority({actor: otherAdmin, scope: college, exceptionReason: "Counselor on leave"}),
+    code("admin_read_only"),
+  );
 });

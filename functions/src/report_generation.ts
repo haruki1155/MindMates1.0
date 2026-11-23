@@ -59,6 +59,8 @@ export interface ReportAnalytics {
   filters: AppliedReportFilters;
   population: {
     schoolYear: string;
+    exists?: boolean;
+    status?: string;
     departments: string[];
     populations: Record<string, number>;
     configured: boolean;
@@ -253,7 +255,7 @@ function userCollegeInfo(
   const resolved = collegeId ? text(collegeNameById.get(collegeId)) : "";
   const department = text(data.department);
   const college = text(data.college);
-  const label = department || college || resolved || "Not specified";
+  const label = resolved || department || college || "Not specified";
   const keys = new Set<string>();
   for (const cand of [department, college, resolved, collegeId]) {
     if (cand) keys.add(cand.toLocaleLowerCase("en-US"));
@@ -279,6 +281,15 @@ function userProgramInfo(
   return {label, keys};
 }
 
+export function isReportableAppUser(data: RecordData): boolean {
+  const legacyRole = text(data.role).toLowerCase().replace(/[\s_-]+/g, "");
+  if (["admin", "superadmin", "counselor", "portalstaff"].includes(legacyRole)) {
+    return false;
+  }
+  const accessRole = text(data.accessRole) || "appUser";
+  return accessRole === "appUser" && data.staffAccountStatus == null;
+}
+
 export function buildReportAnalytics(
   users: Array<{id: string; data: RecordData}>,
   appointments: RecordData[],
@@ -296,6 +307,8 @@ export function buildReportAnalytics(
     schoolYear: string;
     startDate?: string;
     endDate?: string;
+    exists?: boolean;
+    status?: string;
     departments: string[];
     populations: Record<string, number>;
     configured: boolean;
@@ -328,12 +341,7 @@ export function buildReportAnalytics(
     .toLocaleLowerCase("en-US");
   const emotionalSource: EmotionalActivitySourceScope = filters.emotionalSource ?? "all";
 
-  const appUsers = users.filter(({data}) => {
-    const legacyRole = text(data.role).toLowerCase();
-    const accessRole = text(data.accessRole) ||
-      (["admin", "counselor"].includes(legacyRole) ? legacyRole : "appUser");
-    return accessRole === "appUser" && data.staffAccountStatus == null;
-  });
+  const appUsers = users.filter(({data}) => isReportableAppUser(data));
   const appUserIds = new Set(appUsers.map(({id}) => id));
   const userById = new Map(appUsers.map((user) => [user.id, user.data]));
 
@@ -437,7 +445,7 @@ export function buildReportAnalytics(
     const directId = text(appointment.collegeId);
     const resolvedId = directId ? text(collegeNameById.get(directId)) : "";
     const profileInfo = profile ? userCollegeInfo(profile, collegeNameById) : null;
-    const label = directDept || resolvedId || profileInfo?.label || "Not specified";
+    const label = resolvedId || directDept || profileInfo?.label || "Not specified";
     const keys = new Set<string>(profileInfo?.keys ?? []);
     for (const cand of [directDept, resolvedId, directId]) {
       if (cand) keys.add(cand.toLocaleLowerCase("en-US"));
@@ -461,18 +469,13 @@ export function buildReportAnalytics(
     return {label, keys};
   };
 
-  const departmentGroups = percentageGroups(
-    categoryAndYearAppointments.map((a) => appointmentDepartment(a).label),
-  );
-  const departmentAppointmentRates = departmentGroups.map((item) => ({
-    ...item,
-    percentage: population.configured && population.populations[item.label] != null ?
-      Math.round((categoryAndYearAppointments.filter((a) => appointmentDepartment(a).label === item.label).length /
-        population.populations[item.label]) * 1000) / 10 : 0,
-  }));
-  const selectedDepartment = departmentGroups.find(
-    (department) => department.key === requestedDepartment,
-  );
+  const populationByKey = new Map<string, number>();
+  for (const [name, count] of Object.entries(population.populations)) {
+    const normalized = name.toLocaleLowerCase("en-US");
+    if (typeof count === "number" && count > 0) {
+      populationByKey.set(normalized, count);
+    }
+  }
   const includedAppointments = categoryAndYearAppointments.filter((appointment) => {
     if (requestedDepartment !== "all" && !appointmentDepartment(appointment).keys.has(requestedDepartment)) {
       return false;
@@ -482,10 +485,50 @@ export function buildReportAnalytics(
     }
     return true;
   });
-  const includedDepartmentRates = requestedDepartment === "all" ?
-    departmentAppointmentRates : departmentAppointmentRates.filter(
-      (department) => department.key === requestedDepartment,
-    );
+  const departmentGroups = percentageGroups(
+    includedAppointments.map((a) => appointmentDepartment(a).label),
+  );
+  const departmentDenominator = (item: PercentageItem): number => {
+    if (!population.configured) return 0;
+    const direct = populationByKey.get(item.key);
+    if (direct != null) return direct;
+    for (const appt of includedAppointments) {
+      const info = appointmentDepartment(appt);
+      if (info.label.toLocaleLowerCase("en-US") === item.key) {
+        for (const k of info.keys) {
+          const hit = populationByKey.get(k);
+          if (hit != null) return hit;
+        }
+      }
+    }
+    return 0;
+  };
+  const departmentAppointmentRates = !population.configured
+    ? []
+    : departmentGroups.map((item) => {
+        const denom = departmentDenominator(item);
+        const count = includedAppointments.filter(
+          (a) => appointmentDepartment(a).label.toLocaleLowerCase("en-US") === item.key,
+        ).length;
+        return {
+          ...item,
+          percentage: denom > 0 ? Math.round((count / denom) * 1000) / 10 : 0,
+        };
+      });
+  const resolvedRequestedCollegeName = [...collegeNameById.entries()]
+    .find(
+      ([id, name]) =>
+        id.toLocaleLowerCase("en-US") === requestedDepartment ||
+        name.toLocaleLowerCase("en-US") === requestedDepartment,
+    )?.[1];
+  const selectedDepartment =
+    departmentGroups.find(
+      (department) =>
+        department.key === requestedDepartment ||
+        (resolvedRequestedCollegeName != null &&
+          department.key === resolvedRequestedCollegeName.toLocaleLowerCase("en-US")),
+    ) ?? (requestedDepartment !== "all" ? departmentGroups[0] : undefined);
+  const includedDepartmentRates = departmentAppointmentRates;
   const valuesFor = (field: "department" | "course" | "yearLevel"): string[] =>
     includedAppointments.map((appointment) => {
       if (field === "department") return appointmentDepartment(appointment).label;
@@ -502,7 +545,11 @@ export function buildReportAnalytics(
     ? population.totalPopulation
     : matchedPopulationKey != null
     ? population.populations[matchedPopulationKey] ?? 0
-    : population.populations[selectedDepartment?.label ?? ""] ?? 0;
+    : (resolvedRequestedCollegeName
+        ? populationByKey.get(resolvedRequestedCollegeName.toLocaleLowerCase("en-US"))
+        : undefined) ??
+      populationByKey.get((selectedDepartment?.label ?? "").toLocaleLowerCase("en-US")) ??
+      0;
 
   const studentKeys = new Set(includedAppointments.map((appointment) =>
     text(appointment.studentId) || text(appointment.userId) || text(appointment.fullName),
@@ -551,7 +598,11 @@ export function buildReportAnalytics(
       ? [...new Map(
           Object.values(programOptionsByCollege).flat().map((opt) => [opt.key, opt]),
         ).values()].sort((a, b) => a.label.localeCompare(b.label))
-      : programOptionsByCollege[requestedDepartment] ?? [];
+      : programOptionsByCollege[requestedDepartment] ??
+        (resolvedRequestedCollegeName
+          ? programOptionsByCollege[resolvedRequestedCollegeName.toLocaleLowerCase("en-US")]
+          : undefined) ??
+        [];
 
   const emotionalActivity = {
     ...buildEmotionalActivityReport({
@@ -714,8 +765,8 @@ export const getReportAnalytics = onCall(async (request) => {
   }
   const emotionalSource = emotionalSourceRaw as EmotionalActivitySourceScope;
 
-  const schoolYear = text(request.data?.schoolYear) || defaultSchoolYear();
-  if (!/^\d{4}-\d{4}$/.test(schoolYear)) {
+  const requestedSchoolYear = text(request.data?.schoolYear);
+  if (requestedSchoolYear && !/^\d{4}-\d{4}$/.test(requestedSchoolYear)) {
     throw new HttpsError("invalid-argument", "Use a school year such as 2026-2027.");
   }
 
@@ -728,21 +779,25 @@ export const getReportAnalytics = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "The report date range is invalid.");
   }
 
+  const years = await listAcademicYears({includeVoided: false});
+  const schoolYear = requestedSchoolYear ||
+    years.find((y) => y.status === "current")?.schoolYear ||
+    years.find((y) => y.status === "closed")?.schoolYear ||
+    defaultSchoolYear();
+
   const [
     usersSnapshot,
     appointmentsSnapshot,
     population,
-    years,
     moodEntriesSnapshot,
     moodsSnapshot,
     assessmentsSnapshot,
     collegesSnapshot,
     coursesSnapshot,
   ] = await Promise.all([
-    db.collection("users").where("accessRole", "==", "appUser").get(),
+    db.collection("users").get(),
     db.collection("appointments").get(),
     readPopulationConfig(schoolYear),
-    listAcademicYears({includeVoided: false}),
     db.collection("moodEntries").get(),
     db.collection("moods").get(),
     db.collection("assessments").get(),
@@ -803,8 +858,14 @@ export const getReportAnalytics = onCall(async (request) => {
   const courseNameById = new Map<string, string>();
   const courseCollegeKeysByProgram = new Map<string, Set<string>>();
   const programsByCollegeMap = new Map<string, Map<string, string>>();
+  const allowedProgramKeysByCollege = new Map<string, Set<string>>();
 
-  const addProgramToCollege = (collegeLabel: string, progLabel: string, keys: string[] = []) => {
+  const addProgramToCollege = (
+    collegeLabel: string,
+    progLabel: string,
+    keys: string[] = [],
+    collegeKeys: string[] = [],
+  ) => {
     if (!collegeLabel || !progLabel) return;
     const cKey = collegeLabel.toLocaleLowerCase("en-US");
     const pKey = progLabel.toLocaleLowerCase("en-US");
@@ -815,15 +876,39 @@ export const getReportAnalytics = onCall(async (request) => {
     }
     if (!progMap.has(pKey)) progMap.set(pKey, progLabel);
 
-    for (const k of [pKey, ...keys.map((x) => x.toLocaleLowerCase("en-US")).filter(Boolean)]) {
+    const normalizedCollegeKeys = new Set<string>([
+      cKey,
+      ...collegeKeys.map((x) => x.toLocaleLowerCase("en-US")).filter(Boolean),
+    ]);
+    const colId = [...collegeNameById.entries()]
+      .find(([, n]) => n.toLocaleLowerCase("en-US") === cKey)?.[0];
+    if (colId) {
+      normalizedCollegeKeys.add(colId.toLocaleLowerCase("en-US"));
+      const code = collegeCodeById.get(colId);
+      if (code) normalizedCollegeKeys.add(code.toLocaleLowerCase("en-US"));
+    }
+
+    const normalizedProgKeys = [
+      pKey,
+      ...keys.map((x) => x.toLocaleLowerCase("en-US")).filter(Boolean),
+    ];
+
+    for (const ck of normalizedCollegeKeys) {
+      let allowedSet = allowedProgramKeysByCollege.get(ck);
+      if (!allowedSet) {
+        allowedSet = new Set<string>();
+        allowedProgramKeysByCollege.set(ck, allowedSet);
+      }
+      for (const pk of normalizedProgKeys) allowedSet.add(pk);
+    }
+
+    for (const k of normalizedProgKeys) {
       let colSet = courseCollegeKeysByProgram.get(k);
       if (!colSet) {
         colSet = new Set<string>();
         courseCollegeKeysByProgram.set(k, colSet);
       }
-      colSet.add(cKey);
-      const colId = [...collegeNameById.entries()].find(([, n]) => n.toLocaleLowerCase("en-US") === cKey)?.[0];
-      if (colId) colSet.add(colId.toLocaleLowerCase("en-US"));
+      for (const ck of normalizedCollegeKeys) colSet.add(ck);
     }
   };
 
@@ -836,14 +921,17 @@ export const getReportAnalytics = onCall(async (request) => {
     if (cname) courseNameById.set(doc.id, cname);
     const collegeLabel = collegeNameById.get(collegeId) || collegeId;
     if (collegeLabel && cname) {
-      addProgramToCollege(collegeLabel, cname, [doc.id, ccode]);
+      const collegeCode = collegeId ? (collegeCodeById.get(collegeId) ?? "") : "";
+      addProgramToCollege(collegeLabel, cname, [doc.id, ccode], [collegeId, collegeCode]);
     }
   }
 
-  const allUsers = usersSnapshot.docs.map((document) => ({
-    id: document.id,
-    data: document.data() as RecordData,
-  }));
+  const allUsers = usersSnapshot.docs
+    .map((document) => ({
+      id: document.id,
+      data: document.data() as RecordData,
+    }))
+    .filter(({data}) => isReportableAppUser(data));
   const userMatchesAllowedColleges = (data: RecordData): boolean => {
     if (!restrictByCollege) return true;
     const popRole = normalizedPopulationRole(data);
@@ -878,17 +966,25 @@ export const getReportAnalytics = onCall(async (request) => {
 
   // Enrich college -> programs map from authorized user/appointment records (fallback when catalog is sparse).
   for (const {data} of scopedUsers) {
+    const colId = text(data.collegeId);
+    const colCode = colId ? (collegeCodeById.get(colId) ?? "") : "";
     const colLabel = userCollegeInfo(data, collegeNameById).label;
+    const resolvedColLabel = colLabel !== "Not specified" ? colLabel : colId;
     const progLabel = userProgramInfo(data, courseNameById).label;
-    if (colLabel !== "Not specified" && progLabel !== "Not specified") {
-      addProgramToCollege(colLabel, progLabel);
+    if (resolvedColLabel && resolvedColLabel !== "Not specified" && progLabel !== "Not specified") {
+      addProgramToCollege(resolvedColLabel, progLabel, [text(data.courseId)], [colId, colCode]);
     }
   }
   for (const appt of scopedAppointments) {
-    const colLabel = text(appt.department) || text(appt.college);
+    const colId = text(appt.collegeId);
+    const colCode = colId ? (collegeCodeById.get(colId) ?? "") : "";
+    const colLabel = (colId ? text(collegeNameById.get(colId)) : "") ||
+      text(appt.department) ||
+      text(appt.college) ||
+      colId;
     const progLabel = text(appt.course) || text(appt.program);
     if (colLabel && progLabel) {
-      addProgramToCollege(colLabel, progLabel);
+      addProgramToCollege(colLabel, progLabel, [text(appt.courseId)], [colId, colCode]);
     }
   }
 
@@ -910,7 +1006,7 @@ export const getReportAnalytics = onCall(async (request) => {
       }
     }
     if (appointmentDepartment !== "all") {
-      const allowedPrograms = programsByCollegeMap.get(appointmentDepartment);
+      const allowedPrograms = allowedProgramKeysByCollege.get(appointmentDepartment);
       if (knownCollegesForProgram && !knownCollegesForProgram.has(appointmentDepartment)) {
         throw new HttpsError(
           "invalid-argument",

@@ -32,11 +32,14 @@ test("student proposals retain the slot and agreement safely replays", async () 
   const request = {auth: {uid}, data: {appointmentId: id, expectedScheduledAt: oldAt, expectedScheduleRevision: 0, scheduledAt: newAt, requestId: "request_123456"}};
   const baseline = (functions as Record<string, unknown>).initializeAppointmentScheduleRevision as {run: (r: unknown) => Promise<unknown>};
   const staff = "schedule-test-staff";
+  const college = "schedule-test-college";
   const previousSuperAdmin = process.env.SUPER_ADMIN_UID;
-  process.env.SUPER_ADMIN_UID = staff; // triage path: student has no verified college
+  process.env.SUPER_ADMIN_UID = staff;
   try {
   await ensureAuthUser(staff, true);
-  await db.collection("users").doc(staff).set({accessRole: "admin", name: "Staff"});
+  await db.doc(`colleges/${college}`).set({name: "Schedule College", code: "SC", active: true});
+  await db.doc(`users/${uid}`).set({accessRole: "appUser", verificationStatus: "verified", collegeId: college});
+  await db.collection("users").doc(staff).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [college], name: "Staff"});
   assert.ok(baseline, "legacy revision requires explicit initialization");
   const baselineRequest = {auth: {uid: staff}, data: {appointmentId: id, expectedScheduledAt: oldAt, expectedStatus: "confirmed"}};
   await lock.delete();
@@ -110,8 +113,9 @@ test("legacy initialization races fail closed and never reset a revision", async
   const id = "legacy-race-appointment";
   const uid = "legacy-race-student";
   const staff = "legacy-race-staff";
+  const college = "legacy-race-college";
   const previousSuperAdmin = process.env.SUPER_ADMIN_UID;
-  process.env.SUPER_ADMIN_UID = staff; // triage path: student has no verified college
+  process.env.SUPER_ADMIN_UID = staff;
   try {
   const day = new Date(Date.now() + 35 * 86400000);
   while ([0, 6].includes(day.getUTCDay())) day.setUTCDate(day.getUTCDate() + 1);
@@ -120,7 +124,9 @@ test("legacy initialization races fail closed and never reset a revision", async
   const slot = db.doc(`appointment_slots/pacc_${at}`);
   const lock = db.doc(`appointment_user_locks/${uid}`);
   await ensureAuthUser(staff, true);
-  await db.doc(`users/${staff}`).set({accessRole: "admin"});
+  await db.doc(`colleges/${college}`).set({name: "Legacy College", code: "LC", active: true});
+  await db.doc(`users/${uid}`).set({accessRole: "appUser", verificationStatus: "verified", collegeId: college});
+  await db.doc(`users/${staff}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [college]});
   await ref.set({userId: uid, status: "confirmed", scheduledAt: Timestamp.fromMillis(at), concern: "history preserved"});
   await ref.collection("history").doc("historical").set({action: "rescheduled"});
   await slot.set({appointmentId: id});

@@ -114,7 +114,9 @@ class _CounselorAssignedCollegesPageState
 
             final entries =
                 assignedIds
-                    .map((id) => _AssignedCollegeEntry(id: id, college: byId[id]))
+                    .map(
+                      (id) => _AssignedCollegeEntry(id: id, college: byId[id]),
+                    )
                     .toList()
                   ..sort((a, b) => a.sortLabel.compareTo(b.sortLabel));
 
@@ -265,17 +267,15 @@ class _AssignedCollegeCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
-              if (college != null)
+              if (college != null && college.code.isNotEmpty)
                 Text(
-                  college.code.isEmpty
-                      ? 'College ID: ${college.id}'
-                      : 'Code ${college.code} · College ID: ${college.id}',
+                  'Code ${college.code}',
                   style: const TextStyle(color: AdminColors.muted),
                 )
-              else
-                Text(
-                  'Catalog entry not found (ID: ${entry.id}). Contact your administrator to verify this assignment.',
-                  style: const TextStyle(color: AdminColors.muted),
+              else if (college == null)
+                const Text(
+                  'Catalog entry not found. Contact your administrator to verify this assignment.',
+                  style: TextStyle(color: AdminColors.muted),
                 ),
               if (college != null && !college.active) ...[
                 const SizedBox(height: 4),

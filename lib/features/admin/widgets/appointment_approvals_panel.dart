@@ -220,7 +220,8 @@ class _AppointmentApprovalsPanelState extends State<AppointmentApprovalsPanel> {
   void _mergePage(AppointmentApprovalsPage page) {
     final existing = {for (final item in _items) item.appointmentId};
     for (final item in page.items) {
-      if (item.appointmentId.isNotEmpty && !existing.contains(item.appointmentId)) {
+      if (item.appointmentId.isNotEmpty &&
+          !existing.contains(item.appointmentId)) {
         _items.add(item);
         existing.add(item.appointmentId);
       }
@@ -269,7 +270,8 @@ class _AppointmentApprovalsPanelState extends State<AppointmentApprovalsPanel> {
       if (!mounted || epoch != _requestEpoch) return;
       setState(() => _openingId = null);
       final denied =
-          error is FirebaseFunctionsException && error.code == 'permission-denied';
+          error is FirebaseFunctionsException &&
+          error.code == 'permission-denied';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -431,7 +433,8 @@ class _ApprovalRow extends StatelessWidget {
       if (when != null)
         '${when.year}-${when.month.toString().padLeft(2, '0')}-${when.day.toString().padLeft(2, '0')}',
       if (item.pendingStudentProposal) 'Student proposed a new time',
-      if (item.collegeId.isNotEmpty) 'College ${item.collegeId}',
+      if ((appointment?.department ?? '').trim().isNotEmpty)
+        appointment!.department!,
       if (showReason) item.reasonLabel,
     ].join(' · ');
     return ListTile(

@@ -263,10 +263,12 @@ test("storage.rules static check enforces <= 2 distinct Firestore docs per autho
     rules.set(match[1].trim(), match[2].trim());
   }
 
+  assert.equal(rules.get("get"), "false");
+  assert.equal(rules.get("create"), "false");
   assert.equal(rules.get("list"), "false");
   assert.equal(rules.get("update"), "false");
 
-  for (const op of ["get", "create", "delete"]) {
+  for (const op of ["delete"]) {
     const expr = rules.get(op);
     assert.ok(expr, `expected allow ${op} rule`);
     const {branches, allDocs} = collectFirestoreDocsForRule(expr, functions);
@@ -292,18 +294,24 @@ test("storage.rules static check enforces <= 2 distinct Firestore docs per autho
   }
 });
 
-test("approved counselor can upload, view, and delete valid clinical attachments while session is confirmed", async () => {
+async function seedClinicalObject() {
+  await env.withSecurityRulesDisabled(async (context) => {
+    await uploadBytes(ref(context.storage(), path), payload, meta);
+  });
+}
+
+test("assigned counselor can delete drafts and must use the callables to upload or download", async () => {
   const clinician = storageFor("counselor");
-  await assertSucceeds(uploadBytes(ref(clinician, path), payload, meta));
-  await assertSucceeds(getMetadata(ref(clinician, path)));
-  const bytes = await assertSucceeds(getBytes(ref(clinician, path)));
-  assert.deepEqual(new Uint8Array(bytes), payload);
+  await assertFails(uploadBytes(ref(clinician, path), payload, meta));
+  await seedClinicalObject();
+  await assertFails(getMetadata(ref(clinician, path)));
+  await assertFails(getBytes(ref(clinician, path)));
   await assertSucceeds(deleteObject(ref(clinician, path)));
 });
 
-test("configured super-admin can view existing attachments, including unverified triage, but cannot upload or delete", async () => {
+test("configured super-admin cannot directly read or change clinical attachments", async () => {
   const clinician = storageFor("counselor");
-  await assertSucceeds(uploadBytes(ref(clinician, path), payload, meta));
+  await seedClinicalObject();
 
   await env.withSecurityRulesDisabled(async (context) => {
     const storage = context.storage();
@@ -314,9 +322,9 @@ test("configured super-admin can view existing attachments, including unverified
   });
 
   const superAdmin = storageFor("admin");
-  await assertSucceeds(getMetadata(ref(superAdmin, path)));
-  await assertSucceeds(getBytes(ref(superAdmin, path)));
-  await assertSucceeds(getMetadata(ref(superAdmin, adminUnverifiedPath)));
+  await assertFails(getMetadata(ref(superAdmin, path)));
+  await assertFails(getBytes(ref(superAdmin, path)));
+  await assertFails(getMetadata(ref(superAdmin, adminUnverifiedPath)));
 
   // Super-admin direct Storage upload and deletion are disabled under Option A1.
   await assertFails(uploadBytes(ref(superAdmin, adminUnverifiedPath.replace("0123", "abcd")), payload, {
@@ -331,41 +339,37 @@ test("configured super-admin can view existing attachments, including unverified
   await assertFails(deleteObject(ref(superAdmin, path)));
 });
 
-test("two-document limit behavioral proof: counselor does not read users/{student} and super-admin view does not read appointments/{id}", async () => {
+test("counselor draft deletion uses only the appointment projection", async () => {
   const clinician = storageFor("counselor");
-  await assertSucceeds(uploadBytes(ref(clinician, path), payload, meta));
+  await seedClinicalObject();
 
-  // Delete student user document: counselor still succeeds using only users/{counselor} + appointments/{id}.
+  // Draft deletion uses users/{counselor} and appointments/{id}.
   await env.withSecurityRulesDisabled(async (context) => {
     await deleteDoc(doc(context.firestore(), "users/student"));
   });
-  await assertSucceeds(getMetadata(ref(clinician, path)));
-  await assertSucceeds(uploadBytes(ref(clinician, path.replace("0123", "1111")), payload, meta));
+  await assertFails(getMetadata(ref(clinician, path)));
+  await assertSucceeds(deleteObject(ref(clinician, path)));
 
-  // Seed existing storage object whose appointment doc does not exist: super-admin view succeeds using only users/{admin} + system_config/security.
-  const orphanPath = "counseling_session_files/deleted-appointment/counselor/0123456789abcdef0123456789abcdef.pdf";
-  await env.withSecurityRulesDisabled(async (context) => {
-    await uploadBytes(ref(context.storage(), orphanPath), payload, meta);
-  });
-  await assertSucceeds(getMetadata(ref(storageFor("admin"), orphanPath)));
-  // Counselor is denied on missing appointment.
-  await assertFails(getMetadata(ref(clinician, orphanPath)));
+
 });
 
 test("unauthenticated, students, portal staff, ordinary admins, suspended super-admin, unapproved, revoked, suspended, and cross-college counselors are denied", async () => {
   const clinician = storageFor("counselor");
-  await assertSucceeds(uploadBytes(ref(clinician, path), payload, meta));
+  await seedClinicalObject();
 
   // Unauthenticated access denied (get, create, delete).
   const unauth = env.unauthenticatedContext().storage();
   await assertFails(getMetadata(ref(unauth, path)));
+  await assertFails(getBytes(ref(unauth, path)));
   await assertFails(uploadBytes(ref(unauth, path.replace("0123", "2222")), payload, meta));
   await assertFails(deleteObject(ref(unauth, path)));
 
   // Unverified-email counselor and super-admin denied.
   await assertFails(getMetadata(ref(storageFor("counselor", false), path)));
+  await assertFails(getBytes(ref(storageFor("counselor", false), path)));
   await assertFails(uploadBytes(ref(storageFor("counselor", false), path.replace("0123", "3333")), payload, meta));
   await assertFails(getMetadata(ref(storageFor("admin", false), path)));
+  await assertFails(getBytes(ref(storageFor("admin", false), path)));
 
   for (const account of [
     "student",
@@ -381,6 +385,7 @@ test("unauthenticated, students, portal staff, ordinary admins, suspended super-
   ]) {
     const client = storageFor(account);
     await assertFails(getMetadata(ref(client, path)));
+    await assertFails(getBytes(ref(client, path)));
     await assertFails(deleteObject(ref(client, path)));
     await assertFails(
       uploadBytes(
@@ -459,7 +464,7 @@ test("unverified student and missing or untrusted appointment scope projections 
 test("appointment scope and lifecycle regressions immediately revoke or reassign counselor access", async () => {
   const clinician = storageFor("counselor");
   const otherClinician = storageFor("other-counselor");
-  await assertSucceeds(uploadBytes(ref(clinician, path), payload, meta));
+  await seedClinicalObject();
 
   // 1. Student becomes unverified -> counselor immediately loses get, create, delete; super-admin keeps get.
   await env.withSecurityRulesDisabled(async (context) => {
@@ -470,9 +475,9 @@ test("appointment scope and lifecycle regressions immediately revoke or reassign
   await assertFails(getMetadata(ref(clinician, path)));
   await assertFails(deleteObject(ref(clinician, path)));
   await assertFails(uploadBytes(ref(clinician, path.replace("0123", "7777")), payload, meta));
-  await assertSucceeds(getMetadata(ref(storageFor("admin"), path)));
+  await assertFails(getMetadata(ref(storageFor("admin"), path)));
 
-  // 2. Student moves colleges (cite -> cas) -> CITE counselor loses access; CAS counselor gains get/create.
+  // 2. A college move revokes draft deletion for the previous counselor.
   await env.withSecurityRulesDisabled(async (context) => {
     await setDoc(doc(context.firestore(), `appointments/${appointmentId}`), {
       status: "confirmed", userId: "student", collegeId: "cas", studentVerificationStatus: "verified",
@@ -480,8 +485,8 @@ test("appointment scope and lifecycle regressions immediately revoke or reassign
   });
   await assertFails(getMetadata(ref(clinician, path)));
   await assertFails(deleteObject(ref(clinician, path)));
-  await assertSucceeds(getMetadata(ref(otherClinician, path)));
-  await assertSucceeds(uploadBytes(ref(otherClinician, path.replace("/counselor/", "/other-counselor/").replace("0123", "8888")), payload, {
+  await assertFails(getMetadata(ref(otherClinician, path)));
+  await assertFails(uploadBytes(ref(otherClinician, path.replace("/counselor/", "/other-counselor/").replace("0123", "8888")), payload, {
     contentType: "application/pdf",
     customMetadata: {uploadedBy: "other-counselor", appointmentId},
   }));
@@ -494,7 +499,7 @@ test("appointment scope and lifecycle regressions immediately revoke or reassign
       status: "confirmed", userId: "student", collegeId: "cite", studentVerificationStatus: "verified",
     });
   });
-  await assertSucceeds(getMetadata(ref(clinician, path)));
+  await assertFails(getMetadata(ref(clinician, path)));
 
   // 3. Counselor loses college assignment -> immediate denial on get, create, delete.
   await env.withSecurityRulesDisabled(async (context) => {
@@ -519,7 +524,7 @@ test("appointment scope and lifecycle regressions immediately revoke or reassign
 
 test("invalid filenames, MIME types, oversized/empty files, forged metadata, updates, and directory listing are denied", async () => {
   const clinician = storageFor("counselor");
-  await assertSucceeds(uploadBytes(ref(clinician, path), payload, meta));
+  await seedClinicalObject();
 
   // Wrong uploader path segment.
   await assertFails(uploadBytes(ref(clinician, path.replace("/counselor/", "/admin/")), payload, meta));
@@ -557,15 +562,105 @@ test("invalid filenames, MIME types, oversized/empty files, forged metadata, upd
 
 test("clinical evidence becomes read-only after the session is completed", async () => {
   const clinician = storageFor("counselor");
-  await assertSucceeds(uploadBytes(ref(clinician, path), payload, meta));
+  await seedClinicalObject();
   await env.withSecurityRulesDisabled(async (context) => {
     await setDoc(doc(context.firestore(), `appointments/${appointmentId}`), {
       status: "completed", userId: "student", collegeId: "cite", studentVerificationStatus: "verified",
     });
   });
-  await assertSucceeds(getMetadata(ref(clinician, path)));
-  await assertSucceeds(getMetadata(ref(storageFor("admin"), path)));
+  await assertFails(getMetadata(ref(clinician, path)));
+  await assertFails(getMetadata(ref(storageFor("admin"), path)));
   await assertFails(deleteObject(ref(clinician, path)));
   const second = path.replace("0123456789abcdef", "fedcba9876543210");
   await assertFails(uploadBytes(ref(clinician, second), payload, meta));
+});
+
+test("denies list/listAll for non-clinical and ordinary-admin callers, rejected/missing users, missing security doc, and accessRole: null fail-closed", async () => {
+  const clinician = storageFor("counselor");
+  await seedClinicalObject();
+
+  // list / listAll denials across portal-staff, student, other-admin, unauth
+  for (const client of [
+    storageFor("portal-staff"),
+    storageFor("student"),
+    storageFor("other-admin"),
+    env.unauthenticatedContext().storage(),
+  ]) {
+    await assertFails(listAll(ref(client, "counseling_session_files/appointment-1/counselor")));
+    await assertFails(list(ref(client, "counseling_session_files/appointment-1"), {maxResults: 10}));
+  }
+
+  // Rejected counselor, missing users/{uid}, legacy role fallback vs explicit accessRole: null
+  await env.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    await Promise.all([
+      setDoc(doc(firestore, "users/counselor-rejected"), {
+        accessRole: "counselor", staffAccountStatus: "rejected", accountStatus: "active", assignedCollegeIds: ["cite"],
+      }),
+      setDoc(doc(firestore, "users/counselor-legacy-role"), {
+        role: "counselor", assignedCollegeIds: ["cite"],
+      }),
+      setDoc(doc(firestore, "users/counselor-null-role"), {
+        accessRole: null, role: "counselor", assignedCollegeIds: ["cite"],
+      }),
+    ]);
+  });
+
+  const rejected = storageFor("counselor-rejected");
+  await assertFails(getBytes(ref(rejected, path)));
+  await assertFails(deleteObject(ref(rejected, path)));
+  await assertFails(uploadBytes(ref(rejected, path.replace("/counselor/", "/counselor-rejected/").replace("0123", "abcd")), payload, {
+    ...meta, customMetadata: {uploadedBy: "counselor-rejected", appointmentId},
+  }));
+
+  const noUserDoc = storageFor("no-user-doc");
+  await assertFails(getBytes(ref(noUserDoc, path)));
+  await assertFails(deleteObject(ref(noUserDoc, path)));
+  await assertFails(uploadBytes(ref(noUserDoc, path.replace("/counselor/", "/no-user-doc/").replace("0123", "bcde")), payload, {
+    ...meta, customMetadata: {uploadedBy: "no-user-doc", appointmentId},
+  }));
+
+  // Both legacy and current profiles must use the download callable.
+  await assertFails(getBytes(ref(storageFor("counselor-legacy-role"), path)));
+  await assertFails(getBytes(ref(storageFor("counselor-null-role"), path)));
+
+  // Direct super-admin reads remain denied without the security document.
+  await env.withSecurityRulesDisabled(async (context) => {
+    await deleteDoc(doc(context.firestore(), "system_config/security"));
+  });
+  await assertFails(getMetadata(ref(storageFor("admin"), path)));
+  await assertFails(getBytes(ref(storageFor("admin"), path)));
+});
+
+test("denies direct requests for malformed paths and missing objects", async () => {
+  const clinician = storageFor("counselor");
+  const superAdmin = storageFor("admin");
+  const badPaths = [
+    "counseling_session_files/appointment-1/counselor/../other/0123456789abcdef0123456789abcdef.pdf",
+    "counseling_session_files/appointment-1/counselor/sub/0123456789abcdef0123456789abcdef.pdf",
+    "counseling_session_files/appointment-1/0123456789abcdef0123456789abcdef.pdf",
+    "counseling_session_files/appointment-1/counselor/..%2F0123456789abcdef0123456789abcdef.pdf",
+    "backups/2026/export.json",
+    "other_private/test.pdf",
+  ];
+  for (const badPath of badPaths) {
+    for (const client of [clinician, superAdmin]) {
+      await assertFails(getMetadata(ref(client, badPath)));
+      await assertFails(getBytes(ref(client, badPath)));
+      await assertFails(uploadBytes(ref(client, badPath), payload, meta));
+    }
+  }
+
+  const absentPath = "counseling_session_files/appointment-1/counselor/ffffffffffffffffffffffffffffffff.pdf";
+  for (const denied of [
+    clinician,
+    superAdmin,
+    storageFor("portal-staff"),
+    storageFor("student"),
+    storageFor("other-counselor"),
+    storageFor("other-admin"),
+  ]) {
+    const err = await assertFails(getBytes(ref(denied, absentPath))) as {code?: string};
+    assert.equal(err?.code, "storage/unauthorized");
+  }
 });

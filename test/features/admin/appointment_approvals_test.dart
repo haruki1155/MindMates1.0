@@ -464,10 +464,7 @@ void main() {
       var currentRole = AccessRole.counselor;
       var currentUid = 'uid-counselor-a';
 
-      final repoA = _Repo(
-        role: AccessRole.counselor,
-        items: [_item('a1')],
-      );
+      final repoA = _Repo(role: AccessRole.counselor, items: [_item('a1')]);
       final repoStaff = _Repo(
         role: AccessRole.portalStaff,
         items: [_item('a9')],
@@ -558,7 +555,7 @@ void main() {
   );
 
   testWidgets(
-    'super-admin review dialog sends exceptionReason, handles backend validation without double submit, and hides field for counselors',
+    'counselor review dialog submits without exceptionReason while super-admin review is read-only',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1440, 1200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -611,11 +608,8 @@ void main() {
       );
       expect(counselorReview.$2.containsKey('exceptionReason'), isFalse);
 
-      // 2. Super-admin sees Administrator exception reason, sees validation error on empty submit,
-      // does not duplicate submission while in flight, and forwards trimmed reason on success.
+      // 2. Super-admin Review opens read-only appointment details without decision controls.
       final adminCalls = <(String, Map<String, Object?>)>[];
-      Completer<Map<String, dynamic>>? pendingReview;
-      var failFirstReview = true;
       final exceptionRecord = _appointment(
         'appt-exc',
         'Student Exception Case',
@@ -643,18 +637,6 @@ void main() {
               'done': true,
             };
           }
-          if (name == 'reviewAppointment') {
-            if (failFirstReview) {
-              failFirstReview = false;
-              throw FirebaseFunctionsException(
-                code: 'failed-precondition',
-                message:
-                    'Enter an administrator exception reason (at least 5 characters).',
-              );
-            }
-            pendingReview = Completer<Map<String, dynamic>>();
-            return pendingReview!.future;
-          }
           return {'ok': true};
         },
       );
@@ -674,42 +656,12 @@ void main() {
       await tester.tap(find.text('Review').first);
       await tester.pumpAndSettle();
 
-      expect(find.text('Review appointment'), findsOneWidget);
-      expect(find.text('Administrator exception reason'), findsOneWidget);
-
-      // Submitting without exception reason shows server validation error and keeps dialog open.
-      await tester.tap(find.text('Send decision'));
-      await tester.pumpAndSettle();
-      expect(find.text('Review appointment'), findsOneWidget);
-      expect(
-        find.textContaining('Enter an administrator exception reason'),
-        findsOneWidget,
-      );
-
-      // Enter valid reason and tap Submit; double-tap while in-flight must not issue two calls.
-      await tester.enterText(
-        find.widgetWithText(TextField, 'Administrator exception reason'),
-        'Counselor on approved leave',
-      );
-      await tester.tap(find.text('Send decision'));
-      await tester.pump();
-      expect(find.text('Sending decision…'), findsOneWidget);
-      await tester.tap(find.text('Sending decision…'), warnIfMissed: false);
-      await tester.pump();
-
-      pendingReview!.complete({'ok': true});
-      await tester.pumpAndSettle();
-
-      expect(find.text('Review appointment'), findsNothing);
-      final adminReviews = adminCalls
-          .where((c) => c.$1 == 'reviewAppointment')
-          .toList();
-      expect(adminReviews.length, 2);
-      expect(adminReviews[0].$2.containsKey('exceptionReason'), isFalse);
-      expect(
-        adminReviews[1].$2['exceptionReason'],
-        'Counselor on approved leave',
-      );
+      expect(find.text('Appointment details'), findsOneWidget);
+      expect(find.text('PACC decision'), findsNothing);
+      expect(find.text('Administrator exception reason'), findsNothing);
+      expect(find.text('Send decision'), findsNothing);
+      expect(find.text('Close'), findsOneWidget);
+      expect(adminCalls.where((c) => c.$1 == 'reviewAppointment'), isEmpty);
     },
   );
 
@@ -859,7 +811,10 @@ void main() {
       expect(opened, isNull);
       expect(find.textContaining('not authorized to open'), findsOneWidget);
       expect(listCalls, 2);
-      expect(find.text('No appointments are waiting for a decision.'), findsOneWidget);
+      expect(
+        find.text('No appointments are waiting for a decision.'),
+        findsOneWidget,
+      );
     },
   );
 }

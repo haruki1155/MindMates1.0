@@ -13,8 +13,10 @@ import '../../../models/pacc_availability_model.dart';
 import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../domain/admin_management_models.dart';
+import '../domain/admin_status_presentation.dart';
 import '../services/admin_unload_guard.dart';
 import '../domain/appointment_workflow.dart';
+import '../widgets/admin_status_badge.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/appointment_repository.dart';
 import '../../../repositories/pacc_availability_repository.dart';
@@ -32,6 +34,7 @@ import 'counselor_assigned_colleges_page.dart';
 import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
 import '../../announcements/screens/manage_announcements_page.dart';
+import 'activity_logs_page.dart';
 import 'backup_data_page.dart';
 import 'staff_operations_dashboard.dart';
 import 'staff_appointments_page.dart';
@@ -78,6 +81,7 @@ enum AdminPortalPage {
   availability,
   inquiries,
   assessments,
+  activityLogs,
   backupData,
   profile,
 }
@@ -100,6 +104,7 @@ extension on AdminPortalPage {
     AdminPortalPage.availability => 'Schedule',
     AdminPortalPage.inquiries => 'Inquiries',
     AdminPortalPage.assessments => 'Assessment',
+    AdminPortalPage.activityLogs => 'Activity Logs',
     AdminPortalPage.backupData => 'Back-up Data',
     AdminPortalPage.profile => 'Profile',
   };
@@ -128,9 +133,32 @@ extension on AdminPortalPage {
     AdminPortalPage.availability => Icons.storefront_outlined,
     AdminPortalPage.inquiries => Icons.chat_bubble_outline_rounded,
     AdminPortalPage.assessments => Icons.assignment_outlined,
+    AdminPortalPage.activityLogs => Icons.history_rounded,
     AdminPortalPage.backupData => Icons.backup_outlined,
     AdminPortalPage.profile => Icons.account_circle_outlined,
   };
+}
+
+Route<void> _adminAuthRoute(BuildContext context, Widget page) {
+  final reducedMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+  return PageRouteBuilder<void>(
+    transitionDuration: reducedMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 220),
+    reverseTransitionDuration: reducedMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 180),
+    pageBuilder: (_, _, _) => page,
+    transitionsBuilder: (_, animation, _, child) => reducedMotion
+        ? child
+        : FadeTransition(
+            opacity: CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            ),
+            child: child,
+          ),
+  );
 }
 
 class AdminLoginScreen extends StatefulWidget {
@@ -155,6 +183,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   }
 
   Future<void> _signIn() async {
+    if (_submitting) return;
     if (_schoolId.text.trim().isEmpty || _password.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter your School ID and password.')),
@@ -171,8 +200,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
       if (!mounted) return;
       if (!access.isGranted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => PortalAccessStatusScreen(
+          _adminAuthRoute(
+            context,
+            PortalAccessStatusScreen(
               repository: repository,
               evaluation: access,
             ),
@@ -181,8 +211,9 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         return;
       }
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => repository.mustChangePassword
+        _adminAuthRoute(
+          context,
+          repository.mustChangePassword
               ? AdminChangePasswordScreen(repository: repository)
               : AdminPortalHome(repository: repository),
         ),
@@ -286,9 +317,41 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                         width: double.infinity,
                         child: FilledButton(
                           onPressed: _submitting ? null : _signIn,
-                          child: Text(
-                            _submitting ? 'Signing in...' : 'Sign in',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          child: AnimatedSwitcher(
+                            duration:
+                                (MediaQuery.maybeDisableAnimationsOf(context) ??
+                                    false)
+                                ? Duration.zero
+                                : const Duration(milliseconds: 180),
+                            child: _submitting
+                                ? const Row(
+                                    key: ValueKey('signing-in'),
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      SizedBox(width: 10),
+                                      Text(
+                                        'Signing in…',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : const Text(
+                                    'Sign in',
+                                    key: ValueKey('sign-in'),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                           ),
                         ),
                       ),
@@ -415,12 +478,14 @@ class AdminPortalHome extends StatefulWidget {
     this.repository,
     this.registerUnload = registerUnloadGuard,
     this.removeUnload = removeUnloadGuard,
+    this.counselorInboxController,
   });
   final AdminPortalRepository? repository;
 
   /// Browser tab-close guard seams; the defaults are no-ops off the web.
   final UnloadGuardRegistrar registerUnload;
   final UnloadGuardRemover removeUnload;
+  final CounselorInboxUnreadController? counselorInboxController;
 
   @override
   State<AdminPortalHome> createState() => _AdminPortalHomeState();
@@ -437,13 +502,34 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   late final Stream<List<AppNotificationModel>> _notifications;
   final PaccScheduleEditorController _scheduleController =
       PaccScheduleEditorController();
+  CounselorInboxUnreadController? _ownedCounselorInboxController;
 
   Object? _unloadHandle;
+
+  CounselorInboxUnreadController? get _activeCounselorInboxController {
+    if (!canShowCounselorMessagingInInquiries(_repository.currentAccessRole)) {
+      return null;
+    }
+    return widget.counselorInboxController ?? _ownedCounselorInboxController;
+  }
+
+  void _syncCounselorInboxController() {
+    final isCounselor = canShowCounselorMessagingInInquiries(
+      _repository.currentAccessRole,
+    );
+    if (!isCounselor || widget.counselorInboxController != null) {
+      _ownedCounselorInboxController?.dispose();
+      _ownedCounselorInboxController = null;
+      return;
+    }
+    _ownedCounselorInboxController ??= CounselorInboxUnreadController();
+  }
 
   @override
   void initState() {
     super.initState();
     _notifications = _repository.watchPortalNotifications();
+    _syncCounselorInboxController();
     // Closing or refreshing the tab mid-import, or with slips still
     // undownloaded, loses plain codes that are never shown again.
     _unloadHandle = widget.registerUnload(
@@ -452,84 +538,100 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
   }
 
   @override
+  void didUpdateWidget(covariant AdminPortalHome oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncCounselorInboxController();
+  }
+
+  @override
   void dispose() {
+    _ownedCounselorInboxController?.dispose();
+    _ownedCounselorInboxController = null;
     widget.removeUnload(_unloadHandle);
     _unloadHandle = null;
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final compact = constraints.maxWidth < 760;
-      return Scaffold(
-        backgroundColor: _cream,
-        drawer: compact
-            ? Drawer(
-                child: PortalWorkspaceNavigation(
-                  page: _page,
-                  onChanged: _setPage,
-                  compact: true,
-                  accessRole: _repository.currentAccessRole,
-                  isSuperAdmin: _repository.isSuperAdmin,
-                ),
-              )
-            : null,
-        body: Row(
-          children: [
-            if (!compact)
-              SizedBox(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  width: _navCollapsed
-                      ? 76
-                      : constraints.maxWidth < 1120
-                      ? 224
-                      : 252,
+  Widget build(BuildContext context) {
+    final inboxController = _activeCounselorInboxController;
+    final body = LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 760;
+        return Scaffold(
+          backgroundColor: _cream,
+          drawer: compact
+              ? Drawer(
                   child: PortalWorkspaceNavigation(
                     page: _page,
                     onChanged: _setPage,
-                    collapsed: _navCollapsed,
+                    compact: true,
                     accessRole: _repository.currentAccessRole,
                     isSuperAdmin: _repository.isSuperAdmin,
                   ),
+                )
+              : null,
+          body: Row(
+            children: [
+              if (!compact)
+                SizedBox(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    width: _navCollapsed
+                        ? 76
+                        : constraints.maxWidth < 1120
+                        ? 224
+                        : 252,
+                    child: PortalWorkspaceNavigation(
+                      page: _page,
+                      onChanged: _setPage,
+                      collapsed: _navCollapsed,
+                      accessRole: _repository.currentAccessRole,
+                      isSuperAdmin: _repository.isSuperAdmin,
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: Column(
+                  children: [
+                    _PortalHeader(
+                      compact: compact,
+                      navCollapsed: _navCollapsed,
+                      onMenuPressed: compact
+                          ? null
+                          : () =>
+                                setState(() => _navCollapsed = !_navCollapsed),
+                      page: _page,
+                      repository: _repository,
+                      notifications: _notifications,
+                      onOpenNotifications: () =>
+                          _setPage(AdminPortalPage.notifications),
+                      confirmLeave: _rosterLeaveGuard.confirmLeave,
+                    ),
+                    Expanded(child: _buildPage()),
+                  ],
                 ),
               ),
-            Expanded(
-              child: Column(
-                children: [
-                  _PortalHeader(
-                    compact: compact,
-                    navCollapsed: _navCollapsed,
-                    onMenuPressed: compact
-                        ? null
-                        : () => setState(() => _navCollapsed = !_navCollapsed),
-                    page: _page,
-                    repository: _repository,
-                    notifications: _notifications,
-                    onOpenNotifications: () =>
-                        _setPage(AdminPortalPage.notifications),
-                    confirmLeave: _rosterLeaveGuard.confirmLeave,
-                  ),
-                  Expanded(child: _buildPage()),
-                ],
-              ),
-            ),
-          ],
-        ),
-        floatingActionButton:
-            _repository.currentAccessRole.canAccessClinicalData &&
-                _page != AdminPortalPage.notifications
-            ? _NotificationBubble(
-                notifications: _notifications,
-                onPressed: () => _setPage(AdminPortalPage.notifications),
-              )
-            : null,
-        floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
-      );
-    },
-  );
+            ],
+          ),
+          floatingActionButton:
+              _repository.currentAccessRole.canAccessClinicalData &&
+                  _page != AdminPortalPage.notifications
+              ? _NotificationBubble(
+                  notifications: _notifications,
+                  onPressed: () => _setPage(AdminPortalPage.notifications),
+                )
+              : null,
+          floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
+        );
+      },
+    );
+    if (inboxController != null) {
+      return CounselorInboxScope(notifier: inboxController, child: body);
+    }
+    return body;
+  }
 
   Future<void> _setPage(
     AdminPortalPage page, {
@@ -649,11 +751,12 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
       controller: _scheduleController,
     ),
-    AdminPortalPage.inquiries => _InquiriesPage(
+    AdminPortalPage.inquiries => AdminInquiriesPage(
       repository: _repository,
       initialSection: _initialInquirySection,
     ),
     AdminPortalPage.assessments => _AssessmentsPage(repository: _repository),
+    AdminPortalPage.activityLogs => ActivityLogsPage(repository: _repository),
     AdminPortalPage.backupData =>
       _repository.isSuperAdmin
           ? BackupDataPage(repository: _repository)
@@ -711,6 +814,7 @@ class PortalWorkspaceNavigation extends StatelessWidget {
     // duplicating the destination in the workspace navigation.
     AdminPortalPage.notifications => false,
     AdminPortalPage.assessments => accessRole.canAccessClinicalData,
+    AdminPortalPage.activityLogs => isSuperAdmin,
     AdminPortalPage.backupData => isSuperAdmin,
     AdminPortalPage.inquiries =>
       accessRole == AccessRole.counselor ||
@@ -745,6 +849,7 @@ class PortalWorkspaceNavigation extends StatelessWidget {
         AdminPortalPage.academicYear,
       ]),
       const _NavSection('System', [
+        AdminPortalPage.activityLogs,
         AdminPortalPage.backupData,
         AdminPortalPage.profile,
       ]),
@@ -865,12 +970,39 @@ class PortalWorkspaceNavigation extends StatelessWidget {
                                     onTap: () => onChanged(item),
                                     child: SizedBox(
                                       height: 46,
-                                      child: Icon(
-                                        item.icon,
-                                        color: page == item
-                                            ? AdminColors.ink
-                                            : AdminColors.muted,
-                                        size: 21,
+                                      child: Center(
+                                        child:
+                                            item == AdminPortalPage.inquiries &&
+                                                canShowCounselorMessagingInInquiries(
+                                                  accessRole,
+                                                )
+                                            ? Stack(
+                                                clipBehavior: Clip.none,
+                                                children: [
+                                                  Icon(
+                                                    item.icon,
+                                                    color: page == item
+                                                        ? AdminColors.ink
+                                                        : AdminColors.muted,
+                                                    size: 21,
+                                                  ),
+                                                  const Positioned(
+                                                    right: -9,
+                                                    top: -7,
+                                                    child:
+                                                        CounselorInboxUnreadBadge(
+                                                          compact: true,
+                                                        ),
+                                                  ),
+                                                ],
+                                              )
+                                            : Icon(
+                                                item.icon,
+                                                color: page == item
+                                                    ? AdminColors.ink
+                                                    : AdminColors.muted,
+                                                size: 21,
+                                              ),
                                       ),
                                     ),
                                   ),
@@ -1003,45 +1135,120 @@ class _PortalHeader extends StatelessWidget {
           const SizedBox(width: 4),
           if (showIdentity) _HeaderIdentity(repository: repository),
           if (showIdentity) const SizedBox(width: 10),
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: () async {
-              final confirmed = await showDialog<bool>(
-                context: context,
-                builder: (dialogContext) => AlertDialog(
-                  title: const Text('Sign out?'),
-                  content: const Text(
-                    'Are you sure you want to sign out of the MindMate Admin Portal?',
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(dialogContext, false),
-                      child: const Text('Cancel'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(dialogContext, true),
-                      child: const Text('Sign out'),
-                    ),
-                  ],
-                ),
-              );
-              if (confirmed != true) return;
-              if (!context.mounted) return;
-              if (!await confirmLeave(context)) return;
-              await repository.signOut();
-              if (context.mounted) {
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (_) => AdminLoginScreen(repository: repository),
-                  ),
-                  (_) => false,
-                );
-              }
-            },
-            icon: const Icon(Icons.logout),
+          _HeaderSignOutButton(
+            repository: repository,
+            confirmLeave: confirmLeave,
           ),
         ],
       ),
+    );
+  }
+}
+
+class _HeaderSignOutButton extends StatefulWidget {
+  const _HeaderSignOutButton({
+    required this.repository,
+    required this.confirmLeave,
+  });
+
+  final AdminPortalRepository repository;
+  final Future<bool> Function(BuildContext context) confirmLeave;
+
+  @override
+  State<_HeaderSignOutButton> createState() => _HeaderSignOutButtonState();
+}
+
+class _HeaderSignOutButtonState extends State<_HeaderSignOutButton> {
+  bool _signingOut = false;
+
+  Future<void> _handleSignOut() async {
+    if (_signingOut) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+          'Are you sure you want to sign out of the MindMate Admin Portal?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    if (!await widget.confirmLeave(context) || !mounted) return;
+    setState(() => _signingOut = true);
+    try {
+      await widget.repository.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        _adminAuthRoute(
+          context,
+          AdminLoginScreen(repository: widget.repository),
+        ),
+        (_) => false,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            FirebaseErrorMessage.describe(
+              error,
+              fallback: 'Could not sign out right now. Please try again.',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _signingOut = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reducedMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    return AnimatedSwitcher(
+      duration: reducedMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
+      child: _signingOut
+          ? const Padding(
+              key: ValueKey('signing-out'),
+              padding: EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Signing out…',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AdminColors.muted,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : IconButton(
+              key: const ValueKey('sign-out-button'),
+              tooltip: 'Sign out',
+              onPressed: _handleSignOut,
+              icon: const Icon(Icons.logout),
+            ),
     );
   }
 }
@@ -1321,17 +1528,8 @@ class _UsersPageState extends State<_UsersPage> {
                               ? const Color(0xFF8DD78B)
                               : Colors.orange.shade200,
                         ),
-                        u.departmentId ?? u.department ?? '—',
-                        [u.collegeId, u.courseId]
-                                .whereType<String>()
-                                .where((e) => e.isNotEmpty)
-                                .join(' / ')
-                                .isEmpty
-                            ? '—'
-                            : [u.collegeId, u.courseId]
-                                  .whereType<String>()
-                                  .where((e) => e.isNotEmpty)
-                                  .join(' / '),
+                        u.department ?? '—',
+                        u.course ?? '—',
                         _Tag(
                           label: u.verificationStatus.label,
                           color:
@@ -2041,6 +2239,7 @@ class AdminAppointmentsPage extends StatefulWidget {
 class _AppointmentsPageState extends State<AdminAppointmentsPage> {
   String filter = 'Needs action';
   String departmentFilter = 'All departments';
+  String appointmentTypeFilter = 'All appointments';
   bool showHistory = false;
   final Set<String> selectedIds = <String>{};
   final Set<String> _archivingIds = <String>{};
@@ -2088,7 +2287,14 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
         );
         final query = _search.text.trim().toLowerCase();
         final items = categoryRecords.where((a) {
-          return (query.isEmpty ||
+          final isFollowUp = (a.parentAppointmentId ?? '').trim().isNotEmpty;
+          final matchesType = switch (appointmentTypeFilter) {
+            'Follow-up' => isFollowUp,
+            'Initial' => !isFollowUp,
+            _ => true,
+          };
+          return matchesType &&
+              (query.isEmpty ||
                   a.fullName.toLowerCase().contains(query) ||
                   a.userId.toLowerCase().contains(query)) &&
               (departmentFilter == 'All departments' ||
@@ -2158,6 +2364,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                 showHistory = value.first;
                 filter = showHistory ? 'All' : 'Needs action';
                 departmentFilter = 'All departments';
+                appointmentTypeFilter = 'All appointments';
                 selectedIds.clear();
               }),
             ),
@@ -2244,11 +2451,38 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                     ),
                   ),
                 ),
-                if (query.isNotEmpty || departmentFilter != 'All departments')
+                SizedBox(
+                  width: 210,
+                  child: DropdownButtonFormField<String>(
+                    isExpanded: true,
+                    key: ValueKey('type-$appointmentTypeFilter'),
+                    initialValue: appointmentTypeFilter,
+                    decoration: const InputDecoration(
+                      labelText: 'Appointment type',
+                    ),
+                    items: const ['All appointments', 'Initial', 'Follow-up']
+                        .map(
+                          (t) => DropdownMenuItem(
+                            value: t,
+                            child: Text(t, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setState(
+                      () => appointmentTypeFilter = v ?? 'All appointments',
+                    ),
+                  ),
+                ),
+                if (query.isNotEmpty ||
+                    departmentFilter != 'All departments' ||
+                    appointmentTypeFilter != 'All appointments')
                   TextButton(
                     onPressed: () {
                       _search.clear();
-                      setState(() => departmentFilter = 'All departments');
+                      setState(() {
+                        departmentFilter = 'All departments';
+                        appointmentTypeFilter = 'All appointments';
+                      });
                     },
                     child: const Text('Clear filters'),
                   ),
@@ -2295,7 +2529,11 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
               style: const TextStyle(color: AdminColors.muted, fontSize: 12),
             ),
             const SizedBox(height: 8),
-            if (!showHistory && selectable.isNotEmpty)
+            if (!showHistory &&
+                !widget.repository.isSuperAdmin &&
+                widget.repository.currentAccessRole != AccessRole.admin &&
+                widget.repository.currentAccessRole != AccessRole.portalStaff &&
+                selectable.isNotEmpty)
               Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: Padding(
@@ -2663,14 +2901,33 @@ class _PortalAccessStatusScreenState extends State<PortalAccessStatusScreen> {
   }
 
   Future<void> _signOut() async {
-    await widget.repository.signOut();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
-        builder: (_) => AdminLoginScreen(repository: widget.repository),
-      ),
-      (_) => false,
-    );
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      await widget.repository.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        _adminAuthRoute(
+          context,
+          AdminLoginScreen(repository: widget.repository),
+        ),
+        (_) => false,
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _message = FirebaseErrorMessage.describe(
+            error,
+            fallback: 'Could not sign out right now. Please try again.',
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -2985,17 +3242,48 @@ class _AppointmentCard extends StatelessWidget {
             style: const TextStyle(fontSize: 12),
           ),
         );
-        final canReview = canReviewAppointment(item, now);
+        final isAdminRole =
+            repository.isSuperAdmin ||
+            repository.currentAccessRole == AccessRole.admin;
+        final isReadOnlyRole =
+            isAdminRole ||
+            repository.currentAccessRole == AccessRole.portalStaff;
+        final canReview = !isReadOnlyRole && canReviewAppointment(item, now);
+        final isFollowUp = (item.parentAppointmentId ?? '').trim().isNotEmpty;
+        final statusBadges = Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (isFollowUp)
+              AdminStatusBadge.fromStatus(
+                domain: AdminStatusDomain.appointmentType,
+                status: 'follow_up',
+                compact: true,
+              ),
+            AdminStatusBadge.fromStatus(
+              domain: AdminStatusDomain.appointment,
+              status: item.status,
+              labelOverride: _formalLabel(item.status),
+              compact: true,
+            ),
+          ],
+        );
         final action = TextButton.icon(
           onPressed: () => _showReviewDialog(context),
           icon: Icon(
-            !canReview ? Icons.visibility_outlined : Icons.rate_review_outlined,
+            isAdminRole || canReview
+                ? Icons.rate_review_outlined
+                : Icons.visibility_outlined,
             size: 17,
           ),
-          label: Text(canReview ? 'Review' : 'View'),
+          label: Text(isAdminRole || canReview ? 'Review' : 'View'),
         );
         final historyAction =
-            item.isFinalized && !item.isArchived && onArchive != null
+            !isReadOnlyRole &&
+                item.isFinalized &&
+                !item.isArchived &&
+                onArchive != null
             ? IconButton(
                 tooltip: 'Move to history',
                 onPressed: archiving ? null : onArchive,
@@ -3014,7 +3302,7 @@ class _AppointmentCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  if (onSelected != null)
+                  if (onSelected != null && !isReadOnlyRole)
                     Checkbox(
                       value: selected,
                       onChanged: (value) => onSelected!(value ?? false),
@@ -3028,19 +3316,13 @@ class _AppointmentCard extends StatelessWidget {
               const SizedBox(height: 10),
               Row(children: [schedule, department]),
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: _Tag(
-                  label: _formalLabel(item.status),
-                  color: _statusColor(item.status),
-                ),
-              ),
+              Align(alignment: Alignment.centerLeft, child: statusBadges),
             ],
           );
         }
         return Row(
           children: [
-            if (onSelected != null)
+            if (onSelected != null && !isReadOnlyRole)
               Checkbox(
                 value: selected,
                 onChanged: (value) => onSelected!(value ?? false),
@@ -3051,10 +3333,7 @@ class _AppointmentCard extends StatelessWidget {
             const SizedBox(width: 16),
             department,
             const SizedBox(width: 12),
-            _Tag(
-              label: _formalLabel(item.status),
-              color: _statusColor(item.status),
-            ),
+            statusBadges,
             const SizedBox(width: 8),
             historyAction,
             action,
@@ -3066,7 +3345,13 @@ class _AppointmentCard extends StatelessWidget {
 
   Future<void> _showReviewDialog(BuildContext context) async {
     final currentStatus = item.lifecycleStatus;
-    final canReview = canReviewAppointment(item, DateTime.now());
+    final isAdminRole =
+        repository.isSuperAdmin ||
+        repository.currentAccessRole == AccessRole.admin;
+    final isReadOnlyRole =
+        isAdminRole || repository.currentAccessRole == AccessRole.portalStaff;
+    final canReview =
+        !isReadOnlyRole && canReviewAppointment(item, DateTime.now());
     final canUploadClinicalAttachments =
         repository.currentAccessRole == AccessRole.counselor &&
         !repository.isSuperAdmin;
@@ -3237,6 +3522,10 @@ class _AppointmentCard extends StatelessWidget {
                         icon: Icons.lock_outline,
                         message: item.isArchived
                             ? 'This appointment is archived. Details are read-only.'
+                            : isAdminRole
+                            ? 'Admin review is read-only. Only assigned counselors can update appointment decisions.'
+                            : isReadOnlyRole
+                            ? 'Appointment decisions are read-only for your role.'
                             : currentStatus == AppointmentStatus.confirmed
                             ? 'This appointment is scheduled for a future date. Outcome actions become available on its scheduled day.'
                             : 'This appointment has been finalized. The recorded decision is read-only.',
@@ -3254,13 +3543,17 @@ class _AppointmentCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 14),
                       DropdownButtonFormField<String>(
+                        isExpanded: true,
                         initialValue: action,
                         decoration: const InputDecoration(labelText: 'Action'),
                         items: [
                           if (pendingStudent)
                             const DropdownMenuItem(
                               value: 'accept',
-                              child: Text('Accept student proposed time'),
+                              child: Text(
+                                'Accept student proposed time',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           if (!item.hasPendingScheduleChange &&
                               currentStatus != AppointmentStatus.confirmed &&
@@ -3268,21 +3561,33 @@ class _AppointmentCard extends StatelessWidget {
                                   AppointmentStatus.rescheduleProposed)
                             const DropdownMenuItem(
                               value: 'confirmed',
-                              child: Text('Confirm appointment'),
+                              child: Text(
+                                'Confirm appointment',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           const DropdownMenuItem(
                             value: 'rescheduled',
-                            child: Text('Re-schedule appointment'),
+                            child: Text(
+                              'Re-schedule appointment',
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           if (currentStatus == AppointmentStatus.confirmed &&
                               !future) ...[
                             const DropdownMenuItem(
                               value: 'completed',
-                              child: Text('Mark session as completed'),
+                              child: Text(
+                                'Mark session as completed',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                             const DropdownMenuItem(
                               value: 'no_show',
-                              child: Text('Mark as Did Not Attend'),
+                              child: Text(
+                                'Mark as Did Not Attend',
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ],
                         ],
@@ -3295,6 +3600,7 @@ class _AppointmentCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
+                        isExpanded: true,
                         key: ValueKey('reason-$action'),
                         initialValue: reason,
                         decoration: const InputDecoration(
@@ -3304,7 +3610,10 @@ class _AppointmentCard extends StatelessWidget {
                             .map(
                               (value) => DropdownMenuItem(
                                 value: value,
-                                child: Text(value),
+                                child: Text(
+                                  value,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             )
                             .toList(),
@@ -5413,53 +5722,25 @@ class _CompactSummaryStrip extends StatelessWidget {
   );
 }
 
-class _FilterField extends StatelessWidget {
-  const _FilterField({
-    required this.label,
-    required this.value,
-    required this.values,
-    required this.onChanged,
-  });
-
-  final String label;
-  final String value;
-  final List<String> values;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 190,
-    child: DropdownButtonFormField<String>(
-      initialValue: value,
-      isExpanded: true,
-      decoration: InputDecoration(labelText: label),
-      items: values
-          .map(
-            (item) => DropdownMenuItem(
-              value: item,
-              child: Text(_formalLabel(item), overflow: TextOverflow.ellipsis),
-            ),
-          )
-          .toList(),
-      onChanged: onChanged,
-    ),
-  );
-}
-
-class _InquiriesPage extends StatefulWidget {
-  const _InquiriesPage({
+class AdminInquiriesPage extends StatefulWidget {
+  const AdminInquiriesPage({
+    super.key,
     required this.repository,
     this.initialSection = CounselorInquirySection.messages,
   });
   final AdminPortalRepository repository;
   final CounselorInquirySection initialSection;
   @override
-  State<_InquiriesPage> createState() => _InquiriesPageState();
+  State<AdminInquiriesPage> createState() => _AdminInquiriesPageState();
 }
 
-class _InquiriesPageState extends State<_InquiriesPage> {
-  String status = 'All Status';
-  String category = 'All Categories';
+int _inquiryStatusOrder(InquiryStatus status) => switch (status) {
+  InquiryStatus.pending => 0,
+  InquiryStatus.inProgress => 1,
+  InquiryStatus.resolved => 2,
+};
+
+class _AdminInquiriesPageState extends State<AdminInquiriesPage> {
   int _streamEpoch = 0;
 
   bool get _isOperationalStaff =>
@@ -5507,13 +5788,16 @@ class _InquiriesPageState extends State<_InquiriesPage> {
         ? 'Student messages and other PACC service inquiries.'
         : _isOperationalStaff
         ? 'Monitor assigned operational inquiry status and escalate items when needed.'
-        : 'Review, acknowledge, and resolve submitted inquiries.',
+        : 'Review and acknowledge submitted inquiries.',
     child:
         canShowCounselorMessagingInInquiries(
           widget.repository.currentAccessRole,
         )
         ? CounselorInquiryWorkspace(
             messages: const CounselorMessagesPage(embedded: true),
+            messagesBadge: const CounselorInboxUnreadBadge(
+              margin: EdgeInsets.only(left: 8),
+            ),
             otherServices: _buildServiceInquiries(),
             initialSection: widget.initialSection,
           )
@@ -5548,17 +5832,16 @@ class _InquiriesPageState extends State<_InquiriesPage> {
           );
         }
         final all = snapshot.data ?? const <AdminInquiryModel>[];
-        final categories = [
-          'All Categories',
-          ...{for (final item in all) item.category},
-        ];
-        final items = all
-            .where(
-              (i) =>
-                  (status == 'All Status' || i.status.label == status) &&
-                  (category == 'All Categories' || i.category == category),
-            )
-            .toList();
+        // Deterministic queue order: Pending first, In progress second,
+        // Resolved last, newest within each status.
+        final items = List<AdminInquiryModel>.of(all)
+          ..sort((a, b) {
+            final orderCompare = _inquiryStatusOrder(
+              a.status,
+            ).compareTo(_inquiryStatusOrder(b.status));
+            if (orderCompare != 0) return orderCompare;
+            return b.createdAt.compareTo(a.createdAt);
+          });
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -5583,47 +5866,6 @@ class _InquiriesPageState extends State<_InquiriesPage> {
                     .where((item) => item.status == InquiryStatus.resolved)
                     .length,
               },
-            ),
-            const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: _box,
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                crossAxisAlignment: WrapCrossAlignment.end,
-                children: [
-                  _FilterField(
-                    label: 'Status',
-                    value: status,
-                    values: const [
-                      'All Status',
-                      'Pending',
-                      'In Progress',
-                      'Resolved',
-                    ],
-                    onChanged: (value) => setState(() => status = value!),
-                  ),
-                  _FilterField(
-                    label: 'Category',
-                    value: category,
-                    values: categories,
-                    onChanged: (value) => setState(() => category = value!),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      '${items.length} ${items.length == 1 ? 'inquiry' : 'inquiries'} shown',
-                      style: const TextStyle(
-                        color: AdminColors.muted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
             ),
             const SizedBox(height: 14),
             _InquiryList(
@@ -5657,7 +5899,7 @@ class _InquiryList extends StatelessWidget {
       return _EmptyPanel(
         message: operationalEmpty
             ? 'No inquiry status items are currently assigned to you for monitoring.'
-            : 'No inquiries match the selected filters.',
+            : 'No inquiries have been submitted yet.',
       );
     }
     return Container(
@@ -5758,7 +6000,7 @@ class _InquiryQueueRow extends StatelessWidget {
                       item.isOperationalProjection
                           ? (item.collegeId.isEmpty
                                 ? 'College: Pending triage'
-                                : 'College: ${item.collegeId}')
+                                : 'College assigned')
                           : item.displayName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -6084,9 +6326,39 @@ class _InquiryDetails extends StatefulWidget {
 
 class _InquiryDetailsState extends State<_InquiryDetails> {
   bool _acknowledging = false;
-  bool _updatingStatus = false;
+  bool _resolving = false;
   bool _previewingPdf = false;
   bool _downloadingPdf = false;
+  String? _resolvedInquiryId;
+
+  @override
+  void didUpdateWidget(covariant _InquiryDetails oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldItem = oldWidget.item;
+    final nextItem = widget.item;
+    if (oldItem?.id != nextItem?.id) {
+      _resolvedInquiryId = null;
+      return;
+    }
+    if (nextItem != null &&
+        nextItem.id == _resolvedInquiryId &&
+        (nextItem.status == InquiryStatus.resolved ||
+            (oldItem != null &&
+                nextItem.routingRevision > oldItem.routingRevision &&
+                nextItem.status != InquiryStatus.resolved))) {
+      _resolvedInquiryId = null;
+    }
+  }
+
+  bool _canResolveInquiry(AdminInquiryModel item) {
+    if (item.isOperationalProjection) return false;
+    if (widget.repository.isSuperAdmin) return true;
+    if (item.isTakenOver) return false;
+    final uid = widget.repository.currentUserId;
+    return widget.repository.currentAccessRole == AccessRole.counselor &&
+        uid != null &&
+        item.assigneeIds.contains(uid);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -6100,10 +6372,14 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
         item.isOperationalProjection ||
         (!widget.repository.isSuperAdmin &&
             widget.repository.currentAccessRole == AccessRole.portalStaff);
-    final canUpdateClinicalStatus =
-        widget.repository.isSuperAdmin ||
-        (widget.repository.currentAccessRole == AccessRole.counselor &&
-            !item.isTakenOver);
+    final effectiveStatus = _resolvedInquiryId == item.id
+        ? InquiryStatus.resolved
+        : item.status;
+    final effectiveItem =
+        effectiveStatus == InquiryStatus.resolved &&
+            item.status != InquiryStatus.resolved
+        ? item.copyWith(status: InquiryStatus.resolved)
+        : item;
     return Container(
       padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 18 : 22),
       decoration: _box,
@@ -6115,9 +6391,10 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              _Tag(
-                label: item.status.label,
-                color: _statusColor(item.status.storedValue),
+              AdminStatusBadge.fromStatus(
+                domain: AdminStatusDomain.inquiry,
+                status: effectiveStatus.storedValue,
+                labelOverride: effectiveStatus.label,
               ),
               _Tag(label: item.category, color: AdminColors.surfaceMuted),
               Text(
@@ -6243,11 +6520,14 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
               ),
             ],
             const Divider(height: 34),
-            InquiryReplyThread(inquiry: item, repository: widget.repository),
+            InquiryReplyThread(
+              inquiry: effectiveItem,
+              repository: widget.repository,
+            ),
           ],
           const Divider(height: 34),
           InquiryRoutingPanel(
-            inquiry: item,
+            inquiry: effectiveItem,
             repository: widget.repository,
             onChanged: widget.onUpdated,
           ),
@@ -6264,9 +6544,10 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
               OutlinedButton.icon(
                 onPressed:
                     item.isAcknowledged ||
-                        item.status == InquiryStatus.resolved ||
+                        effectiveStatus == InquiryStatus.resolved ||
                         (item.isTakenOver && !widget.repository.isSuperAdmin) ||
-                        _acknowledging
+                        _acknowledging ||
+                        _resolving
                     ? null
                     : () => _acknowledge(context),
                 icon: Icon(
@@ -6277,18 +6558,32 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                 label: Text(
                   item.isAcknowledged
                       ? 'Receipt acknowledged'
-                      : item.status == InquiryStatus.resolved
+                      : effectiveStatus == InquiryStatus.resolved
                       ? 'Resolved'
                       : _acknowledging
                       ? 'Acknowledging…'
                       : 'Acknowledge receipt',
                 ),
               ),
-              if (canUpdateClinicalStatus && !isOperationalOnly)
-                _InquiryStatusMenu(
-                  current: item.status,
-                  enabled: !_updatingStatus && !_acknowledging,
-                  onSelected: (next) => _updateStatus(context, next),
+              if (effectiveStatus == InquiryStatus.inProgress &&
+                  _canResolveInquiry(item))
+                FilledButton.icon(
+                  onPressed: _resolving || _acknowledging
+                      ? null
+                      : () => _confirmAndResolve(context),
+                  icon: _resolving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.check_circle_outline),
+                  label: Text(
+                    _resolving ? 'Marking as resolved…' : 'Mark as Resolved',
+                  ),
                 ),
             ],
           ),
@@ -6298,7 +6593,7 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
   }
 
   Future<void> _acknowledge(BuildContext context) async {
-    if (_acknowledging) return;
+    if (_acknowledging || _resolving) return;
     setState(() => _acknowledging = true);
     try {
       await widget.repository.acknowledgeInquiry(
@@ -6310,7 +6605,12 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
           const SnackBar(content: Text('Receipt notification sent.')),
         );
       }
-    } catch (error) {
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'inquiry_acknowledge_failed',
+      );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -6323,31 +6623,76 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     }
   }
 
-  Future<void> _updateStatus(BuildContext context, InquiryStatus next) async {
-    if (_updatingStatus || next == widget.item!.status) return;
-    setState(() => _updatingStatus = true);
+  Future<void> _confirmAndResolve(BuildContext context) async {
+    final item = widget.item;
+    if (item == null ||
+        _resolving ||
+        _acknowledging ||
+        _resolvedInquiryId == item.id ||
+        item.status != InquiryStatus.inProgress ||
+        !_canResolveInquiry(item)) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Mark inquiry as resolved?'),
+        content: const Text(
+          'This will update the inquiry status to Resolved. Make sure the student\'s concern has been addressed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Mark as Resolved'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || !context.mounted) return;
+    final current = widget.item;
+    if (current == null ||
+        current.id != item.id ||
+        _resolvedInquiryId == current.id ||
+        current.status != InquiryStatus.inProgress ||
+        _resolving) {
+      return;
+    }
+    setState(() => _resolving = true);
     try {
-      await widget.repository.updateInquiryStatus(
-        widget.item!.id,
-        next,
-        expectedRevision: widget.item!.routingRevision,
+      await widget.repository.resolveInquiry(
+        current.id,
+        expectedRevision: current.routingRevision,
       );
+      if (mounted) {
+        setState(() => _resolvedInquiryId = current.id);
+      }
       widget.onUpdated();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Inquiry marked as resolved.')),
+        );
+      }
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'inquiry_resolve_failed',
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Inquiry marked ${next.label.toLowerCase()}.'),
+            content: Text(
+              _inquiryActionError(error, 'mark inquiry as resolved'),
+            ),
           ),
         );
       }
-    } catch (error) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_inquiryActionError(error, 'update inquiry'))),
-        );
-      }
     } finally {
-      if (mounted) setState(() => _updatingStatus = false);
+      if (mounted) setState(() => _resolving = false);
     }
   }
 
@@ -6512,65 +6857,6 @@ class _InquiryResponseGrid extends StatelessWidget {
       },
     );
   }
-}
-
-class _InquiryStatusMenu extends StatelessWidget {
-  const _InquiryStatusMenu({
-    required this.current,
-    required this.onSelected,
-    required this.enabled,
-  });
-  final InquiryStatus current;
-  final ValueChanged<InquiryStatus> onSelected;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) => PopupMenuButton<InquiryStatus>(
-    tooltip: 'Change inquiry status',
-    onSelected: enabled ? onSelected : null,
-    itemBuilder: (context) => InquiryStatus.values
-        .map(
-          (status) => PopupMenuItem(
-            value: status,
-            child: Row(
-              children: [
-                Icon(
-                  status == current
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  size: 17,
-                ),
-                const SizedBox(width: 9),
-                Text(status.label),
-              ],
-            ),
-          ),
-        )
-        .toList(),
-    child: Container(
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: AdminColors.ink,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.swap_horiz, color: Colors.white, size: 18),
-          const SizedBox(width: 8),
-          Text(
-            'Change status',
-            style: Theme.of(
-              context,
-            ).textTheme.labelLarge?.copyWith(color: Colors.white),
-          ),
-          const SizedBox(width: 6),
-          const Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
-        ],
-      ),
-    ),
-  );
 }
 
 class _ProfilePage extends StatefulWidget {

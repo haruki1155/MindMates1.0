@@ -133,6 +133,7 @@ test("terminal, unauthorized, and forged staff actions are denied", async () => 
   await expectCallableFailure(review.run({auth: {uid: counselorId}, data: payload(terminal.id, await futureWeekdaySlot(new Set([slot])))}), "failed-precondition");
   const appointment = await seedAppointment("authority"); const target = await futureWeekdaySlot();
   await expectCallableFailure(review.run({auth: {uid: studentId}, data: payload(appointment.id, target)}), "permission-denied"); await expectCallableFailure(review.run({auth: {uid: portalStaffId}, data: payload(appointment.id, target)}), "permission-denied");
+  await expectCallableFailure(review.run({auth: {uid: adminId}, data: {...payload(appointment.id, target), exceptionReason: "Covering for counselor"}}), "permission-denied");
   await expectCallableFailure(review.run({auth: {uid: otherCounselorId}, data: payload(appointment.id, target)}), "permission-denied");
   const updated = (await appointment.get()).data()!;
   assert.equal(updated.assignedStaffId, counselorId);
@@ -151,8 +152,9 @@ test("legacy proposal is explicitly counterproposed by staff and accepted by stu
 test("concurrent re-schedules to one slot allow exactly one claimant", async () => {
   const firstAt = await futureWeekdaySlot(); const secondAt = await futureWeekdaySlot(new Set([firstAt])); const target = await futureWeekdaySlot(new Set([firstAt, secondAt]));
   const first = await seedAppointment("race-first", {scheduledAt: firstAt}); const second = await seedAppointment("race-second", {scheduledAt: secondAt});
+  await db.doc(`users/${studentId}-race`).set({accessRole: "appUser", verificationStatus: "verified", collegeId: college});
   await first.update({userId: `${studentId}-race`});
   await db.doc(`appointment_user_locks/${studentId}-race`).set({appointmentId: first.id});
-  const outcomes = await Promise.allSettled([review.run({auth: {uid: counselorId}, data: payload(first.id, target)}), review.run({auth: {uid: adminId}, data: {...payload(second.id, target), exceptionReason: "Covering for the assigned counselor"}})]);
+  const outcomes = await Promise.allSettled([review.run({auth: {uid: counselorId}, data: payload(first.id, target)}), review.run({auth: {uid: counselorId}, data: payload(second.id, target)})]);
   assert.equal(outcomes.filter((result) => result.status === "fulfilled").length, 1); assert.equal(outcomes.filter((result) => result.status === "rejected").length, 1); assert.equal((await db.collection("appointment_slots").doc(`pacc_${target}`).get()).exists, true);
 });

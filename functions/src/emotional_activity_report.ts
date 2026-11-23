@@ -342,10 +342,11 @@ export function buildEmotionalActivityReport(input: {
   const courseNameById = input.courseNameById ?? new Map<string, string>();
 
   const appUsers = input.users.filter(({data}) => {
-    const legacyRole = text(data.role).toLowerCase();
-    const accessRole =
-      text(data.accessRole) ||
-      (["admin", "counselor"].includes(legacyRole) ? legacyRole : "appUser");
+    const legacyRole = text(data.role).toLowerCase().replace(/[\s_-]+/g, "");
+    if (["admin", "superadmin", "counselor", "portalstaff"].includes(legacyRole)) {
+      return false;
+    }
+    const accessRole = text(data.accessRole) || "appUser";
     return accessRole === "appUser" && data.staffAccountStatus == null;
   });
 
@@ -492,8 +493,14 @@ export function buildEmotionalActivityReport(input: {
   }
 
   const valenceBreakdown = finalizeBuckets(valenceMap, "percentage");
-  const moodBreakdown = finalizeBuckets(moodMap, "percentage");
-  const assessmentBreakdown = finalizeBuckets(assessmentMap, "percentage");
+  const moodBreakdown =
+    moodUsers.size >= MIN_EMOTIONAL_COHORT_SIZE
+      ? finalizeBuckets(moodMap, "percentage")
+      : [];
+  const assessmentBreakdown =
+    assessmentUsers.size >= MIN_EMOTIONAL_COHORT_SIZE
+      ? finalizeBuckets(assessmentMap, "percentage")
+      : [];
   const periodTrends = finalizeBuckets(periodMap, "chronological");
 
   const topValence = valenceBreakdown.find((b) => !b.suppressed && b.percentage != null);

@@ -5,11 +5,14 @@ import {
   assigneeNotificationId,
   buildInquiryStatusProjection,
   decideRouting,
+  ESCALATION_TYPES,
   escalationNotificationId,
+  InquiryEscalationInputError,
   InquiryRoutingError,
   isEligibleAssignee,
   isEligibleCounselorAssignee,
   isEligibleMonitoringStaff,
+  parseEscalationInput,
   planReassignment,
   shouldWriteInquiryProjection,
   triageNotificationId,
@@ -222,4 +225,72 @@ test("notification ids are deterministic and path-safe", () => {
   assert.equal(assigneeNotificationId("inq1", "uid1"), "portal_inquiry_inq1_uid1");
   assert.equal(triageNotificationId("inq1"), "portal_inquiry_triage_inq1");
   assert.equal(escalationNotificationId("inq1", 3), "portal_inquiry_escalation_inq1_3");
+});
+
+test("parseEscalationInput supports reason-less counselor confirmation and reasoned staff escalation with strict validation", () => {
+  const escErr = (e: unknown) => e instanceof InquiryEscalationInputError;
+
+  // Counselor confirmation without reason (omitted, null, or explicit counselor_confirmation).
+  assert.deepEqual(parseEscalationInput({}, "counselor"), {
+    escalationType: ESCALATION_TYPES.counselorConfirmation,
+    reason: null,
+  });
+  assert.deepEqual(
+    parseEscalationInput({reason: null, escalationType: ESCALATION_TYPES.counselorConfirmation}, "counselor"),
+    {escalationType: ESCALATION_TYPES.counselorConfirmation, reason: null},
+  );
+
+  // Reason-less escalation is rejected for portalStaff/admin or conflicting/unknown types.
+  assert.throws(() => parseEscalationInput({}, "portalStaff"), escErr);
+  assert.throws(() => parseEscalationInput({escalationType: ESCALATION_TYPES.counselorConfirmation}, "portalStaff"), escErr);
+  assert.throws(() => parseEscalationInput({escalationType: ESCALATION_TYPES.staffReasoned}, "counselor"), escErr);
+  assert.throws(() => parseEscalationInput({escalationType: "custom_type"}, "counselor"), escErr);
+  assert.throws(() => parseEscalationInput({escalationType: ""}, "counselor"), escErr);
+  assert.throws(() => parseEscalationInput({escalationType: 123}, "counselor"), escErr);
+
+  // Reasoned escalation trims and classifies as staff_reasoned.
+  assert.deepEqual(
+    parseEscalationInput({reason: "  Needs supervisor review  "}, "portalStaff"),
+    {escalationType: ESCALATION_TYPES.staffReasoned, reason: "Needs supervisor review"},
+  );
+  assert.deepEqual(
+    parseEscalationInput({reason: "Needs review", escalationType: ESCALATION_TYPES.staffReasoned}, "counselor"),
+    {escalationType: ESCALATION_TYPES.staffReasoned, reason: "Needs review"},
+  );
+
+  // Short, empty, whitespace, overlong, or conflicting counselor_confirmation + reason are rejected.
+  assert.throws(() => parseEscalationInput({reason: ""}, "counselor"), escErr);
+  assert.throws(() => parseEscalationInput({reason: "   "}, "counselor"), escErr);
+  assert.throws(() => parseEscalationInput({reason: "no"}, "counselor"), escErr);
+  assert.throws(() => parseEscalationInput({reason: "x".repeat(501)}, "portalStaff"), escErr);
+  assert.throws(() => parseEscalationInput({reason: 42}, "counselor"), escErr);
+  assert.throws(
+    () => parseEscalationInput({reason: "Valid reason", escalationType: ESCALATION_TYPES.counselorConfirmation}, "counselor"),
+    escErr,
+  );
+  assert.throws(
+    () => parseEscalationInput({reason: "Valid reason", escalationType: "bogus"}, "portalStaff"),
+    escErr,
+  );
+});
+
+test("buildInquiryStatusProjection never leaks escalation.type or escalation.reason", () => {
+  const projection = buildInquiryStatusProjection("inq-esc", {
+    status: "in_progress",
+    routingStatus: "routed",
+    routingRevision: 2,
+    assigneeIds: ["c1"],
+    escalation: {
+      status: "requested",
+      type: ESCALATION_TYPES.counselorConfirmation,
+      reason: "Legacy clinical note",
+    },
+  });
+  assert.equal(projection.escalationStatus, "requested");
+  assert.equal(Object.prototype.hasOwnProperty.call(projection, "escalationType"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(projection, "escalationReason"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(projection, "escalation"), false);
+  const serialized = JSON.stringify(projection);
+  assert.ok(!serialized.includes("counselor_confirmation"));
+  assert.ok(!serialized.includes("Legacy clinical note"));
 });

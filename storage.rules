@@ -24,10 +24,8 @@ service firebase.storage {
       allow delete: if isOwner(userId);
     }
 
-    // Task #10 (Option A1): confidential counselor interview files.
-    // Every clinical authorization branch accesses at most 2 distinct Firestore documents:
-    //   - Super-admin viewing (`get` only): users/$(request.auth.uid) + system_config/security
-    //   - Assigned-college counselor (`get`, `create`, `delete`): users/$(request.auth.uid) + appointments/$(appointmentId)
+    // Only assigned counselors can remove draft clinical evidence.
+    // Uploads and downloads use the private callables.
     function isVerifiedSignedIn() {
       return signedIn() && request.auth.token.email_verified == true;
     }
@@ -56,12 +54,6 @@ service firebase.storage {
         );
     }
 
-    function isSystemAdmin() {
-      return hasActiveClinicalAccount('admin')
-        && firestore.exists(/databases/(default)/documents/system_config/security)
-        && request.auth.uid == firestore.get(/databases/(default)/documents/system_config/security).data.get('superAdminUid', '');
-    }
-
     function appointmentExists(appointmentId) {
       return firestore.exists(/databases/(default)/documents/appointments/$(appointmentId));
     }
@@ -82,30 +74,10 @@ service firebase.storage {
         && appointmentDoc(appointmentId).get('collegeId', '') in userDoc().get('assignedCollegeIds', []);
     }
 
-    function validClinicalAttachmentCreate(appointmentId, uploaderUid, fileName) {
-      return isVerifiedSignedIn()
-        && request.auth.uid == uploaderUid
-        && fileName.matches('^[a-f0-9]{32}[.](jpg|jpeg|png|pdf|doc|docx)$')
-        && request.resource != null
-        && request.resource.size > 0
-        && request.resource.size <= 5 * 1024 * 1024
-        && request.resource.contentType in [
-          'image/jpeg', 'image/png', 'application/pdf', 'application/msword',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        ]
-        && request.resource.metadata != null
-        && 'uploadedBy' in request.resource.metadata
-        && 'appointmentId' in request.resource.metadata
-        && request.resource.metadata.uploadedBy == uploaderUid
-        && request.resource.metadata.appointmentId == appointmentId;
-    }
-
     match /counseling_session_files/{appointmentId}/{uploaderUid}/{fileName} {
-      allow get: if isSystemAdmin() || isAssignedCollegeCounselor(appointmentId);
+      allow get: if false;
       allow list: if false;
-      allow create: if validClinicalAttachmentCreate(appointmentId, uploaderUid, fileName)
-        && isAssignedCollegeCounselor(appointmentId)
-        && appointmentDoc(appointmentId).get('status', '') == 'confirmed';
+      allow create: if false;
       allow delete: if isVerifiedSignedIn()
         && request.auth.uid == uploaderUid
         && isAssignedCollegeCounselor(appointmentId)

@@ -1,10 +1,10 @@
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/admin_inquiry_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../../../services/firebase/firebase_error_message.dart';
 import '../domain/admin_management_models.dart';
 import '../theme/admin_theme.dart';
 
@@ -53,11 +53,7 @@ String routingReasonLabel(String? reason) => switch (reason) {
 };
 
 String _errorText(Object error, String fallback) =>
-    error is FirebaseFunctionsException
-    ? (error.message?.trim().isNotEmpty == true
-          ? error.message!
-          : '$fallback (${error.code}).')
-    : '$fallback.';
+    FirebaseErrorMessage.describe(error, fallback: '$fallback.');
 
 /// Routing details and the actions this session may take on them. Every
 /// action is a server callable; the server re-checks authorization.
@@ -124,7 +120,7 @@ class InquiryRoutingPanel extends StatelessWidget {
         const SizedBox(height: 8),
         _row(
           'College',
-          inquiry.collegeId.isEmpty ? 'Not identified' : inquiry.collegeId,
+          inquiry.collegeId.isEmpty ? 'Not identified' : 'College assigned',
         ),
         _row('Status', status),
         _row(
@@ -145,7 +141,11 @@ class InquiryRoutingPanel extends StatelessWidget {
             'Escalation',
             _isOperationalView
                 ? 'Requested'
-                : 'Requested — ${inquiry.escalationReason ?? ''}',
+                : (inquiry.escalationReason ?? '').trim().isNotEmpty
+                ? 'Requested — ${inquiry.escalationReason!.trim()}'
+                : inquiry.escalationType != null
+                ? 'Requested — ${inquiry.escalationType!.label}'
+                : 'Requested',
           ),
         if (inquiry.isTakenOver)
           _row(
@@ -199,18 +199,31 @@ class InquiryRoutingPanel extends StatelessWidget {
   );
 
   Future<void> _escalate(BuildContext context) async {
-    final done = await showDialog<bool>(
-      context: context,
-      builder: (_) => _ReasonDialog(
-        title: 'Escalate to administrator',
-        actionLabel: 'Escalate',
-        onSubmit: (reason) => repository.escalateInquiry(
-          inquiry.id,
-          reason: reason,
-          expectedRevision: inquiry.routingRevision,
-        ),
-      ),
-    );
+    final done = _isOperationalView
+        ? await showDialog<bool>(
+            context: context,
+            builder: (_) => _ReasonDialog(
+              title: 'Escalate to administrator',
+              actionLabel: 'Escalate',
+              onSubmit: (reason) => repository.escalateInquiry(
+                inquiry.id,
+                escalationType: InquiryEscalationType.staffReasoned,
+                reason: reason,
+                expectedRevision: inquiry.routingRevision,
+              ),
+            ),
+          )
+        : await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _EscalateConfirmDialog(
+              onConfirm: () => repository.escalateInquiry(
+                inquiry.id,
+                escalationType: InquiryEscalationType.counselorConfirmation,
+                expectedRevision: inquiry.routingRevision,
+              ),
+            ),
+          );
     if (done == true) onChanged?.call();
   }
 
@@ -237,6 +250,62 @@ class InquiryRoutingPanel extends StatelessWidget {
     );
     if (done == true) onChanged?.call();
   }
+}
+
+class _EscalateConfirmDialog extends StatefulWidget {
+  const _EscalateConfirmDialog({required this.onConfirm});
+
+  final Future<void> Function() onConfirm;
+
+  @override
+  State<_EscalateConfirmDialog> createState() => _EscalateConfirmDialogState();
+}
+
+class _EscalateConfirmDialogState extends State<_EscalateConfirmDialog> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.onConfirm();
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = _errorText(error, 'The request failed'));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+    canPop: !_busy,
+    child: AlertDialog(
+      title: const Text('Escalate this inquiry to the Administrator?'),
+      content: _error == null
+          ? null
+          : Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+      actions: [
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+          child: const Text('No'),
+        ),
+        FilledButton(
+          onPressed: _busy ? null : _submit,
+          child: Text(_busy ? 'Escalating…' : 'Yes'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _ReasonDialog extends StatefulWidget {
@@ -423,7 +492,7 @@ class _ReassignDialogState extends State<_ReassignDialog> {
                       Text(
                         widget.inquiry.collegeId.isEmpty
                             ? 'College not identified. Any eligible counselor may be assigned clinical handling.'
-                            : 'College ${widget.inquiry.collegeId}. Counselors outside this college are allowed and recorded in the audit log.',
+                            : 'College identified. Counselors outside this college are allowed and recorded in the audit log.',
                         style: const TextStyle(color: AdminColors.muted),
                       ),
                       const SizedBox(height: 10),
@@ -468,7 +537,9 @@ class _ReassignDialogState extends State<_ReassignDialog> {
                             dense: true,
                             value: _selectedMonitors.contains(user.id),
                             title: Text(user.displayName),
-                            subtitle: const Text('Operational status monitoring'),
+                            subtitle: const Text(
+                              'Operational status monitoring',
+                            ),
                             onChanged: _busy
                                 ? null
                                 : (checked) => setState(

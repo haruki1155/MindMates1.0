@@ -5,6 +5,7 @@ import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import {HttpsError} from "firebase-functions/v2/https";
 
 import "./index";
+import {REPORT_DEPARTMENTS} from "./counseling_population";
 import {getReportAnalytics} from "./report_generation";
 
 const emulated = Boolean(
@@ -17,6 +18,11 @@ const db = getFirestore();
 type Callable = {
   run: (r: {auth?: {uid: string}; data?: Record<string, unknown>}) => Promise<{
     report: {
+      population: {
+        schoolYear: string;
+        status?: string;
+        configured: boolean;
+      };
       filters: {
         schoolYear: string;
         periodLabel: string;
@@ -32,8 +38,12 @@ type Callable = {
       appointments: {
         totalAppointments: number;
         uniqueStudentsServed: number;
+        department: Array<{key: string; label: string; percentage: number}>;
         course: Array<{key: string; label: string; percentage: number}>;
+        yearLevel: Array<{key: string; label: string; percentage: number}>;
       };
+      comparison: {schoolYear: string} | null;
+      trends: Array<{schoolYear: string}>;
       emotionalActivity: {
         status: string;
         suppressed: boolean;
@@ -400,5 +410,196 @@ test(
     assert.equal(wholeYear3839.report.users.overallActivePercentage, 0);
     assert.equal(wholeYear3839.report.appointments.totalAppointments, 0);
     assert.equal(wholeYear3839.report.emotionalActivity.status, "no_data");
+  },
+);
+
+test(
+  "resolves omitted schoolYear, includes legacy students without accessRole, and handles full population casing & counselor collegeId filter",
+  {skip: !emulated},
+  async () => {
+    const legacyStudentId = uid("legacy-student");
+    const legacyStaffId = uid("legacy-staff");
+    const nursingStudentId = uid("nursing-student");
+    const fullPopYear = "2036-2037";
+    const fullPopulations = Object.fromEntries(REPORT_DEPARTMENTS.map((d) => [d, 50]));
+
+    try {
+      // 1. Omitted schoolYear resolves to active "current" year (2037-2038) instead of missing defaultSchoolYear().
+      const omittedCurrent = await fetchReport.run({
+        auth: {uid: uid("super-admin")},
+        data: {},
+      });
+      assert.equal(omittedCurrent.report.population.schoolYear, "2037-2038");
+      assert.equal(omittedCurrent.report.population.status, "current");
+      assert.ok(omittedCurrent.report.users.overallActivePercentage > 0);
+      assert.ok(omittedCurrent.report.appointments.totalAppointments > 0);
+
+      // Explicit missing year remains isolated.
+      const explicitMissing = await fetchReport.run({
+        auth: {uid: uid("super-admin")},
+        data: {schoolYear: "2038-2039"},
+      });
+      assert.equal(explicitMissing.report.population.status, "unknown");
+      assert.equal(explicitMissing.report.appointments.totalAppointments, 0);
+      assert.equal(explicitMissing.report.comparison, null);
+      assert.equal(explicitMissing.report.trends.length, 0);
+
+      // Fallback to latest "closed" when no "current" year exists.
+      const popSnap = await db.collection("counseling_population").get();
+      const otherCurrentIds = popSnap.docs
+        .filter((d) => d.id !== "2037-2038" && d.data().status === "current")
+        .map((d) => d.id);
+      await Promise.all([
+        db.doc("counseling_population/2037-2038").update({status: "closed"}),
+        ...otherCurrentIds.map((id) =>
+          db.doc(`counseling_population/${id}`).update({status: "closed"}),
+        ),
+      ]);
+      try {
+        const omittedClosed = await fetchReport.run({
+          auth: {uid: uid("super-admin")},
+          data: {},
+        });
+        assert.equal(omittedClosed.report.population.schoolYear, "2037-2038");
+        assert.equal(omittedClosed.report.population.status, "closed");
+        assert.ok(omittedClosed.report.appointments.totalAppointments > 0);
+      } finally {
+        await Promise.all([
+          db.doc("counseling_population/2037-2038").update({status: "current"}),
+          ...otherCurrentIds.map((id) =>
+            db.doc(`counseling_population/${id}`).update({status: "current"}),
+          ),
+        ]);
+      }
+
+      // 2. Legacy verified student without accessRole is included across users, appointments, and emotional activity;
+      // legacy portalStaff without accessRole is excluded.
+      await db.doc(`users/${legacyStudentId}`).set({
+        role: "student",
+        populationRole: "student",
+        verificationStatus: "verified",
+        collegeId: collegeAId,
+        department: collegeAName,
+        course: progA2,
+        lastActiveAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
+      });
+      await db.doc(`appointments/${prefix}-ap-leg-stu`).set({
+        userId: legacyStudentId,
+        collegeId: collegeAId,
+        department: collegeAName,
+        course: progA2,
+        yearLevel: "3rd Year",
+        status: "completed",
+        academicYearId: "2037-2038",
+        scheduledAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
+      });
+      await db.doc(`moodEntries/${prefix}-m-leg-stu`).set({
+        userId: legacyStudentId,
+        level: 5,
+        label: "Great",
+        occurredAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
+      });
+      await db.doc(`users/${legacyStaffId}`).set({
+        role: "portalStaff",
+        lastActiveAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
+      });
+      await db.doc(`appointments/${prefix}-ap-leg-staff`).set({
+        userId: legacyStaffId,
+        collegeId: collegeAId,
+        department: collegeAName,
+        course: progA2,
+        status: "completed",
+        academicYearId: "2037-2038",
+        scheduledAt: Timestamp.fromDate(new Date("2037-09-15T04:00:00Z")),
+      });
+
+      const counselorProgA2 = await fetchReport.run({
+        auth: {uid: uid("counselor-a")},
+        data: {
+          schoolYear: "2037-2038",
+          appointmentDepartment: collegeAId,
+          program: progA2,
+        },
+      });
+      // 2 original a2 students + 1 legacy verified student = 3 (legacy portalStaff excluded).
+      assert.equal(counselorProgA2.report.appointments.totalAppointments, 3);
+      assert.equal(counselorProgA2.report.users.overallActivePercentage, 100);
+
+      // 10 BSIT + 1 legacy student = 11 emotional mood participants in College A.
+      const legacyEmo = await fetchReport.run({
+        auth: {uid: uid("counselor-a")},
+        data: {
+          schoolYear: "2037-2038",
+          appointmentDepartment: collegeAId,
+          emotionalSource: "mood",
+        },
+      });
+      assert.equal(legacyEmo.report.emotionalActivity.status, "ready");
+
+      // Cross-college, staff, non-super admin, and unauthenticated remain rejected.
+      await rejects(
+        fetchReport.run({
+          auth: {uid: uid("counselor-a")},
+          data: {schoolYear: "2037-2038", appointmentDepartment: "all", program: progB1},
+        }),
+        "permission-denied",
+      );
+      await rejects(
+        fetchReport.run({
+          auth: {uid: uid("counselor-a")},
+          data: {schoolYear: "2037-2038", appointmentDepartment: collegeBName},
+        }),
+        "permission-denied",
+      );
+      await rejects(
+        fetchReport.run({auth: {uid: uid("staff")}, data: {schoolYear: "2037-2038"}}),
+        "permission-denied",
+      );
+      await rejects(
+        fetchReport.run({auth: {uid: uid("admin")}, data: {schoolYear: "2037-2038"}}),
+        "permission-denied",
+      );
+      await rejects(fetchReport.run({data: {schoolYear: "2037-2038"}}), "unauthenticated");
+
+      // 3. Full REPORT_DEPARTMENTS population with lowercase "college of nursing" yields non-zero department %, course, yearLevel.
+      await db.doc(`counseling_population/${fullPopYear}`).set({
+        schoolYear: fullPopYear,
+        startDate: "2036-06-01",
+        endDate: "2037-05-31",
+        status: "closed",
+        populations: fullPopulations,
+      });
+      await db.doc(`users/${nursingStudentId}`).set({
+        accessRole: "appUser",
+        populationRole: "student",
+        verificationStatus: "verified",
+        department: "college of nursing",
+        course: "BS Nursing",
+        yearLevel: "4th Year",
+        lastActiveAt: Timestamp.fromDate(new Date("2036-09-10T04:00:00Z")),
+      });
+      await db.doc(`appointments/${prefix}-ap-nursing`).set({
+        userId: nursingStudentId,
+        department: "college of nursing",
+        course: "BS Nursing",
+        yearLevel: "4th Year",
+        status: "completed",
+        academicYearId: fullPopYear,
+        scheduledAt: Timestamp.fromDate(new Date("2036-09-10T04:00:00Z")),
+      });
+
+      const fullPopRes = await fetchReport.run({
+        auth: {uid: uid("super-admin")},
+        data: {schoolYear: fullPopYear},
+      });
+      assert.equal(fullPopRes.report.population.configured, true);
+      assert.ok(fullPopRes.report.appointments.department.length > 0);
+      assert.ok(fullPopRes.report.appointments.department[0].percentage > 0);
+      assert.ok(fullPopRes.report.appointments.course.length > 0);
+      assert.ok(fullPopRes.report.appointments.yearLevel.length > 0);
+    } finally {
+      await db.doc("counseling_population/2037-2038").update({status: "current"}).catch(() => undefined);
+      await db.doc(`counseling_population/${fullPopYear}`).delete().catch(() => undefined);
+    }
   },
 );

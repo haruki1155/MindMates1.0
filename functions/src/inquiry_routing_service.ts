@@ -10,8 +10,11 @@ import {
   buildInquiryStatusProjection,
   Candidate,
   decideRouting,
+  EscalationInput,
   escalationNotificationId,
+  InquiryEscalationInputError,
   InquiryRoutingError,
+  parseEscalationInput,
   planReassignment,
   shouldWriteInquiryProjection,
   triageNotificationId,
@@ -263,6 +266,32 @@ export function reasonFrom(data: unknown): string {
   return text;
 }
 
+export function escalationInputFrom(data: unknown, role: string): EscalationInput {
+  const input = (data ?? {}) as {reason?: unknown};
+  if (input.reason !== undefined && input.reason !== null) {
+    const reason = reasonFrom(data);
+    try {
+      const payload = (data && typeof data === "object" && !Array.isArray(data)
+        ? data
+        : {}) as Record<string, unknown>;
+      return parseEscalationInput({...payload, reason}, role);
+    } catch (error) {
+      if (error instanceof InquiryEscalationInputError) {
+        throw new HttpsError("invalid-argument", error.message);
+      }
+      throw error;
+    }
+  }
+  try {
+    return parseEscalationInput(data, role);
+  } catch (error) {
+    if (error instanceof InquiryEscalationInputError) {
+      throw new HttpsError("invalid-argument", error.message);
+    }
+    throw error;
+  }
+}
+
 export const STALE_REVISION = "This inquiry was updated by someone else. Reload and try again.";
 
 /**
@@ -312,7 +341,9 @@ export const acknowledgeInquiry = onCall(async (request) => {
     if (String(data.status ?? "pending").toLowerCase() === "resolved") {
       throw new HttpsError("failed-precondition", "Resolved inquiries cannot be acknowledged.");
     }
-    if (data.acknowledgedAt) throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
+    if (hasTimestampValue(data.acknowledgedAt)) {
+      throw new HttpsError("failed-precondition", "A receipt notification was already sent.");
+    }
     const userId = String(data.userId ?? "");
     if (!userId) throw new HttpsError("failed-precondition", "Inquiry has no sender.");
     // Only clinical counselors or the super-admin claim inquiry `ownerId`;
@@ -354,6 +385,81 @@ export const acknowledgeInquiry = onCall(async (request) => {
   return {ok: true};
 });
 
+/**
+ * Enforces the approved inquiry resolution workflow across both the dedicated
+ * `resolveInquiry` callable and the legacy `setInquiryStatus` callable:
+ * pending inquiries must be acknowledged (or have a clinical response) and in
+ * progress before resolution. Checking `acknowledgedAt != null ||
+ * firstResponseAt != null` also closes the two-step legacy bypass where
+ * `setInquiryStatus("in_progress")` transitions a pending inquiry without
+ * acknowledging it.
+ */
+function hasTimestampValue(value: unknown): boolean {
+  if (value == null || typeof value === "boolean") return false;
+  if (value instanceof Timestamp) return true;
+  if (value instanceof Date) return !Number.isNaN(value.getTime());
+  if (typeof value === "number") return Number.isFinite(value) && value > 0;
+  if (typeof value === "string") {
+    return value.trim().length > 0 && !Number.isNaN(Date.parse(value));
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const record = value as {
+      toMillis?: unknown;
+      seconds?: unknown;
+      _seconds?: unknown;
+      nanoseconds?: unknown;
+      _nanoseconds?: unknown;
+    };
+    if (typeof record.toMillis === "function") {
+      try {
+        const ms = (record.toMillis as () => unknown)();
+        return typeof ms === "number" && Number.isFinite(ms) && ms > 0;
+      } catch {
+        return false;
+      }
+    }
+    const seconds =
+      typeof record.seconds === "number"
+        ? record.seconds
+        : typeof record._seconds === "number"
+          ? record._seconds
+          : null;
+    if (seconds !== null && Number.isFinite(seconds) && seconds >= 0) {
+      const nanos =
+        record.nanoseconds !== undefined
+          ? record.nanoseconds
+          : record._nanoseconds;
+      if (
+        nanos !== undefined &&
+        (typeof nanos !== "number" || !Number.isFinite(nanos) || nanos < 0)
+      ) {
+        return false;
+      }
+      return seconds > 0 || (typeof nanos === "number" && nanos > 0);
+    }
+  }
+  return false;
+}
+
+function assertCanResolveInquiryStatus(
+  data: FirebaseFirestore.DocumentData,
+  before: string,
+  alreadyResolvedMode: "reject" | "noop",
+): boolean {
+  if (before === "resolved") {
+    if (alreadyResolvedMode === "reject") {
+      throw new HttpsError("failed-precondition", "This inquiry is already resolved.");
+    }
+    return false;
+  }
+  const isAcknowledgedOrResponded =
+    hasTimestampValue(data.acknowledgedAt) || hasTimestampValue(data.firstResponseAt);
+  if (before !== "in_progress" || !isAcknowledgedOrResponded) {
+    throw new HttpsError("failed-precondition", "Acknowledge receipt before marking this inquiry as resolved.");
+  }
+  return true;
+}
+
 export const setInquiryStatus = onCall(async (request) => {
   const who = await inquiryActor(request);
   const inquiryId = inquiryIdFrom(request.data);
@@ -376,8 +482,14 @@ export const setInquiryStatus = onCall(async (request) => {
     }
     const revision = revisionOf(data);
     const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
-    const before = String(data.status ?? "pending");
-    if (before === status) return {ok: true, changed: false, revision};
+    const before = String(data.status ?? "pending").toLowerCase();
+    if (status === "resolved") {
+      if (!assertCanResolveInquiryStatus(data, before, "noop")) {
+        return {ok: true, changed: false, revision};
+      }
+    } else if (before === status) {
+      return {ok: true, changed: false, revision};
+    }
     tx.update(ref, {
       status,
       routingRevision: revision + 1,
@@ -405,10 +517,62 @@ export const setInquiryStatus = onCall(async (request) => {
   });
 });
 
-export const escalateInquiry = onCall(async (request) => {
+export const resolveInquiry = onCall(async (request) => {
   const who = await inquiryActor(request);
   const inquiryId = inquiryIdFrom(request.data);
-  const reason = reasonFrom(request.data);
+  const ref = db().collection("inquiries").doc(inquiryId);
+  const statusRef = statusCollection().doc(inquiryId);
+  const nowTs = Timestamp.now();
+  return db().runTransaction(async (tx) => {
+    const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
+    if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
+    const data = current.data()!;
+    if (!canHandleClinical(who, data)) {
+      throw new HttpsError(
+        "permission-denied",
+        data.takeover
+          ? "An administrator has taken over this inquiry."
+          : "Only the counselor assigned to this inquiry or the super-administrator can resolve this inquiry.",
+      );
+    }
+    const revision = revisionOf(data);
+    const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
+    const before = String(data.status ?? "pending").toLowerCase();
+    assertCanResolveInquiryStatus(data, before, "reject");
+    tx.update(ref, {
+      status: "resolved",
+      routingRevision: revision + 1,
+      updatedAt: FieldValue.serverTimestamp(),
+      resolvedAt: FieldValue.serverTimestamp(),
+      resolvedBy: who.actor.uid,
+    });
+    const projection = buildInquiryStatusProjection(inquiryId, {
+      ...data,
+      status: "resolved",
+      routingRevision: revision + 1,
+      updatedAt: nowTs,
+      resolvedAt: nowTs,
+    });
+    if (shouldWriteInquiryProjection(currentProjection.exists ? currentProjection.data() : null, projection)) {
+      tx.set(statusRef, {...projection, projectedAt: FieldValue.serverTimestamp()});
+    }
+    writeAudit(tx, db(), {
+      actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
+      action: "INQUIRY_RESOLVED",
+      category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
+      metadata: {before, after: "resolved", revision: revision + 1, revisionChecked},
+    });
+    return {ok: true, changed: true, revision: revision + 1};
+  });
+});
+
+export const escalateInquiry = onCall(async (request) => {
+  const who = await inquiryActor(request);
+  if (who.isSuperAdmin || (who.role !== "counselor" && who.role !== "portalStaff")) {
+    throw new HttpsError("permission-denied", "Only staff assigned to this inquiry can escalate it.");
+  }
+  const inquiryId = inquiryIdFrom(request.data);
+  const {escalationType, reason} = escalationInputFrom(request.data, who.role);
   const ref = db().collection("inquiries").doc(inquiryId);
   const statusRef = statusCollection().doc(inquiryId);
   const admin = superAdminUid();
@@ -426,7 +590,13 @@ export const escalateInquiry = onCall(async (request) => {
     const revision = revisionOf(data);
     const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
     if (data.escalation?.status === "requested") throw new HttpsError("failed-precondition", "This inquiry is already escalated.");
-    const nextEscalation = {status: "requested", reason, requestedBy: who.actor.uid, requestedAt: FieldValue.serverTimestamp()};
+    const nextEscalation = {
+      status: "requested",
+      type: escalationType,
+      reason,
+      requestedBy: who.actor.uid,
+      requestedAt: FieldValue.serverTimestamp(),
+    };
     tx.update(ref, {
       escalation: nextEscalation,
       routingRevision: revision + 1,
@@ -444,7 +614,14 @@ export const escalateInquiry = onCall(async (request) => {
     writeAudit(tx, db(), {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ESCALATED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
-      metadata: {reason, recipient: admin, revision: revision + 1, revisionChecked},
+      metadata: {
+        escalationType,
+        reasonProvided: reason !== null,
+        reason,
+        recipient: admin,
+        revision: revision + 1,
+        revisionChecked,
+      },
     });
     return revision;
   });
