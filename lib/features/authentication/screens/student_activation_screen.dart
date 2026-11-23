@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../models/student_roster_models.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../routes/route_names.dart';
 
-/// Two-step activation of a roster record: identity (Student No., one-time
-/// activation code, date of birth), then the account email and password.
+/// Two-step, no-code setup of a roster record: identity (Student No., name,
+/// date of birth), then the personal email and password. The record is claimed
+/// after the emailed code is verified.
 class StudentActivationScreen extends StatefulWidget {
   const StudentActivationScreen({super.key});
 
@@ -18,20 +18,21 @@ class StudentActivationScreen extends StatefulWidget {
 
 class _StudentActivationScreenState extends State<StudentActivationScreen> {
   static const _mismatchCopy = "Those details don't match our records.";
-  static const _expiredCopy =
-      'This activation code has expired. Ask the PACC office for a new one.';
-  static const _alreadyActivatedCopy =
-      'This account is already activated. Sign in or use Forgot password.';
-  static const _emailInUseCopy = 'This email address is already registered.';
+  static const _inProgressCopy =
+      'Setup for this record is already in progress. Wait a few minutes and try again.';
+  static const _emailInUseCopy =
+      "That email address can't be used. Try a different one.";
   static const _unknownCopy =
-      "We couldn't complete activation right now. Check your connection and try again.";
+      "We couldn't complete setup right now. Check your connection and try again.";
   static const _signInFailedCopy =
-      'Your account was activated, but we could not sign you in. Go back to sign in.';
+      'Your account was created, but we could not sign you in. Go back to sign in.';
 
   final _identityFormKey = GlobalKey<FormState>();
   final _accountFormKey = GlobalKey<FormState>();
   final _studentNoController = TextEditingController();
-  final _codeController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _middleNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
@@ -40,11 +41,15 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
   String? _error;
   bool _alreadyActivated = false;
 
+  /// Shown only when PACC has no email on file for this record.
+  bool _needsEmail = false;
+
   @override
   void initState() {
     super.initState();
     _studentNoController.addListener(_refresh);
-    _codeController.addListener(_refresh);
+    _firstNameController.addListener(_refresh);
+    _lastNameController.addListener(_refresh);
   }
 
   void _refresh() {
@@ -54,7 +59,9 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
   @override
   void dispose() {
     _studentNoController.dispose();
-    _codeController.dispose();
+    _firstNameController.dispose();
+    _middleNameController.dispose();
+    _lastNameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
@@ -63,7 +70,8 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
 
   bool get _identityComplete =>
       _studentNoController.text.trim().isNotEmpty &&
-      _codeController.text.trim().isNotEmpty &&
+      _firstNameController.text.trim().isNotEmpty &&
+      _lastNameController.text.trim().isNotEmpty &&
       _dateOfBirth != null;
 
   static String _dateKey(DateTime date) =>
@@ -106,26 +114,33 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
       _alreadyActivated = false;
     });
     try {
-      await auth.activateStudentAccount(
+      await auth.startStudentAccountSetup(
         studentNo: _studentNoController.text.trim(),
-        activationCode: _codeController.text.trim(),
+        firstName: _firstNameController.text.trim(),
+        middleName: _middleNameController.text.trim(),
+        lastName: _lastNameController.text.trim(),
         dateOfBirthKey: _dateKey(dob),
-        email: _emailController.text.trim(),
+        email: _needsEmail ? _emailController.text.trim() : null,
         password: _passwordController.text,
       );
     } on StudentActivationException catch (error) {
       if (!mounted) return;
+      if (error.reason == StudentActivationFailure.emailRequired) {
+        setState(() {
+          _needsEmail = true;
+          _error = null;
+        });
+        return;
+      }
       setState(() {
         _error = _copyFor(error);
-        _alreadyActivated =
-            error.reason == StudentActivationFailure.alreadyActivated;
       });
       return;
     } on StudentActivationSignInException {
       if (!mounted) return;
       setState(() {
         _error = _signInFailedCopy;
-        _alreadyActivated = true;
+        _alreadyActivated = true; // offers the "Sign in" shortcut
       });
       return;
     } catch (_) {
@@ -144,10 +159,10 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
     switch (error.reason) {
       case StudentActivationFailure.mismatch:
         return _mismatchCopy;
-      case StudentActivationFailure.expired:
-        return _expiredCopy;
-      case StudentActivationFailure.alreadyActivated:
-        return _alreadyActivatedCopy;
+      case StudentActivationFailure.inProgress:
+        return _inProgressCopy;
+      case StudentActivationFailure.emailRequired:
+        return _unknownCopy;
       case StudentActivationFailure.emailInUse:
         return _emailInUseCopy;
       case StudentActivationFailure.invalidInput:
@@ -177,7 +192,7 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
         elevation: 0,
         foregroundColor: _ActivationColors.text,
         title: const Text(
-          'Activate student account',
+          'Set up student account',
           style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
         ),
       ),
@@ -215,7 +230,8 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
         children: [
           const _StepHeader(
             step: 'Step 1 of 2',
-            text: 'Enter the details from your activation slip.',
+            text:
+                'Enter your details exactly as they appear in school records.',
           ),
           const SizedBox(height: 16),
           _ActivationField(
@@ -226,14 +242,27 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
           ),
           const SizedBox(height: 14),
           _ActivationField(
-            controller: _codeController,
-            label: 'Activation code',
-            hint: 'XXXXX-XXXXX',
-            helper: 'Your activation code is on the slip from the PACC office.',
-            icon: Icons.vpn_key_outlined,
+            controller: _firstNameController,
+            label: 'First name',
+            icon: Icons.person_outline,
             textInputAction: TextInputAction.next,
-            textCapitalization: TextCapitalization.characters,
-            inputFormatters: [_UpperCaseFormatter()],
+            textCapitalization: TextCapitalization.words,
+          ),
+          const SizedBox(height: 14),
+          _ActivationField(
+            controller: _middleNameController,
+            label: 'Middle name (optional)',
+            icon: Icons.person_outline,
+            textInputAction: TextInputAction.next,
+            textCapitalization: TextCapitalization.words,
+          ),
+          const SizedBox(height: 14),
+          _ActivationField(
+            controller: _lastNameController,
+            label: 'Last name',
+            icon: Icons.person_outline,
+            textInputAction: TextInputAction.next,
+            textCapitalization: TextCapitalization.words,
           ),
           const SizedBox(height: 14),
           InkWell(
@@ -268,27 +297,31 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const _StepHeader(
+          _StepHeader(
             step: 'Step 2 of 2',
-            text: 'Choose the email and password for your account.',
+            text: _needsEmail
+                ? 'PACC has no email on file for you. Enter your personal email and choose a password. We will email you a code to verify it, then a PACC administrator will approve your account.'
+                : 'Choose a password. We will email a verification code to the email address PACC has on file for you.',
           ),
           const SizedBox(height: 16),
-          _ActivationField(
-            controller: _emailController,
-            label: 'Email Address',
-            icon: Icons.email_outlined,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.next,
-            validator: (value) {
-              final text = value?.trim() ?? '';
-              if (text.isEmpty) return 'Email address is required';
-              if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(text)) {
-                return 'Enter a valid email address';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 14),
+          if (_needsEmail) ...[
+            _ActivationField(
+              controller: _emailController,
+              label: 'Personal email address',
+              icon: Icons.email_outlined,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.next,
+              validator: (value) {
+                final text = value?.trim() ?? '';
+                if (text.isEmpty) return 'Email address is required';
+                if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(text)) {
+                  return 'Enter a valid email address';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 14),
+          ],
           _ActivationField(
             controller: _passwordController,
             label: 'Password',
@@ -352,7 +385,7 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
           ],
           const SizedBox(height: 22),
           _PrimaryButton(
-            label: 'Activate account',
+            label: 'Continue',
             loading: isLoading,
             onPressed: isLoading ? null : _activate,
           ),
@@ -372,20 +405,7 @@ class _StudentActivationScreenState extends State<StudentActivationScreen> {
   }
 }
 
-class _UpperCaseFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) => newValue.copyWith(text: newValue.text.toUpperCase());
-}
-
-InputDecoration _decoration({
-  required String label,
-  IconData? icon,
-  String? hint,
-  String? helper,
-}) {
+InputDecoration _decoration({required String label, IconData? icon}) {
   OutlineInputBorder border(Color color, [double width = 1]) =>
       OutlineInputBorder(
         borderRadius: BorderRadius.circular(15),
@@ -393,9 +413,6 @@ InputDecoration _decoration({
       );
   return InputDecoration(
     labelText: label,
-    hintText: hint,
-    helperText: helper,
-    helperMaxLines: 2,
     labelStyle: const TextStyle(
       color: _ActivationColors.mutedText,
       fontSize: 13,
@@ -425,12 +442,9 @@ class _ActivationField extends StatelessWidget {
     required this.controller,
     required this.label,
     this.icon,
-    this.hint,
-    this.helper,
     this.keyboardType,
     this.textInputAction,
     this.textCapitalization = TextCapitalization.none,
-    this.inputFormatters,
     this.obscureText = false,
     this.validator,
   });
@@ -438,12 +452,9 @@ class _ActivationField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final IconData? icon;
-  final String? hint;
-  final String? helper;
   final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
   final TextCapitalization textCapitalization;
-  final List<TextInputFormatter>? inputFormatters;
   final bool obscureText;
   final String? Function(String?)? validator;
 
@@ -454,7 +465,6 @@ class _ActivationField extends StatelessWidget {
       keyboardType: keyboardType,
       textInputAction: textInputAction,
       textCapitalization: textCapitalization,
-      inputFormatters: inputFormatters,
       obscureText: obscureText,
       autocorrect: false,
       enableSuggestions: !obscureText,
@@ -464,12 +474,7 @@ class _ActivationField extends StatelessWidget {
         fontSize: 15,
         fontWeight: FontWeight.w700,
       ),
-      decoration: _decoration(
-        label: label,
-        icon: icon,
-        hint: hint,
-        helper: helper,
-      ),
+      decoration: _decoration(label: label, icon: icon),
     );
   }
 }

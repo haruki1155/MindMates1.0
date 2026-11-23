@@ -17,6 +17,7 @@ const rosterTemplateHeaders = [
   'College',
   'Course',
   'Year Level',
+  'Email',
 ];
 
 /// Wire keys for [rosterTemplateHeaders], in the same order.
@@ -29,7 +30,11 @@ const _fieldKeys = [
   'college',
   'course',
   'yearLevel',
+  'email',
 ];
+
+/// Columns a file may leave out entirely. The school email lets a student finish setup with no administrator step.
+const _optionalKeys = {'email'};
 
 const rosterChunkSize = 1000;
 
@@ -69,6 +74,9 @@ final Map<String, String> _headerLookup = {
   'date of birth': 'dateOfBirth',
   'student no': 'studentNo',
   'student number': 'studentNo',
+  'email address': 'email',
+  'school email': 'email',
+  'student email': 'email',
 };
 
 /// Mirrors the server's canonical Student No. (uppercase, alphanumerics only)
@@ -112,7 +120,9 @@ RosterParseResult parseRosterFile(String fileName, List<int> bytes) {
   }
   final missing = [
     for (var i = 0; i < _fieldKeys.length; i++)
-      if (!headerIndex.containsKey(_fieldKeys[i])) rosterTemplateHeaders[i],
+      if (!_optionalKeys.contains(_fieldKeys[i]) &&
+          !headerIndex.containsKey(_fieldKeys[i]))
+        rosterTemplateHeaders[i],
   ];
   if (missing.isNotEmpty) {
     return _failure(
@@ -126,8 +136,8 @@ RosterParseResult parseRosterFile(String fileName, List<int> bytes) {
   for (var r = 1; r < grid.length; r++) {
     final cells = grid[r];
     Object? cell(String key) {
-      final c = headerIndex[key]!;
-      return c < cells.length ? cells[c] : null;
+      final c = headerIndex[key];
+      return c != null && c < cells.length ? cells[c] : null;
     }
 
     if (_fieldKeys.every((k) => _text(cell(k)).trim().isEmpty)) continue;
@@ -137,6 +147,8 @@ RosterParseResult parseRosterFile(String fileName, List<int> bytes) {
       if (key == 'dateOfBirth') {
         row[key] =
             parseRosterDate(raw, date1904: date1904) ?? _text(raw).trim();
+      } else if (_optionalKeys.contains(key) && _text(raw).trim().isEmpty) {
+        continue; // an absent optional value is not sent at all
       } else {
         row[key] = _text(raw).trim();
       }

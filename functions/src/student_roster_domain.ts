@@ -1,5 +1,7 @@
 import {randomBytes, randomInt, scrypt, timingSafeEqual} from "node:crypto";
 import {canonicalLoginId} from "./account_recovery";
+import {isAllowedPersonalEmail} from "./student_claim_domain";
+import {normalizeRecoveryContactEmail} from "./student_recovery_contacts";
 
 // Pure roster domain logic: no Firestore access.
 
@@ -8,8 +10,10 @@ export type AcademicIndex = {
   courses: {id: string; name: string; code: string; collegeId: string; departmentId: string; departmentName: string}[];
 };
 export type RosterRowInput = {studentNo?: unknown; surname?: unknown; firstName?: unknown; middleName?: unknown;
-  dateOfBirth?: unknown; college?: unknown; course?: unknown; yearLevel?: unknown};
+  dateOfBirth?: unknown; college?: unknown; course?: unknown; yearLevel?: unknown; email?: unknown};
 export type OfficialFields = {studentNo: string; studentKey: string; surname: string; firstName: string; middleName: string;
+  /** The school's registered email for the student (lowercase), or "" when the row has none. */
+  contactEmail: string;
   dateOfBirthKey: string; collegeId: string; college: string; courseId: string; course: string;
   departmentId: string; department: string; yearLevel: string};
 export type RowResult = {index: number; ok: true; value: OfficialFields} | {index: number; ok: false; errors: string[]};
@@ -77,6 +81,11 @@ export function validateRosterRows(rows: RosterRowInput[], index: AcademicIndex)
     if (!dateOfBirthKey) errors.push("Date of birth is missing or invalid.");
     const yearLevel = normalizeYearLevel(row.yearLevel);
     if (!yearLevel) errors.push("Year level must be 1 to 5.");
+    // Optional. A present but malformed address is an error rather than being silently dropped, because a wrong
+    // address would send a student's verification code to somebody else.
+    const rawEmail = cleanText(row.email);
+    const contactEmail = rawEmail ? (normalizeRecoveryContactEmail(rawEmail) ?? "") : "";
+    if (rawEmail && (!contactEmail || !isAllowedPersonalEmail(contactEmail))) errors.push("Email address is not valid.");
 
     const collegeText = normalizeName(cleanText(row.college));
     const college = collegeText ?
@@ -106,7 +115,7 @@ export function validateRosterRows(rows: RosterRowInput[], index: AcademicIndex)
       return {index: i, ok: false, errors};
     }
     return {index: i, ok: true, value: {
-      studentNo, studentKey, surname, firstName, middleName, dateOfBirthKey,
+      studentNo, studentKey, surname, firstName, middleName, dateOfBirthKey, contactEmail,
       collegeId: college.id, college: college.name, courseId: course.id, course: course.name,
       departmentId: course.departmentId, department: course.departmentName, yearLevel,
     }};

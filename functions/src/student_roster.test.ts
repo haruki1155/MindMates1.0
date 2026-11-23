@@ -5,13 +5,18 @@ import {getAuth} from "firebase-admin/auth";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {
-  activateStudentAccountDev, backfillStudentInfoRequirement, importStudentRoster, issueStudentActivationCodes,
+  backfillStudentInfoRequirement, importStudentRoster, issueStudentActivationCodes,
   listLegacyStudentsNotInRoster, listStudentRoster, listStudentRosterImports, previewStudentRosterImport,
   resetStudentActivationLock, resolveSchoolIdAuthEmailDev, revokeStudentActivation, setStudentRosterStatus,
   updateStudentRosterRecord,
 } from "./index";
-import {issueCodesFor, rosterTestHooks} from "./student_roster";
-import {verifyActivationCode} from "./student_roster_domain";
+import {rosterTestHooks} from "./student_roster";
+import {
+  approveAccountClaim, approveStudentAccountClaim, completeAccountSetup, listStudentAccountClaims, rejectStudentAccountClaim,
+  startAccountSetup,
+} from "./student_account_setup";
+import {studentAuthAliasEmail} from "./student_auth_alias";
+import {RECOVERY_CONTACTS, RECOVERY_EMAILS, recoveryEmailHash} from "./student_recovery_contacts";
 import {ensureAuthUser} from "./test_auth_helper";
 
 if (!getApps().length) initializeApp({projectId: process.env.GCLOUD_PROJECT});
@@ -145,10 +150,10 @@ test("import with an error row writes nothing", async () => {
   assert.equal(await rosterCount(), before);
 });
 
-test("import creates roster rows, record, audit, and hashed codes only", async () => {
+test("import creates roster rows, record and audit, and no activation code", async () => {
   const out = await commit.run({auth, data: {fileName: "r.xlsx", rows: [row("I1"), row("I2")]}}) as Imported;
   assert.deepEqual(out.counts, {new: 2, updated: 0, linked: 0});
-  assert.equal(out.codes.length, 2);
+  assert.equal(out.codes.length, 0, "no activation codes are created");
   const doc = (await roster("I1").get()).data()!;
   assert.equal(doc.activated, false);
   assert.equal(doc.userId, null);
@@ -158,15 +163,12 @@ test("import creates roster rows, record, audit, and hashed codes only", async (
   assert.equal(doc.dateOfBirth.toDate().toISOString(), "2004-05-06T00:00:00.000Z");
   assert.equal(doc.studentKey, keyOf(`${run}-I1`));
   assert.equal(doc.surnameNormalized, "delacruzi1");
-  assert.ok(doc.activationCode.hash && doc.activationCode.salt);
+  assert.equal(doc.activationCode, null);
   const rec = (await db.collection("student_roster_imports").doc(out.importId).get()).data()!;
   assert.deepEqual(rec.counts, {new: 2, updated: 0, linked: 0});
   const audits = await db.collection("admin_audit_logs").where("targetId", "==", out.importId).get();
   assert.equal(audits.size, 1);
   assert.equal(audits.docs[0].data().action, "STUDENT_ROSTER_IMPORTED");
-  const blobs = [JSON.stringify(doc), JSON.stringify(rec), JSON.stringify(audits.docs[0].data())];
-  for (const c of out.codes) for (const b of blobs) assert.ok(!b.includes(c.code) && !b.includes(c.code.replace("-", "")));
-  assert.ok(out.codes.find((c) => c.studentNo === `${run}-I1`));
 });
 
 test("link case sets academic fields, keeps names, and records previous values", async () => {
@@ -202,13 +204,12 @@ test("link case sets academic fields, keeps names, and records previous values",
   assert.ok(JSON.stringify(audit.metadata).includes("Old Course"));
 });
 
-test("re-import keeps unactivated code and activated state", async () => {
-  const first = (await roster("I1").get()).data()!;
+test("re-import keeps activated state and still creates no code", async () => {
   const out = await commit.run({auth, data: {fileName: "r.xlsx", rows: [row("I1", {yearLevel: "4"})]}}) as Imported;
   assert.deepEqual(out.counts, {new: 0, updated: 1, linked: 0});
   assert.equal(out.codes.length, 0);
   const again = (await roster("I1").get()).data()!;
-  assert.equal(again.activationCode.hash, first.activationCode.hash);
+  assert.equal(again.activationCode, null);
   assert.equal(again.yearLevel, "4th Year");
 
   const uid = `${run}-actuid`;
@@ -230,25 +231,7 @@ test("re-import keeps unactivated code and activated state", async () => {
   assert.deepEqual((await db.collection("student_personal_info").doc(uid).get()).data(), {sex: "Female"});
 });
 
-test("issueCodesFor overwrites codes only for active unactivated rows", async () => {
-  const before = (await roster("I2").get()).data()!;
-  const codes = await issueCodesFor([keyOf(`${run}-I2`), keyOf(`${run}-A1`), keyOf(`${run}-MISSING`)], adminUid);
-  assert.equal(codes.length, 1);
-  assert.equal(codes[0].studentNo, `${run}-I2`);
-  const after = (await roster("I2").get()).data()!;
-  assert.notEqual(after.activationCode.hash, before.activationCode.hash);
-  assert.ok(!JSON.stringify(after).includes(codes[0].code));
-});
-
-test("successful import reports complete on response and record", async () => {
-  const out = await commit.run({auth, data: {fileName: "r.xlsx", rows: [row("C1")]}}) as Imported & {status: string};
-  assert.equal(out.status, "complete");
-  const rec = (await db.collection("student_roster_imports").doc(out.importId).get()).data()!;
-  assert.equal(rec.status, "complete");
-  assert.deepEqual(rec.counts, {new: 1, updated: 0, linked: 0});
-});
-
-test("a failing later batch yields a partial result with codes only for committed rows", async () => {
+test("a failing later batch yields a partial result listing only the committed rows", async () => {
   rosterTestHooks.batchLimit = 1;
   rosterTestHooks.afterClassify = async () => {
     await roster("P2").set({studentKey: keyOf(`${run}-P2`), concurrent: true});
@@ -258,11 +241,9 @@ test("a failing later batch yields a partial result with codes only for committe
       Imported & {status: string; failedRows: {studentNo: string}[]; message: string};
     assert.equal(out.status, "partial");
     assert.deepEqual(out.counts, {new: 1, updated: 0, linked: 0});
-    assert.deepEqual(out.codes.map((c) => c.studentNo), [`${run}-P1`]);
+    assert.deepEqual(out.codes, []);
     assert.deepEqual(out.failedRows.map((f) => f.studentNo), [`${run}-P2`, `${run}-P3`]);
-    const stored = (await roster("P1").get()).data()!.activationCode;
-    assert.ok(await verifyActivationCode(out.codes[0].code, {
-      hash: stored.hash, salt: stored.salt, issuedAt: stored.issuedAt.toDate(), expiresAt: stored.expiresAt.toDate()}));
+    assert.equal((await roster("P1").get()).data()!.activationCode, null);
     assert.equal((await roster("P3").get()).exists, false);
     const rec = (await db.collection("student_roster_imports").doc(out.importId).get()).data()!;
     assert.equal(rec.status, "partial");
@@ -270,7 +251,6 @@ test("a failing later batch yields a partial result with codes only for committe
     const audit = (await db.collection("admin_audit_logs").where("targetId", "==", out.importId).get()).docs[0].data();
     assert.deepEqual(audit.metadata.counts, {new: 1, updated: 0, linked: 0});
     assert.equal(audit.metadata.partial, true);
-    assert.ok(!JSON.stringify([rec, audit]).includes(out.codes[0].code));
   } finally {
     rosterTestHooks.batchLimit = undefined;
     rosterTestHooks.afterClassify = undefined;
@@ -289,7 +269,6 @@ const listImports = asCallable(listStudentRosterImports);
 const backfill = asCallable(backfillStudentInfoRequirement);
 const issueCodes = asCallable(issueStudentActivationCodes);
 const revoke = asCallable(revokeStudentActivation);
-const activate = asCallable(activateStudentAccountDev);
 const resolveEmail = asCallable(resolveSchoolIdAuthEmailDev);
 const counselorUid = `${run}-counselor`;
 const authUids: string[] = [];
@@ -303,26 +282,28 @@ async function put(ref: FirebaseFirestore.DocumentReference, data: Record<string
   return ref;
 }
 
-async function importOne(n: string, extra: Record<string, unknown> = {}): Promise<string> {
-  const out = await commit.run({auth, data: {fileName: `${run}-m.xlsx`, rows: [row(n, extra)]}}) as Imported;
-  return out.codes[0].code;
+async function importOne(n: string, extra: Record<string, unknown> = {}): Promise<void> {
+  await commit.run({auth, data: {fileName: `${run}-m.xlsx`, rows: [row(n, extra)]}});
 }
 
-async function activateRow(n: string, tag: string, code: string): Promise<{uid: string; email: string}> {
+let claimIp = 0;
+/** Sets a student up through the no-code flow. The emailed-code step has its own tests, so verification is set directly. */
+async function claimRow(n: string, tag: string): Promise<{uid: string; email: string}> {
+  const studentNo = `${run}-${n}`;
   const address = `${run.toLowerCase()}-${tag}@example.com`;
-  await activate.run({data: {studentNo: `${run}-${n}`, activationCode: code, dateOfBirth: "2004-05-06", email: address,
+  await startAccountSetup({auth: null, rawRequest: {ip: `10.9.${(claimIp >> 8) & 255}.${claimIp++ & 255}`}, data: {
+    studentNo, firstName: "Juan", middleName: "Santos", lastName: `Dela Cruz${n}`, dateOfBirth: "2004-05-06", email: address,
     password: "Str0ngPass!"}});
-  const uid = (await getAuth().getUserByEmail(address)).uid;
+  const uid = (await getAuth().getUserByEmail(studentAuthAliasEmail(studentNo))).uid;
   authUids.push(uid);
-  created.push(db.collection("users").doc(uid), db.collection("student_id_reservations").doc(keyOf(`${run}-${n}`)),
-    db.collection("student_activation_attempts").doc(keyOf(`${run}-${n}`)));
+  await db.collection(RECOVERY_CONTACTS).doc(uid).update({verifiedAt: Timestamp.now()});
+  await getAuth().updateUser(uid, {emailVerified: true});
+  await completeAccountSetup({auth: {uid}}, {now: () => Date.now()});
+  await approveAccountClaim({id: adminUid, name: "Test Admin", role: "admin"}, uid, {now: () => Date.now()}, true);
+  created.push(db.collection("users").doc(uid), db.collection("student_id_reservations").doc(keyOf(studentNo)),
+    db.collection("student_activation_attempts").doc(keyOf(studentNo)), db.collection(RECOVERY_CONTACTS).doc(uid),
+    db.collection("student_claim_pending").doc(uid), db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(address)));
   return {uid, email: address};
-}
-
-async function storedCodeVerifies(n: string, code: string): Promise<boolean> {
-  const stored = (await roster(n).get()).data()!.activationCode;
-  return verifyActivationCode(code, {hash: stored.hash, salt: stored.salt, issuedAt: stored.issuedAt.toDate(),
-    expiresAt: stored.expiresAt.toDate()});
 }
 
 async function auditsFor(action: string): Promise<FirebaseFirestore.DocumentData[]> {
@@ -404,8 +385,8 @@ test("listStudentRoster paginates 50 at a time", async () => {
 });
 
 test("setStudentRosterStatus disables and re-enables the linked Auth user and audits", async () => {
-  const code = await importOne("ST1");
-  const {uid} = await activateRow("ST1", "st1", code);
+  await importOne("ST1");
+  const {uid} = await claimRow("ST1", "st1");
   assert.deepEqual(await setStatus.run({auth, data: {studentNo: `${run}-ST1`, status: "deactivated"}}), {ok: true});
   assert.equal((await getAuth().getUser(uid)).disabled, true);
   assert.equal((await roster("ST1").get()).data()!.status, "deactivated");
@@ -627,57 +608,60 @@ test("Step 11.3G.1 Test A: listStudentRosterImports returns safe status, rowCoun
   }
 });
 
-test("issueStudentActivationCodes replaces the hash and skips ineligible rows", async () => {
-  const oldCode = await importOne("IC1");
-  await importOne("IC2");
-  await roster("IC2").update({activated: true, userId: `${run}-ic2`});
-  await importOne("IC3");
-  await roster("IC3").update({status: "deactivated"});
-  await denied(issueCodes.run({auth, data: {studentNos: []}}), "invalid-argument");
-  await denied(issueCodes.run({auth, data: {studentNos: Array.from({length: 1001}, (_, i) => `${run}-${i}`)}}), "invalid-argument");
-  const before = (await auditsFor("STUDENT_ACTIVATION_CODES_ISSUED")).length;
-  const out = await issueCodes.run({auth, data: {studentNos: [`${run} ic1`, `${run}-IC2`, `${run}-IC3`, `${run}-NOPE`]}}) as
-    {codes: {studentNo: string; code: string}[]; skipped: {studentNo: string; reason: string}[]};
-  assert.deepEqual(out.codes.map((c) => c.studentNo), [`${run}-IC1`]);
-  assert.deepEqual(out.skipped.map((s) => s.studentNo).sort(), [`${run}-IC2`, `${run}-IC3`, `${run}-NOPE`].sort());
-  assert.ok(out.skipped.every((s) => s.reason.length > 0));
-  assert.equal(await storedCodeVerifies("IC1", oldCode), false);
-  assert.equal(await storedCodeVerifies("IC1", out.codes[0].code), true);
-  const audits = await auditsFor("STUDENT_ACTIVATION_CODES_ISSUED");
-  assert.equal(audits.length, before + 1);
-  assert.ok(audits.some((a) => a.metadata?.count === 1 && Object.keys(a.metadata).length === 1));
-  assert.ok(!JSON.stringify(audits).includes(out.codes[0].code));
+test("claim review callables are administrator-only", async () => {
+  const review = [listStudentAccountClaims, approveStudentAccountClaim, rejectStudentAccountClaim].map(asCallable);
+  for (const fn of review) {
+    await denied(fn.run({data: {uid: "x"}}), "unauthenticated");
+    await denied(fn.run({auth: {uid: `${run}-not-an-admin`}, data: {uid: "x"}}), "permission-denied");
+  }
+  const list = await review[0].run({auth, data: {}}) as {claims: unknown[]};
+  assert.ok(Array.isArray(list.claims));
 });
 
-test("revokeStudentActivation disables the claimant, frees the Student No., and issues a new code", async () => {
-  const code = await importOne("RV1");
-  const first = await activateRow("RV1", "rv1a", code);
+test("issueStudentActivationCodes is disabled: activation codes are no longer used", async () => {
+  await importOne("IC1");
+  await denied(issueCodes.run({auth, data: {studentNos: [`${run}-IC1`]}}), "failed-precondition");
+  await denied(issueCodes.run({data: {studentNos: [`${run}-IC1`]}}), "unauthenticated");
+  assert.equal((await roster("IC1").get()).data()!.activationCode, null, "nothing was issued");
+});
+
+test("revokeStudentActivation disables the claimant and frees the Student No. without issuing any code", async () => {
+  await importOne("RV1");
+  const first = await claimRow("RV1", "rv1a");
   await denied(revoke.run({auth, data: {studentNo: `${run}-RV1`, reason: "  "}}), "invalid-argument");
   await denied(revoke.run({auth, data: {studentNo: `${run}-RV1`, reason: "x".repeat(501)}}), "invalid-argument");
-  const out = await revoke.run({auth, data: {studentNo: `${run}-RV1`, reason: "Claimed by the wrong person"}}) as
-    {code: {studentNo: string; code: string}};
-  assert.equal(out.code.studentNo, `${run}-RV1`);
+  assert.deepEqual(await revoke.run({auth, data: {studentNo: `${run}-RV1`, reason: "Claimed by the wrong person"}}), {ok: true});
   assert.equal((await getAuth().getUser(first.uid)).disabled, true);
   const u = (await db.collection("users").doc(first.uid).get()).data()!;
   assert.equal(u.accountStatus, "revoked");
   assert.equal(u.rosterLinked, false);
   assert.equal(u.firstName, "Juan");
   assert.equal(u.email, first.email);
+  // The revoked account stays disabled and keeps its alias until the Student ID is activated again; its recovery
+  // records are released immediately so the address can be reused.
+  const alias = studentAuthAliasEmail(`${run}-RV1`);
+  assert.equal((await getAuth().getUser(first.uid)).email, alias);
+  assert.equal((await db.collection(RECOVERY_CONTACTS).doc(first.uid).get()).exists, false);
+  assert.equal((await db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(first.email)).get()).exists, false);
   assert.equal((await db.collection("student_id_reservations").doc(keyOf(`${run}-RV1`)).get()).exists, false);
   const r = (await roster("RV1").get()).data()!;
   assert.equal(r.activated, false);
   assert.equal(r.userId, null);
   assert.equal(r.consumedActivationCode, null);
   assert.ok(r.revokedUserIds.includes(first.uid));
-  assert.ok(!JSON.stringify(r).includes(out.code.code.replace("-", "")));
+  assert.equal(r.activationCode, null, "no code is issued on revoke");
   const audits = (await auditsFor("STUDENT_ACTIVATION_REVOKED")).filter((a) => a.targetId === keyOf(`${run}-RV1`));
   assert.equal(audits.length, 1);
   assert.equal(audits[0].metadata.reason, "Claimed by the wrong person");
-  assert.ok(!JSON.stringify(audits[0]).includes(out.code.code.replace("-", "")));
 
-  const second = await activateRow("RV1", "rv1b", out.code.code);
+  // The student can set up again with no code, and the revoked account is moved off the alias.
+  const second = await claimRow("RV1", "rv1b");
   assert.notEqual(second.uid, first.uid);
-  assert.deepEqual(await resolveEmail.run({data: {schoolId: `${run}-RV1`}}), {email: second.email});
+  assert.equal((await getAuth().getUser(second.uid)).email, alias);
+  const retired = await getAuth().getUser(first.uid);
+  assert.notEqual(retired.email, alias, "the revoked account was moved off the alias");
+  assert.equal(retired.disabled, true, "and it stays disabled");
+  assert.deepEqual(await resolveEmail.run({data: {schoolId: `${run}-RV1`}}), {email: alias});
 
   await denied(revoke.run({auth, data: {studentNo: `${run}-S1`, reason: "nope"}}), "failed-precondition");
 });
@@ -687,14 +671,13 @@ test("revokeStudentActivation tolerates a missing Auth user and users doc", asyn
   const ghost = `${run}-ghostuid`;
   const reservation = await put(db.collection("student_id_reservations").doc(keyOf(`${run}-RV2`)), {userId: ghost});
   await roster("RV2").update({activated: true, userId: ghost, activationCode: null});
-  const out = await revoke.run({auth, data: {studentNo: `${run}-RV2`, reason: "Orphaned"}}) as {code: {code: string}};
-  assert.ok(out.code.code);
+  assert.deepEqual(await revoke.run({auth, data: {studentNo: `${run}-RV2`, reason: "Orphaned"}}), {ok: true});
   assert.equal((await reservation.get()).exists, false);
   assert.equal((await db.collection("users").doc(ghost).get()).exists, false);
   const r = (await roster("RV2").get()).data()!;
   assert.equal(r.activated, false);
   assert.ok(r.revokedUserIds.includes(ghost));
-  assert.equal(await storedCodeVerifies("RV2", out.code.code), true);
+  assert.equal(r.activationCode, null);
 });
 
 /** Runs the backfill and asserts exactly one audit for this call, matched by actor, action and a time window. */
@@ -742,4 +725,13 @@ after(async () => {
     const audits = await db.collection("admin_audit_logs").where("actorId", "==", uid).get();
     await Promise.all(audits.docs.map((d) => d.ref.delete()));
   }
+});
+
+test("an optional school email is stored on the roster row, and a later import without one keeps it", async () => {
+  await commit.run({auth, data: {fileName: "e.xlsx", rows: [row("EM1", {email: "Student.One@School.example"})]}});
+  assert.equal((await roster("EM1").get()).data()!.contactEmail, "student.one@school.example");
+  await commit.run({auth, data: {fileName: "e2.xlsx", rows: [row("EM1", {yearLevel: "3rd Year"})]}});
+  const after = (await roster("EM1").get()).data()!;
+  assert.equal(after.yearLevel, "3rd Year");
+  assert.equal(after.contactEmail, "student.one@school.example", "an import without the column never erases the address");
 });

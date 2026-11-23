@@ -147,7 +147,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             _profileDataFromUser(
               userProvider.user,
               fallbackUserId: authProvider?.userId,
-              fallbackEmail: authProvider?.currentUserEmail,
+              fallbackEmail: authProvider?.currentUserContactEmail,
               summary: reportProvider?.latestReport == null
                   ? null
                   : ProfileSummaryData(

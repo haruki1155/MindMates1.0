@@ -39,6 +39,18 @@ void main() {
       expect(provider.isSaving, isFalse);
     });
 
+    test('a failed load never leaves a previous account profile behind', () async {
+      final provider = UserProvider(_FakeUserRepository());
+      provider.setUser(
+        const UserModel(id: 'previous', email: 'old@example.com', firstName: 'Old'),
+      );
+
+      final loaded = await provider.loadProfile('new_user');
+
+      expect(loaded, isFalse);
+      expect(provider.user, isNull);
+    });
+
     test(
       'missing backend profile does not clear existing local user',
       () async {

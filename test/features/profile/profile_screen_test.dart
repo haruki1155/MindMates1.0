@@ -266,6 +266,23 @@ void main() {
     );
   }
 
+  testWidgets('profile never shows the internal Student ID alias as an email', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final provider = UserProvider(_MissingProfileRepository());
+
+    await tester.pumpWidget(
+      _profileApp(provider, authProvider: _AliasAuthProvider()),
+    );
+    await tester.pump();
+
+    expect(find.byType(ProfileScreen), findsOneWidget);
+    expect(find.textContaining('mindmate.local'), findsNothing);
+    expect(find.textContaining('students.mindmate'), findsNothing);
+  });
+
   testWidgets('profile Log Out confirms, signs out, and opens login', (
     tester,
   ) async {
@@ -814,6 +831,23 @@ class _FakeUserRepository extends UserRepository {
       url: 'https://example.com/profile.png',
     );
   }
+}
+
+/// The signed-in account has no profile document yet, so the screen falls back
+/// to what the auth session offers.
+class _MissingProfileRepository extends UserRepository {
+  @override
+  Future<UserModel?> fetchUserProfile(String uid) async => null;
+}
+
+class _AliasAuthProvider extends AuthProvider {
+  _AliasAuthProvider() : super(_FakeAuthRepository());
+
+  @override
+  String? get userId => 'student-1';
+
+  @override
+  String? get currentUserEmail => '202012345@students.mindmate.local';
 }
 
 class _FakeAuthProvider extends AuthProvider {
