@@ -438,6 +438,58 @@ test("an alias that is already taken fails closed as already activated and leave
   assert.equal((await getAuth().getUser(taken.uid)).email, aliasOf(s.studentNo), "the pre-existing account is untouched");
 });
 
+test("an abandoned alias held by an unrelated account with no profile is released so the real student can activate", async () => {
+  const s = await seed("SQ1");
+  const squatter = await getAuth().createUser({email: aliasOf(s.studentNo), password: "Squatter!1"});
+  extraUids.push(squatter.uid);
+  const previous = process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS;
+  process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS = "0";
+  try {
+    const address = email("sq1");
+    await activate.run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address, password: PASSWORD}});
+    const owner = await getAuth().getUserByEmail(aliasOf(s.studentNo));
+    assert.notEqual(owner.uid, squatter.uid);
+    await assert.rejects(getAuth().getUser(squatter.uid), (e: {code?: string}) => e.code === "auth/user-not-found");
+    assert.equal((await rosterRef(s.key).get()).data()?.userId, owner.uid);
+  } finally {
+    if (previous === undefined) delete process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS;
+    else process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS = previous;
+  }
+});
+
+test("a recently created alias holder is never treated as abandoned, and neither is one that has a profile or contact", async () => {
+  const fresh = await seed("SQ2");
+  const freshHolder = await getAuth().createUser({email: aliasOf(fresh.studentNo), password: PASSWORD});
+  extraUids.push(freshHolder.uid);
+  // Default age threshold (10 minutes): a just-created account might be a concurrent activation in flight.
+  await rejectsWith(activate.run({data: {studentNo: fresh.studentNo, activationCode: fresh.code, dateOfBirth: DOB,
+    email: email("sq2"), password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
+  assert.equal((await getAuth().getUser(freshHolder.uid)).email, aliasOf(fresh.studentNo));
+
+  const previous = process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS;
+  process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS = "0";
+  try {
+    const withProfile = await seed("SQ3");
+    const holder = await getAuth().createUser({email: aliasOf(withProfile.studentNo), password: PASSWORD});
+    extraUids.push(holder.uid);
+    await db.collection("users").doc(holder.uid).set({schoolId: withProfile.studentNo});
+    await rejectsWith(activate.run({data: {studentNo: withProfile.studentNo, activationCode: withProfile.code, dateOfBirth: DOB,
+      email: email("sq3"), password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
+    assert.equal((await getAuth().getUser(holder.uid)).email, aliasOf(withProfile.studentNo));
+
+    const withContact = await seed("SQ4");
+    const holder2 = await getAuth().createUser({email: aliasOf(withContact.studentNo), password: PASSWORD});
+    extraUids.push(holder2.uid);
+    await contactRef(holder2.uid).set({uid: holder2.uid, studentKey: withContact.key});
+    await rejectsWith(activate.run({data: {studentNo: withContact.studentNo, activationCode: withContact.code, dateOfBirth: DOB,
+      email: email("sq4"), password: PASSWORD}}), "already-exists", "already-activated", ACTIVATED);
+    assert.equal((await getAuth().getUser(holder2.uid)).email, aliasOf(withContact.studentNo));
+  } finally {
+    if (previous === undefined) delete process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS;
+    else process.env.STUDENT_ALIAS_ORPHAN_MIN_AGE_MS = previous;
+  }
+});
+
 test("a disabled account that was not revoked for this roster row never loses the alias", async () => {
   const s = await seed("T2");
   const holder = await getAuth().createUser({email: aliasOf(s.studentNo), password: PASSWORD, disabled: true});

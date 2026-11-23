@@ -354,20 +354,22 @@ test("the reset goes to the verified recovery contact even if the profile email 
   assert.equal(mails[0].to, s.address);
 });
 
-test("reset requests are rate limited per Student ID and per caller, equally for real and unknown IDs", async () => {
+test("repeated requests for one Student ID are silently suppressed, never an error, equally for real and unknown IDs", async () => {
   reset();
   const s = await seedStudent("PR9", {verified: true});
   const outcomes: string[] = [];
   for (let i = 0; i < 6; i++) {
     try {
-      await resetPasswordForStudentId(as(undefined, {studentId: s.studentNo}, "198.51.100.9"), deps);
+      await resetPasswordForStudentId(as(undefined, {studentId: s.studentNo}, `198.51.100.${i + 20}`), deps);
       outcomes.push("ok");
     } catch (error) {
       outcomes.push((error as Err).code ?? "?");
     }
   }
-  assert.deepEqual(outcomes.slice(0, 3), ["ok", "ok", "ok"]);
-  assert.ok(outcomes.slice(3).every((o) => o === "resource-exhausted"), outcomes.join());
+  // An attacker can neither lock the real student out of the reset flow nor flood their inbox: the answer is always
+  // the same, and mail stops after the per-Student-ID allowance.
+  assert.deepEqual(outcomes, ["ok", "ok", "ok", "ok", "ok", "ok"]);
+  assert.equal(mails.length, 3, "at most three reset emails per Student ID per window");
   const unknown: string[] = [];
   for (let i = 0; i < 6; i++) {
     try {
@@ -377,7 +379,7 @@ test("reset requests are rate limited per Student ID and per caller, equally for
       unknown.push((error as Err).code ?? "?");
     }
   }
-  assert.deepEqual(unknown, outcomes, "unknown IDs are limited exactly like real ones");
+  assert.deepEqual(unknown, outcomes, "unknown IDs answer exactly like real ones");
   const perIp: string[] = [];
   for (let i = 0; i < 16; i++) {
     try {
@@ -408,9 +410,13 @@ test("the callables exist for production and for Staging, and Dev endpoints refu
     requestStudentRecoveryEmailCode, requestStudentRecoveryEmailCodeDev, confirmStudentRecoveryEmailCode,
     confirmStudentRecoveryEmailCodeDev, requestStudentPasswordResetProd, requestStudentPasswordResetDev,
   ]) assert.equal(typeof (callable as unknown as {run: unknown}).run, "function");
+  // Fail closed: only known non-production projects (and emulator demo projects) may serve the Dev endpoints.
   assert.doesNotThrow(() => assertDevEndpointAllowed("mindmate-staging"));
+  assert.doesNotThrow(() => assertDevEndpointAllowed("mindmate-dev-4e91c"));
   assert.doesNotThrow(() => assertDevEndpointAllowed("demo-mindmate-mood-v2"));
-  assert.throws(() => assertDevEndpointAllowed("mind-mates-cd2cf"), (e: Err) => e.code === "failed-precondition");
+  for (const refused of ["mind-mates-cd2cf", "some-other-project", "", undefined]) {
+    assert.throws(() => assertDevEndpointAllowed(refused as string), (e: Err) => e.code === "failed-precondition", String(refused));
+  }
 });
 
 // ------------------------------------------------------------------ end to end

@@ -36,8 +36,8 @@ const RESEND_COOLDOWN_MS = 30 * 1000;
 const CODE_REQUEST_LIMIT = 5;
 const RESET_ID_LIMIT = 3;
 const IP_LIMIT = 12;
-const RESET_MIN_RESPONSE_MS = 2500;
-const PRODUCTION_PROJECT_ID = "mind-mates-cd2cf";
+const RESET_MIN_RESPONSE_MS = 4000;
+const DEV_ENDPOINT_PROJECTS = new Set(["mindmate-staging", "mindmate-dev-4e91c"]);
 
 export type RecoveryMail = {to: string; subject: string; text: string; html: string};
 export type RecoveryDeps = {
@@ -59,11 +59,17 @@ export const defaultRecoveryDeps: RecoveryDeps = {
   minResetResponseMs: RESET_MIN_RESPONSE_MS,
 };
 
-/** Dev endpoints skip App Check (Staging has no provider) but must never answer in the production project. */
-export function assertDevEndpointAllowed(projectId = process.env.GCLOUD_PROJECT): void {
-  if (projectId === PRODUCTION_PROJECT_ID) {
-    throw new HttpsError("failed-precondition", "This endpoint is not available.");
-  }
+/**
+ * Dev endpoints skip App Check (Staging has no provider), so they fail closed: only the known non-production
+ * projects, and emulator demo projects, may serve them. Any other or unknown project is refused.
+ */
+export function assertDevEndpointAllowed(projectId: string | undefined): void {
+  if (projectId && (DEV_ENDPOINT_PROJECTS.has(projectId) || projectId.startsWith("demo-"))) return;
+  throw new HttpsError("failed-precondition", "This endpoint is not available.");
+}
+
+function currentProjectId(): string | undefined {
+  return process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || undefined;
 }
 
 function digest(value: string): string {
@@ -84,15 +90,19 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;"})[c] ?? c);
 }
 
-/** Fixed-window limiter. Counts every request, so real and unknown identifiers are limited identically. */
-async function consumeWindow(scope: string, subject: string, limit: number, now: number): Promise<void> {
+/**
+ * Fixed-window limiter. Counts every request, so real and unknown identifiers are limited identically. Returns
+ * false (instead of throwing) when the window is full and `suppress` is set, so a caller can stay silent.
+ */
+async function consumeWindow(scope: string, subject: string, limit: number, now: number, suppress = false): Promise<boolean> {
   const ref = db().collection(LIMITS).doc(`${scope}_${digest(subject)}`);
-  await db().runTransaction(async (transaction) => {
+  return db().runTransaction(async (transaction) => {
     const snap = await transaction.get(ref);
     const started = snap.data()?.startedAt instanceof Timestamp ? (snap.data()!.startedAt as Timestamp).toMillis() : 0;
     const inWindow = now - started < WINDOW_MS;
     const count = inWindow ? Number(snap.data()?.count ?? 0) : 0;
     if (count >= limit) {
+      if (suppress) return false;
       throw new HttpsError("resource-exhausted", "Too many requests. Please wait 15 minutes and try again.");
     }
     const startedAt = inWindow ? started : now;
@@ -100,6 +110,7 @@ async function consumeWindow(scope: string, subject: string, limit: number, now:
       startedAt: Timestamp.fromMillis(startedAt), count: count + 1,
       expiresAt: Timestamp.fromMillis(startedAt + WINDOW_MS * 2),
     });
+    return true;
   });
 }
 
@@ -243,11 +254,14 @@ export async function resetPasswordForStudentId(request: Req, deps: RecoveryDeps
   const raw = request.data && typeof request.data === "object" ? (request.data as {studentId?: unknown}).studentId : undefined;
   const key = canonicalLoginId(raw);
   const now = deps.now();
-  await consumeWindow("reset_id", key, RESET_ID_LIMIT, now);
+  // The caller-facing limit may answer "too many requests", but the per-Student-ID limit never does: that would
+  // let anyone lock a student out of recovery. Beyond the allowance a request is simply not acted on, and the
+  // response is unchanged. Real and unknown IDs count identically.
   await consumeWindow("reset_ip", callerIp(request), IP_LIMIT, now);
+  const allowed = await consumeWindow("reset_id", key, RESET_ID_LIMIT, now, true);
 
   try {
-    await sendResetIfEligible(key, deps);
+    if (allowed) await sendResetIfEligible(key, deps);
   } catch (error) {
     // Failures must not be distinguishable from "no such account", so they are logged, never returned.
     logError("Student password reset could not be completed", {
@@ -296,20 +310,20 @@ export const requestStudentRecoveryEmailCode = onCall(
   {enforceAppCheck: true, ...options}, (request) => requestRecoveryEmailCode(request));
 export const requestStudentRecoveryEmailCodeDev = onCall(
   {enforceAppCheck: false, ...options}, (request) => {
-    assertDevEndpointAllowed();
+    assertDevEndpointAllowed(currentProjectId());
     return requestRecoveryEmailCode(request);
   });
 export const confirmStudentRecoveryEmailCode = onCall(
   {enforceAppCheck: true}, (request) => confirmRecoveryEmailCode(request));
 export const confirmStudentRecoveryEmailCodeDev = onCall(
   {enforceAppCheck: false}, (request) => {
-    assertDevEndpointAllowed();
+    assertDevEndpointAllowed(currentProjectId());
     return confirmRecoveryEmailCode(request);
   });
 export const requestStudentPasswordReset = onCall(
   {enforceAppCheck: true, ...options}, (request) => resetPasswordForStudentId(request));
 export const requestStudentPasswordResetDev = onCall(
   {enforceAppCheck: false, ...options}, (request) => {
-    assertDevEndpointAllowed();
+    assertDevEndpointAllowed(currentProjectId());
     return resetPasswordForStudentId(request);
   });
