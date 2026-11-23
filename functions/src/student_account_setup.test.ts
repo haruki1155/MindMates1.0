@@ -28,7 +28,7 @@ let ipSeq = 0;
 function nextIp() { return `10.7.${(ipSeq >> 8) & 255}.${ipSeq++ & 255}`; }
 
 const REVIEWER = {id: `${run}-reviewer`, name: "PACC Reviewer", role: "admin"};
-const approve = (uid: string) => approveAccountClaim(REVIEWER, uid, {now: () => clock.t});
+const approve = (uid: string) => approveAccountClaim(REVIEWER, uid, {now: () => clock.t}, true);
 
 const mails: RecoveryMail[] = [];
 const recoveryDeps: RecoveryDeps = {
@@ -163,7 +163,7 @@ test("start, verify the personal email, then complete: the claim is created only
   assert.equal(row.claimMethod, "self-roster-match");
   assert.equal(await exists(db.collection(CLAIM_PENDING).doc(uid)), false);
   const audits = (await db.collection("admin_audit_logs").where("actorId", "==", REVIEWER.id).get()).docs.map((d) => d.data());
-  assert.ok(audits.some((a) => a.action === "STUDENT_ACCOUNT_CLAIMED" && a.targetId === s.key && a.metadata.approvedBy === REVIEWER.id));
+  assert.ok(audits.some((a) => a.action === "STUDENT_ACCOUNT_CLAIMED" && a.targetId === s.key && a.metadata.approvedBy === REVIEWER.id && a.metadata.identityVerifiedByAdmin === true));
   assert.ok(!JSON.stringify(audits).includes(address) && !JSON.stringify(audits).includes("mindmate.local"));
 
   // Safe to repeat.
@@ -425,7 +425,7 @@ test("approval re-checks the roster, the reservation and the expiry", async () =
   assert.equal(await exists(db.collection("users").doc(held.uid)), false);
 
   const late = await submitted("AP5");
-  await rejects(approveAccountClaim(REVIEWER, late.uid, {now: () => clock.t + 15 * 24 * 60 * 60 * 1000}), "failed-precondition");
+  await rejects(approveAccountClaim(REVIEWER, late.uid, {now: () => clock.t + 15 * 24 * 60 * 60 * 1000}, true), "failed-precondition");
 });
 
 test("rejecting a request removes only that unapproved setup and frees the Student ID and email", async () => {
@@ -506,4 +506,45 @@ test("a login whose Auth email no longer matches the claimed Student ID cannot b
   await rejects(approve(t.uid), "failed-precondition");
   assert.equal(await exists(db.collection("users").doc(t.uid)), false);
   assert.equal((await t.s.ref.get()).data()?.activated, false);
+});
+
+test("approval is refused unless the administrator attests that they verified the student's identity", async () => {
+  const t = await submitted("ATT1");
+  await rejects(approveAccountClaim(REVIEWER, t.uid, {now: () => clock.t}), "failed-precondition", "Confirm the student's identity before approving.");
+  await rejects(approveAccountClaim(REVIEWER, t.uid, {now: () => clock.t}, false), "failed-precondition");
+  assert.equal(await exists(db.collection("users").doc(t.uid)), false);
+  assert.equal((await t.s.ref.get()).data()?.activated, false);
+  await approve(t.uid);
+  assert.equal((await t.s.ref.get()).data()?.userId, t.uid);
+});
+
+test("the Student ID and Firebase UID stay one identity across retries, restarts, approval and login", async () => {
+  const s = await seedRow("ID1");
+  clock.t = Date.now();
+  await start(payload(s, email("id1")));
+  const uid = await track(s, email("id1"));
+  await authedConfirm(uid);
+  // Retries and a "restart" (calling again later) before approval change nothing.
+  for (let i = 0; i < 3; i++) {
+    assert.deepEqual(await completeAccountSetup({...as(uid)}, {now: () => clock.t + i * 1000}),
+      {ok: true, alreadyComplete: false, status: "awaiting-approval"});
+  }
+  assert.equal((await getAuth().getUserByEmail(s.alias)).uid, uid);
+  clock.t += 60 * 60 * 1000;
+  await approve(uid);
+  // The sign-in identity (alias -> uid), the profile, the reservation and the roster link all name the same uid and ID.
+  const login = await getAuth().getUserByEmail(s.alias);
+  const profile = (await db.collection("users").doc(uid).get()).data()!;
+  const row = (await s.ref.get()).data()!;
+  assert.equal(login.uid, uid);
+  assert.equal(profile.id ?? uid, uid);
+  assert.equal(profile.schoolId, s.studentNo);
+  assert.equal((await db.collection("student_id_reservations").doc(s.key).get()).data()?.userId, uid);
+  assert.equal(row.userId, uid);
+  assert.equal(row.studentNo, s.studentNo);
+  // Later calls (the app asking again after approval) are no-ops that keep the same identity.
+  assert.deepEqual(await completeAccountSetup({...as(uid)}, {now: () => clock.t}), {ok: true, alreadyComplete: true, status: "approved"});
+  await rejects(approve(uid), "failed-precondition");
+  assert.equal((await getAuth().getUserByEmail(s.alias)).uid, uid);
+  assert.equal((await db.collection("users").doc(uid).get()).data()?.schoolId, s.studentNo);
 });

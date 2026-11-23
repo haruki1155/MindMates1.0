@@ -158,8 +158,10 @@ class StudentRosterRepository {
     ];
   }
 
+  /// The server refuses unless the administrator attests they verified the
+  /// student's identity.
   Future<void> approveAccountClaim(String uid) =>
-      _call('approveStudentAccountClaim', {'uid': uid});
+      _call('approveStudentAccountClaim', {'uid': uid, 'identityVerified': true});
 
   Future<void> rejectAccountClaim(String uid) =>
       _call('rejectStudentAccountClaim', {'uid': uid});

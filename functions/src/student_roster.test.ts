@@ -299,7 +299,7 @@ async function claimRow(n: string, tag: string): Promise<{uid: string; email: st
   await db.collection(RECOVERY_CONTACTS).doc(uid).update({verifiedAt: Timestamp.now()});
   await getAuth().updateUser(uid, {emailVerified: true});
   await completeAccountSetup({auth: {uid}}, {now: () => Date.now()});
-  await approveAccountClaim({id: adminUid, name: "Test Admin", role: "admin"}, uid, {now: () => Date.now()});
+  await approveAccountClaim({id: adminUid, name: "Test Admin", role: "admin"}, uid, {now: () => Date.now()}, true);
   created.push(db.collection("users").doc(uid), db.collection("student_id_reservations").doc(keyOf(studentNo)),
     db.collection("student_activation_attempts").doc(keyOf(studentNo)), db.collection(RECOVERY_CONTACTS).doc(uid),
     db.collection("student_claim_pending").doc(uid), db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(address)));

@@ -567,50 +567,60 @@ void main() {
     expect(find.textContaining('activation slips'), findsNothing);
   });
 
-  testWidgets(
-    'account requests: an administrator approves or rejects each one',
-    (tester) async {
-      StudentAccountClaim claim(String uid, String no) => StudentAccountClaim(
-        uid: uid,
-        studentNo: no,
-        name: 'Ana Cruz',
-        college: 'CITE',
-        course: 'BSIT',
-        yearLevel: '1st Year',
-        email: '$uid@example.com',
-        submittedAt: DateTime.utc(2026, 11, 20),
-        rosterAlreadyClaimed: false,
-      );
-      final repo = _Repo()
-        ..claims = [claim('u1', '2021-001'), claim('u2', '2021-002')];
-      await _pump(tester, repo);
-      await tester.tap(find.text('Account requests'));
-      await tester.pumpAndSettle();
-      expect(
-        find.textContaining('Personal email: u1@example.com'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('does not prove it'), findsOneWidget);
+  testWidgets('account requests: an administrator approves or rejects each one', (
+    tester,
+  ) async {
+    StudentAccountClaim claim(String uid, String no) => StudentAccountClaim(
+      uid: uid,
+      studentNo: no,
+      name: 'Ana Cruz',
+      college: 'CITE',
+      course: 'BSIT',
+      yearLevel: '1st Year',
+      email: '$uid@example.com',
+      submittedAt: DateTime.utc(2026, 11, 20),
+      rosterAlreadyClaimed: false,
+    );
+    final repo = _Repo()
+      ..claims = [claim('u1', '2021-001'), claim('u2', '2021-002')];
+    await _pump(tester, repo);
+    await tester.tap(find.text('Account requests'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Personal email: u1@example.com'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('does not prove it'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Approve').first);
-      await tester.pumpAndSettle();
-      expect(
-        repo.calls.where((c) => c.startsWith('approve')),
-        isEmpty,
-        reason: 'asks first',
-      );
-      await tester.tap(find.widgetWithText(FilledButton, 'Approve').last);
-      await tester.pumpAndSettle();
-      expect(repo.calls, contains('approve:u1'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Approve').first);
+    await tester.pumpAndSettle();
+    expect(
+      repo.calls.where((c) => c.startsWith('approve')),
+      isEmpty,
+      reason: 'asks first',
+    );
+    // Approve stays disabled until the administrator attests they verified the student.
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Approve').last,
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.byKey(const Key('claim-identity-verified')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Approve').last);
+    await tester.pumpAndSettle();
+    expect(repo.calls, contains('approve:u1'));
 
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Reject').first);
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Reject').last);
-      await tester.pumpAndSettle();
-      expect(repo.calls, contains('reject:u2'));
-      expect(find.text('No account requests are waiting.'), findsOneWidget);
-    },
-  );
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Reject').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Reject').last);
+    await tester.pumpAndSettle();
+    expect(repo.calls, contains('reject:u2'));
+    expect(find.text('No account requests are waiting.'), findsOneWidget);
+  });
 
   testWidgets('corrections: reject needs a reason, approve works', (
     tester,

@@ -206,7 +206,7 @@ void main() {
     respond = (_) => _m({'ok': true});
     await repo.approveAccountClaim('u1');
     expect(calls.last.$1, 'approveStudentAccountClaim');
-    expect(calls.last.$2, {'uid': 'u1'});
+    expect(calls.last.$2, {'uid': 'u1', 'identityVerified': true});
     await repo.rejectAccountClaim('u1');
     expect(calls.last.$1, 'rejectStudentAccountClaim');
   });

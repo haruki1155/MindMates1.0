@@ -8,8 +8,9 @@ import {
   RecoveryDeps, RecoveryMail, assertDevEndpointAllowed, confirmRecoveryEmailCode, requestRecoveryEmailCode,
   resetPasswordForStudentId,
 } from "./student_account_recovery";
+import {legacyActivate} from "./legacy_activation_fixture";
 import {
-  activateStudentAccountDev, confirmStudentRecoveryEmailCodeDev, confirmStudentRecoveryEmailCode,
+  confirmStudentRecoveryEmailCodeDev, confirmStudentRecoveryEmailCode,
   requestStudentPasswordResetDev, requestStudentPasswordReset as requestStudentPasswordResetProd,
   requestStudentRecoveryEmailCodeDev, requestStudentRecoveryEmailCode,
 } from "./index";
@@ -452,7 +453,7 @@ test("activate, verify the recovery email with the emailed code, then reset the 
   activationCode: {hash: stored.hash, salt: stored.salt, issuedAt: Timestamp.fromDate(stored.issuedAt),
     expiresAt: Timestamp.fromDate(stored.expiresAt)}});
   const address = `${runLower}-e2e@example.com`;
-  const activated = await (activateStudentAccountDev as unknown as {run: (r: unknown) => Promise<{authEmail: string}>})
+  const activated = await (legacyActivate as unknown as {run: (r: unknown) => Promise<{authEmail: string}>})
     .run({data: {studentNo, activationCode: code, dateOfBirth: DOB, email: address, password: PASSWORD}});
   assert.equal(activated.authEmail, studentAuthAliasEmail(studentNo));
   const user = await getAuth().getUserByEmail(studentAuthAliasEmail(studentNo));

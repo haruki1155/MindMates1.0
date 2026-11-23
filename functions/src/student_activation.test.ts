@@ -4,7 +4,8 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
-import {activateStudentAccountDev, cancelPendingRegistrationDev} from "./index";
+import {cancelPendingRegistrationDev} from "./index";
+import {legacyActivate} from "./legacy_activation_fixture";
 import {generateActivationCode, hashActivationCode} from "./student_roster_domain";
 import {studentAuthAliasEmail} from "./student_auth_alias";
 import {RECOVERY_CONTACTS, RECOVERY_EMAILS, RECOVERY_VERIFICATIONS, recoveryEmailHash} from "./student_recovery_contacts";
@@ -15,7 +16,7 @@ type Callable = {run: (request: {auth?: {uid: string}; data?: unknown}) => Promi
 type Err = {code?: string; message?: string; details?: {reason?: string}};
 
 const db = getFirestore();
-const activate = activateStudentAccountDev as unknown as Callable;
+const activate = legacyActivate as unknown as Callable;
 const cancel = cancelPendingRegistrationDev as unknown as Callable;
 const extraUids: string[] = [];
 const run = `SA${Date.now()}`;

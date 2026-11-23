@@ -231,7 +231,16 @@ export async function listAccountClaims() {
 
 type Reviewer = {id: string; name: string; role: string};
 
-export async function approveAccountClaim(reviewer: Reviewer, rawUid: unknown, deps: SetupDeps = defaultSetupDeps) {
+/**
+ * `identityVerified` is the administrator's explicit statement that they confirmed, independently of what the student
+ * typed, that this person is the student on the record. Approval is refused without it and it is kept in the audit log.
+ */
+export async function approveAccountClaim(
+  reviewer: Reviewer, rawUid: unknown, deps: SetupDeps = defaultSetupDeps, identityVerified = false,
+) {
+  if (identityVerified !== true) {
+    throw new HttpsError("failed-precondition", "Confirm the student's identity before approving.");
+  }
   const uid = typeof rawUid === "string" ? rawUid.trim() : "";
   if (!uid || uid.length > 128) throw new HttpsError("invalid-argument", "A claim to approve is required.");
   const now = deps.now();
@@ -285,7 +294,7 @@ export async function approveAccountClaim(reviewer: Reviewer, rawUid: unknown, d
     writeAudit(transaction, db(), {
       actorId: reviewer.id, actorNameSnapshot: reviewer.name, actorRoleSnapshot: reviewer.role,
       action: "STUDENT_ACCOUNT_CLAIMED", category: AUDIT_CATEGORIES.userManagement,
-      targetType: "student", targetId: key, metadata: {studentNo, userId: uid, claimMethod: CLAIM_METHOD, approvedBy: reviewer.id},
+      targetType: "student", targetId: key, metadata: {studentNo, userId: uid, claimMethod: CLAIM_METHOD, approvedBy: reviewer.id, identityVerifiedByAdmin: true},
     });
   });
   return {ok: true};
@@ -366,7 +375,9 @@ export const listStudentAccountClaims = onCall(async (request) => {
   await reviewerOf(request);
   return listAccountClaims();
 });
-export const approveStudentAccountClaim = onCall(async (request) =>
-  approveAccountClaim(await reviewerOf(request), (request.data as {uid?: unknown} | undefined)?.uid));
+export const approveStudentAccountClaim = onCall(async (request) => {
+  const data = (request.data ?? {}) as {uid?: unknown; identityVerified?: unknown};
+  return approveAccountClaim(await reviewerOf(request), data.uid, defaultSetupDeps, data.identityVerified === true);
+});
 export const rejectStudentAccountClaim = onCall(async (request) =>
   rejectAccountClaim(await reviewerOf(request), (request.data as {uid?: unknown} | undefined)?.uid));

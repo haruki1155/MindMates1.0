@@ -1395,15 +1395,19 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
     StudentAccountClaim c, {
     required bool approve,
   }) async {
-    final ok = await _confirm(
-      title: approve ? 'Approve this account?' : 'Reject this request?',
-      body: approve
-          ? '${c.name} (${c.studentNo}) will own this roster record and '
-                'can sign in with ${c.email} as their recovery email.'
-          : 'The request is deleted and the Student ID is free for the real '
-                'student to set up. Nothing else changes.',
-      confirmLabel: approve ? 'Approve' : 'Reject',
-    );
+    final ok = approve
+        ? await showDialog<bool>(
+                context: context,
+                builder: (_) => _ApproveClaimDialog(claim: c),
+              ) ??
+              false
+        : await _confirm(
+            title: 'Reject this request?',
+            body:
+                'The request is deleted and the Student ID is free for the '
+                'real student to set up. Nothing else changes.',
+            confirmLabel: 'Reject',
+          );
     if (!ok || !mounted) return;
     setState(() => _busyClaims.add(c.uid));
     try {
@@ -1525,6 +1529,62 @@ class _ReasonDialogState extends State<_ReasonDialog> {
       ),
     ],
   );
+}
+
+/// Approval needs the administrator's explicit statement that they verified
+/// the student's identity themselves; the server refuses without it.
+class _ApproveClaimDialog extends StatefulWidget {
+  const _ApproveClaimDialog({required this.claim});
+  final StudentAccountClaim claim;
+
+  @override
+  State<_ApproveClaimDialog> createState() => _ApproveClaimDialogState();
+}
+
+class _ApproveClaimDialogState extends State<_ApproveClaimDialog> {
+  bool _verified = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.claim;
+    return AlertDialog(
+      title: const Text('Approve this account?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${c.name} (${c.studentNo}) will own this roster record and can '
+            'sign in with the password they chose. ${c.email} becomes their '
+            'recovery email.',
+          ),
+          const SizedBox(height: 12),
+          CheckboxListTile(
+            key: const Key('claim-identity-verified'),
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            value: _verified,
+            onChanged: (v) => setState(() => _verified = v == true),
+            title: const Text(
+              'I confirmed this person is the student on this record, '
+              'independently of what they typed (in person or against '
+              'school records).',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _verified ? () => Navigator.pop(context, true) : null,
+          child: const Text('Approve'),
+        ),
+      ],
+    );
+  }
 }
 
 class _EditRecordDialog extends StatefulWidget {

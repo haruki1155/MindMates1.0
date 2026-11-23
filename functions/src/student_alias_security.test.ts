@@ -1,3 +1,4 @@
+import {legacyActivate} from "./legacy_activation_fixture";
 import assert from "node:assert/strict";
 import {after, before, test} from "node:test";
 import {getApps, initializeApp} from "firebase-admin/app";
@@ -5,7 +6,7 @@ import {getAuth} from "firebase-admin/auth";
 import {Timestamp, getFirestore} from "firebase-admin/firestore";
 
 import {
-  activateStudentAccountDev, cancelPendingRegistrationDev, importStudentRoster, issueStudentActivationCodes,
+  cancelPendingRegistrationDev, importStudentRoster, issueStudentActivationCodes,
   previewStudentRosterImport, provisionAppUserProfile, provisionAppUserProfileDev, repairMyStudentCollegeDev,
   revokeStudentActivation,
 } from "./index";
@@ -56,7 +57,7 @@ async function seedRoster(tag: string) {
 }
 
 async function activate(s: {studentNo: string; code: string}, address: string): Promise<string> {
-  await asCallable(activateStudentAccountDev).run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB,
+  await asCallable(legacyActivate).run({data: {studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB,
     email: address, password: PASSWORD}});
   const user = await getAuth().getUserByEmail(aliasOf(s.studentNo));
   uids.push(user.uid);
@@ -149,7 +150,7 @@ test("two students racing for the same recovery email: exactly one activates and
   const b = await seedRoster("RB");
   const address = email("race");
   docs.push(db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(address)));
-  const results = await Promise.allSettled([a, b].map((s) => asCallable(activateStudentAccountDev).run({data: {
+  const results = await Promise.allSettled([a, b].map((s) => asCallable(legacyActivate).run({data: {
     studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address, password: PASSWORD}})));
   assert.equal(results.filter((r) => r.status === "fulfilled").length, 1, JSON.stringify(results.map((r) => r.status)));
   const [winner, loser] = results[0].status === "fulfilled" ? [a, b] : [b, a];
@@ -167,7 +168,7 @@ test("two students racing for the same recovery email: exactly one activates and
 
 test("two simultaneous activations of one Student ID create exactly one identity", async () => {
   const s = await seedRoster("RC");
-  const results = await Promise.allSettled([email("rc1"), email("rc2")].map((address) => asCallable(activateStudentAccountDev).run({data: {
+  const results = await Promise.allSettled([email("rc1"), email("rc2")].map((address) => asCallable(legacyActivate).run({data: {
     studentNo: s.studentNo, activationCode: s.code, dateOfBirth: DOB, email: address, password: PASSWORD}})));
   assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
   const user = await getAuth().getUserByEmail(aliasOf(s.studentNo));
