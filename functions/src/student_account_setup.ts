@@ -42,6 +42,7 @@ export type SetupDeps = {now: () => number};
 export const defaultSetupDeps: SetupDeps = {now: () => Date.now()};
 type Req = {auth?: {uid: string} | null; data?: unknown; rawRequest?: {ip?: string; socket?: {remoteAddress?: string}}};
 
+const unavailableClaim = () => new HttpsError("failed-precondition", "This claim is no longer available.");
 const mismatch = () => new HttpsError("not-found", GENERIC);
 const emailUnusable = () => new HttpsError("already-exists", "That email address can't be used. Try a different one.");
 const inProgress = () => new HttpsError("resource-exhausted", "Setup for this record is already in progress. Wait a few minutes and try again.");
@@ -126,9 +127,13 @@ async function createSetupUser(
   const occupant = await getAuth().getUserByEmail(alias).catch(() => null);
   if (!occupant) throw unavailableRecord();
   const pendingRef = db().collection(CLAIM_PENDING).doc(occupant.uid);
-  const pending = (await pendingRef.get()).data();
-  if (!pending || pending.studentKey !== key) throw unavailableRecord();
-  const expiresAt = pending.expiresAt instanceof Timestamp ? pending.expiresAt.toMillis() : 0;
+  const [pendingSnap, contactSnap] = await Promise.all([pendingRef.get(), db().collection(RECOVERY_CONTACTS).doc(occupant.uid).get()]);
+  const pending = pendingSnap.data();
+  // The system's own setup for this Student ID is recognised by its pending record, or, once the TTL policy has
+  // removed that record, by the recovery contact created with it. Anything else is an unrelated account.
+  const ownSetup = pending ? pending.studentKey === key : contactSnap.data()?.studentKey === key;
+  if (!ownSetup) throw unavailableRecord();
+  const expiresAt = pending?.expiresAt instanceof Timestamp ? pending.expiresAt.toMillis() : 0;
   if (expiresAt > now) throw inProgress();
 
   const [profile, reservation] = await Promise.all([
@@ -185,6 +190,7 @@ export async function completeAccountSetup(request: Req, deps: SetupDeps = defau
   if (!contact.verifiedAt || !user.emailVerified) {
     throw new HttpsError("failed-precondition", "Verify your email address first.");
   }
+  if (user.email !== studentAuthAliasEmail(String(pending.studentKey))) throw unavailableClaim();
   const live = (await db().collection("student_roster").doc(String(pending.studentKey)).get()).data();
   if (!eligible(live) || !storedIdentityMatches(pending.identity, live)) throw mismatch();
 
@@ -248,6 +254,8 @@ export async function approveAccountClaim(reviewer: Reviewer, rawUid: unknown, d
     if (expiresAt <= now) throw new HttpsError("failed-precondition", "This request has expired. The student must start again.");
     // Both halves of email ownership are still required at approval time.
     if (!contact.verifiedAt || !user.emailVerified) throw new HttpsError("failed-precondition", "The student's email is not verified.");
+    // The login must still be the alias of the record being claimed (a changed Auth email would claim another ID).
+    if (user.email !== studentAuthAliasEmail(String(pending.studentKey))) throw unavailableClaim();
 
     const key = String(pending.studentKey);
     const rosterRef = db().collection("student_roster").doc(key);

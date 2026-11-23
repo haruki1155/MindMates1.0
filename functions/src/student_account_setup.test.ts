@@ -470,3 +470,40 @@ test("the attacker's submission only reaches the queue, and rejecting it leaves 
   await approve(realUid);
   assert.equal((await s.ref.get()).data()?.userId, realUid);
 });
+
+test("an abandoned setup whose pending record was removed by the TTL policy never blocks the Student ID", async () => {
+  const s = await seedRow("TTL1");
+  clock.t = Date.now();
+  await start(payload(s, email("ttl1")));
+  const staleUid = await track(s, email("ttl1"));
+  // Firestore TTL removes only the pending document; the Auth user and recovery contact remain.
+  await db.collection(CLAIM_PENDING).doc(staleUid).delete();
+  await start(payload(s, email("ttl1-again")));
+  const freshUid = await track(s, email("ttl1-again"));
+  assert.notEqual(freshUid, staleUid);
+  assert.equal(await exists(db.collection(RECOVERY_CONTACTS).doc(staleUid)), false);
+  assert.equal(await exists(db.collection(RECOVERY_EMAILS).doc(recoveryEmailHash(email("ttl1")))), false);
+  // An approved account is never treated as abandoned, even without a pending record.
+  const approved = await submitted("TTL2");
+  await approve(approved.uid);
+  await rejects(start(payload(approved.s, email("ttl2-other"))), "not-found", GENERIC);
+  assert.equal((await getAuth().getUser(approved.uid)).email, approved.s.alias);
+});
+
+test("a login whose Auth email no longer matches the claimed Student ID cannot be submitted or approved", async () => {
+  const s = await seedRow("M1A");
+  clock.t = Date.now();
+  await start(payload(s, email("m1a")));
+  const uid = await track(s, email("m1a"));
+  await authedConfirm(uid);
+  await getAuth().updateUser(uid, {email: aliasOf(`${run}-M1B`)});
+  authEmails.add(aliasOf(`${run}-M1B`));
+  await rejects(completeAccountSetup({...as(uid)}, {now: () => clock.t}), "failed-precondition");
+
+  const t = await submitted("M1C");
+  await getAuth().updateUser(t.uid, {email: aliasOf(`${run}-M1D`)});
+  authEmails.add(aliasOf(`${run}-M1D`));
+  await rejects(approve(t.uid), "failed-precondition");
+  assert.equal(await exists(db.collection("users").doc(t.uid)), false);
+  assert.equal((await t.s.ref.get()).data()?.activated, false);
+});
