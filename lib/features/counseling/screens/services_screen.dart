@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'student_inquiries_screen.dart';
+
 import '../../../core/constants/app_assets.dart';
 import '../../../core/widgets/mindmate_bottom_navigation.dart';
 import '../../../routes/route_names.dart';
@@ -327,6 +329,18 @@ class ServicesScreen extends StatelessWidget {
                   const _AnimatedServicesSection(
                     delay: 0,
                     child: Text('All Services', style: _ServicesText.heading),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const MyInquiriesScreen(),
+                        ),
+                      ),
+                      icon: const Icon(Icons.mark_email_read_outlined),
+                      label: const Text('View My Inquiries'),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   for (var index = 0; index < services.length; index++) ...[

@@ -250,7 +250,7 @@ void main() {
     expect(find.text('PACC Support Service'), findsNothing);
     expect(find.text('Need Immediate Help?'), findsNothing);
     expect(find.text('Set Appointment'), findsNothing);
-    expect(find.text('View My Inquiries'), findsNothing);
+    expect(find.text('View My Inquiries'), findsOneWidget);
     expect(find.text('Take satisfaction survey'), findsNothing);
     expect(find.text('Open client feedback form'), findsNothing);
     expect(find.text('Today'), findsNothing);
@@ -495,7 +495,6 @@ void main() {
     expect(find.text('PACC Support Service'), findsNothing);
     expect(find.text('Need Immediate Help?'), findsNothing);
     expect(find.text('Set Appointment'), findsNothing);
-    expect(find.text('View My Inquiries'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
