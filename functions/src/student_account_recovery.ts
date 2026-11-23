@@ -8,7 +8,7 @@ import {HttpsError, onCall} from "firebase-functions/v2/https";
 import {accountEmailTransporter, canonicalLoginId, smtpAppPassword, smtpSender} from "./account_recovery";
 import {AUDIT_CATEGORIES, writeAudit} from "./audit";
 import {studentAuthAliasEmail} from "./student_auth_alias";
-import {RECOVERY_CONTACTS, RECOVERY_VERIFICATIONS, maskEmail} from "./student_recovery_contacts";
+import {CLAIM_PENDING, RECOVERY_CONTACTS, RECOVERY_VERIFICATIONS, maskEmail} from "./student_recovery_contacts";
 import {
   generateActivationCode, hashActivationCode, normalizeActivationCode, verifyActivationCode,
 } from "./student_roster_domain";
@@ -40,6 +40,8 @@ const RESET_MIN_RESPONSE_MS = 4000;
 const DEV_ENDPOINT_PROJECTS = new Set(["mindmate-staging", "mindmate-dev-4e91c"]);
 
 export type RecoveryMail = {to: string; subject: string; text: string; html: string};
+export const CLAIM_FINISH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export type RecoveryDeps = {
   sendMail: (mail: RecoveryMail) => Promise<void>;
   now: () => number;
@@ -68,7 +70,7 @@ export function assertDevEndpointAllowed(projectId: string | undefined): void {
   throw new HttpsError("failed-precondition", "This endpoint is not available.");
 }
 
-function currentProjectId(): string | undefined {
+export function currentProjectId(): string | undefined {
   return process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || undefined;
 }
 
@@ -76,7 +78,7 @@ function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function callerIp(request: Req): string {
+export function callerIp(request: Req): string {
   return request.rawRequest?.ip || request.rawRequest?.socket?.remoteAddress || "unknown";
 }
 
@@ -94,7 +96,7 @@ function escapeHtml(value: string): string {
  * Fixed-window limiter. Counts every request, so real and unknown identifiers are limited identically. Returns
  * false (instead of throwing) when the window is full and `suppress` is set, so a caller can stay silent.
  */
-async function consumeWindow(scope: string, subject: string, limit: number, now: number, suppress = false): Promise<boolean> {
+export async function consumeWindow(scope: string, subject: string, limit: number, now: number, suppress = false): Promise<boolean> {
   const ref = db().collection(LIMITS).doc(`${scope}_${digest(subject)}`);
   return db().runTransaction(async (transaction) => {
     const snap = await transaction.get(ref);
@@ -227,7 +229,10 @@ export async function confirmRecoveryEmailCode(request: Req, deps: RecoveryDeps 
   const profile = (await db().collection("users").doc(uid).get()).data() ?? {};
   const actorName = [profile.firstName, profile.lastName].map((v) => String(v ?? "")).filter(Boolean).join(" ") || "Student";
   await db().runTransaction(async (transaction) => {
-    const [verification, current] = await Promise.all([transaction.get(verificationRef), transaction.get(contactRef)]);
+    const pendingRef = db().collection(CLAIM_PENDING).doc(uid);
+    const [verification, current, pending] = await Promise.all([
+      transaction.get(verificationRef), transaction.get(contactRef), transaction.get(pendingRef),
+    ]);
     // Single use: a concurrent or repeated redemption finds the code already consumed.
     if (!verification.exists || verification.data()?.hash !== reserved.hash ||
       verification.data()?.emailHash !== current.data()?.emailHash) {
@@ -235,6 +240,8 @@ export async function confirmRecoveryEmailCode(request: Req, deps: RecoveryDeps 
     }
     transaction.delete(verificationRef);
     transaction.update(contactRef, {verifiedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()});
+    // A verified account setup gets a day to be completed; until then it cannot be replaced by another setup.
+    if (pending.exists) transaction.update(pendingRef, {expiresAt: Timestamp.fromMillis(deps.now() + CLAIM_FINISH_WINDOW_MS)});
     writeAudit(transaction, db(), {
       actorId: uid, actorNameSnapshot: actorName, actorRoleSnapshot: "student",
       action: "STUDENT_RECOVERY_EMAIL_VERIFIED", category: AUDIT_CATEGORIES.authentication,

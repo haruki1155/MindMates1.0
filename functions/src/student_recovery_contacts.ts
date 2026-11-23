@@ -15,6 +15,8 @@ import {Transaction, getFirestore} from "firebase-admin/firestore";
 export const RECOVERY_CONTACTS = "student_recovery_contacts";
 export const RECOVERY_EMAILS = "student_recovery_emails";
 export const RECOVERY_VERIFICATIONS = "student_recovery_verifications";
+/** A no-code account setup that has started but not yet been claimed: student_claim_pending/{uid}. */
+export const CLAIM_PENDING = "student_claim_pending";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -55,6 +57,7 @@ export function releaseRecoveryRecords(transaction: Transaction, uid: string, re
   const db = getFirestore();
   transaction.delete(db.collection(RECOVERY_CONTACTS).doc(uid));
   transaction.delete(db.collection(RECOVERY_VERIFICATIONS).doc(uid));
+  transaction.delete(db.collection(CLAIM_PENDING).doc(uid));
   if (records.emailHash && records.ownsEmailReservation) {
     transaction.delete(db.collection(RECOVERY_EMAILS).doc(records.emailHash));
   }

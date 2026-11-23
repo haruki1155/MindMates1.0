@@ -10,6 +10,7 @@ import {AUDIT_CATEGORIES, writeAudit} from "./audit";
 import {
   StoredActivationCode, hashActivationCode, normalizeActivationCode, parseDateKey, verifyActivationCode,
 } from "./student_roster_domain";
+import {rosterStudentProfile} from "./student_profile";
 import {studentAuthAliasEmail} from "./student_auth_alias";
 import {
   RECOVERY_CONTACTS, RECOVERY_EMAILS, normalizeRecoveryContactEmail, recoveryEmailHash, releaseStudentAlias,
@@ -37,7 +38,7 @@ const COPY: Record<Exclude<Reason, "invalid-input">, {code: "not-found" | "deadl
   "email-in-use": {code: "already-exists", message: "This email address is already registered."},
 };
 
-function activationError(reason: Exclude<Reason, "invalid-input">): HttpsError {
+export function activationError(reason: Exclude<Reason, "invalid-input">): HttpsError {
   return new HttpsError(COPY[reason].code, COPY[reason].message, {reason});
 }
 
@@ -45,7 +46,7 @@ function invalidInput(message: string): HttpsError {
   return new HttpsError("invalid-argument", message, {reason: "invalid-input"});
 }
 
-function database(): FirebaseFirestore.Firestore {
+export function database(): FirebaseFirestore.Firestore {
   return getFirestore();
 }
 
@@ -103,7 +104,7 @@ function lockedUntilMillis(data: FirebaseFirestore.DocumentData | undefined): nu
  * Lockout check and attempt reservation in one transaction, before any identity check. Reserving the attempt up
  * front means concurrent guesses cannot slip past the limit. Returns false when the Student No. is locked.
  */
-async function reserveAttempt(key: string): Promise<boolean> {
+export async function reserveAttempt(key: string): Promise<boolean> {
   const db = database();
   const ref = db.collection("student_activation_attempts").doc(key);
   return db.runTransaction(async (transaction) => {
@@ -124,12 +125,12 @@ async function reserveAttempt(key: string): Promise<boolean> {
   });
 }
 
-async function clearAttempts(key: string): Promise<void> {
+export async function clearAttempts(key: string): Promise<void> {
   await database().collection("student_activation_attempts").doc(key).delete();
 }
 
 /** True when any Firebase Auth account (employee, legacy or pre-alias student) already uses this address. */
-async function authEmailTaken(address: string): Promise<boolean> {
+export async function authEmailTaken(address: string): Promise<boolean> {
   try {
     await getAuth().getUserByEmail(address);
     return true;
@@ -147,7 +148,7 @@ async function authEmailTaken(address: string): Promise<boolean> {
  * Any other holder is an unrelated account: it is never modified or deleted, whatever its age or records, and the
  * activation fails closed (auth/email-already-exists).
  */
-async function createAliasUser(authEmail: string, password: string, row: FirebaseFirestore.DocumentData): Promise<string> {
+export async function createAliasUser(authEmail: string, password: string, row: FirebaseFirestore.DocumentData): Promise<string> {
   const create = () => getAuth().createUser({email: authEmail, password, emailVerified: false, disabled: false});
   try {
     return (await create()).uid;
@@ -263,23 +264,7 @@ async function activateStudentAccountHandler(request: CallableRequest) {
       if (recoveryEmail.exists && recoveryEmail.data()?.uid !== uid) throw activationError("email-in-use");
 
       const studentNo = String(live.studentNo ?? key);
-      transaction.create(profileRef, {
-        id: uid, email: input.email, emailVerified: false, studentIdLogin: true, schoolId: studentNo,
-        firstName: String(live.firstName ?? ""), middleName: String(live.middleName ?? ""), lastName: String(live.surname ?? ""),
-        name: [live.firstName, live.middleName, live.surname].map((v) => String(v ?? "")).filter(Boolean).join(" "),
-        populationRole: "student", declaredRole: "student", role: "student",
-        collegeId: String(live.collegeId ?? ""), college: String(live.college ?? ""),
-        courseId: String(live.courseId ?? ""), course: String(live.course ?? ""),
-        departmentId: String(live.departmentId ?? ""), department: String(live.department ?? ""),
-        yearLevel: String(live.yearLevel ?? ""),
-        dateOfBirth: live.dateOfBirth ?? Timestamp.fromDate(new Date(`${live.dateOfBirthKey}T00:00:00Z`)),
-        dateOfBirthKey: String(live.dateOfBirthKey ?? ""),
-        gender: "", sector: "", position: "", employeeId: "",
-        accessRole: "appUser", verificationStatus: "verified", profileVersion: 3,
-        verifiedAt: FieldValue.serverTimestamp(), verifiedBy: "roster-activation",
-        personalInfoRequired: true, rosterLinked: true,
-        ...defaultActivityFields(),
-      });
+      transaction.create(profileRef, rosterStudentProfile(live, {uid, email: input.email, studentNo, emailVerified: false}));
       if (!reservation.exists) {
         transaction.create(reservationRef, {userId: uid, studentId: studentNo, createdAt: FieldValue.serverTimestamp()});
       }

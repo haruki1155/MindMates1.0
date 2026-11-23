@@ -12,8 +12,7 @@ import {
 } from "./appointment_approval_service";
 import {AUDIT_CATEGORIES, actorName, writeAudit, writeAuditBatch} from "./audit";
 import {
-  AcademicIndex, OfficialFields, RosterRowInput, StoredActivationCode, generateActivationCode, hashActivationCode,
-  normalizeName, normalizeYearLevel, validateRosterRows,
+  AcademicIndex, OfficialFields, RosterRowInput, normalizeName, normalizeYearLevel, validateRosterRows,
 } from "./student_roster_domain";
 
 if (!getApps().length) initializeApp();
@@ -193,54 +192,11 @@ export const previewStudentRosterImport = onCall(async (request) => {
   return {rows: out, counts};
 });
 
-// ------------------------------------------------------------------ codes
-
-type MintedCode = {plain: string; stored: StoredActivationCode};
-
-async function mintCode(): Promise<MintedCode> {
-  const plain = generateActivationCode();
-  return {plain, stored: await hashActivationCode(plain)};
-}
-
-function issued(info: Doc, minted: MintedCode): IssuedCode {
-  return {
-    studentNo: String(info.studentNo ?? ""),
-    name: [info.firstName, info.middleName, info.surname].filter(Boolean).join(" "),
-    college: String(info.college ?? ""), course: String(info.course ?? ""), yearLevel: String(info.yearLevel ?? ""),
-    code: minted.plain, expiresAt: minted.stored.expiresAt.toISOString(),
-  };
-}
-
-function storedCodeField(stored: StoredActivationCode): Record<string, unknown> {
-  return {
-    hash: stored.hash, salt: stored.salt,
-    issuedAt: Timestamp.fromDate(stored.issuedAt), expiresAt: Timestamp.fromDate(stored.expiresAt),
-  };
-}
+// ------------------------------------------------------------------ audit helpers
 
 async function actorSnapshot(actorId: string): Promise<{actorNameSnapshot: string; actorRoleSnapshot: string}> {
   const profile = (await database().collection("users").doc(actorId).get()).data() ?? {};
   return {actorNameSnapshot: actorName(profile), actorRoleSnapshot: roleOf(profile) || "admin"};
-}
-
-/** Overwrites the activation code of every active, unactivated roster row among `keys`. Returns plain codes once. */
-export async function issueCodesFor(keys: string[], actorId: string): Promise<IssuedCode[]> {
-  const db = database();
-  const unique = [...new Set(keys)];
-  const snaps = await getAllChunked(unique.map((k) => db.collection("student_roster").doc(k)));
-  const eligible = snaps.filter((s) => s.exists && s.data()?.status === "active" && s.data()?.activated !== true);
-  const minted = await Promise.all(eligible.map(() => mintCode()));
-  const codes = eligible.map((s, i) => issued(s.data() as Doc, minted[i]));
-  if (!eligible.length) return codes;
-  const actor = await actorSnapshot(actorId);
-  const ops: ((b: WriteBatch) => void)[] = eligible.map((s, i) => (b) =>
-    b.update(s.ref, {activationCode: storedCodeField(minted[i].stored), updatedAt: FieldValue.serverTimestamp()}));
-  ops.push((b) => writeAuditBatch(b, db, {
-    actorId, ...actor, action: "STUDENT_ACTIVATION_CODES_ISSUED", category: AUDIT_CATEGORIES.userManagement,
-    targetType: "student_roster", metadata: {count: eligible.length},
-  }));
-  await commitOps(ops);
-  return codes;
 }
 
 async function commitOps(ops: ((b: WriteBatch) => void)[]): Promise<void> {
@@ -699,25 +655,13 @@ export const importStudentRoster = onCall({timeoutSeconds: 540, memory: "512MiB"
     if (step.mode === "batch") {
       const batchCodes: IssuedCode[] = [];
       try {
-        const newUnits = step.units.filter((u): u is NewBatchUnit => u.kind === "new");
-        const mintedList = newUnits.length
-          ? await Promise.all(
-              newUnits.map(async (u) => {
-                const m = await mintCode();
-                rosterTestHooks.onCodeMinted?.(u.studentNo);
-                return m;
-              }),
-            )
-          : [];
         const batch = db.batch();
-        let mintIdx = 0;
         for (const u of step.units) {
           if (u.kind === "new") {
-            const m = mintedList[mintIdx++];
-            batchCodes.push(issued(u.v as unknown as Doc, m));
+            // Students claim their record themselves (Student No. + name + date of birth), so no code is created.
             batch.create(u.rosterRef, {
               ...officialFields(u.v), status: "active", activated: false, userId: null,
-              activationCode: storedCodeField(m.stored), importId: importRef.id,
+              activationCode: null, importId: importRef.id,
               createdBy: actorId, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
             });
           } else {
@@ -1171,38 +1115,10 @@ export const backfillStudentInfoRequirement = onCall({timeoutSeconds: 540}, asyn
   return counts;
 });
 
+/** Activation codes are no longer used: students set up their own account. Kept only so older clients get a clear answer. */
 export const issueStudentActivationCodes = onCall(async (request) => {
-  const actorId = requireUid(request);
-  await requireAdmin(actorId);
-  const list = payload(request.data).studentNos;
-  if (!Array.isArray(list) || list.length < 1 || list.length > MAX_ROWS) {
-    throw new HttpsError("invalid-argument", `Choose 1 to ${MAX_ROWS} Student Nos.`);
-  }
-  const db = database();
-  const skipped: {studentNo: string; reason: string}[] = [];
-  const keyed = new Map<string, string>();
-  for (const entry of list) {
-    const key = canonicalOrNull(entry);
-    if (!key) skipped.push({studentNo: typeof entry === "string" ? entry.trim().slice(0, 60) : "", reason: "Invalid Student No."});
-    else if (!keyed.has(key)) keyed.set(key, String(entry).trim());
-  }
-  const keys = [...keyed.keys()];
-  const snaps = await getAllChunked(keys.map((k) => db.collection("student_roster").doc(k)));
-  const eligible: string[] = [];
-  snaps.forEach((s, i) => {
-    const data = s.data();
-    if (!s.exists || !data) skipped.push({studentNo: keyed.get(keys[i]) ?? keys[i], reason: "Not in the roster."});
-    else if (data.activated === true) skipped.push({studentNo: String(data.studentNo ?? keys[i]), reason: "Already activated."});
-    else if (data.status !== "active") skipped.push({studentNo: String(data.studentNo ?? keys[i]), reason: "Deactivated."});
-    else eligible.push(keys[i]);
-  });
-  const codes = eligible.length ? await issueCodesFor(eligible, actorId) : [];
-  // Rows that changed between the check and the write.
-  const issuedNos = new Set(codes.map((c) => canonicalOrNull(c.studentNo)));
-  for (const key of eligible) {
-    if (!issuedNos.has(key)) skipped.push({studentNo: keyed.get(key) ?? key, reason: "No longer eligible."});
-  }
-  return {codes, skipped};
+  await requireAdmin(requireUid(request));
+  throw new HttpsError("failed-precondition", "Activation codes are no longer used. Students set up their own accounts.");
 });
 
 export const revokeStudentActivation = onCall(async (request) => {
@@ -1233,7 +1149,6 @@ export const revokeStudentActivation = onCall(async (request) => {
     await setAuthDisabled(uid, true);
   }
 
-  const minted = await mintCode();
   try {
     await db.runTransaction(async (transaction) => {
       const userRef = uid ? db.collection("users").doc(uid) : null;
@@ -1246,7 +1161,7 @@ export const revokeStudentActivation = onCall(async (request) => {
         throw new HttpsError("failed-precondition", "The roster row changed. Refresh and try again.");
       }
       transaction.update(rosterRef, {
-        activated: false, userId: null, consumedActivationCode: null, activationCode: storedCodeField(minted.stored),
+        activated: false, userId: null, consumedActivationCode: null, activationCode: null,
         ...(uid ? {revokedUserIds: FieldValue.arrayUnion(uid)} : {}),
         revokedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), updatedBy: actorId,
       });
@@ -1266,5 +1181,5 @@ export const revokeStudentActivation = onCall(async (request) => {
     if (uid && wasEnabled) await setAuthDisabled(uid, false).catch(() => undefined);
     throw error;
   }
-  return {code: issued(pre, minted)};
+  return {ok: true};
 });

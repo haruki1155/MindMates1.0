@@ -384,6 +384,12 @@
       "indexes": []
     },
     {
+      "collectionGroup": "student_claim_pending",
+      "fieldPath": "expiresAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
       "collectionGroup": "notifications",
       "fieldPath": "expiresAt",
       "ttl": true,
