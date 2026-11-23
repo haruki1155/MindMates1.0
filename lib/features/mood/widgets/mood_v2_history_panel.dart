@@ -26,6 +26,8 @@ class MoodV2HistoryPanel extends StatelessWidget {
     this.onExpandDay,
     this.period,
     this.referenceInstant,
+    this.selectedDateKey,
+    this.permittedRange,
   });
 
   final MoodHistoryWindow? history;
@@ -44,6 +46,8 @@ class MoodV2HistoryPanel extends StatelessWidget {
   final ValueChanged<String>? onExpandDay;
   final MoodJourneyPeriod? period;
   final DateTime? referenceInstant;
+  final String? selectedDateKey;
+  final MoodWeekRange? permittedRange;
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +55,7 @@ class MoodV2HistoryPanel extends StatelessWidget {
     if (isLoading && history == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (errorMessage != null) {
+    if (errorMessage != null && history == null) {
       return Column(
         children: [
           _HistoryMessage(
@@ -76,7 +80,7 @@ class MoodV2HistoryPanel extends StatelessWidget {
       );
     }
     final events = history!.uniqueEvents;
-    if (events.isEmpty) {
+    if (selectedDateKey == null && events.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -124,22 +128,39 @@ class MoodV2HistoryPanel extends StatelessWidget {
       );
     }
     final days = MoodAnalytics.dailyAggregates(
-      events
-          .where(
-            (e) =>
-                period == null ||
-                includesMoodJourneyDate(
-                  e.dateKey,
-                  period!,
-                  referenceInstant ?? DateTime.now(),
-                ),
-          )
-          .toList(),
+      events.where((e) {
+        if (permittedRange != null && !permittedRange!.includes(e.dateKey)) {
+          return false;
+        }
+        if (selectedDateKey != null) {
+          return e.dateKey == selectedDateKey;
+        }
+        return period == null ||
+            includesMoodJourneyDate(
+              e.dateKey,
+              period!,
+              referenceInstant ?? DateTime.now(),
+            );
+      }).toList(),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (isLoading) const LinearProgressIndicator(),
+        if (selectedDateKey != null) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              '${MaterialLocalizations.of(context).formatShortMonthDay(MoodManilaCalendar.dateForKey(selectedDateKey!))} · Your check-ins',
+              key: const Key('mood-selected-day-heading'),
+              style: const TextStyle(
+                color: HomePalette.text,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
         if (showPersonalDetails &&
             history!.coverage == MoodHistoryCoverage.partial)
           const Padding(
@@ -151,33 +172,45 @@ class MoodV2HistoryPanel extends StatelessWidget {
           const SizedBox(height: 12),
         ],
         if (days.isEmpty)
-          Padding(
+          Container(
+            key: const Key('mood-selected-day-empty'),
+            decoration: selectedDateKey != null ? HomeDecor.card() : null,
             padding: const EdgeInsets.all(16),
             child: Text(
-              history!.coverage == MoodHistoryCoverage.partial
-                  ? 'No check-ins loaded for this period. Load more history to check earlier dates.'
-                  : 'No check-ins in this period.',
+              selectedDateKey != null
+                  ? (permittedRange != null &&
+                            !permittedRange!.includes(selectedDateKey!)
+                        ? 'This date is outside the selected academic period.'
+                        : 'No mood check-ins on this date.')
+                  : (history!.coverage == MoodHistoryCoverage.partial
+                        ? 'No check-ins loaded for this period. Load more history to check earlier dates.'
+                        : 'No check-ins in this period.'),
+              style: const TextStyle(
+                color: HomePalette.muted,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-        ListView.separated(
-          key: const Key('mood-v2-history-list'),
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: days.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 10),
-          itemBuilder: (context, index) {
-            final day = days[days.length - 1 - index];
-            return _MoodDayCard(
-              day: day,
-              isPartial: history!.coverage == MoodHistoryCoverage.partial,
-              showPersonalDetails: showPersonalDetails,
-              notes: v2PersonalNotes,
-              notesLoading: v2NoteLoadingDays.contains(day.dateKey),
-              notesError: v2NoteErrorDays.contains(day.dateKey),
-              onExpandDay: onExpandDay,
-            );
-          },
-        ),
+        if (days.isNotEmpty)
+          ListView.separated(
+            key: const Key('mood-v2-history-list'),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: days.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final day = days[days.length - 1 - index];
+              return _MoodDayCard(
+                day: day,
+                isPartial: history!.coverage == MoodHistoryCoverage.partial,
+                showPersonalDetails: showPersonalDetails,
+                notes: v2PersonalNotes,
+                notesLoading: v2NoteLoadingDays.contains(day.dateKey),
+                notesError: v2NoteErrorDays.contains(day.dateKey),
+                onExpandDay: onExpandDay,
+              );
+            },
+          ),
         if (paginationErrorMessage != null) ...[
           const SizedBox(height: 12),
           Semantics(

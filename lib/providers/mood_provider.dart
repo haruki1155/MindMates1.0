@@ -43,17 +43,34 @@ class MoodProvider extends ChangeNotifier {
   Set<String> get v2NoteLoadingDays => Set.unmodifiable(_v2NoteLoadingDays);
   Set<String> get v2NoteErrorDays => Set.unmodifiable(_v2NoteErrorDays);
 
+  bool _isNoteOwnerStillActive(String userId) =>
+      (!_isBoundToAuthentication || _authenticatedUserId == userId) &&
+      (_v2HistoryUserId == userId || _v2CalendarUserId == userId);
+
   Future<void> loadMoodV2DayNotes(String userId, String dateKey) async {
     if (!isMoodV2ReadEnabled ||
-        _v2History == null ||
-        _v2HistoryUserId != userId ||
+        userId.trim().isEmpty ||
         (_isBoundToAuthentication && _authenticatedUserId != userId) ||
         _v2NoteLoadingDays.contains(dateKey)) {
       return;
     }
-    final events = _v2History!.uniqueEvents
+    final hasRecentOwner = _v2History != null && _v2HistoryUserId == userId;
+    final hasCalendarOwner =
+        _moodCalendarHistory != null && _v2CalendarUserId == userId;
+    if (!hasRecentOwner && !hasCalendarOwner) {
+      return;
+    }
+    final combinedWindow = MoodHistoryWindow(
+      events: [
+        if (hasRecentOwner) ..._v2History!.events,
+        if (hasCalendarOwner) ..._moodCalendarHistory!.events,
+      ],
+      coverage: MoodHistoryCoverage.partial,
+    );
+    final events = combinedWindow.uniqueEvents
         .where(
           (e) =>
+              e.userId == userId &&
               e.dateKey == dateKey &&
               !_v2PersonalNotes.containsKey(e.stableIdentity),
         )
@@ -68,13 +85,17 @@ class MoodProvider extends ChangeNotifier {
         userId: userId,
         events: events,
       );
-      if (generation != _noteGeneration || _v2HistoryUserId != userId) return;
+      if (generation != _noteGeneration || !_isNoteOwnerStillActive(userId)) {
+        return;
+      }
       _v2PersonalNotes.addAll(notes);
     } catch (_) {
-      if (generation != _noteGeneration || _v2HistoryUserId != userId) return;
+      if (generation != _noteGeneration || !_isNoteOwnerStillActive(userId)) {
+        return;
+      }
       _v2NoteErrorDays.add(dateKey);
     } finally {
-      if (generation == _noteGeneration && _v2HistoryUserId == userId) {
+      if (generation == _noteGeneration && _isNoteOwnerStillActive(userId)) {
         _v2NoteLoadingDays.remove(dateKey);
         notifyListeners();
       }
@@ -129,6 +150,14 @@ class MoodProvider extends ChangeNotifier {
   String? _v2PaginationErrorMessage;
   int _v2RequestGeneration = 0;
 
+  MoodHistoryWindow? _moodCalendarHistory;
+  String? _v2CalendarUserId;
+  bool _isLoadingMoodCalendarRange = false;
+  String? _moodCalendarRangeError;
+  String? _loadedMoodCalendarStartKey;
+  String? _loadedMoodCalendarEndExclusiveKey;
+  int _v2CalendarRequestGeneration = 0;
+
   List<MoodModel> get moods => List.unmodifiable(_moods);
   bool get isLoading => _isLoading;
   bool get isLoadingToday => _isLoadingToday;
@@ -143,6 +172,12 @@ class MoodProvider extends ChangeNotifier {
   String? get v2HistoryErrorMessage => _v2HistoryErrorMessage;
   String? get v2PaginationErrorMessage => _v2PaginationErrorMessage;
   bool get canLoadMoreMoodV2History => _v2NextCursor != null || _hasV2Retry;
+  MoodHistoryWindow? get moodCalendarHistory => _moodCalendarHistory;
+  bool get isLoadingMoodCalendarRange => _isLoadingMoodCalendarRange;
+  String? get moodCalendarRangeError => _moodCalendarRangeError;
+  String? get loadedMoodCalendarStartKey => _loadedMoodCalendarStartKey;
+  String? get loadedMoodCalendarEndExclusiveKey =>
+      _loadedMoodCalendarEndExclusiveKey;
   bool get isMoodV2ReadEnabled =>
       _useMoodV2Read && _combinedHistoryRepository != null;
 
@@ -298,6 +333,143 @@ class MoodProvider extends ChangeNotifier {
         : null;
   }
 
+  /// Loads bounded combined history for a specific Manila calendar date window
+  /// `[startDateKey, endExclusiveDateKey)` without replacing the recent
+  /// [v2History] or [v2Analytics] streak state.
+  Future<void> loadMoodCalendarRange(
+    String userId, {
+    required String startDateKey,
+    required String endExclusiveDateKey,
+  }) async {
+    final repository = _combinedHistoryRepository;
+    if (!_useMoodV2Read ||
+        repository == null ||
+        userId.trim().isEmpty ||
+        (_isBoundToAuthentication && _authenticatedUserId != userId) ||
+        startDateKey.compareTo(endExclusiveDateKey) >= 0) {
+      return;
+    }
+
+    final generation = ++_v2CalendarRequestGeneration;
+    final rangeChanged =
+        _v2CalendarUserId != userId ||
+        _loadedMoodCalendarStartKey != startDateKey ||
+        _loadedMoodCalendarEndExclusiveKey != endExclusiveDateKey;
+    if (rangeChanged) {
+      _moodCalendarHistory = null;
+      _loadedMoodCalendarStartKey = null;
+      _loadedMoodCalendarEndExclusiveKey = null;
+    }
+    _v2CalendarUserId = userId;
+    _isLoadingMoodCalendarRange = true;
+    _moodCalendarRangeError = null;
+    notifyListeners();
+
+    const maxPages = 10;
+    final accumulated = <NormalizedMoodEvent>[];
+    MoodCombinedHistoryCursor? cursor;
+    var hasFailedSource = false;
+    var allSourcesFailedOnFirstPage = false;
+    var pagesLoaded = 0;
+
+    bool isRequestCurrent() =>
+        generation == _v2CalendarRequestGeneration &&
+        _v2CalendarUserId == userId &&
+        (!_isBoundToAuthentication || _authenticatedUserId == userId);
+
+    try {
+      while (pagesLoaded < maxPages) {
+        final page = await repository.fetch(
+          MoodCombinedHistoryRequest.forManilaDateRange(
+            userId: userId,
+            startDateKey: startDateKey,
+            endExclusiveDateKey: endExclusiveDateKey,
+            pageSize: 100,
+            cursor: cursor,
+          ),
+        );
+        if (!isRequestCurrent()) return;
+
+        final validEvents = page.window.uniqueEvents.where(
+          (event) =>
+              event.userId == userId &&
+              event.dateKey.compareTo(startDateKey) >= 0 &&
+              event.dateKey.compareTo(endExclusiveDateKey) < 0,
+        );
+        accumulated.addAll(validEvents);
+        pagesLoaded++;
+
+        if (page.failedSources.isNotEmpty) {
+          hasFailedSource = true;
+          if (pagesLoaded == 1 &&
+              page.failedSources.length >= MoodEventSource.values.length &&
+              accumulated.isEmpty) {
+            allSourcesFailedOnFirstPage = true;
+          }
+          break;
+        }
+        if (!page.hasMore || page.nextCursor == null) {
+          cursor = null;
+          break;
+        }
+        cursor = page.nextCursor;
+      }
+
+      if (!isRequestCurrent()) return;
+
+      if (allSourcesFailedOnFirstPage) {
+        _moodCalendarHistory = null;
+        _loadedMoodCalendarStartKey = null;
+        _loadedMoodCalendarEndExclusiveKey = null;
+        _moodCalendarRangeError = 'Unable to load mood history for this month.';
+        return;
+      }
+
+      final deduplicated = MoodHistoryWindow(
+        events: accumulated,
+        coverage: MoodHistoryCoverage.partial,
+      ).uniqueEvents;
+      final isComplete = !hasFailedSource && cursor == null;
+      _moodCalendarHistory = MoodHistoryWindow(
+        events: deduplicated,
+        coverage: isComplete
+            ? MoodHistoryCoverage.complete
+            : MoodHistoryCoverage.partial,
+      );
+      _loadedMoodCalendarStartKey = startDateKey;
+      _loadedMoodCalendarEndExclusiveKey = endExclusiveDateKey;
+      _moodCalendarRangeError = hasFailedSource
+          ? 'Some mood history could not be loaded. Try again.'
+          : null;
+    } catch (_) {
+      if (!isRequestCurrent()) return;
+      if (accumulated.isNotEmpty) {
+        final deduplicated = MoodHistoryWindow(
+          events: accumulated,
+          coverage: MoodHistoryCoverage.partial,
+        ).uniqueEvents;
+        _moodCalendarHistory = MoodHistoryWindow(
+          events: deduplicated,
+          coverage: MoodHistoryCoverage.partial,
+        );
+        _loadedMoodCalendarStartKey = startDateKey;
+        _loadedMoodCalendarEndExclusiveKey = endExclusiveDateKey;
+        _moodCalendarRangeError =
+            'Some mood history could not be loaded. Try again.';
+      } else {
+        _moodCalendarHistory = null;
+        _loadedMoodCalendarStartKey = null;
+        _loadedMoodCalendarEndExclusiveKey = null;
+        _moodCalendarRangeError = 'Unable to load mood history for this month.';
+      }
+    } finally {
+      if (isRequestCurrent()) {
+        _isLoadingMoodCalendarRange = false;
+        notifyListeners();
+      }
+    }
+  }
+
   void clearMoodV2History() {
     _noteGeneration++;
     _v2PersonalNotes.clear();
@@ -314,6 +486,13 @@ class MoodProvider extends ChangeNotifier {
     _v2RetryCursor = null;
     _hasV2Retry = false;
     _v2PaginationErrorMessage = null;
+    _v2CalendarRequestGeneration++;
+    _v2CalendarUserId = null;
+    _moodCalendarHistory = null;
+    _isLoadingMoodCalendarRange = false;
+    _moodCalendarRangeError = null;
+    _loadedMoodCalendarStartKey = null;
+    _loadedMoodCalendarEndExclusiveKey = null;
     notifyListeners();
   }
 

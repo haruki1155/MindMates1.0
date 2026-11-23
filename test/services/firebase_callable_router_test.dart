@@ -37,6 +37,12 @@ void main() {
           'Staging installs no App Check provider, so it must use the Dev '
           'callable; every other environment keeps the protected one.',
     );
+    expect(
+      FirebaseCallableRouter.name('getStudentAcademicCalendar'),
+      environment == 'staging'
+          ? 'getStudentAcademicCalendarDev'
+          : 'getStudentAcademicCalendar',
+    );
   });
 
   test('does not rewrite an unknown callable', () {

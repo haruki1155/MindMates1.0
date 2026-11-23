@@ -127,6 +127,10 @@ export {
   closeAcademicYear,
   voidAcademicYear,
 } from "./counseling_population";
+export {
+  getStudentAcademicCalendar,
+  getStudentAcademicCalendarDev,
+} from "./student_academic_calendar";
 
 if (!getApps().length) initializeApp();
 
