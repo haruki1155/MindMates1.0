@@ -114,7 +114,6 @@ class MoodJourneySummary extends StatelessWidget {
           emptyLabel: 'Your feelings, at your pace',
           isMonthOverview: false,
         ),
-        if (showWeekRecap) MoodWeekRecapCards(recap: safeRecap),
         const SizedBox(height: 12),
         _SummaryPeriodCard(
           cardKey: const Key('mood-month-overview-card'),
@@ -170,7 +169,7 @@ class MoodJourneySummary extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 16),
+        if (showWeekRecap) MoodWeekRecapCards(recap: safeRecap),
       ],
     );
   }
@@ -210,17 +209,32 @@ class _SummaryPeriodCard extends StatelessWidget {
       }
       return emptyLabel;
     }
-    final denominatorNote = summary.unlabeledCheckInCount > 0
-        ? '${summary.labeledCheckInCount} labeled check-ins'
-        : '${summary.labeledCheckInCount}';
     final partialQualifier = summary.isPartial ? ' (loaded entries)' : '';
     final prefix = isMonthOverview ? 'Top logged mood' : 'Most logged mood';
     if (summary.isTiedTop) {
-      final tied = summary.topLabels.join(', ');
-      return '${prefix}s are tied: $tied (${summary.topLabelCount} of $denominatorNote, ${summary.topLabelPercentage}%)$partialQualifier';
+      return '${prefix}s are tied: ${summary.topLabels.join(', ')}$partialQualifier';
     }
-    final top = summary.topLabels.single;
-    return '$prefix$partialQualifier: $top (${summary.topLabelCount} of $denominatorNote, ${summary.topLabelPercentage}%)';
+    return '$prefix$partialQualifier: ${summary.topLabels.single}';
+  }
+
+  void _showPercentageGuide(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('How percentages work'),
+        content: const Text(
+          'Each mood’s share compares its check-ins with all check-ins with a mood label in this week or month. Multiple check-ins on the same day count separately.\n\n'
+          'For example, if 2 of 5 labeled check-ins were Okay, the row shows 2 (40%). Percentages are rounded to whole numbers. If some history is missing, only loaded check-ins are used.',
+        ),
+        scrollable: true,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -228,18 +242,51 @@ class _SummaryPeriodCard extends StatelessWidget {
     final distributions = summary.labelDistribution.take(4).toList();
     return Container(
       key: cardKey,
-      decoration: HomeDecor.card(),
+      decoration: HomeDecor.card(shadowColor: const Color(0x090F0B05)),
       padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: HomePalette.text,
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: HomePalette.surfaceWarm,
+                  borderRadius: BorderRadius.circular(HomeMetrics.radiusSmall),
+                ),
+                child: Icon(
+                  isMonthOverview
+                      ? Icons.calendar_month_outlined
+                      : Icons.view_week_outlined,
+                  color: HomePalette.text,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: HomePalette.text,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+              if (distributions.isNotEmpty)
+                IconButton(
+                  tooltip: 'How mood percentages are calculated',
+                  onPressed: () => _showPercentageGuide(context),
+                  icon: const Icon(
+                    Icons.info_outline,
+                    color: HomePalette.muted,
+                  ),
+                ),
+            ],
           ),
           if (filterSubtitle != null) ...[
             const SizedBox(height: 2),

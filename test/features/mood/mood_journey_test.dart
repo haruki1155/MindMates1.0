@@ -78,12 +78,51 @@ void main() {
         ),
         findsOneWidget,
       );
-      // Nov 1 is Sunday; before selecting Nov 1, Sunday's day card is not shown.
-      expect(find.text('Sunday'), findsNothing);
-
-      // Select Sunday Nov 1 on the calendar.
-      await tester.tap(find.byKey(const Key('mood-calendar-day-2026-11-01')));
+      final weekCard = find.byKey(const Key('mood-selected-week-card'));
+      expect(
+        find.descendant(
+          of: weekCard,
+          matching: find.text('Most logged mood: Okay'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: weekCard, matching: find.text('1 (100%)')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('1 of 1'), findsNothing);
+      await tester.tap(
+        find.descendant(
+          of: weekCard,
+          matching: find.byTooltip('How mood percentages are calculated'),
+        ),
+      );
       await tester.pumpAndSettle();
+      expect(find.text('How percentages work'), findsOneWidget);
+      expect(find.textContaining('check-ins with a mood label'), findsWidgets);
+      await tester.tap(find.text('Got it'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Expand mood calendar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mood Calendar'), findsOneWidget);
+      expect(weekCard, findsNothing);
+      final loggedDay = find.byKey(const Key('mood-calendar-day-2026-11-01'));
+      await tester.tap(loggedDay);
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: loggedDay,
+          matching: find.byType(TweenAnimationBuilder<double>),
+        ),
+        findsOneWidget,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Nov 1 · Your check-ins'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('My Mood Journey'), findsOneWidget);
+      expect(find.text('Nov 1 · Your check-ins'), findsOneWidget);
 
       // Now Sunday Nov 1's detail is shown and the selected week (Oct 26 - Nov 1) has 2 check-ins.
       expect(find.text('Sunday'), findsOneWidget);
@@ -448,6 +487,27 @@ void main() {
         expect(
           find.byKey(const Key('mood-academic-filter-bar')),
           findsOneWidget,
+        );
+        final calendar = find.byKey(const Key('mood-journey-calendar'));
+        final filters = find.byKey(const Key('mood-academic-filter-bar'));
+        final selection = find.byKey(const Key('mood-selected-day-heading'));
+        final week = find.byKey(const Key('mood-selected-week-card'));
+        final month = find.byKey(const Key('mood-month-overview-card'));
+        expect(
+          tester.getBottomLeft(calendar).dy,
+          lessThanOrEqualTo(tester.getTopLeft(selection).dy),
+        );
+        expect(
+          tester.getTopLeft(filters).dy,
+          greaterThan(tester.getTopLeft(calendar).dy),
+        );
+        expect(
+          tester.getTopLeft(selection).dy,
+          lessThan(tester.getTopLeft(week).dy),
+        );
+        expect(
+          tester.getTopLeft(week).dy,
+          lessThan(tester.getTopLeft(month).dy),
         );
         expect(find.text('2026-2027'), findsOneWidget);
         expect(find.text('All year'), findsOneWidget);
