@@ -247,8 +247,10 @@ void main() {
     expect(find.text('Key Features'), findsNothing);
     expect(find.text('Learn More'), findsNothing);
     expect(find.text('Inquire'), findsNothing);
-    expect(find.text('PACC Support Service'), findsOneWidget);
-    expect(find.text('Set Appointment'), findsOneWidget);
+    expect(find.text('PACC Support Service'), findsNothing);
+    expect(find.text('Need Immediate Help?'), findsNothing);
+    expect(find.text('Set Appointment'), findsNothing);
+    expect(find.text('View My Inquiries'), findsOneWidget);
     expect(find.text('Take satisfaction survey'), findsNothing);
     expect(find.text('Open client feedback form'), findsNothing);
     expect(find.text('Today'), findsNothing);
@@ -453,7 +455,7 @@ void main() {
     await tester.pumpWidget(_servicesApp());
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.text('Set Appointment'),
+      find.text('Follow-up Service'),
       500,
       scrollable: find.byType(Scrollable).first,
     );
@@ -472,7 +474,9 @@ void main() {
     expect(find.text('Message'), findsOneWidget);
   });
 
-  testWidgets('set appointment opens PACC appointment flow', (tester) async {
+  testWidgets('services ends without the PACC support service card', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(390, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -480,19 +484,18 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('Set Appointment'),
+      find.text('Follow-up Service'),
       420,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.drag(find.byType(Scrollable).first, const Offset(0, -180));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Set Appointment'));
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -600));
     await tester.pumpAndSettle();
 
-    expect(find.byType(PaccCounselingScreen), findsOneWidget);
-    expect(find.text('My appointments'), findsOneWidget);
-    expect(find.text('No upcoming appointments'), findsOneWidget);
-    expect(find.text('Book Appointment'), findsOneWidget);
+    expect(find.text('Follow-up Service'), findsOneWidget);
+    expect(find.text('PACC Support Service'), findsNothing);
+    expect(find.text('Need Immediate Help?'), findsNothing);
+    expect(find.text('Set Appointment'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('personal information validates before counseling is shown', (

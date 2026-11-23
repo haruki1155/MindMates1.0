@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:phosphor_icons/phosphor_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -18,7 +17,6 @@ import '../../mood/domain/mood_v2_analytics.dart';
 import '../../mood/screens/mood_journey_screen.dart';
 import '../domain/home_streak_source.dart';
 import '../../../repositories/assessment_repository.dart';
-import '../../../repositories/mood_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
 import '../../quick_assessment/models/quick_assessment_models.dart';
@@ -35,8 +33,6 @@ import '../../announcements/screens/announcements_screen.dart';
 import '../../notifications/widgets/appointment_notification_banner.dart';
 import '../models/home_dashboard_data.dart';
 import '../widgets/home_dashboard_widgets.dart';
-import '../widgets/pilot_uid_diagnostic.dart';
-import '../../../core/config/app_environment.dart';
 
 enum _HomeNavDestination { today, services, appointments, secretChat, messages }
 
@@ -255,26 +251,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
     final unreadNotifications =
         _watchProviderOrNull<NotificationProvider>(context)?.unreadCount ?? 0;
-    final moodProvider = _watchProviderOrNull<MoodProvider>(context);
-    final storedMood = moodProvider?.todayMood;
-    final todayMood =
-        storedMood != null &&
-            MoodRepository.dateKeyFor(storedMood.createdAt) ==
-                MoodRepository.dateKeyFor(widget._nowProvider())
-        ? storedMood
-        : null;
-    final latest = MoodV2FeatureFlag.homeRead
-        ? moodProvider?.latestMoodForToday(now: widget._nowProvider())
-        : null;
-    final todayMoodLabel = latest != null
-        ? (latest.label?.trim().isNotEmpty == true
-              ? latest.label!.trim()
-              : 'Mood logged')
-        : todayMood == null
-        ? null
-        : (todayMood.label?.trim().isNotEmpty ?? false)
-        ? todayMood.label!.trim()
-        : 'Mood logged';
     final user = _userFor(data, assessmentProvider);
     final nextAppointment = _nextAppointment(
       appointmentProvider?.appointments ?? const [],
@@ -291,14 +267,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             bottom: false,
             child: _activeDestination == _HomeNavDestination.appointments
                 ? Padding(
-                  padding: EdgeInsets.only(bottom: 96 + MediaQuery.paddingOf(context).bottom),
-                  child: PaccCounselingScreen(
-                    key: ValueKey('appointments_$_appointmentBookingRequested'),
-                    startBooking: _appointmentBookingRequested,
-                    initialAppointmentId: _pendingAppointmentId,
-                    nowProvider: widget._nowProvider,
-                    showBottomNavigation: false,
-                  ))
+                    padding: EdgeInsets.only(
+                      bottom: 96 + MediaQuery.paddingOf(context).bottom,
+                    ),
+                    child: PaccCounselingScreen(
+                      key: ValueKey(
+                        'appointments_$_appointmentBookingRequested',
+                      ),
+                      startBooking: _appointmentBookingRequested,
+                      initialAppointmentId: _pendingAppointmentId,
+                      nowProvider: widget._nowProvider,
+                      showBottomNavigation: false,
+                    ),
+                  )
                 : CustomScrollView(
                     controller: _scrollController,
                     physics: const BouncingScrollPhysics(),
@@ -312,18 +293,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                         sliver: SliverList.list(
                           children: [
-                            if (kDebugMode && AppEnvironmentConfig.isStaging)
-                              const PilotUidDiagnostic(),
                             HomeAnimatedSection(
                               delay: 70,
                               child: HomeWelcomeCard(
                                 user: user,
-                                todayMoodLabel: todayMoodLabel,
                                 onNotificationTap: _openNotifications,
                                 unreadNotificationCount: unreadNotifications,
                                 onCalendarTap: _openAppointmentCalendar,
                                 onProfileTap: _openProfile,
-                                onViewTodaysMood: _openTodaysMood,
                               ),
                             ),
                             const SizedBox(height: 12),
@@ -370,7 +347,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               label: 'Announcements',
                               icon: Icons.campaign_outlined,
                               onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const AnnouncementsScreen()),
+                                MaterialPageRoute(
+                                  builder: (_) => const AnnouncementsScreen(),
+                                ),
                               ),
                             ),
                             if (appointmentProvider != null) ...[
@@ -605,18 +584,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         builder: (_) => MoodJourneyScreen(milestoneDays: milestoneDays),
       ),
     );
-  }
-
-  /// Item 40: today's check-ins live in My Mood Journey; without Mood V2
-  /// reading, Log Mood shows today's legacy entry instead.
-  void _openTodaysMood() {
-    final moodProvider = _readProviderOrNull<MoodProvider>(context);
-    if (MoodV2FeatureFlag.historyRead &&
-        (moodProvider?.isMoodV2ReadEnabled ?? false)) {
-      _openMoodJourney();
-    } else {
-      _openLogMood();
-    }
   }
 
   void _onStreakTap(HomeStreakData? streak) {

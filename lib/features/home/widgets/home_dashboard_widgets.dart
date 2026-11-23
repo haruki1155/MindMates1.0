@@ -342,23 +342,17 @@ class HomeWelcomeCard extends StatelessWidget {
   const HomeWelcomeCard({
     super.key,
     required this.user,
-    this.todayMoodLabel,
     required this.onNotificationTap,
     this.unreadNotificationCount = 0,
     required this.onCalendarTap,
     required this.onProfileTap,
-    this.onViewTodaysMood,
   });
 
   final HomeUserData user;
-  final String? todayMoodLabel;
   final VoidCallback onNotificationTap;
   final int unreadNotificationCount;
   final VoidCallback onCalendarTap;
   final VoidCallback onProfileTap;
-
-  /// Shown under today's mood once the user has checked in today (item 40).
-  final VoidCallback? onViewTodaysMood;
 
   @override
   Widget build(BuildContext context) {
@@ -435,50 +429,6 @@ class HomeWelcomeCard extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
-          if ((todayMoodLabel ?? '').isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: HomePalette.softGold.withAlpha(120),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                'Today’s mood: ${todayMoodLabel!}',
-                style: const TextStyle(
-                  color: HomePalette.text,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            if (onViewTodaysMood != null) ...[
-              const SizedBox(height: 8),
-              OutlinedButton(
-                key: const Key('home-view-todays-mood'),
-                onPressed: onViewTodaysMood,
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: HomePalette.surface,
-                  foregroundColor: HomePalette.text,
-                  side: const BorderSide(color: HomePalette.sun),
-                  shape: const StadiumBorder(),
-                  minimumSize: const Size.fromHeight(44),
-                  textStyle: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Flexible(child: Text('View today’s mood')),
-                    SizedBox(width: 4),
-                    Icon(Icons.chevron_right, size: 20),
-                  ],
-                ),
-              ),
-            ],
-          ],
         ],
       ),
     );

@@ -143,7 +143,8 @@ void moodVisualAcceptance({Future<void> Function(String name)? screenshot}) {
     await tester.tap(find.text('View My Mood Journey'));
     await tester.pumpAndSettle();
     expect(find.byType(MoodJourneyScreen), findsOneWidget);
-    expect(find.text('3 check-ins · 1 mood-active day'), findsOneWidget);
+    expect(find.byKey(const Key('mood-journey-calendar')), findsOneWidget);
+    expect(find.text('+2'), findsOneWidget);
     expect(find.byType(ExpansionTile), findsOneWidget);
     if (screenshot != null) await screenshot('04-mood-journey');
     await tester.ensureVisible(find.byType(ExpansionTile).first);
@@ -155,6 +156,18 @@ void moodVisualAcceptance({Future<void> Function(String name)? screenshot}) {
     await tester.tap(find.byType(ExpansionTile).at(1));
     await tester.pumpAndSettle();
     expect(find.text('Synthetic owner-only note 2'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('3 check-ins · 1 mood-active day'),
+      120,
+      scrollable: find
+          .descendant(
+            of: find.byType(MoodJourneyScreen),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('3 check-ins · 1 mood-active day'), findsOneWidget);
     authRepo.uid = 'synthetic-b';
     mood.bindAuthenticatedUser(authRepo.uid);
     users.setUser(_profile(authRepo.uid));

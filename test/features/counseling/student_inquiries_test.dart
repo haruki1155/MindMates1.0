@@ -505,6 +505,8 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        expect(find.text('PACC Support Service'), findsNothing);
+        expect(find.text('Set Appointment'), findsNothing);
         final button = find.text('View My Inquiries');
         expect(button, findsOneWidget);
         await tester.ensureVisible(button);

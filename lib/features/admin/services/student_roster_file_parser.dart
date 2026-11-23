@@ -191,8 +191,15 @@ String _text(Object? value) => switch (value) {
   _ => value.toString(),
 };
 
+const rosterFieldKeys = _fieldKeys;
+
+const _requiredManualFieldIndices = [0, 1, 2, 4, 5, 6, 7];
+
 /// Minimal RFC-4180 parser: quoted fields, doubled quotes, CRLF/LF/CR, BOM.
-List<List<Object?>> _parseCsv(String input) {
+List<List<Object?>> _parseCsv(String input) =>
+    _parseDelimited(input, delimiter: ',');
+
+List<List<Object?>> _parseDelimited(String input, {String delimiter = ','}) {
   final text = input.startsWith('﻿') ? input.substring(1) : input;
   final rows = <List<Object?>>[];
   var row = <Object?>[];
@@ -227,21 +234,20 @@ List<List<Object?>> _parseCsv(String input) {
       }
       continue;
     }
-    switch (ch) {
-      case '"':
-        inQuotes = true;
-        touched = true;
-      case ',':
-        endField();
-        touched = true;
-      case '\r':
-        if (i + 1 < text.length && text[i + 1] == '\n') i++;
-        endRow();
-      case '\n':
-        endRow();
-      default:
-        field.write(ch);
-        touched = true;
+    if (ch == '"') {
+      inQuotes = true;
+      touched = true;
+    } else if (ch == delimiter) {
+      endField();
+      touched = true;
+    } else if (ch == '\r') {
+      if (i + 1 < text.length && text[i + 1] == '\n') i++;
+      endRow();
+    } else if (ch == '\n') {
+      endRow();
+    } else {
+      field.write(ch);
+      touched = true;
     }
   }
   if (touched || field.isNotEmpty) endRow();
@@ -459,3 +465,220 @@ List<List<Map<String, String>>> chunkRows(
   for (var i = 0; i < rows.length; i += size)
     rows.sublist(i, i + size > rows.length ? rows.length : i + size),
 ];
+
+/// Validation snapshot for interactive manual bulk roster drafts.
+class ManualRosterValidation {
+  const ManualRosterValidation({
+    required this.nonEmptyIndices,
+    required this.rowErrors,
+    required this.duplicateStudentNos,
+    required this.normalizedRows,
+    required this.readyCount,
+    required this.incompleteCount,
+    required this.invalidDateCount,
+    required this.duplicateCount,
+  });
+
+  final List<int> nonEmptyIndices;
+  final Map<int, List<String>> rowErrors;
+  final Map<String, List<int>> duplicateStudentNos;
+  final List<Map<String, String>> normalizedRows;
+  final int readyCount;
+  final int incompleteCount;
+  final int invalidDateCount;
+  final int duplicateCount;
+
+  int get nonEmptyCount => nonEmptyIndices.length;
+
+  bool get hasBlockingIssues =>
+      nonEmptyIndices.isEmpty ||
+      rowErrors.isNotEmpty ||
+      duplicateStudentNos.isNotEmpty;
+
+  RosterParseResult toParseResult() => RosterParseResult(
+    rows: normalizedRows,
+    fileErrors: [
+      if (nonEmptyIndices.isEmpty) 'Add at least one student row.',
+      if (rowErrors.isNotEmpty)
+        '${rowErrors.length} manual row${rowErrors.length == 1 ? '' : 's'} '
+            'need attention before previewing.',
+    ],
+    duplicateStudentNos: duplicateStudentNos,
+  );
+}
+
+/// Validates and normalizes bulk manual roster draft rows matching
+/// [rosterTemplateHeaders].
+ManualRosterValidation validateManualRosterDrafts(
+  List<Map<String, String>> draftRows,
+) {
+  final nonEmptyIndices = <int>[];
+  final normalizedRows = <Map<String, String>>[];
+  final seen = <String, List<int>>{};
+  final rowErrors = <int, List<String>>{};
+  var incompleteCount = 0;
+  var invalidDateCount = 0;
+
+  for (var i = 0; i < draftRows.length; i++) {
+    final draft = draftRows[i];
+    if (_fieldKeys.every((k) => (draft[k] ?? '').trim().isEmpty)) {
+      continue;
+    }
+    nonEmptyIndices.add(i);
+    final errors = <String>[];
+    final missingLabels = <String>[];
+    for (final idx in _requiredManualFieldIndices) {
+      final key = _fieldKeys[idx];
+      if ((draft[key] ?? '').trim().isEmpty) {
+        missingLabels.add(rosterTemplateHeaders[idx]);
+      }
+    }
+    if (missingLabels.isNotEmpty) {
+      incompleteCount++;
+      errors.add('Missing ${missingLabels.join(', ')}.');
+    }
+
+    final rawDob = (draft['dateOfBirth'] ?? '').trim();
+    final parsedDob = parseRosterDate(rawDob);
+    if (rawDob.isNotEmpty && parsedDob == null) {
+      invalidDateCount++;
+      errors.add('Use MM/DD/YYYY (e.g. 02/15/2005) for Date of Birth.');
+    }
+
+    final normalized = <String, String>{
+      for (final key in _fieldKeys)
+        key: key == 'dateOfBirth'
+            ? (parsedDob ?? rawDob)
+            : (draft[key] ?? '').trim(),
+    };
+    normalizedRows.add(normalized);
+
+    final canonical = _canonicalStudentNo(normalized['studentNo'] ?? '');
+    if (canonical.isNotEmpty) {
+      seen.putIfAbsent(canonical, () => []).add(i + 1);
+    }
+    if (errors.isNotEmpty) {
+      rowErrors[i] = errors;
+    }
+  }
+
+  final duplicates = <String, List<int>>{
+    for (final entry in seen.entries)
+      if (entry.value.length > 1) entry.key: entry.value,
+  };
+  for (final entry in duplicates.entries) {
+    for (final oneBasedRow in entry.value) {
+      final idx = oneBasedRow - 1;
+      rowErrors
+          .putIfAbsent(idx, () => [])
+          .add('Duplicate Student No. (${entry.value.join(', ')}).');
+    }
+  }
+
+  final readyCount = nonEmptyIndices
+      .where((i) => !rowErrors.containsKey(i))
+      .length;
+  return ManualRosterValidation(
+    nonEmptyIndices: nonEmptyIndices,
+    rowErrors: rowErrors,
+    duplicateStudentNos: duplicates,
+    normalizedRows: normalizedRows,
+    readyCount: readyCount,
+    incompleteCount: incompleteCount,
+    invalidDateCount: invalidDateCount,
+    duplicateCount: duplicates.length,
+  );
+}
+
+RosterParseResult parseRosterManualRows(List<Map<String, String>> draftRows) =>
+    validateManualRosterDrafts(draftRows).toParseResult();
+
+/// Formats an ISO `YYYY-MM-DD` date string as `MM/DD/YYYY` for template display.
+String displayRosterDateMmDdYyyy(String raw) {
+  final trimmed = raw.trim();
+  final iso = parseRosterDate(trimmed);
+  if (iso == null) return trimmed;
+  final parts = iso.split('-');
+  if (parts.length != 3) return trimmed;
+  return '${parts[1]}/${parts[2]}/${parts[0]}';
+}
+
+/// Parses pasted spreadsheet (tab-separated) or CSV lines into template rows.
+/// Accepts optional header row matching [rosterTemplateHeaders]; otherwise maps
+/// columns 0..7 in exact template order.
+RosterParseResult parseRosterBulkText(String rawText) {
+  final trimmed = rawText.trim();
+  if (trimmed.isEmpty) {
+    return _failure('Paste at least one student row in template format.');
+  }
+  final delimiter = trimmed.contains('\t') ? '\t' : ',';
+  final grid = _parseDelimited(rawText, delimiter: delimiter);
+  if (grid.isEmpty) {
+    return _failure('Paste at least one student row in template format.');
+  }
+
+  final firstRow = grid.first;
+  var recognizedHeaders = 0;
+  final headerIndex = <String, int>{};
+  for (var c = 0; c < firstRow.length; c++) {
+    final key = _headerLookup[_normalizeHeader(_text(firstRow[c]))];
+    if (key != null) {
+      recognizedHeaders++;
+      headerIndex.putIfAbsent(key, () => c);
+    }
+  }
+
+  final hasHeader = recognizedHeaders >= 2;
+  if (hasHeader) {
+    final missing = [
+      for (var i = 0; i < _fieldKeys.length; i++)
+        if (!_optionalKeys.contains(_fieldKeys[i]) &&
+            !headerIndex.containsKey(_fieldKeys[i]))
+          rosterTemplateHeaders[i],
+    ];
+    if (missing.isNotEmpty) {
+      return _failure(
+        'Missing column${missing.length == 1 ? '' : 's'}: '
+        '${missing.join(', ')}.',
+      );
+    }
+  } else {
+    for (var i = 0; i < _fieldKeys.length; i++) {
+      headerIndex[_fieldKeys[i]] = i;
+    }
+  }
+
+  final startRow = hasHeader ? 1 : 0;
+  final rows = <Map<String, String>>[];
+  final seen = <String, List<int>>{};
+  for (var r = startRow; r < grid.length; r++) {
+    final cells = grid[r];
+    String cell(String key) {
+      final c = headerIndex[key];
+      return c != null && c < cells.length ? _text(cells[c]).trim() : '';
+    }
+
+    if (_fieldKeys.every((k) => cell(k).isEmpty)) continue;
+    final row = <String, String>{
+      for (final key in _fieldKeys)
+        if (!_optionalKeys.contains(key) || cell(key).isNotEmpty)
+          key: key == 'dateOfBirth'
+              ? (parseRosterDate(cell(key)) ?? cell(key))
+              : cell(key),
+    };
+    rows.add(row);
+    final canonical = _canonicalStudentNo(row['studentNo']!);
+    if (canonical.isNotEmpty) {
+      seen.putIfAbsent(canonical, () => []).add(rows.length);
+    }
+  }
+
+  return RosterParseResult(
+    rows: rows,
+    fileErrors: [if (rows.isEmpty) 'No student rows found in pasted text.'],
+    duplicateStudentNos: {
+      for (final e in seen.entries)
+        if (e.value.length > 1) e.key: e.value,
+    },
+  );
+}

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +9,7 @@ import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/features/mood/widgets/mood_v2_history_panel.dart';
 import 'package:mind_mates/features/mood/screens/mood_journey_screen.dart';
 import 'package:mind_mates/features/mood/widgets/mood_journey_summary.dart';
+import 'package:mind_mates/repositories/student_academic_calendar_repository.dart';
 import 'package:mind_mates/routes/route_names.dart';
 
 void main() {
@@ -16,12 +19,14 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: MoodJourneySummary(
-              history: const MoodHistoryWindow(
-                events: [],
-                coverage: MoodHistoryCoverage.complete,
+            body: SingleChildScrollView(
+              child: MoodJourneySummary(
+                history: const MoodHistoryWindow(
+                  events: [],
+                  coverage: MoodHistoryCoverage.complete,
+                ),
+                now: DateTime.utc(2026, 11, 12),
               ),
-              now: DateTime.utc(2026, 11, 12),
             ),
           ),
         ),
@@ -36,32 +41,114 @@ void main() {
       expect(find.text('Mood Streak'), findsOneWidget);
     },
   );
-  testWidgets('week month filters summary and collapsed days together', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(900, 1400));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
-          ChangeNotifierProvider<MoodProvider>.value(value: _PeriodMood()),
-        ],
-        child: MaterialApp(
-          home: MoodJourneyScreen(
-            nowProvider: () => DateTime.utc(2026, 11, 12),
+
+  testWidgets(
+    'selecting a past date shows only its day detail, updates selected-week summary, and keeps monthly overview separate',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+            ChangeNotifierProvider<MoodProvider>.value(value: _PeriodMood()),
+          ],
+          child: MaterialApp(
+            home: MoodJourneyScreen(
+              nowProvider: () => DateTime.utc(2026, 11, 12),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('1 check-in · 1 mood-active day'), findsOneWidget);
-    expect(find.text('Sunday'), findsNothing);
-    await tester.tap(find.text('This Month'));
-    await tester.pumpAndSettle();
-    expect(find.text('2 check-ins · 2 mood-active days'), findsOneWidget);
-    expect(find.text('Sunday'), findsOneWidget);
-  });
+      );
+      await tester.pumpAndSettle();
+
+      // Default selected date is Nov 11/12 week; Nov 11 is in week Nov 9-15 (1 check-in),
+      // while November at a glance has 3 check-ins across 2 mood-active days (Nov 1 has 2, Nov 11 has 1).
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('mood-selected-week-card')),
+          matching: find.text('1 check-in · 1 mood-active day'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('mood-month-overview-card')),
+          matching: find.text('2 mood-active days · 3 check-ins'),
+        ),
+        findsOneWidget,
+      );
+      final weekCard = find.byKey(const Key('mood-selected-week-card'));
+      expect(
+        find.descendant(
+          of: weekCard,
+          matching: find.text('Most logged mood: Okay'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: weekCard, matching: find.text('1 (100%)')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('1 of 1'), findsNothing);
+      await tester.tap(
+        find.descendant(
+          of: weekCard,
+          matching: find.byTooltip('How mood percentages are calculated'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('How percentages work'), findsOneWidget);
+      expect(find.textContaining('check-ins with a mood label'), findsWidgets);
+      await tester.tap(find.text('Got it'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Expand mood calendar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Mood Calendar'), findsOneWidget);
+      expect(weekCard, findsNothing);
+      final loggedDay = find.byKey(const Key('mood-calendar-day-2026-11-01'));
+      await tester.tap(loggedDay);
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: loggedDay,
+          matching: find.byType(TweenAnimationBuilder<double>),
+        ),
+        findsOneWidget,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Nov 1 · Your check-ins'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('My Mood Journey'), findsOneWidget);
+      expect(find.text('Nov 1 · Your check-ins'), findsOneWidget);
+
+      // Now Sunday Nov 1's detail is shown and the selected week (Oct 26 - Nov 1) has 2 check-ins.
+      expect(find.text('Sunday'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('mood-selected-week-card')),
+          matching: find.text('2 check-ins · 1 mood-active day'),
+        ),
+        findsOneWidget,
+      );
+      // Monthly overview remains 2 mood-active days · 3 check-ins.
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('mood-month-overview-card')),
+          matching: find.text('2 mood-active days · 3 check-ins'),
+        ),
+        findsOneWidget,
+      );
+      // Selecting an empty historical day does not open any mood logger.
+      await tester.tap(find.byKey(const Key('mood-calendar-day-2026-11-05')));
+      await tester.pumpAndSettle();
+      expect(find.text('No mood check-ins on this date.'), findsOneWidget);
+      expect(find.text('Save mood entry'), findsNothing);
+    },
+  );
+
   testWidgets(
     'journey hides the previous account history after an account switch',
     (tester) async {
@@ -75,7 +162,7 @@ void main() {
           ],
           child: MaterialApp(
             home: MoodJourneyScreen(
-              nowProvider: () => DateTime.utc(2026, 11, 12),
+              nowProvider: () => DateTime.utc(2026, 11, 11, 2),
             ),
           ),
         ),
@@ -85,15 +172,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byType(ExpansionTile).first);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Okay'));
+      await tester.tap(find.text('Okay').first);
       await tester.pumpAndSettle();
       expect(find.text('Private account A note'), findsOneWidget);
       auth.switchTo('account-b');
       await tester.pump();
       expect(find.text('Private account A note'), findsNothing);
-      expect(find.text('Okay'), findsNothing);
+      expect(find.byType(ExpansionTile), findsNothing);
     },
   );
+
   testWidgets('journey summary counts events and active days separately', (
     tester,
   ) async {
@@ -124,51 +212,54 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: MoodJourneySummary(history: history, now: now),
+          body: SingleChildScrollView(
+            child: MoodJourneySummary(history: history, now: now),
+          ),
         ),
       ),
     );
-    expect(find.byKey(const Key('mood-seven-day-strip')), findsOneWidget);
+    expect(find.byKey(const Key('mood-selected-week-card')), findsOneWidget);
+    expect(find.byKey(const Key('mood-month-overview-card')), findsOneWidget);
     expect(find.text('2 check-ins · 1 mood-active day'), findsOneWidget);
-    expect(find.text('Most logged mood: Okay'), findsOneWidget);
-    expect(find.text('Based on loaded entries'), findsOneWidget);
+    expect(find.text('1 mood-active day · 2 check-ins'), findsOneWidget);
+    expect(find.textContaining('Most logged mood'), findsOneWidget);
+    expect(find.textContaining('Top logged mood'), findsOneWidget);
+    expect(find.textContaining('Okay'), findsWidgets);
+    expect(find.text('Based on loaded entries'), findsWidgets);
   });
 
   for (final width in [320.0, 360.0, 390.0, 430.0]) {
-    testWidgets('journey strip never wraps at $width with large text', (
-      tester,
-    ) async {
-      await tester.binding.setSurfaceSize(Size(width, 1000));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      final now = DateTime.utc(2026, 11, 11);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: MediaQuery(
-            data: const MediaQueryData(textScaler: TextScaler.linear(1.8)),
-            child: Scaffold(
-              body: SingleChildScrollView(
-                child: MoodJourneySummary(
-                  history: const MoodHistoryWindow(
-                    events: [],
-                    coverage: MoodHistoryCoverage.complete,
-                  ),
-                  now: now,
+    testWidgets(
+      'journey summary and calendar fit without overflow at $width with large text',
+      (tester) async {
+        await tester.binding.setSurfaceSize(Size(width, 1200));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final now = DateTime.utc(2026, 11, 11);
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+              ChangeNotifierProvider<MoodProvider>.value(value: _PeriodMood()),
+            ],
+            child: MaterialApp(
+              home: MediaQuery(
+                data: MediaQueryData(
+                  size: Size(width, 1200),
+                  textScaler: const TextScaler.linear(1.8),
                 ),
+                child: MoodJourneyScreen(nowProvider: () => now),
               ),
             ),
           ),
-        ),
-      );
-      final strip = find.byKey(const Key('mood-seven-day-strip'));
-      expect(
-        tester.widget<SingleChildScrollView>(strip).scrollDirection,
-        Axis.horizontal,
-      );
-      expect(find.text('0 days'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    });
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('mood-journey-calendar')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
-  testWidgets('journey week month changes counts and respects ties', (
+
+  testWidgets('journey week and month summaries report tied moods accurately', (
     tester,
   ) async {
     final now = DateTime.utc(2026, 11, 11);
@@ -191,24 +282,48 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: MoodJourneySummary(
-            history: MoodHistoryWindow(
-              events: events,
-              coverage: MoodHistoryCoverage.partial,
+          body: SingleChildScrollView(
+            child: MoodJourneySummary(
+              history: MoodHistoryWindow(
+                events: events,
+                coverage: MoodHistoryCoverage.partial,
+              ),
+              now: now,
+              selectedDateKey: '2026-11-11',
+              displayedMonth: DateTime.utc(2026, 11, 1),
             ),
-            now: now,
           ),
         ),
       ),
     );
-    expect(find.text('Most logged moods are tied.'), findsOneWidget);
-    expect(find.text('2 check-ins · 1 mood-active day'), findsOneWidget);
-    await tester.tap(find.text('This Month'));
-    await tester.pumpAndSettle();
-    expect(find.text('3 check-ins · 2 mood-active days'), findsOneWidget);
-    expect(find.text('Most logged mood: Great'), findsOneWidget);
-    expect(find.text('Based on loaded entries'), findsOneWidget);
+    expect(
+      find.textContaining('Most logged moods are tied: Great, Okay'),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('mood-selected-week-card')),
+        matching: find.text('2 check-ins · 1 mood-active day'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('mood-month-overview-card')),
+        matching: find.text('2 mood-active days · 3 check-ins'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('mood-month-overview-card')),
+        matching: find.textContaining('Great'),
+      ),
+      findsWidgets,
+    );
+    expect(find.text('Based on loaded entries'), findsWidgets);
   });
+
   group('item 38 recap', () {
     Future<void> pumpJourney(WidgetTester tester, {int? milestoneDays}) async {
       await tester.binding.setSurfaceSize(const Size(900, 2400));
@@ -257,7 +372,7 @@ void main() {
       );
     });
 
-    testWidgets('this week shows best day, a tip and the support note', (
+    testWidgets('selected week shows best day, a tip and the support note', (
       tester,
     ) async {
       await pumpJourney(tester, milestoneDays: 7);
@@ -288,19 +403,284 @@ void main() {
       expect(find.text('Breathing target'), findsOneWidget);
     });
 
-    testWidgets('this month hides the weekly recap cards', (tester) async {
-      await pumpJourney(tester);
-      await tester.tap(find.text('This Month'));
-      await tester.pumpAndSettle();
-      expect(find.text('Best day'), findsNothing);
-      expect(find.text('A gentle tip'), findsNothing);
-    });
+    testWidgets(
+      'selecting a week with no good-enough check-in hides Best day',
+      (tester) async {
+        await pumpJourney(tester);
+        // Select Nov 2 (earlier week with no entries).
+        await tester.tap(find.byKey(const Key('mood-calendar-day-2026-11-02')));
+        await tester.pumpAndSettle();
+        expect(find.text('Best day'), findsNothing);
+        expect(find.text('A gentle tip'), findsOneWidget);
+      },
+    );
   });
+
   testWidgets('journey has a clear title and an empty state', (tester) async {
     await tester.pumpWidget(const MaterialApp(home: MoodJourneyScreen()));
     expect(find.text('My Mood Journey'), findsOneWidget);
     expect(find.textContaining('Sign in'), findsOneWidget);
   });
+
+  group('academic year and semester filtering', () {
+    testWidgets(
+      'clips week and month summaries to selected academic year and semester report grouping, and navigates to historical year',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(900, 1800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+
+        final academicRepo = StudentAcademicCalendarRepository(
+          caller: () async => {
+            'years': [
+              {
+                'schoolYear': '2026-2027',
+                'startDateKey': '2026-06-01',
+                'endExclusiveDateKey': '2027-06-01',
+                'status': 'current',
+                'semesterRanges': [
+                  {
+                    'id': 'semester_1',
+                    'label': 'Semester 1 (report grouping)',
+                    'startDateKey': '2026-06-01',
+                    'endExclusiveDateKey': '2026-12-01',
+                    'source': 'reportGrouping',
+                  },
+                  {
+                    'id': 'semester_2',
+                    'label': 'Semester 2 (report grouping)',
+                    'startDateKey': '2026-12-01',
+                    'endExclusiveDateKey': '2027-06-01',
+                    'source': 'reportGrouping',
+                  },
+                ],
+              },
+              {
+                'schoolYear': '2025-2026',
+                'startDateKey': '2025-06-01',
+                'endExclusiveDateKey': '2026-06-01',
+                'status': 'closed',
+                'semesterRanges': const [],
+              },
+            ],
+          },
+        );
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+              ChangeNotifierProvider<MoodProvider>.value(
+                value: _AcademicFilterMood(),
+              ),
+            ],
+            child: MaterialApp(
+              home: MoodJourneyScreen(
+                nowProvider: () => DateTime.utc(2026, 12, 2, 2),
+                academicCalendarRepository: academicRepo,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Filter bar appears and defaults to current academic year 2026-2027, All year.
+        expect(
+          find.byKey(const Key('mood-academic-filter-bar')),
+          findsOneWidget,
+        );
+        final calendar = find.byKey(const Key('mood-journey-calendar'));
+        final filters = find.byKey(const Key('mood-academic-filter-bar'));
+        final selection = find.byKey(const Key('mood-selected-day-heading'));
+        final week = find.byKey(const Key('mood-selected-week-card'));
+        final month = find.byKey(const Key('mood-month-overview-card'));
+        expect(
+          tester.getBottomLeft(calendar).dy,
+          lessThanOrEqualTo(tester.getTopLeft(selection).dy),
+        );
+        expect(
+          tester.getTopLeft(filters).dy,
+          greaterThan(tester.getTopLeft(calendar).dy),
+        );
+        expect(
+          tester.getTopLeft(selection).dy,
+          lessThan(tester.getTopLeft(week).dy),
+        );
+        expect(
+          tester.getTopLeft(week).dy,
+          lessThan(tester.getTopLeft(month).dy),
+        );
+        expect(find.text('2026-2027'), findsOneWidget);
+        expect(find.text('All year'), findsOneWidget);
+
+        // Week of Nov 30 - Dec 6 has 1 check-in on Nov 30 (Okay) and 2 check-ins on Dec 1 (Great).
+        // Under "All year", the selected week has 3 check-ins across 2 mood-active days.
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('mood-selected-week-card')),
+            matching: find.text('3 check-ins · 2 mood-active days'),
+          ),
+          findsOneWidget,
+        );
+
+        // Select "Semester 1 (report grouping)" (ends exclusive 2026-12-01).
+        await tester.tap(
+          find.byKey(const Key('mood-academic-semester-selector')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Semester 1 (report grouping)').last);
+        await tester.pumpAndSettle();
+
+        // Shows approximate dates disclosure and clips the week to Nov 30 only (1 check-in).
+        expect(
+          find.byKey(const Key('mood-academic-approximate-notice')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('mood-selected-week-card')),
+            matching: find.text('1 check-in · 1 mood-active day'),
+          ),
+          findsOneWidget,
+        );
+
+        // Switch to "Semester 2 (report grouping)" (starts 2026-12-01).
+        await tester.tap(
+          find.byKey(const Key('mood-academic-semester-selector')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Semester 2 (report grouping)').last);
+        await tester.pumpAndSettle();
+
+        // Select Dec 1 and verify week is clipped to Dec 1..Dec 6 (2 check-ins).
+        await tester.tap(find.byKey(const Key('mood-calendar-day-2026-12-01')));
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('mood-selected-week-card')),
+            matching: find.text('2 check-ins · 1 mood-active day'),
+          ),
+          findsOneWidget,
+        );
+
+        // Select historical year 2025-2026 (which has no term dates -> resets to All year).
+        await tester.tap(find.byKey(const Key('mood-academic-year-selector')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('2025-2026').last);
+        await tester.pumpAndSettle();
+        expect(find.text('June 2025'), findsOneWidget);
+
+        // Tapping Today while viewing historical year 2025-2026 switches back to 2026-2027 and Dec 2026.
+        await tester.tap(find.byKey(const Key('mood-calendar-today-button')));
+        await tester.pumpAndSettle();
+        expect(find.text('December 2026'), findsOneWidget);
+        expect(find.text('2026-2027'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('mood-selected-week-card')),
+            matching: find.text('3 check-ins · 2 mood-active days'),
+          ),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'clamps initial calendar month when default academic year does not include today',
+      (tester) async {
+        final academicRepo = StudentAcademicCalendarRepository(
+          caller: () async => {
+            'years': [
+              {
+                'schoolYear': '2025-2026',
+                'startDateKey': '2025-06-01',
+                'endExclusiveDateKey': '2026-06-01',
+                'status': 'closed',
+                'semesterRanges': const [],
+              },
+            ],
+          },
+        );
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+              ChangeNotifierProvider<MoodProvider>.value(
+                value: _AcademicFilterMood(),
+              ),
+            ],
+            child: MaterialApp(
+              home: MoodJourneyScreen(
+                nowProvider: () => DateTime.utc(2026, 12, 2, 2),
+                academicCalendarRepository: academicRepo,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('2025-2026'), findsOneWidget);
+        expect(find.text('June 2025'), findsOneWidget);
+        expect(
+          find.text('This date is outside the selected academic period.'),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'fails closed when academic calendar throws or returns stale response after account switch',
+      (tester) async {
+        final auth = _JourneyAuth();
+        final pending = Completer<Map<String, dynamic>>();
+        var shouldThrow = false;
+        final academicRepo = StudentAcademicCalendarRepository(
+          caller: () {
+            if (shouldThrow) throw StateError('callable unavailable');
+            return pending.future;
+          },
+        );
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider<AuthProvider>.value(value: auth),
+              ChangeNotifierProvider<MoodProvider>.value(value: _PeriodMood()),
+            ],
+            child: MaterialApp(
+              home: MoodJourneyScreen(
+                nowProvider: () => DateTime.utc(2026, 11, 12),
+                academicCalendarRepository: academicRepo,
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        // Switch account while account-a's academic calendar request is still pending.
+        shouldThrow = true;
+        auth.switchTo('account-b');
+        await tester.pump();
+
+        pending.complete({
+          'years': [
+            {
+              'schoolYear': '2026-2027',
+              'startDateKey': '2026-06-01',
+              'endExclusiveDateKey': '2027-06-01',
+              'status': 'current',
+            },
+          ],
+        });
+        await tester.pumpAndSettle();
+
+        // Filter bar remains hidden (fail closed) and mood calendar still renders safely.
+        expect(find.byKey(const Key('mood-academic-filter-bar')), findsNothing);
+        expect(find.byKey(const Key('mood-journey-calendar')), findsOneWidget);
+      },
+    );
+  });
+
   testWidgets('personal journey shows each same-day mood and its note', (
     tester,
   ) async {
@@ -351,6 +731,79 @@ void main() {
     expect(find.text('A private note'), findsOneWidget);
     expect(find.text('Based on loaded entries'), findsOneWidget);
   });
+
+  testWidgets(
+    'partial calendar error preserves loaded selected-day check-ins without duplicate error banner',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+            ChangeNotifierProvider<MoodProvider>.value(
+              value: _PartialErrorJourneyMood(),
+            ),
+          ],
+          child: MaterialApp(
+            home: MoodJourneyScreen(
+              nowProvider: () => DateTime.utc(2026, 11, 18, 4),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Calendar displays the inline retryable error banner once.
+      expect(find.byKey(const Key('mood-calendar-error')), findsOneWidget);
+      expect(find.text('Retry history'), findsNothing);
+      // Loaded check-ins for the selected day (Nov 18) remain visible and expandable.
+      expect(
+        find.byKey(const Key('mood-selected-day-heading')),
+        findsOneWidget,
+      );
+      expect(find.byType(ExpansionTile), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Manila midnight rollover advances selected today date and month and forwards nowProvider to loadMoodV2History',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      // 2026-11-30 23:59:50 Manila == 2026-11-30 15:59:50 UTC (10s before midnight).
+      var now = DateTime.utc(2026, 11, 30, 15, 59, 50);
+      final mood = _MidnightJourneyMood();
+
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
+            ChangeNotifierProvider<MoodProvider>.value(value: mood),
+          ],
+          child: MaterialApp(home: MoodJourneyScreen(nowProvider: () => now)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('November 2026'), findsOneWidget);
+      expect(find.text('Nov 30 · Your check-ins'), findsOneWidget);
+      expect(mood.lastHistoryNow, DateTime.utc(2026, 11, 30, 15, 59, 50));
+
+      // Cross Manila midnight into Dec 1, 2026 (2026-11-30 16:00:01 UTC).
+      now = DateTime.utc(2026, 11, 30, 16, 0, 1);
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pumpAndSettle();
+
+      expect(find.text('December 2026'), findsOneWidget);
+      expect(find.text('Dec 1 · Your check-ins'), findsOneWidget);
+      expect(mood.lastHistoryNow, DateTime.utc(2026, 11, 30, 16, 0, 1));
+      expect(mood.lastCalendarStartKey, '2026-11-30');
+      expect(mood.lastCalendarEndExclusiveKey, '2027-01-04');
+    },
+  );
 }
 
 class _JourneyAuth extends ChangeNotifier implements AuthProvider {
@@ -396,6 +849,22 @@ class _JourneyMood extends ChangeNotifier implements MoodProvider {
     ],
   );
   @override
+  MoodHistoryWindow? get moodCalendarHistory => v2History;
+  @override
+  bool get isLoadingMoodCalendarRange => false;
+  @override
+  String? get moodCalendarRangeError => null;
+  @override
+  String? get loadedMoodCalendarStartKey => '2026-10-26';
+  @override
+  String? get loadedMoodCalendarEndExclusiveKey => '2026-12-07';
+  @override
+  Future<void> loadMoodCalendarRange(
+    String userId, {
+    required String startDateKey,
+    required String endExclusiveDateKey,
+  }) async {}
+  @override
   bool get isLoadingV2History => false;
   @override
   bool get isLoadingMoreV2History => false;
@@ -416,16 +885,33 @@ class _PeriodMood extends _JourneyMood {
   MoodHistoryWindow get v2History => MoodHistoryWindow(
     coverage: MoodHistoryCoverage.complete,
     events: [
-      for (final day in [1, 11])
-        NormalizedMoodEvent(
-          id: '$day',
-          userId: 'account-a',
-          level: 3,
-          dateKey: '2026-11-${day.toString().padLeft(2, '0')}',
-          occurredAt: DateTime.utc(2026, 11, day),
-          source: MoodEventSource.v2,
-          label: 'Okay',
-        ),
+      NormalizedMoodEvent(
+        id: '1-a',
+        userId: 'account-a',
+        level: 3,
+        dateKey: '2026-11-01',
+        occurredAt: DateTime.utc(2026, 11, 1, 1),
+        source: MoodEventSource.v2,
+        label: 'Okay',
+      ),
+      NormalizedMoodEvent(
+        id: '1-b',
+        userId: 'account-a',
+        level: 4,
+        dateKey: '2026-11-01',
+        occurredAt: DateTime.utc(2026, 11, 1, 3),
+        source: MoodEventSource.v2,
+        label: 'Great',
+      ),
+      NormalizedMoodEvent(
+        id: '11',
+        userId: 'account-a',
+        level: 3,
+        dateKey: '2026-11-11',
+        occurredAt: DateTime.utc(2026, 11, 11, 2),
+        source: MoodEventSource.v2,
+        label: 'Okay',
+      ),
     ],
   );
 }
@@ -436,7 +922,7 @@ class _RecapMood extends _JourneyMood {
         id: id,
         userId: 'account-a',
         level: level,
-        dateKey: '2026-11-$day',
+        dateKey: '2026-11-${day.toString().padLeft(2, '0')}',
         occurredAt: DateTime.utc(2026, 11, day, 2),
         source: MoodEventSource.v2,
         label: label,
@@ -452,4 +938,94 @@ class _RecapMood extends _JourneyMood {
       _event('thu', 12, 4, 'Okay'),
     ],
   );
+}
+
+class _AcademicFilterMood extends _JourneyMood {
+  @override
+  String? get loadedMoodCalendarStartKey => null;
+  @override
+  String? get loadedMoodCalendarEndExclusiveKey => null;
+
+  @override
+  MoodHistoryWindow get v2History => MoodHistoryWindow(
+    coverage: MoodHistoryCoverage.complete,
+    events: [
+      NormalizedMoodEvent(
+        id: 'nov-30',
+        userId: 'account-a',
+        level: 3,
+        dateKey: '2026-11-30',
+        occurredAt: DateTime.utc(2026, 11, 30, 2),
+        source: MoodEventSource.v2,
+        label: 'Okay',
+      ),
+      NormalizedMoodEvent(
+        id: 'dec-1a',
+        userId: 'account-a',
+        level: 5,
+        dateKey: '2026-12-01',
+        occurredAt: DateTime.utc(2026, 12, 1, 2),
+        source: MoodEventSource.v2,
+        label: 'Great',
+      ),
+      NormalizedMoodEvent(
+        id: 'dec-1b',
+        userId: 'account-a',
+        level: 5,
+        dateKey: '2026-12-01',
+        occurredAt: DateTime.utc(2026, 12, 1, 4),
+        source: MoodEventSource.v2,
+        label: 'Great',
+      ),
+    ],
+  );
+}
+
+class _PartialErrorJourneyMood extends _JourneyMood {
+  @override
+  MoodHistoryWindow get v2History => MoodHistoryWindow(
+    coverage: MoodHistoryCoverage.partial,
+    events: [
+      NormalizedMoodEvent(
+        id: 'nov-18',
+        userId: 'account-a',
+        level: 4,
+        dateKey: '2026-11-18',
+        occurredAt: DateTime.utc(2026, 11, 18, 2),
+        source: MoodEventSource.v2,
+        label: 'Okay',
+      ),
+    ],
+  );
+
+  @override
+  String? get moodCalendarRangeError =>
+      'Some mood history could not be loaded. Try again.';
+}
+
+class _MidnightJourneyMood extends _JourneyMood {
+  DateTime? lastHistoryNow;
+  String? lastCalendarStartKey;
+  String? lastCalendarEndExclusiveKey;
+
+  @override
+  String? get loadedMoodCalendarStartKey => lastCalendarStartKey;
+
+  @override
+  String? get loadedMoodCalendarEndExclusiveKey => lastCalendarEndExclusiveKey;
+
+  @override
+  Future<void> loadMoodV2History(String userId, {DateTime? now}) async {
+    lastHistoryNow = now;
+  }
+
+  @override
+  Future<void> loadMoodCalendarRange(
+    String userId, {
+    required String startDateKey,
+    required String endExclusiveDateKey,
+  }) async {
+    lastCalendarStartKey = startDateKey;
+    lastCalendarEndExclusiveKey = endExclusiveDateKey;
+  }
 }

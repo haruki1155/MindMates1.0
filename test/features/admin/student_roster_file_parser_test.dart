@@ -377,4 +377,105 @@ void main() {
       expect(rows[1][6], 'Jan 12, 2027');
     });
   });
+
+  group('bulk manual roster helpers', () {
+    test('validateManualRosterDrafts normalizes dates and flags issues', () {
+      final result = validateManualRosterDrafts([
+        const {
+          'studentNo': ' 2021-001 ',
+          'surname': ' Santos ',
+          'firstName': ' Ana ',
+          'middleName': '',
+          'dateOfBirth': '02/15/2005',
+          'college': 'CITE',
+          'course': 'BSIT',
+          'yearLevel': '1st Year',
+        },
+        const {
+          'studentNo': '2021-002',
+          'surname': 'Reyes',
+          'firstName': '',
+          'middleName': 'L',
+          'dateOfBirth': '31/02/2005',
+          'college': 'CITE',
+          'course': 'BSIT',
+          'yearLevel': '2nd Year',
+        },
+        const {
+          'studentNo': '2021-001',
+          'surname': 'Santos',
+          'firstName': 'Ana',
+          'middleName': '',
+          'dateOfBirth': '2005-02-15',
+          'college': 'CITE',
+          'course': 'BSIT',
+          'yearLevel': '1st Year',
+        },
+        const {
+          'studentNo': '',
+          'surname': '',
+          'firstName': '',
+          'middleName': '',
+          'dateOfBirth': '',
+          'college': '',
+          'course': '',
+          'yearLevel': '',
+        },
+      ]);
+
+      expect(result.nonEmptyCount, 3);
+      expect(result.readyCount, 0);
+      expect(result.incompleteCount, 1);
+      expect(result.invalidDateCount, 1);
+      expect(result.duplicateCount, 1);
+      expect(result.duplicateStudentNos['2021001'], [1, 3]);
+      expect(result.normalizedRows.first['dateOfBirth'], '2005-02-15');
+      expect(result.hasBlockingIssues, isTrue);
+      expect(result.rowErrors[1], hasLength(2));
+    });
+
+    test(
+      'parseRosterBulkText parses tab-separated and CSV lines with or without header',
+      () {
+        final tsv = parseRosterBulkText(
+          '2021-101\tCruz\tJuan\tM\t02/03/2005\tCITE\tBSIT\t1st Year\n'
+          '2021-102\tLim\tBea\t\t04/05/2004\tCBA\tBSBA\t2',
+        );
+        expect(tsv.fileErrors, isEmpty);
+        expect(tsv.duplicateStudentNos, isEmpty);
+        expect(tsv.rows, hasLength(2));
+        expect(tsv.rows.first['studentNo'], '2021-101');
+        expect(tsv.rows.first['dateOfBirth'], '2005-02-03');
+        expect(tsv.rows.last['yearLevel'], '2');
+
+        final csvWithHeader = parseRosterBulkText(
+          'Year Level,Course,College,Date of Birth (MM/DD/YYYY),Middle Name,First Name,Surname,Student No.\n'
+          '3rd Year,BSIT,CITE,06/12/2003,D,Marco,Diaz,2021-103\n',
+        );
+        expect(csvWithHeader.fileErrors, isEmpty);
+        expect(csvWithHeader.rows.single['studentNo'], '2021-103');
+        expect(csvWithHeader.rows.single['firstName'], 'Marco');
+        expect(csvWithHeader.rows.single['dateOfBirth'], '2003-06-12');
+      },
+    );
+
+    test(
+      'parseRosterBulkText rejects missing columns when header is provided',
+      () {
+        final missing = parseRosterBulkText(
+          'Student No.,Surname,First Name\n2021-001,Santos,Ana',
+        );
+        expect(missing.fileErrors.single, contains('Missing columns:'));
+        expect(missing.rows, isEmpty);
+      },
+    );
+
+    test(
+      'displayRosterDateMmDdYyyy converts ISO dates back to template display',
+      () {
+        expect(displayRosterDateMmDdYyyy('2005-02-15'), '02/15/2005');
+        expect(displayRosterDateMmDdYyyy('bad-date'), 'bad-date');
+      },
+    );
+  });
 }
