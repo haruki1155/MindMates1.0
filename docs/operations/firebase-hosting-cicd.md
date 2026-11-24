@@ -145,7 +145,11 @@ The workflow's IAM check would reject anything broader.
 ### 3. Production deployer (before any production deploy)
 
 Repeat step 1 in `mind-mates-cd2cf` (account
-`github-hosting-deployer@mind-mates-cd2cf`). Store its key as an environment
+`github-hosting-deployer@mind-mates-cd2cf`). GitHub environment names are not
+case-sensitive, so `environment: production` uses the existing
+Vercel-created **Production** environment. As of 2026-11-24 it had no
+protection rules. Add required reviewers and a `main`-only branch policy to it
+first. Store its key as an environment
 secret `FIREBASE_SERVICE_ACCOUNT_MIND_MATES_CD2CF` of `production`, restricted
 to `main` and with required reviewers. Then remove the repository secrets
 `FIREBASE_SERVICE_ACCOUNT` and `FIREBASE_SERVICE_ACCOUNT_MIND_MATES_CD2CF`.
@@ -165,8 +169,9 @@ cannot be validated without that IAM setup.
   staging reCAPTCHA Enterprise key `6Le17JgtAAAAACbHth-LPHcS_P2n4ejBuddUYReM`.
   That key is registered in App Check for the staging web app and allows
   `mindmate-staging.web.app`, `paaccmindmate.com` and `www.paaccmindmate.com`.
-  `mindmate-staging.firebaseapp.com` is not on it, so App Check tokens fail
-  there. Use the `web.app` host.
+  `mindmate-staging.firebaseapp.com` is deliberately not on it, so App Check
+  fails there. Recovery links never point to it; use the `web.app` host. The
+  production key likewise allows only `mind-mates-cd2cf.web.app`.
 - **Callables:** on staging, `lib/services/firebase/firebase_callable_router.dart`
   still routes the listed callables to their `…Dev` aliases. Routing them to
   the App Check-protected callables is application work in PR #78.
@@ -196,11 +201,13 @@ cannot be validated without that IAM setup.
 The recovery and verification emails take their link origin from the
 `ADMIN_WEB_URL` Functions parameter. Only allowlisted HTTPS origins are used:
 
-- Staging: `mindmate-staging.web.app`, `mindmate-staging.firebaseapp.com`,
-  `paaccmindmate.com`, `www.paaccmindmate.com`. Anything else, including the
-  old Vercel host, falls back to `https://mindmate-staging.web.app`.
-- Production: `mind-mates-cd2cf.web.app` and `mind-mates-cd2cf.firebaseapp.com`.
-  Anything else falls back to `https://mind-mates-cd2cf.web.app`.
+- Staging: `mindmate-staging.web.app`, `paaccmindmate.com`,
+  `www.paaccmindmate.com`. Anything else, including the old Vercel host,
+  falls back to `https://mindmate-staging.web.app`.
+- Production: `mind-mates-cd2cf.web.app` only. Anything else falls back to it.
+- These are exactly the domains on each project's reCAPTCHA Enterprise key.
+  The `firebaseapp.com` hosts are not on the keys, so App Check fails there,
+  and recovery links never point to them.
 
 Password-reset links use the app route `/reset-password`, because Firebase
 Hosting reserves `/__/*`.

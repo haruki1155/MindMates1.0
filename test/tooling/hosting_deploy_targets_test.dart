@@ -151,6 +151,13 @@ void main() {
     expect(source, isNot(contains(r'ref: ${{ github.event.workflow_run')));
     expect(source, isNot(contains('flutter build')));
     expect(source, contains(r'run-id: ${{ needs.gate.outputs.build_run_id }}'));
+    expect(
+      source,
+      contains(
+        'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
+      ),
+    );
+    expect(source, contains('path: build/web'));
     expect(source, contains(r'CHANNEL_ID: pr-${{ needs.gate.outputs.pr }}'));
     expect(source, contains(r'channelId: ${{ env.CHANNEL_ID }}'));
     expect(source, isNot(contains('channelId: live')));
