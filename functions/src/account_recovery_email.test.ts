@@ -17,13 +17,14 @@ test("rejects an invalid recovery email", () => {
   assert.throws(() => normalizeRecoveryEmail("not-an-email"));
 });
 
-test("moves a Firebase reset action onto the public admin host", () => {
+test("moves a Firebase reset action onto an app route of the public admin host", () => {
   const result = new URL(directPasswordResetLink(
     "https://project.firebaseapp.com/__/auth/action?mode=resetPassword&oobCode=secret-code&apiKey=public-key&lang=en",
-    "https://mindmate-admin-staging.vercel.app",
+    "https://mindmate-staging.web.app",
   ));
-  assert.equal(result.origin, "https://mindmate-admin-staging.vercel.app");
-  assert.equal(result.pathname, "/__/auth/action");
+  assert.equal(result.origin, "https://mindmate-staging.web.app");
+  // Firebase Hosting reserves /__/*, so /__/auth/action would bypass the admin app's action screen.
+  assert.equal(result.pathname, "/reset-password");
   assert.equal(result.searchParams.get("oobCode"), "secret-code");
   assert.equal(result.searchParams.get("apiKey"), "public-key");
   assert.equal(result.searchParams.get("mode"), "resetPassword");
@@ -42,34 +43,58 @@ test("moves a Firebase verification action onto /verify-email on the public admi
   assert.equal(result.searchParams.get("lang"), "en");
 });
 
-test("resolveStaffVerificationWebUrl routes staging to paaccmindmate.com and rejects obsolete Vercel domain", () => {
-  assert.equal(
-    resolveStaffVerificationWebUrl("", "mindmate-staging"),
-    "https://paaccmindmate.com",
-  );
-  assert.equal(
-    resolveStaffVerificationWebUrl("https://mindmate-admin-staging.vercel.app", "mindmate-staging"),
-    "https://paaccmindmate.com",
-  );
+test("resolveStaffVerificationWebUrl falls back to the staging Firebase Hosting URL", () => {
+  for (const configured of [
+    "",
+    "https://mindmate-admin-staging.vercel.app",
+    "https://mind-mates-cd2cf.web.app",
+    "https://mindmate-dev-4e91c.web.app",
+    // Served by Hosting, but not on the staging reCAPTCHA key, so App Check fails there.
+    "https://mindmate-staging.firebaseapp.com",
+    "http://paaccmindmate.com",
+    "https://evil.example.com",
+    "not a url",
+  ]) {
+    assert.equal(
+      resolveStaffVerificationWebUrl(configured, "mindmate-staging"),
+      "https://mindmate-staging.web.app",
+      configured,
+    );
+  }
+});
+
+test("resolveStaffVerificationWebUrl uses the staging custom domain only when configured", () => {
   assert.equal(
     resolveStaffVerificationWebUrl("https://paaccmindmate.com/some/path", "mindmate-staging"),
     "https://paaccmindmate.com",
   );
+  assert.equal(
+    resolveStaffVerificationWebUrl("https://mindmate-staging.web.app/", "mindmate-staging"),
+    "https://mindmate-staging.web.app",
+  );
 });
 
-test("resolveStaffVerificationWebUrl blocks cross-environment hosts and preserves dev/production config", () => {
-  assert.equal(
-    resolveStaffVerificationWebUrl("https://mind-mates-cd2cf.web.app", "mindmate-staging"),
+test("resolveStaffVerificationWebUrl keeps production on the production host", () => {
+  for (const configured of [
+    "",
+    "https://mindmate-admin-staging.vercel.app",
     "https://paaccmindmate.com",
-  );
-  assert.equal(
-    resolveStaffVerificationWebUrl("https://paaccmindmate.com", "mind-mates-cd2cf"),
-    "https://mind-mates-cd2cf.web.app",
-  );
-  assert.equal(
-    resolveStaffVerificationWebUrl("https://mind-mates-cd2cf.web.app/", "mind-mates-cd2cf"),
-    "https://mind-mates-cd2cf.web.app",
-  );
+    "https://mindmate-staging.web.app",
+    "https://mindmate-dev-4e91c.web.app",
+    "http://mind-mates-cd2cf.web.app",
+    "https://mind-mates-cd2cf.firebaseapp.com",
+    "https://evil.example.com",
+    "not a url",
+  ]) {
+    assert.equal(
+      resolveStaffVerificationWebUrl(configured, "mind-mates-cd2cf"),
+      "https://mind-mates-cd2cf.web.app",
+      configured,
+    );
+  }
+});
+
+test("resolveStaffVerificationWebUrl preserves development config", () => {
   assert.equal(
     resolveStaffVerificationWebUrl("http://localhost:5000/", "mindmate-dev-4e91c"),
     "http://localhost:5000",

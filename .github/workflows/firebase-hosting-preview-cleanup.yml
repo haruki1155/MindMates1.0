@@ -1,0 +1,54 @@
+# Deletes a PR's staging preview channel when the PR closes.
+#
+# pull_request_target runs this definition from main, with main checked out,
+# so the "staging-preview" environment (main only) can release the deploy
+# credential. It never checks out or runs code from the PR. The 7-day channel
+# expiry remains the fallback.
+
+name: Clean up staging Firebase Hosting preview
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: staging-preview
+    # Shared with the deploy workflow: cancels an in-flight deploy for this PR.
+    concurrency:
+      group: hosting-preview-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      PROJECT_ID: mindmate-staging
+      FIREBASE_TOOLS_VERSION: 15.29.0
+      DEPLOYER: github-hosting-deployer@mindmate-staging.iam.gserviceaccount.com
+      CHANNEL_ID: pr-${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Verify the deploy credential and its actual IAM permissions
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING }}
+        run: bash ci/verify_hosting_deployer.sh "$PROJECT_ID" "$DEPLOYER"
+      - name: Delete this PR's preview channel
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING }}
+        run: |
+          set -euo pipefail
+          # Never anything but pr-<number>; in particular never the live channel.
+          [[ "$CHANNEL_ID" =~ ^pr-[0-9]+$ ]] || { echo "::error::Refusing to delete channel '$CHANNEL_ID'."; exit 1; }
+          key="$RUNNER_TEMP/sa.json"
+          trap 'rm -f "$key"' EXIT
+          (umask 077; printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$key")
+          export GOOGLE_APPLICATION_CREDENTIALS="$key"
+          # A PR closed before its preview deployed has no channel; that is fine.
+          npx --yes "firebase-tools@$FIREBASE_TOOLS_VERSION" hosting:channel:delete "$CHANNEL_ID" \
+            --project "$PROJECT_ID" --force \
+            || echo "::warning::Preview channel $CHANNEL_ID was not deleted (it may not exist); it expires within 7 days."

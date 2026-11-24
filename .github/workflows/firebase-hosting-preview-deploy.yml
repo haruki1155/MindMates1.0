@@ -1,0 +1,143 @@
+# Deploys a PR's staging preview once it is verified.
+#
+# Trigger: workflow_run, so this definition, its scripts and firebase.json
+# always come from main and a PR cannot change them. The PR's code reaches this
+# workflow only as the static bundle built, without secrets, by
+# firebase-hosting-pull-request.yml.
+#
+# Gate: the PR must be open, from this repository, targeting main, and its
+# current head commit must have a successful run of BOTH "Verify Android
+# flavors" and "Build staging Admin Web preview". Failed, cancelled, missing
+# or stale results never deploy. Whichever of the two finishes last deploys.
+# Those two checks run the PR's own workflow files, so a PR that changes
+# .github/ or ci/ gets no preview (ci/preview_deploy_gate.py).
+#
+# Credential: FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING is an environment
+# secret of "staging-preview", whose deployment branch policy allows main only.
+
+name: Deploy staging Firebase Hosting preview
+on:
+  workflow_run:
+    workflows: ["Verify Android flavors", "Build staging Admin Web preview"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_ID: mindmate-staging
+  FIREBASE_TOOLS_VERSION: 15.29.0
+  # Holds roles/firebasehosting.admin on mindmate-staging only.
+  DEPLOYER: github-hosting-deployer@mindmate-staging.iam.gserviceaccount.com
+  HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+
+jobs:
+  gate:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      deploy: ${{ steps.check.outputs.deploy }}
+      pr: ${{ steps.check.outputs.pr }}
+      build_run_id: ${{ steps.check.outputs.build_run_id }}
+    steps:
+      # Trusted gate code from the default branch.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: python3 ci/preview_deploy_gate.py
+
+  deploy:
+    needs: gate
+    if: needs.gate.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    environment: staging-preview
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    # Shared with the cleanup workflow, which cancels a running deploy. A deploy
+    # never cancels anything (so it cannot cancel a cleanup); a stale deploy
+    # is stopped by the freshness check instead.
+    concurrency:
+      group: hosting-preview-pr-${{ needs.gate.outputs.pr }}
+      cancel-in-progress: false
+    env:
+      PR_NUMBER: ${{ needs.gate.outputs.pr }}
+      CHANNEL_ID: pr-${{ needs.gate.outputs.pr }}
+    steps:
+      # Trusted scripts and firebase.json from the default branch.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      # v4.3.0, pinned: this job holds the deploy key while it unpacks PR-built
+      # files. The bundle lands only in build/web and is uploaded as static
+      # content; nothing in it is executed, and firebase.json and ci/ come from
+      # main.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: admin-web-staging
+          path: build/web
+          run-id: ${{ needs.gate.outputs.build_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify the bundle carries the mindmate-staging config
+        run: bash ci/verify_staging_web_bundle.sh build/web
+      - name: Verify the deploy credential and its actual IAM permissions
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING }}
+        run: bash ci/verify_hosting_deployer.sh "$PROJECT_ID" "$DEPLOYER"
+      # Re-checked right before deploying, so an older commit never replaces a
+      # newer preview.
+      - name: Skip unless this commit is still the PR head
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          read -r state head < <(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '[.state, .head.sha] | @tsv')
+          if [[ "$state" == open && "$head" == "$HEAD_SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::PR #$PR_NUMBER is $state at $head; not deploying $HEAD_SHA."
+          fi
+      # v0.11.0. With a non-live channelId this deploys a preview channel only.
+      - id: deploy
+        if: steps.freshness.outputs.current == 'true'
+        uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING }}
+          projectId: mindmate-staging
+          channelId: ${{ env.CHANNEL_ID }}
+          expires: 7d
+          firebaseToolsVersion: ${{ env.FIREBASE_TOOLS_VERSION }}
+          # workflow_run has no PR context, so the comment is written below.
+          disableComment: true
+      - name: Comment the preview URL on the PR
+        if: steps.deploy.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.deploy.outputs.details_url }}
+          EXPIRES: ${{ steps.deploy.outputs.expire_time_formatted }}
+        run: |
+          marker='<!-- mindmate-staging-hosting-preview -->'
+          body="$(printf '%s\n**Staging preview** (limited UI testing; App Check is off and the backend is shared staging): %s\n\nCommit: %s\nChannel: `%s` on `%s`\nExpires: %s' \
+            "$marker" "$URL" "$HEAD_SHA" "$CHANNEL_ID" "$PROJECT_ID" "$EXPIRES")"
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n1)"
+          if [[ -n "$existing" ]]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -f body="$body" > /dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" > /dev/null
+          fi
