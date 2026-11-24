@@ -315,6 +315,30 @@ test("completion sets the permanent password, clears the gate and leaves no secr
   assert.ok(!(await signIn(s.alias, "Another-Perm-9")));
 });
 
+// Auth refuses refresh tokens issued before tokensValidAfterTime, so a session opened with a replaced password
+// is dead once that time moves past it. The emulator does not enforce it on refresh, so the recorded time is checked.
+const validAfter = async (uid: string) => Date.parse((await getAuth().getUser(uid)).tokensValidAfterTime ?? "") || 0;
+const pause = () => new Promise((r) => setTimeout(r, 1100)); // token times have one-second resolution
+
+test("the permanent password revokes every session opened with the temporary one", async () => {
+  const {uid} = await issue("c8");
+  const before = await validAfter(uid);
+  await pause();
+  assert.equal(await code(complete(uid, {newPassword: PERMANENT})), "ok");
+  assert.ok((await validAfter(uid)) > before, "sessions older than the change are revoked, so none can pick up the cleared claim");
+});
+
+test("reissuing a temporary password revokes sessions opened with the old one", async () => {
+  const {s, uid} = await issue("c9");
+  const before = await validAfter(uid);
+  await pause();
+  clock.t += 25 * HOUR;
+  mails.length = 0;
+  await ask({studentId: s.studentNo});
+  assert.equal(mails.length, 1);
+  assert.ok((await validAfter(uid)) > before);
+});
+
 test("an interrupted completion is reconciled by the next sign-in with the new password", async () => {
   const {s, uid} = await issue("c7");
   await assert.rejects(

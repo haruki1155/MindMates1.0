@@ -58,3 +58,13 @@ test("the same student without the claim keeps normal access", async () => {
   await assertSucceeds(updateDoc(doc(db, "users/s1"), {firstName: "Changed"}));
   await assertFails(updateDoc(doc(db, "users/s1"), {mustChangePassword: false}));
 });
+
+test("no client can read or write login issuance records, which hold password hashes", async () => {
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "student_login_issuance/QA20260001"), {studentKey: "QA20260001", uid: "s1", hash: "x", salt: "y"});
+  });
+  for (const db of [environment.authenticatedContext("s1").firestore(), environment.authenticatedContext("s1", PENDING).firestore()]) {
+    await assertFails(getDoc(doc(db, "student_login_issuance/QA20260001")));
+    await assertFails(setDoc(doc(db, "student_login_issuance/QA20260001"), {hash: "z"}));
+  }
+});
