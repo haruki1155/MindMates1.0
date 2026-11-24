@@ -11,7 +11,7 @@ From the repository root, run:
 flutter pub get
 flutter test test/app_bootstrap_test.dart
 flutter analyze
-flutter build web --release --target lib/admin_main.dart --dart-define=RECAPTCHA_V3_SITE_KEY=YOUR_RECAPTCHA_V3_SITE_KEY
+flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=production --dart-define=RECAPTCHA_ENTERPRISE_SITE_KEY=YOUR_RECAPTCHA_ENTERPRISE_SITE_KEY
 ```
 
 For the staging Admin portal, explicitly select the staging Firebase project:
@@ -30,16 +30,17 @@ measure, but deployment automation uses the explicit admin target.
 
 ## Deploy
 
-The GitHub Hosting workflows need an Actions secret named
-`FIREBASE_SERVICE_ACCOUNT_MIND_MATES_CD2CF` containing the complete JSON key for
-a service account in the `mind-mates-cd2cf` project. The older
-`FIREBASE_SERVICE_ACCOUNT` secret is accepted as a fallback only when it points
-to the same project. The workflows validate the key's JSON and project ID before
-calling the deploy action. The service account needs Firebase Hosting Admin and
-API Keys Viewer; preview deployments also need Firebase Authentication Admin.
-Configure the secret in the repository's Actions secrets and grant these roles
-in the production Firebase project. A local `firebase login` does not give
-GitHub Actions credentials.
+Routine GitHub deployments (PR previews and the deploy after a merge to `main`)
+target `mindmate-staging` only. Their credentials, gates and rollback are
+described in [operations/firebase-hosting-cicd.md](operations/firebase-hosting-cicd.md).
+
+Production Hosting is deployed only by the manual
+`firebase-hosting-production.yml` workflow (or the commands below). It needs an
+Actions secret named `FIREBASE_SERVICE_ACCOUNT_MIND_MATES_CD2CF` containing the
+complete JSON key for a service account in the `mind-mates-cd2cf` project. The
+older `FIREBASE_SERVICE_ACCOUNT` secret is accepted as a fallback only when it
+points to the same project. A local `firebase login` does not give GitHub
+Actions credentials.
 
 Configure the immutable administrator when prompted by Firebase Functions. Use
 the Firebase Authentication UID of the single super-administrator:
