@@ -228,25 +228,117 @@ only after the custom domain shows **Connected** and serves the app over HTTPS.
   50%, 80% and 100%. Budgets send alerts; they do not cap spending.
 - Review GitHub Actions minutes under Settings, Billing.
 
-## Acceptance procedure (after the owner setup)
+## Transition from the legacy workflows
 
-1. Open a draft PR from a branch of this repository. "Build staging Admin Web
-   preview" and "Verify Android flavors" run. When both pass, "Deploy staging
-   Firebase Hosting preview" deploys `pr-<N>` and comments the URL, commit and
-   expiry.
-2. Push another commit. The build is cancelled or replaced, the same channel
-   and comment update, and the old commit is never deployed after the new one.
-3. Push a commit that fails a test (on the test branch only). The gate logs
-   the failure and nothing is deployed.
-4. `https://mindmate-staging.web.app` still shows the previous release (Hosting,
+The legacy staging Hosting workflows are the same files,
+`firebase-hosting-merge.yml` and `firebase-hosting-pull-request.yml`. Merging
+this change replaces them in place, so nothing needs disabling in this
+repository. The two new files (`firebase-hosting-preview-deploy.yml` and
+`firebase-hosting-preview-cleanup.yml`) become active when they reach `main`.
+`workflow_run` only fires from definitions on the default branch, so nothing
+new runs before the merge. Non-Hosting CI (`android-verify.yml`,
+`mood-v2-emulator-validation.yml`) is unchanged.
+
+**Before merge**
+
+1. Keep the repository-level secret `FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING`
+   for now. The current `main` merge workflow, and preview runs of other open
+   PRs, still use it.
+2. Branch protection: if the old job name `build_and_preview` is a required
+   check, replace it with `build` ("Build staging Admin Web preview").
+   Otherwise this PR and every later PR stay blocked waiting for a check that
+   no longer exists. Keep the `Verify Android flavors` checks required.
+3. Optionally disable "Inspect staging Hosting credential identity only"
+   (branch `fix/hosting-preview-identity-diagnostic`). It reads the
+   repository-level secret.
+4. This PR's own checks: "Verify Android flavors" and "Build staging Admin Web
+   preview" (which also runs `ci/preview_deploy_gate_test.py`) must pass. It
+   gets no preview. The deploy workflow is not on `main` yet, and PRs that
+   change `.github/` or `ci/` are never previewed.
+
+**Merge**
+
+5. Merge with owner approval. The push to `main` runs "Verify Android
+   flavors". On success, the new merge workflow deploys staging live through
+   the `staging` environment.
+
+**After merge**
+
+6. Actions tab: confirm that all five Hosting workflows are listed as active
+   (`firebase-hosting-merge`, `-pull-request`, `-preview-deploy`,
+   `-preview-cleanup`, `-production`).
+7. Confirm that the first staging deploy succeeded:
+   - its "Verify the deploy credential and its actual IAM permissions" step
+     printed that the identity holds Hosting deploy rights only;
+   - Deployments shows `staging`;
+   - the Hosting release history shows the merge commit.
+8. Only then delete the repository-level secret
+   `FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING`. From then on, any old-style run
+   (for example a PR branch that still carries the old workflow file) fails
+   closed instead of deploying with the Admin SDK key.
+9. Run the acceptance procedure below. Retiring the old Admin SDK key needs
+   separate approval.
+
+## Integration with PRs #78 and #82
+
+Recommended order: **this PR, then #82, then #78**, each rebased on the
+updated `main`. A trial merge of all three was resolved as below. With #78's
+test updated, the recovery and reset suites passed in the emulators (14/14).
+
+- **#82** (merges cleanly into `main` today). Against this PR it conflicts in
+  both Hosting workflows, `docs/admin_web_deployment.md` and
+  `account_recovery.ts`.
+  - Take this PR's workflows and docs. #82's
+    `RECAPTCHA_ENTERPRISE_SITE_KEY_STAGING` secret and its build checks are
+    superseded by the key in `firebase-hosting-merge.yml`, and that missing
+    secret is what currently fails its preview.
+  - In `account_recovery.ts`, keep #82's `export` of `smtpAppPassword` and this
+    PR's `ADMIN_WEB_URL` default of `""`.
+- **#78** (already conflicts with `main` in
+  `appointment_availability_callable.test.ts` and
+  `firebase_callable_router_test.dart`; those are its own conflicts).
+  - Take this PR's `firebase-hosting-merge.yml`: it already builds with
+    `ENABLE_STAGING_APP_CHECK=true` and the key.
+  - Take this PR's `resolveStaffVerificationWebUrl`. It covers #78's
+    production Vercel handling, and `OBSOLETE_ADMIN_WEB_HOSTS` no longer
+    exists.
+  - Keep #78's injectable `processAdminPasswordReset`, which already calls the
+    resolver. Update its comment about `paaccmindmate.com` and
+    `/__/auth/action`.
+  - Take this PR's `account_recovery_email.test.ts`.
+  - In `admin_password_reset.test.ts`, "Staging reset links use the supported
+    admin host's action handler" must expect `https://mindmate-staging.web.app`
+    and `/reset-password`.
+  - #78's `staging_admin_web_build_config_test.dart` matches this PR's
+    workflows unchanged.
+  - #78's router change (protected `requestAdminPasswordReset` on staging)
+    needs the App Check build enabled here.
+- **Functions deploy:** after #78 is merged, the recovery callables still need
+  a separately authorized Functions deploy. See "Runtime configuration".
+
+## Acceptance procedure (after merge)
+
+1. Open a draft PR from a branch of this repository that changes only app code
+   (for example a comment in `lib/`). "Build staging Admin Web preview" and
+   "Verify Android flavors" run. When both pass, "Deploy staging Firebase
+   Hosting preview" deploys `pr-<N>` and comments the URL, commit and expiry.
+   The deploy run shows the `staging-preview` environment, and its IAM step
+   passes.
+2. Push another commit. The same channel and comment update, and the old
+   commit is never deployed after the new one (its gate or freshness step logs
+   "Stale").
+3. Push a commit that fails a test (test branch only). The gate logs the
+   failure and nothing is deployed.
+4. Push a commit that touches `ci/`. The gate logs "changes CI definitions" and
+   nothing is deployed.
+5. `https://mindmate-staging.web.app` still shows the previous release (Hosting,
    Release history: `live` is unchanged).
-5. Close the PR. The cleanup workflow deletes `pr-<N>`
+6. Close the PR. The cleanup workflow deletes `pr-<N>`
    (`firebase hosting:channel:list --project mindmate-staging`).
-6. After an approved merge, `Verify Android flavors` passes, then the merge
-   workflow deploys. Release time and commit match. On
-   `https://mindmate-staging.web.app`, the browser console shows no App Check
-   errors.
-7. Production Hosting release history is unchanged.
+7. After the next approved merge, the merge workflow deploys after "Verify
+   Android flavors". On `https://mindmate-staging.web.app`, the browser
+   console shows no App Check errors and sign-in works.
+8. Production Hosting release history is unchanged.
 
 ## Rollback
 
