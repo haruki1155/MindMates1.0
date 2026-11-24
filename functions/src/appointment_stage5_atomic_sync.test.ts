@@ -32,7 +32,6 @@ import {
   updateStudentRosterRecord,
 } from "./index";
 import {rosterTestHooks} from "./student_roster";
-import {verifyActivationCode} from "./student_roster_domain";
 
 const emulated = Boolean(process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST);
 const projectId = process.env.GCLOUD_PROJECT ?? "demo-mindmate-test";
@@ -1177,7 +1176,7 @@ test(
       if (partialRes.importId) importIds.push(partialRes.importId);
       assert.equal(partialRes.status, "partial");
       assert.deepEqual(partialRes.counts, {new: 1, updated: 0, linked: 0});
-      assert.deepEqual(partialRes.codes.map((c: {studentNo: string}) => c.studentNo), [newNo2]);
+      assert.deepEqual(partialRes.codes, [], "no activation codes are created");
       assert.deepEqual(partialRes.failedRows.map((f: {studentNo: string}) => f.studentNo), [overflowNo, blockedLinkNo]);
       // Zero partial commit on overflowing student; Counselor B cannot read overflow student appointments.
       assert.equal((await db.doc(`users/${overflowUid}`).get()).data()?.collegeId, collegeA);
@@ -1231,14 +1230,8 @@ test(
       if (mixedRes.importId) importIds.push(mixedRes.importId);
       assert.equal(mixedRes.status, "complete");
       assert.deepEqual(mixedRes.counts, {new: 1, updated: 1, linked: 1});
-      assert.deepEqual(mixedRes.codes.map((c: {studentNo: string}) => c.studentNo), [newNo1]);
-      const storedCode = (await db.doc(`student_roster/${newKey1}`).get()).data()!.activationCode;
-      assert.equal(await verifyActivationCode(mixedRes.codes[0].code, {
-        hash: storedCode.hash,
-        salt: storedCode.salt,
-        issuedAt: storedCode.issuedAt.toDate(),
-        expiresAt: storedCode.expiresAt.toDate(),
-      }), true);
+      assert.deepEqual(mixedRes.codes, [], "no activation codes are created");
+      assert.equal((await db.doc(`student_roster/${newKey1}`).get()).data()!.activationCode, null);
       assert.equal((await db.doc(`appointments/${linkAppt}`).get()).data()?.collegeId, collegeB);
       assert.equal((await db.doc(`appointments/${updAppt}`).get()).data()?.collegeId, collegeB);
       assert.deepEqual(await listCollegeAppointmentsAsCounselor(clientA.clientDb, collegeA, linkUid), []);
@@ -1493,16 +1486,9 @@ test(
       // while preserving earlier valid batch writes, codes, counts, and audit records.
       assert.equal(res.status, "partial");
       assert.deepEqual(res.counts, {new: 1, updated: 0, linked: 0});
-      assert.deepEqual(res.codes.map((c: {studentNo: string}) => c.studentNo), [batchNewNo]);
+      assert.deepEqual(res.codes, [], "no activation codes are created");
       assert.deepEqual(res.failedRows.map((f: {studentNo: string}) => f.studentNo), [raceNo]);
-
-      const storedNewCode = (await db.doc(`student_roster/${batchNewKey}`).get()).data()!.activationCode;
-      assert.equal(await verifyActivationCode(res.codes[0].code, {
-        hash: storedNewCode.hash,
-        salt: storedNewCode.salt,
-        issuedAt: storedNewCode.issuedAt.toDate(),
-        expiresAt: storedNewCode.expiresAt.toDate(),
-      }), true);
+      assert.equal((await db.doc(`student_roster/${batchNewKey}`).get()).data()!.activationCode, null);
 
       const auditSnap = await db.collection("admin_audit_logs").where("targetId", "==", res.importId).get();
       assert.equal(auditSnap.size, 1);
@@ -1967,17 +1953,14 @@ test(
 
       assert.equal(partialRes.status, "partial");
       assert.deepEqual(partialRes.counts, {new: 1, updated: 0, linked: 0});
-      assert.deepEqual(partialRes.codes.map((c: {studentNo: string}) => c.studentNo), [n1]);
+      assert.deepEqual(partialRes.codes, [], "no activation codes are created");
       assert.deepEqual(partialRes.failedRows.map((f: {studentNo: string}) => f.studentNo), [u1, l1, n2]);
       assert.equal((await db.doc(`student_roster/${kN1}`).get()).exists, true);
       assert.equal((await db.doc(`student_roster/${kN2}`).get()).exists, false);
       assert.equal((await db.doc(`users/${u1Uid}`).get()).data()?.collegeId, collegeA);
       assert.equal((await db.doc(`appointments/${u1Appt}`).get()).data()?.collegeId, collegeA);
 
-      const storedN1 = (await db.doc(`student_roster/${kN1}`).get()).data()!.activationCode;
-      assert.equal(await verifyActivationCode(partialRes.codes[0].code, {
-        hash: storedN1.hash, salt: storedN1.salt, issuedAt: storedN1.issuedAt.toDate(), expiresAt: storedN1.expiresAt.toDate(),
-      }), true);
+      assert.equal((await db.doc(`student_roster/${kN1}`).get()).data()!.activationCode, null);
 
       const rec = (await db.doc(`student_roster_imports/${partialRes.importId}`).get()).data()!;
       assert.equal(rec.status, "partial");
@@ -1988,7 +1971,7 @@ test(
       assert.equal(auditSnap.size, 1);
       assert.equal(auditSnap.docs[0].data().metadata.partial, true);
       assert.equal(auditSnap.docs[0].data().metadata.failureCode, "time-budget-exceeded");
-      assert.ok(!JSON.stringify([capturedLogs, rec, auditSnap.docs[0].data()]).includes(partialRes.codes[0].code));
+      assert.doesNotMatch(JSON.stringify([capturedLogs, rec, auditSnap.docs[0].data()]), /[A-Z2-9]{5}-[A-Z2-9]{5}/);
 
       // Resume remaining failed rows + check re-importing n1 does not duplicate activation codes.
       hookBag.timeBudgetMs = undefined;
@@ -1997,8 +1980,8 @@ test(
       if (resumeRes.importId) importIds.push(resumeRes.importId);
       assert.equal(resumeRes.status, "complete");
       assert.deepEqual(resumeRes.counts, {new: 1, updated: 2, linked: 1});
-      assert.deepEqual(resumeRes.codes.map((c: {studentNo: string}) => c.studentNo), [n2]);
-      assert.equal((await db.doc(`student_roster/${kN1}`).get()).data()!.activationCode.hash, storedN1.hash);
+      assert.deepEqual(resumeRes.codes, [], "no activation codes are created");
+      assert.equal((await db.doc(`student_roster/${kN1}`).get()).data()!.activationCode, null);
       assert.equal((await db.doc(`users/${u1Uid}`).get()).data()?.collegeId, collegeB);
       assert.equal((await db.doc(`users/${u1Uid}`).get()).data()?.college, "College B");
       assert.equal((await db.doc(`appointments/${u1Appt}`).get()).data()?.collegeId, collegeB);
@@ -2226,7 +2209,7 @@ test(
 );
 
 test(
-  "Step 11.3G.1 Test E: lazy activation code generation mints codes only for executed batches",
+  "Step 11.3G.1 Test E: no activation code is minted for executed batches",
   {skip: !emulated},
   async () => {
     await resetMainAssignments();
@@ -2274,8 +2257,8 @@ test(
       assert.equal(res.status, "partial");
       assert.equal(res.failureCode, "time-budget-exceeded");
       assert.deepEqual(res.counts, {new: 2, updated: 0, linked: 0});
-      assert.deepEqual(res.codes.map((c: {studentNo: string}) => c.studentNo), [nos[0], nos[1]]);
-      assert.deepEqual([...mintedNos].sort(), [nos[0], nos[1]].sort());
+      assert.deepEqual(res.codes, [], "no activation codes are created");
+      assert.deepEqual(mintedNos, []);
       assert.deepEqual(res.failedRows.map((r: {studentNo: string}) => r.studentNo), [nos[2], nos[3]]);
 
       const [r0, r1, r2, r3] = await Promise.all(keys.map((k) => db.doc(`student_roster/${k}`).get()));
@@ -2283,8 +2266,8 @@ test(
       assert.equal(r1.exists, true);
       assert.equal(r2.exists, false);
       assert.equal(r3.exists, false);
-      assert.equal(await verifyActivationCode(res.codes[0].code, r0.data()!.activationCode), true);
-      assert.equal(await verifyActivationCode(res.codes[1].code, r1.data()!.activationCode), true);
+      assert.equal(r0.data()!.activationCode, null);
+      assert.equal(r1.data()!.activationCode, null);
       assert.doesNotMatch(JSON.stringify(warnLogs), /[A-Z2-9]{5}-[A-Z2-9]{5}/);
     } finally {
       console.warn = origWarn;

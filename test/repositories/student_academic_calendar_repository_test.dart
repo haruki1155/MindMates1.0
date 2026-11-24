@@ -4,15 +4,16 @@ import 'package:mind_mates/services/firebase/firebase_callable_router.dart';
 
 void main() {
   test(
-    'FirebaseCallableRouter routes getStudentAcademicCalendar to Dev alias in staging only',
+    'FirebaseCallableRouter routes getStudentAcademicCalendar to Dev alias in staging without App Check only',
     () {
       const environment = String.fromEnvironment(
         'APP_ENV',
         defaultValue: 'development',
       );
+      const appCheck = bool.fromEnvironment('ENABLE_STAGING_APP_CHECK');
       expect(
         FirebaseCallableRouter.name('getStudentAcademicCalendar'),
-        environment == 'staging'
+        environment == 'staging' && !appCheck
             ? 'getStudentAcademicCalendarDev'
             : 'getStudentAcademicCalendar',
       );

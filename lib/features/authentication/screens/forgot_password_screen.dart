@@ -15,6 +15,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _schoolIdController = TextEditingController();
   bool _sent = false;
 
+  /// Students reset with their Student ID. Employees and older accounts choose
+  /// the School ID flow explicitly.
+  bool _legacy = false;
+
+  void _togglePath() => setState(() => _legacy = !_legacy);
+
   @override
   void dispose() {
     _schoolIdController.dispose();
@@ -24,9 +30,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Future<void> _sendResetLink() async {
     FocusScope.of(context).unfocus();
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    final sent = await context
-        .read<AuthProvider>()
-        .sendPasswordResetForSchoolId(_schoolIdController.text);
+    final auth = context.read<AuthProvider>();
+    final sent = _legacy
+        ? await auth.sendPasswordResetForSchoolId(_schoolIdController.text)
+        : await auth.sendPasswordResetForStudentId(_schoolIdController.text);
     if (mounted && sent) setState(() => _sent = true);
   }
 
@@ -74,6 +81,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                           _sent
                               ? _SuccessCard(
                                   schoolId: _schoolIdController.text.trim(),
+                                  legacy: _legacy,
                                   onBack: () => Navigator.pop(context),
                                 )
                               : _RequestCard(
@@ -81,6 +89,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                   controller: _schoolIdController,
                                   loading: provider.isLoading,
                                   error: provider.errorMessage,
+                                  legacy: _legacy,
+                                  onTogglePath: _togglePath,
                                   onSubmit: _sendResetLink,
                                 ),
                         ],
@@ -103,6 +113,8 @@ class _RequestCard extends StatelessWidget {
     required this.controller,
     required this.loading,
     required this.error,
+    required this.legacy,
+    required this.onTogglePath,
     required this.onSubmit,
   });
 
@@ -110,6 +122,8 @@ class _RequestCard extends StatelessWidget {
   final TextEditingController controller;
   final bool loading;
   final String? error;
+  final bool legacy;
+  final VoidCallback onTogglePath;
   final Future<void> Function() onSubmit;
 
   @override
@@ -132,8 +146,10 @@ class _RequestCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Enter the School ID you use to sign in. We’ll send a secure reset link to your verified email address.',
+          Text(
+            legacy
+                ? 'Enter the School ID you use to sign in. We’ll send a secure reset link to your verified email address.'
+                : 'Enter your Student ID. If it has a verified recovery email, we’ll send a secure reset link there.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: _RecoveryColors.muted,
@@ -152,11 +168,14 @@ class _RequestCard extends StatelessWidget {
             onFieldSubmitted: (_) {
               if (!loading) onSubmit();
             },
-            validator: (value) =>
-                value?.trim().isEmpty == true ? 'School ID is required.' : null,
+            validator: (value) => value?.trim().isEmpty == true
+                ? (legacy ? 'School ID is required.' : 'Student ID is required.')
+                : null,
             decoration: InputDecoration(
-              labelText: 'School ID',
-              hintText: 'Enter your registered School ID',
+              labelText: legacy ? 'School ID' : 'Student ID',
+              hintText: legacy
+                  ? 'Enter your registered School ID'
+                  : 'Enter your Student ID',
               prefixIcon: const Icon(Icons.badge_outlined),
               filled: true,
               fillColor: Colors.white,
@@ -197,7 +216,16 @@ class _RequestCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          TextButton(
+            key: const Key('forgot-path-toggle'),
+            onPressed: loading ? null : onTogglePath,
+            child: Text(
+              legacy
+                  ? 'Student? Reset with your Student ID'
+                  : 'Employee or older account? Use School ID',
+            ),
+          ),
+          const SizedBox(height: 6),
           const Text(
             'For your privacy, the recovery email is never displayed here.',
             textAlign: TextAlign.center,
@@ -215,9 +243,14 @@ class _RequestCard extends StatelessWidget {
 }
 
 class _SuccessCard extends StatelessWidget {
-  const _SuccessCard({required this.schoolId, required this.onBack});
+  const _SuccessCard({
+    required this.schoolId,
+    required this.legacy,
+    required this.onBack,
+  });
 
   final String schoolId;
+  final bool legacy;
   final VoidCallback onBack;
 
   @override
@@ -238,7 +271,9 @@ class _SuccessCard extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          'A password reset link was sent for School ID $schoolId. Open the link, choose a new password, then return to sign in.',
+          legacy
+              ? 'A password reset link was sent for School ID $schoolId. Open the link, choose a new password, then return to sign in.'
+              : 'If that Student ID has a verified recovery email, a reset link is on its way. Open the link, choose a new password, then return to sign in. If nothing arrives, contact the PACC office for assisted recovery.',
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: _RecoveryColors.muted,

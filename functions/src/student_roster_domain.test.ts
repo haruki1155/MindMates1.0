@@ -236,3 +236,13 @@ test("two courses of one college matching the same name is an error, not an arbi
   assert.ok(!row.ok && row.errors.some((e) => e.includes("BS Information Technology")),
     JSON.stringify(row));
 });
+
+test("validateRosterRows reads an optional school email, normalises it and refuses a malformed one", async () => {
+  const {validateRosterRows} = await load();
+  const [none, ok, bad] = validateRosterRows([
+    goodRow, {...goodRow, studentNo: "2021-00124", email: "  Juan.Cruz@School.EDU.ph "}, {...goodRow, studentNo: "2021-00125", email: "not-an-email"},
+  ], index);
+  assert.ok(none.ok && none.value.contactEmail === "", "a row with no email stays valid");
+  assert.ok(ok.ok && ok.value.contactEmail === "juan.cruz@school.edu.ph");
+  assert.ok(!bad.ok && bad.errors.includes("Email address is not valid."));
+});

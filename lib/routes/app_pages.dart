@@ -6,7 +6,7 @@ import '../features/authentication/screens/forgot_password_screen.dart';
 import '../features/authentication/screens/login_screen.dart';
 import '../features/authentication/screens/signup_screen.dart';
 import '../features/authentication/screens/student_activation_screen.dart';
-import '../features/authentication/screens/email_verification_screen.dart';
+import '../features/authentication/screens/student_recovery_verification_screen.dart';
 import '../features/authentication/screens/profile_setup_screen.dart';
 import '../features/breathing/screens/mindful_breathing_screen.dart';
 import '../features/counseling/screens/services_screen.dart';
@@ -40,7 +40,7 @@ class AppPages {
     RouteNames.login: (_) => const LoginScreen(),
     RouteNames.signup: (_) => const SignupScreen(),
     RouteNames.studentActivation: (_) => const StudentActivationScreen(),
-    RouteNames.emailVerification: (_) => const EmailVerificationScreen(),
+    RouteNames.emailVerification: (_) => const EmailVerificationGate(),
     RouteNames.profileSetup: (_) => const ProfileSetupScreen(),
     RouteNames.studentInformation: (_) => const StudentInformationScreen(),
     RouteNames.forgotPassword: (_) => const ForgotPasswordScreen(),
