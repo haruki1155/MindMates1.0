@@ -15,15 +15,15 @@ const STAGING_ADMIN_WEB_URL = "https://mindmate-staging.web.app";
 const PRODUCTION_ADMIN_WEB_URL = "https://mind-mates-cd2cf.web.app";
 const STAGING_PROJECT_ID = "mindmate-staging";
 const PRODUCTION_PROJECT_ID = "mind-mates-cd2cf";
+// Exactly the hosts on each project's reCAPTCHA Enterprise key, so links never
+// land where App Check fails. The firebaseapp.com hosts are deliberately absent.
 const STAGING_ADMIN_WEB_HOSTS = new Set([
   "paaccmindmate.com",
   "www.paaccmindmate.com",
   "mindmate-staging.web.app",
-  "mindmate-staging.firebaseapp.com",
 ]);
 const PRODUCTION_ADMIN_WEB_HOSTS = new Set([
   "mind-mates-cd2cf.web.app",
-  "mind-mates-cd2cf.firebaseapp.com",
 ]);
 const DEVELOPMENT_ADMIN_WEB_HOSTS = new Set([
   "mindmate-dev-4e91c.web.app",

@@ -49,6 +49,8 @@ test("resolveStaffVerificationWebUrl falls back to the staging Firebase Hosting 
     "https://mindmate-admin-staging.vercel.app",
     "https://mind-mates-cd2cf.web.app",
     "https://mindmate-dev-4e91c.web.app",
+    // Served by Hosting, but not on the staging reCAPTCHA key, so App Check fails there.
+    "https://mindmate-staging.firebaseapp.com",
     "http://paaccmindmate.com",
     "https://evil.example.com",
     "not a url",
@@ -80,6 +82,7 @@ test("resolveStaffVerificationWebUrl keeps production on the production host", (
     "https://mindmate-staging.web.app",
     "https://mindmate-dev-4e91c.web.app",
     "http://mind-mates-cd2cf.web.app",
+    "https://mind-mates-cd2cf.firebaseapp.com",
     "https://evil.example.com",
     "not a url",
   ]) {
@@ -89,10 +92,6 @@ test("resolveStaffVerificationWebUrl keeps production on the production host", (
       configured,
     );
   }
-  assert.equal(
-    resolveStaffVerificationWebUrl("https://mind-mates-cd2cf.firebaseapp.com/", "mind-mates-cd2cf"),
-    "https://mind-mates-cd2cf.firebaseapp.com",
-  );
 });
 
 test("resolveStaffVerificationWebUrl preserves development config", () => {
