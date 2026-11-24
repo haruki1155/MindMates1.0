@@ -1,4 +1,5 @@
 # Deploys the Admin Web portal to the mindmate-staging live channel.
+# The deploy credential is an environment secret of "staging" (main only).
 #
 # Runs only after "Verify Android flavors" (analyzer, the full Flutter suite and
 # the Functions emulator suite) has passed for a push to main, so the deployed
@@ -18,6 +19,8 @@ on:
 
 permissions:
   contents: read
+  # The manual-run gate queries Actions runs.
+  actions: read
 
 # Serialize live deploys. A run that is already deploying finishes; an older
 # queued run is replaced by the newer one.
@@ -30,6 +33,10 @@ env:
   FIREBASE_TOOLS_VERSION: 15.29.0
   # Holds roles/firebasehosting.admin on mindmate-staging only.
   DEPLOYER: github-hosting-deployer@mindmate-staging.iam.gserviceaccount.com
+  # reCAPTCHA Enterprise site key registered in App Check for the staging web
+  # app ("MindMate Admin - Staging"). Site keys are public. Its allowed domains
+  # are mindmate-staging.web.app, paaccmindmate.com and www.paaccmindmate.com.
+  STAGING_RECAPTCHA_SITE_KEY: 6Le17JgtAAAAACbHth-LPHcS_P2n4ejBuddUYReM
   DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
@@ -62,13 +69,13 @@ jobs:
           [[ "$passed" -gt 0 ]] || { echo "::error::$DEPLOY_SHA has no successful Verify Android flavors run on main."; exit 1; }
       - run: flutter pub get
       - name: Build staging admin web portal
-        run: flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=staging
+        run: flutter build web --release --target lib/admin_main.dart --dart-define=APP_ENV=staging --dart-define=ENABLE_STAGING_APP_CHECK=true --dart-define=RECAPTCHA_ENTERPRISE_SITE_KEY=$STAGING_RECAPTCHA_SITE_KEY
       - name: Verify the bundle targets mindmate-staging
-        run: bash ci/verify_staging_web_bundle.sh build/web
-      - name: Verify staging Firebase Hosting service account
+        run: bash ci/verify_staging_web_bundle.sh build/web "$STAGING_RECAPTCHA_SITE_KEY"
+      - name: Verify the deploy credential and its actual IAM permissions
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MINDMATE_STAGING }}
-        run: python3 ci/verify_hosting_service_account.py "$PROJECT_ID" "$DEPLOYER"
+        run: bash ci/verify_hosting_deployer.sh "$PROJECT_ID" "$DEPLOYER"
       # Checked last so the window for a newer merge is as small as possible.
       # That newer commit deploys through its own run once it is verified.
       - name: Skip unless this commit is still the head of main
