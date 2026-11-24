@@ -4,7 +4,7 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {Timestamp, getFirestore} from "firebase-admin/firestore";
 
-import {LoginDeps, requestLogin, requestStudentLoginDev} from "./student_login";
+import {LoginDeps, completePasswordChange, requestLogin, requestStudentLoginDev} from "./student_login";
 import {FIRST_LOGIN_CLAIM, passwordMatches} from "./student_login_domain";
 import {studentAuthAliasEmail} from "./student_auth_alias";
 import {RECOVERY_CONTACTS, RECOVERY_EMAILS, recoveryEmailHash} from "./student_recovery_contacts";
@@ -226,4 +226,110 @@ test("the Dev endpoint refuses to run outside non-production projects", async ()
   } finally {
     process.env.GCLOUD_PROJECT = previous;
   }
+});
+
+// ------------------------------------------------------------------ completeStudentPasswordChange
+
+const PERMANENT = "Perm4nent-Pass";
+type Row = Awaited<ReturnType<typeof seedRow>>;
+async function issue(tag: string) {
+  const s = await seedRow(tag);
+  emails.push(s.alias);
+  mails.length = 0;
+  await ask({studentId: s.studentNo});
+  const user = (await userOf(s.alias))!;
+  return {s, temp: passwordIn(mails[0]), uid: user.uid};
+}
+const complete = (uid: string, data: unknown, token: Record<string, unknown> = {}) =>
+  completePasswordChange(
+    {auth: {uid, token: {auth_time: Math.floor(clock.t / 1000), firstLoginPending: true, ...token}}, data},
+    {now: () => clock.t},
+  );
+const code = (p: Promise<unknown>) => p.then(() => "ok", (e: {code?: string}) => e.code);
+const issuanceOf = async (s: Row) => (await db.collection("student_login_issuance").doc(s.key).get()).data()!;
+
+test("password change needs the first-login claim", async () => {
+  const {uid} = await issue("c1");
+  assert.equal(await code(complete(uid, {newPassword: PERMANENT}, {firstLoginPending: undefined})), "failed-precondition");
+});
+
+test("an account that is not a roster student account cannot use it, even with a forged claim", async () => {
+  const other = await getAuth().createUser({email: `${run}-plain@example.com`, password: "Plain-Pass-123"});
+  try {
+    assert.equal(await code(complete(other.uid, {newPassword: PERMANENT})), "failed-precondition");
+  } finally {
+    await getAuth().deleteUser(other.uid);
+  }
+});
+
+test("one student's change never touches another student's account", async () => {
+  const a = await issue("c2a");
+  const b = await issue("c2b");
+  assert.equal(await code(complete(b.uid, {newPassword: PERMANENT})), "ok");
+  assert.ok(await signIn(a.s.alias, a.temp), "A still has only the temporary password");
+  assert.equal((await issuanceOf(a.s)).state, "issued");
+});
+
+test("an expired temporary issuance cannot complete", async () => {
+  const {uid} = await issue("c3");
+  clock.t += 25 * HOUR;
+  assert.equal(await code(complete(uid, {newPassword: PERMANENT})), "failed-precondition");
+});
+
+test("a stale sign-in cannot complete", async () => {
+  const {uid} = await issue("c4");
+  assert.equal(await code(complete(uid, {newPassword: PERMANENT}, {auth_time: Math.floor(clock.t / 1000) - 10 * 60})), "failed-precondition");
+});
+
+test("the temporary password and weak passwords are refused", async () => {
+  const {uid, temp} = await issue("c5");
+  assert.equal(await code(complete(uid, {newPassword: temp})), "invalid-argument");
+  assert.equal(await code(complete(uid, {newPassword: "short"})), "invalid-argument");
+  assert.equal(await code(complete(uid, {})), "invalid-argument");
+});
+
+test("completion sets the permanent password, clears the gate and leaves no secrets behind", async () => {
+  const {s, uid, temp} = await issue("c6");
+  assert.equal(await code(complete(uid, {newPassword: PERMANENT})), "ok");
+  assert.ok(await signIn(s.alias, PERMANENT));
+  assert.ok(!(await signIn(s.alias, temp)));
+  assert.equal((await getAuth().getUser(uid)).customClaims?.[FIRST_LOGIN_CLAIM], undefined);
+  assert.equal((await db.collection("users").doc(uid).get()).data()?.mustChangePassword, false);
+  const issuance = await issuanceOf(s);
+  assert.equal(issuance.state, "completed");
+  assert.equal(issuance.hash, undefined);
+  const audits = await db.collection("admin_audit_logs").where("targetId", "==", s.key).where("action", "==", "STUDENT_PASSWORD_SET").get();
+  assert.equal(audits.size, 1);
+  docs.push(audits.docs[0].ref);
+  assert.ok(!JSON.stringify(audits.docs[0].data()).includes(PERMANENT));
+  // A request for a login never replaces a finished account's password.
+  mails.length = 0;
+  clock.t += 25 * HOUR;
+  await ask({studentId: s.studentNo});
+  assert.equal(mails.length, 0);
+  assert.ok(await signIn(s.alias, PERMANENT));
+  // The gate cannot be replayed: without the claim nothing runs, and a stale claim only gets cleared, never a new password.
+  assert.equal(await code(complete(uid, {newPassword: "Another-Perm-9"}, {firstLoginPending: undefined})), "failed-precondition");
+  assert.equal(await code(complete(uid, {newPassword: "Another-Perm-9"})), "ok");
+  assert.ok(await signIn(s.alias, PERMANENT));
+  assert.ok(!(await signIn(s.alias, "Another-Perm-9")));
+});
+
+test("an interrupted completion is reconciled by the next sign-in with the new password", async () => {
+  const {s, uid} = await issue("c7");
+  await assert.rejects(
+    completePasswordChange(
+      {auth: {uid, token: {auth_time: Math.floor(clock.t / 1000), firstLoginPending: true}}, data: {newPassword: PERMANENT}},
+      {now: () => clock.t, afterAuthUpdate: async () => { throw new Error("crash after auth update"); }},
+    ),
+    /crash after auth update/,
+  );
+  assert.ok(await signIn(s.alias, PERMANENT), "Auth already holds the permanent password");
+  assert.equal((await db.collection("users").doc(uid).get()).data()?.mustChangePassword, true);
+  // The old session cannot finish it; a sign-in made after the change can, without sending the password again.
+  assert.equal(await code(complete(uid, {}, {auth_time: Math.floor(clock.t / 1000) - 60})), "failed-precondition");
+  assert.equal(await code(complete(uid, {}, {auth_time: Math.floor(clock.t / 1000) + 2})), "ok");
+  assert.equal((await db.collection("users").doc(uid).get()).data()?.mustChangePassword, false);
+  assert.equal((await getAuth().getUser(uid)).customClaims?.[FIRST_LOGIN_CLAIM], undefined);
+  assert.equal((await issuanceOf(s)).state, "completed");
 });

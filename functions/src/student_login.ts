@@ -3,7 +3,7 @@ import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {FieldValue, getFirestore} from "firebase-admin/firestore";
 import {error as logError} from "firebase-functions/logger";
-import {onCall} from "firebase-functions/v2/https";
+import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {canonicalLoginId, smtpAppPassword} from "./account_recovery";
 import {AUDIT_CATEGORIES, writeAudit} from "./audit";
@@ -15,6 +15,7 @@ import {studentAuthAliasEmail} from "./student_auth_alias";
 import {isAllowedPersonalEmail} from "./student_claim_domain";
 import {
   FIRST_LOGIN_CLAIM, MAX_ISSUES_PER_DAY, TEMP_PASSWORD_TTL_MS, generateTemporaryPassword, hashPassword, mayReissue,
+  validatePermanentPassword,
 } from "./student_login_domain";
 import {rosterStudentProfile} from "./student_profile";
 import {RECOVERY_CONTACTS, RECOVERY_EMAILS, normalizeRecoveryContactEmail, recoveryEmailHash} from "./student_recovery_contacts";
@@ -222,6 +223,86 @@ async function sendLoginMail(deps: LoginDeps, to: string, studentNo: string, pas
   });
 }
 
+// ------------------------------------------------------------------ permanent password
+
+const RECENT_LOGIN_SECONDS = 5 * 60;
+const precondition = (message: string, reason: string) => new HttpsError("failed-precondition", message, {reason});
+
+export type PasswordChangeRequest = {
+  auth?: {uid: string; token: {auth_time?: number; firstLoginPending?: boolean}} | null;
+  data?: unknown;
+};
+export type PasswordChangeDeps = {now: () => number; afterAuthUpdate?: () => Promise<void>};
+
+/**
+ * The only way out of the first-login restriction. The permanent password is set here, on the server, so the temporary
+ * one cannot be reused and the gate is never cleared on the client's word. Order: validate, mark the issuance
+ * `completing`, set the Auth password, then (second half) clear the profile flag and the claim. If the process stops
+ * between the halves, the student signs in with the new password and the next call finishes the second half alone.
+ */
+export async function completePasswordChange(request: PasswordChangeRequest, deps: PasswordChangeDeps = {now: () => Date.now()}) {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
+  if (request.auth?.token.firstLoginPending !== true) throw precondition("No password change is pending.", "not-pending");
+  const authTimeMs = Number(request.auth?.token.auth_time ?? 0) * 1000;
+  const now = deps.now();
+
+  const [user, profile] = await Promise.all([getAuth().getUser(uid), db().collection("users").doc(uid).get()]);
+  let key: string;
+  try {
+    key = canonicalLoginId(profile.data()?.schoolId);
+  } catch {
+    throw precondition("No password change is pending.", "not-pending");
+  }
+  if (user.email !== studentAuthAliasEmail(key) || user.disabled || profile.data()?.rosterLinked !== true) {
+    throw precondition("No password change is pending.", "not-pending");
+  }
+  const issuanceRef = db().collection(ISSUANCE).doc(key);
+  const rosterRef = db().collection("student_roster").doc(key);
+  const [issuanceSnap, rosterSnap] = await Promise.all([issuanceRef.get(), rosterRef.get()]);
+  const issuance = issuanceSnap.data();
+  if (!issuance || issuance.uid !== uid || rosterSnap.data()?.userId !== uid) throw precondition("No password change is pending.", "not-pending");
+
+  if (issuance.state === "completed") {
+    // Everything is done; only a stale claim is left (a previous call stopped before clearing it).
+    await getAuth().setCustomUserClaims(uid, {});
+    return {ok: true as const};
+  }
+  if (issuance.state === "completing") {
+    if (authTimeMs < Number(issuance.completingAtMs ?? Infinity)) {
+      throw precondition("Sign in again with your new password.", "sign-in-again");
+    }
+  } else if (issuance.state === "issued") {
+    if (Number(issuance.expiresAtMs ?? 0) <= now) throw precondition("This temporary password has expired. Ask for a new login.", "expired");
+    if (now / 1000 - authTimeMs / 1000 > RECENT_LOGIN_SECONDS) throw precondition("Sign in again to change your password.", "recent-login-required");
+    const raw = request.data && typeof request.data === "object" ? (request.data as {newPassword?: unknown}).newPassword : undefined;
+    validatePermanentPassword(raw, {studentKey: key, temporary: {hash: String(issuance.hash), salt: String(issuance.salt)}});
+    await db().runTransaction(async (transaction) => {
+      const live = (await transaction.get(issuanceRef)).data();
+      if (live?.state !== "issued") throw precondition("No password change is pending.", "not-pending");
+      transaction.update(issuanceRef, {state: "completing", completingAtMs: now});
+    });
+    await getAuth().updateUser(uid, {password: raw as string});
+    if (deps.afterAuthUpdate) await deps.afterAuthUpdate();
+  } else {
+    throw precondition("No password change is pending.", "not-pending");
+  }
+
+  await db().runTransaction(async (transaction) => {
+    transaction.update(db().collection("users").doc(uid), {
+      mustChangePassword: false, passwordChangedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.update(issuanceRef, {state: "completed", completedAt: FieldValue.serverTimestamp(), hash: FieldValue.delete(), salt: FieldValue.delete()});
+    writeAudit(transaction, db(), {
+      actorId: uid, actorNameSnapshot: "Student", actorRoleSnapshot: "student",
+      action: "STUDENT_PASSWORD_SET", category: AUDIT_CATEGORIES.authentication, targetType: "student", targetId: key,
+      metadata: {userId: uid},
+    });
+  });
+  await getAuth().setCustomUserClaims(uid, {});
+  return {ok: true as const};
+}
+
 // ------------------------------------------------------------------ callables
 
 export const requestStudentLogin = onCall(
@@ -231,3 +312,4 @@ export const requestStudentLoginDev = onCall(
     assertDevEndpointAllowed(currentProjectId());
     return requestLogin(request);
   });
+export const completeStudentPasswordChange = onCall((request) => completePasswordChange(request));
