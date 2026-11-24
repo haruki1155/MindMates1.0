@@ -1,4 +1,5 @@
 import {randomUUID} from "node:crypto";
+import {assertNotFirstLogin} from "./access";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
@@ -27,6 +28,7 @@ function safeErrorCode(error: unknown): string {
 }
 
 function requireUid(request: {auth?: {uid?: string}}): string {
+  assertNotFirstLogin(request);
   const uid = request.auth?.uid?.trim();
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
   return uid;
