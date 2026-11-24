@@ -196,6 +196,17 @@ class StudentRosterRepository {
   Future<void> requestPasswordResetForStudentId(String studentId) =>
       _call('requestStudentPasswordReset', {'studentId': studentId.trim()});
 
+  // ----------------------------------------- student login by roster email
+
+  /// Asks for a login email. The server answers identically for every Student ID.
+  Future<void> requestStudentLogin(String studentId) =>
+      _call('requestStudentLogin', {'studentId': studentId.trim()});
+
+  /// Sets the permanent password on the server. The session that called it is
+  /// revoked, so the caller signs in again with the new password afterwards.
+  Future<void> completePasswordChange(String newPassword) =>
+      _call('completeStudentPasswordChange', {'newPassword': newPassword});
+
   // ------------------------------------------------- student information
 
   Future<StudentInformation> getMyInformation() async =>

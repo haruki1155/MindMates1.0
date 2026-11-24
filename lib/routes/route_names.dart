@@ -6,6 +6,8 @@ class RouteNames {
   static const login = '/login';
   static const signup = '/signup';
   static const studentActivation = '/activate';
+  static const studentLoginRequest = '/student-login';
+  static const studentChangePassword = '/student-change-password';
   static const studentInformation = '/student-information';
   static const emailVerification = '/email-verification';
   static const profileSetup = '/profile-setup';
