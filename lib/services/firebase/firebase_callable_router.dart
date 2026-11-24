@@ -29,8 +29,12 @@ class FirebaseCallableRouter {
     'getStudentAcademicCalendar',
   };
 
+  /// The Dev aliases skip App Check, so only a Staging build without an App
+  /// Check provider uses them. An App Check build (live Staging Admin Web, an
+  /// approved pilot APK) has a token and must call the protected callable.
   static String name(String protectedName) {
     if (AppEnvironmentConfig.isStaging &&
+        !AppEnvironmentConfig.stagingAppCheckEnabled &&
         _stagingAliases.contains(protectedName)) {
       return '${protectedName}Dev';
     }
