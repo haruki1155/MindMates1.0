@@ -11,13 +11,20 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hosting-production-live
+  cancel-in-progress: false
+
 jobs:
   build_and_deploy:
-    if: ${{ inputs.confirm_production_deploy }}
+    # Manual, confirmed, from main only, and gated by the production environment.
+    if: ${{ inputs.confirm_production_deploy && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.4'
@@ -48,8 +55,10 @@ jobs:
           if not account.get('client_email') or not account.get('private_key'):
               sys.exit('The Firebase Hosting service account secret must contain the full JSON key.')
           PY
-      - uses: FirebaseExtended/action-hosting-deploy@v0
+      # v0.11.0
+      - uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a
         with:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MIND_MATES_CD2CF || secrets.FIREBASE_SERVICE_ACCOUNT }}
           channelId: live
           projectId: mind-mates-cd2cf
+          firebaseToolsVersion: 15.29.0
