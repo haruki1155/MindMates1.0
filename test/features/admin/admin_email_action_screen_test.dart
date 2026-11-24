@@ -155,6 +155,46 @@ void main() {
     );
 
     testWidgets(
+      'rejects expired and invalid codes on /reset-password without a password form',
+      (tester) async {
+        for (final (code, message) in [
+          (
+            'expired-action-code',
+            'This link has expired. Return to sign in and request a new one.',
+          ),
+          (
+            'invalid-action-code',
+            'This link is invalid or has already been used. Request a new one.',
+          ),
+        ]) {
+          final auth = _FakeFirebaseAuth()
+            ..verifyResetError = FirebaseAuthException(code: code);
+          final locations = <String>[];
+          await tester.pumpWidget(
+            MaterialApp(
+              home: AdminEmailActionScreen(
+                key: ValueKey(code),
+                uri: Uri.parse(
+                  'https://mindmate-staging.web.app/reset-password?mode=resetPassword&oobCode=synthetic-$code',
+                ),
+                auth: auth,
+                onReplaceLocation: locations.add,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          expect(find.text(message), findsOneWidget);
+          expect(find.byType(TextFormField), findsNothing);
+          expect(auth.confirmedResets, isEmpty);
+          await tester.tap(find.text('Return to sign in'));
+          await tester.pump();
+          expect(locations, ['https://mindmate-staging.web.app/']);
+        }
+      },
+    );
+
+    testWidgets(
       'routes root and /verify-email without oobCode to auth gate',
       (tester) async {
         for (final route in ['/', '/verify-email']) {
@@ -396,6 +436,23 @@ void main() {
             'http://paaccmindmate.com/verify-email?mode=verifyEmail&oobCode=secret',
           ),
           environment: AppEnvironment.staging,
+        ),
+        '/',
+      );
+      // The staging Firebase Hosting fallback used by recovery emails.
+      const resetOnStagingHosting =
+          'https://mindmate-staging.web.app/reset-password?mode=resetPassword&oobCode=secret';
+      expect(
+        AdminEmailActionScreen.resolveReturnToSignInUrl(
+          Uri.parse(resetOnStagingHosting),
+          environment: AppEnvironment.staging,
+        ),
+        'https://mindmate-staging.web.app/',
+      );
+      expect(
+        AdminEmailActionScreen.resolveReturnToSignInUrl(
+          Uri.parse(resetOnStagingHosting),
+          environment: AppEnvironment.production,
         ),
         '/',
       );
