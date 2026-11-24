@@ -34,5 +34,13 @@ Students have no activation step. A student whose Student ID is on the roster wi
 - The temporary password has no timed expiry: it stays valid until used or rotated by a new request. Enforcing expiry would need a custom login.
 - A password in an email is only as safe as the mailbox; forced change at first login is the mitigation.
 
+## V2 security revisions (approved 2026-11-24, supersede the sections below and above where they differ)
+- Temporary passwords have a **server-enforced expiry (24 h)**. An expired issuance can never complete a password change; the student requests a new login.
+- Requests do **not** rotate an unexpired temporary password on every call. Reissue (which rotates) only after expiry, or after a 60-minute cooldown with at most 3 issues per 24 h.
+- The first-login restriction is a **custom Auth claim `firstLoginPending`**, enforced in Firestore Rules (`signedIn()`), callables (`requireUid` and every direct `request.auth` reader) and the Flutter gate. Only own-profile read is allowed while pending.
+- The permanent password is set **server-side** (`completeStudentPasswordChange`, Admin `updateUser`) after recent-auth, UID, roster, issuance-expiry and password-policy checks and rejection of temp-password reuse (server-only scrypt hash). The claim and `mustChangePassword` clear only after Auth succeeds; an interrupted completion is reconciled on the next sign-in.
+- The roster email is stored as a verified recovery contact at issuance so the existing Forgot Password flow works unchanged after setup.
+- Existing activation/setup Functions stay deployed; only the app's entry points are removed.
+
 ## Left to the builder
 Exact email wording, rate-limit numbers (suggest 3/hour per ID, 10/hour per IP), password length/charset (suggest 12 chars, no ambiguous characters), test layout, and migrating tests that assumed activation.
