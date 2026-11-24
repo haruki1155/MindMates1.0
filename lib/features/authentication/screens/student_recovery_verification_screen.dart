@@ -289,7 +289,7 @@ class _StudentRecoveryVerificationScreenState
       if (!mounted) return;
       Navigator.of(
         context,
-      ).pushNamedAndRemoveUntil(RouteNames.studentActivation, (route) => false);
+      ).pushNamedAndRemoveUntil(RouteNames.studentLoginRequest, (route) => false);
     } catch (_) {
       if (!mounted) return;
       _show(

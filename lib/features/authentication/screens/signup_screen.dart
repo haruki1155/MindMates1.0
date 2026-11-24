@@ -285,7 +285,7 @@ class _SignupBodyState extends State<_SignupBody> {
     // Rebuild the stack on top of sign in rather than replacing this screen, so
     // backing out of activation lands somewhere usable.
     navigator.pushNamedAndRemoveUntil(RouteNames.login, (route) => false);
-    navigator.pushNamed(RouteNames.studentActivation);
+    navigator.pushNamed(RouteNames.studentLoginRequest);
   }
 
   Future<bool> _confirmRegistrationEmail(String normalizedEmail) async {
@@ -698,7 +698,7 @@ class _EmailGuide extends StatelessWidget {
     final message = switch (kind) {
       _EmailKind.empty => 'Use your @ucu.edu.ph employee email.',
       _EmailKind.personal =>
-        "Students activate accounts through the roster. Tap 'Activate student account'.",
+        "Students get their login by email. Tap 'Email me my login'.",
       _EmailKind.institutional => 'Institutional email detected.',
     };
     return Container(
@@ -752,7 +752,7 @@ class _EmailGuide extends StatelessWidget {
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    child: const Text('Activate student account'),
+                    child: const Text('Email me my login'),
                   ),
               ],
             ),

@@ -223,7 +223,7 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Use another email'));
     await tester.pumpAndSettle();
     expect(auth.cancelled, 1);
-    expect(find.text('activation target'), findsOneWidget);
+    expect(find.text('login request target'), findsOneWidget);
   });
 
   group('EmailVerificationGate', () {
@@ -263,7 +263,7 @@ Future<void> _pump(
         routes: {
           RouteNames.profileSetup: (_) => const Scaffold(body: Text('profile setup target')),
           RouteNames.studentInformation: (_) => const Scaffold(body: Text('student info target')),
-          RouteNames.studentActivation: (_) => const Scaffold(body: Text('activation target')),
+          RouteNames.studentLoginRequest: (_) => const Scaffold(body: Text('login request target')),
           RouteNames.home: (_) => const Scaffold(body: Text('home target')),
           RouteNames.login: (_) => const Scaffold(body: Text('login target')),
         },

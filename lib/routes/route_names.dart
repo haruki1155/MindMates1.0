@@ -5,7 +5,6 @@ class RouteNames {
   static const onboarding = '/onboarding';
   static const login = '/login';
   static const signup = '/signup';
-  static const studentActivation = '/activate';
   static const studentLoginRequest = '/student-login';
   static const studentChangePassword = '/student-change-password';
   static const studentInformation = '/student-information';
