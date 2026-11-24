@@ -128,6 +128,32 @@ void main() {
       },
     );
 
+    // Recovery emails link here because Firebase Hosting reserves /__/*.
+    testWidgets(
+      'routes /reset-password with mode=resetPassword and oobCode to AdminEmailActionScreen',
+      (tester) async {
+        tester.binding.platformDispatcher.defaultRouteNameTestValue =
+            '/reset-password?mode=resetPassword&oobCode=synthetic-reset';
+        addTearDown(
+          tester.binding.platformDispatcher.clearDefaultRouteNameTestValue,
+        );
+
+        await tester.pumpWidget(
+          MindMateAdminApp(
+            auth: _FakeFirebaseAuth()..resetEmail = 'staff@example.edu',
+            onReplaceLocation: (_) {},
+            authGateBuilder: (_) =>
+                const Scaffold(body: Text('Sign In Gate')),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AdminEmailActionScreen), findsOneWidget);
+        expect(find.text('Sign In Gate'), findsNothing);
+        expect(find.text('Choose a new password'), findsOneWidget);
+      },
+    );
+
     testWidgets(
       'routes root and /verify-email without oobCode to auth gate',
       (tester) async {
