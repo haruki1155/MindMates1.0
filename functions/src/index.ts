@@ -3063,6 +3063,7 @@ export {
   confirmStudentRecoveryEmailCode, confirmStudentRecoveryEmailCodeDev,
   requestStudentPasswordReset, requestStudentPasswordResetDev,
 } from "./student_account_recovery";
+export {requestStudentLogin, requestStudentLoginDev} from "./student_login";
 export {
   getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
   reviewStudentCorrection, saveStudentPersonalInfo,
