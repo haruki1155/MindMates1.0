@@ -184,8 +184,10 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
     if (_auth.currentUser?.uid != uid) return;
     final thread = _db.collection('counselor_threads').doc(uid);
     final snapshot = await thread.get();
-    if (studentThreadUnread(snapshot.data() ?? {})) {
-      await thread.update({'studentReadAt': FieldValue.serverTimestamp()});
+    final data = snapshot.data() ?? {};
+    if (studentThreadUnread(data)) {
+      // The counselor message actually seen, so a later reply is never Read.
+      await thread.update({'studentReadAt': data['lastCounselorMessageAt']});
     }
   }
 }

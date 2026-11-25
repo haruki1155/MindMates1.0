@@ -421,8 +421,10 @@ service cloud.firestore {
                 && request.resource.data.lastStudentMessageAt == request.time
                 && request.resource.data.lastStudentMessageId != resource.data.get('lastStudentMessageId', '')
                 && linkedCounselorMessage(userId, request.resource.data.lastStudentMessageId, userId, 'user')))
+            // The latest counselor message the student has seen (the counselor's Read).
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['studentReadAt'])
-              || request.resource.data.studentReadAt == request.time)
+              || (request.resource.data.studentReadAt is timestamp
+                && request.resource.data.studentReadAt <= request.time))
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['studentName'])
               || (request.resource.data.studentName is string
                 && request.resource.data.studentName.size() <= 160
@@ -437,9 +439,13 @@ service cloud.firestore {
                 && request.resource.data.lastCounselorMessageAt == request.time
                 && request.resource.data.lastCounselorMessageId != resource.data.get('lastCounselorMessageId', '')
                 && linkedCounselorMessage(userId, request.resource.data.lastCounselorMessageId, request.auth.uid, 'counselor')))
-            // Lets the student see that a counselor opened the thread (Read).
+            // The latest student message a counselor has seen (the student's Read).
+            // Never in the future and never moving backwards.
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['counselorReadAt'])
-              || request.resource.data.counselorReadAt == request.time))
+              || (request.resource.data.counselorReadAt is timestamp
+                && request.resource.data.counselorReadAt <= request.time
+                && (!('counselorReadAt' in resource.data)
+                  || request.resource.data.counselorReadAt >= resource.data.counselorReadAt))))
         );
       allow delete: if false;
 

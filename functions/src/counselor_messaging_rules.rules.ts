@@ -116,11 +116,41 @@ test("a signed-in non-counselor cannot write as a counselor", async () => {
   }));
 });
 
-test("only an approved counselor can stamp counselorReadAt, and only with the server time", async () => {
+const past = (minutes: number) => Timestamp.fromMillis(Date.now() - minutes * 60_000);
+const future = (minutes: number) => Timestamp.fromMillis(Date.now() + minutes * 60_000);
+
+test("an approved counselor stamps counselorReadAt with the student message time they saw", async () => {
   await seedThread();
-  await assertSucceeds(updateDoc(doc(counselor(), "counselor_threads/s1"), {counselorReadAt: serverTimestamp()}));
-  await assertFails(updateDoc(doc(counselor(), "counselor_threads/s1"), {counselorReadAt: Timestamp.now()}));
-  await assertFails(updateDoc(doc(student(), "counselor_threads/s1"), {counselorReadAt: serverTimestamp()}));
+  const thread = () => doc(counselor(), "counselor_threads/s1");
+  await assertSucceeds(updateDoc(thread(), {counselorReadAt: past(10)}));
+  await assertSucceeds(updateDoc(thread(), {counselorReadAt: serverTimestamp()}));
+  await assertFails(updateDoc(thread(), {counselorReadAt: past(30)})); // never moves backwards
+  await assertFails(updateDoc(doc(counselor(), "counselor_threads/s1"), {counselorReadAt: future(10)}));
+  await assertFails(updateDoc(doc(student(), "counselor_threads/s1"), {counselorReadAt: past(1)}));
+});
+
+test("counselorReadAt cannot carry other thread changes", async () => {
+  await seedThread();
+  const thread = doc(counselor(), "counselor_threads/s1");
+  await assertFails(updateDoc(thread, {counselorReadAt: past(1), collegeId: "c-other"}));
+  await assertFails(updateDoc(thread, {counselorReadAt: past(1), studentName: "Someone"}));
+  await assertFails(updateDoc(thread, {
+    counselorReadAt: past(1), updatedAt: serverTimestamp(), lastCounselorMessageAt: serverTimestamp(),
+    lastCounselorMessageId: "no-such-message",
+  }));
+});
+
+test("a student records the counselor message time they saw, never a future time", async () => {
+  await seedThread();
+  const thread = doc(student(), "counselor_threads/s1");
+  await assertSucceeds(updateDoc(thread, {studentReadAt: past(5)}));
+  await assertSucceeds(updateDoc(thread, {studentReadAt: serverTimestamp()}));
+  await assertFails(updateDoc(thread, {studentReadAt: future(5)}));
+});
+
+test("a student cannot create a message outside the send batch", async () => {
+  await seedThread();
+  await assertFails(setDoc(doc(student(), "counselor_threads/s1/messages/lone"), reply("Hello there")));
 });
 
 test("historical free-text messages stay readable by the student and counselor", async () => {

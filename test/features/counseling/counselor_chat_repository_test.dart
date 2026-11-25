@@ -45,6 +45,13 @@ class TestReference extends Fake
   Future<DocumentSnapshot<Map<String, dynamic>>> get([
     GetOptions? options,
   ]) async => TestSnapshot(db.documents[path]);
+  @override
+  Future<void> update(Map<Object, Object?> data) async {
+    db.documents[path] = {
+      ...?db.documents[path],
+      ...data.map((k, v) => MapEntry(k.toString(), v)),
+    };
+  }
 }
 
 class TestCollection extends Fake
@@ -212,4 +219,22 @@ void main() {
     await repo.send('student', 'same', 'I am available.');
     expect(db.committedMessages, 1);
   });
+
+  test(
+    'markRepliesRead records the counselor message the student saw',
+    () async {
+      final db = TestFirestore();
+      final seen = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10));
+      db.documents['counselor_threads/student'] = {
+        'userId': 'student',
+        'lastCounselorMessageAt': seen,
+      };
+      final repo = FirestoreCounselorChatRepository(
+        firestore: db,
+        auth: TestAuth(),
+      );
+      await repo.markRepliesRead('student');
+      expect(db.documents['counselor_threads/student']!['studentReadAt'], seen);
+    },
+  );
 }

@@ -7,6 +7,7 @@ import 'package:mind_mates/features/counseling/data/guidance_quick_replies.dart'
 import 'package:mind_mates/features/counseling/repositories/counselor_chat_repository.dart';
 import 'package:mind_mates/features/counseling/controllers/counselor_send_controller.dart';
 import 'package:mind_mates/features/counseling/widgets/counselor_message_timeline.dart';
+import 'package:mind_mates/features/counseling/widgets/guidance_quick_reply_composer.dart';
 import 'package:mind_mates/features/counseling/screens/counselor_chat_screen.dart';
 import 'package:mind_mates/core/theme/app_theme.dart';
 
@@ -701,6 +702,67 @@ void main() {
       store.failSave = false;
       await sender.retry();
       expect(repo.calls, [id]);
+    },
+  );
+
+  testWidgets('the composer sits flush with the bottom of the screen', (
+    tester,
+  ) async {
+    final repo = FakeChat();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CounselorChatScreen(
+          userId: 'student',
+          repository: repo,
+          outbox: MemoryOutbox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final screenBottom = tester.getBottomLeft(find.byType(Scaffold)).dy;
+    expect(
+      tester.getBottomLeft(find.byType(GuidanceQuickReplyComposer)).dy,
+      screenBottom,
+    );
+    await tester.pumpWidget(const SizedBox());
+    await repo.messages.close();
+  });
+
+  testWidgets(
+    'the legacy notice keeps Discard reachable at 2x on a small screen',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repo = FakeChat()..failure = const QuickReplyNotAllowedException();
+      final store = MemoryOutbox()
+        ..value = const OutgoingInquiry(id: 'legacy-1', text: 'Old free text');
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: CounselorChatScreen(
+            userId: 'student',
+            repository: repo,
+            outbox: store,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Retry'));
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.text('Discard'));
+      await tester.pumpAndSettle();
+      expect(find.text('Discard').hitTestable(), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await repo.messages.close();
     },
   );
 }

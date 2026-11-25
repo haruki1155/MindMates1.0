@@ -172,8 +172,11 @@ class _CounselorChatScreenState extends State<CounselorChatScreen> {
           : Column(
               children: [
                 if (MediaQuery.viewInsetsOf(context).bottom == 0)
-                  // Scrolls instead of overflowing at large text on small screens.
-                  Flexible(
+                  // Capped and scrollable so it never crowds out the timeline.
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: MediaQuery.sizeOf(context).height * .15,
+                    ),
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.all(12),
                       child: Text(

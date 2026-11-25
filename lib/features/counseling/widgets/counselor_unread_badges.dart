@@ -433,7 +433,7 @@ class CounselorInboxUnreadController extends ChangeNotifier {
       if (!_disposed && epoch == _authEpoch && _activeUid == uid) {
         _recordCommittedWatermark(studentId, watermark);
       }
-      unawaited(_touchCounselorReadAt(db, studentId));
+      unawaited(_touchCounselorReadAt(db, studentId, watermark));
     } catch (_) {
       if (!_disposed && epoch == _authEpoch && _activeUid == uid) {
         _removeInFlightToken(studentId, token);
@@ -465,15 +465,19 @@ class CounselorInboxUnreadController extends ChangeNotifier {
     }
   }
 
-  /// Lets the student see Read. Kept out of the receipt batches and allowed to
-  /// fail, so badges keep working on rules that predate `counselorReadAt`.
+  /// Records [seenThrough], the latest student message this counselor has
+  /// seen, so the student sees Read only on messages a counselor saw. Kept out
+  /// of the receipt batches and allowed to fail, so badges keep working on
+  /// rules that predate `counselorReadAt`.
   Future<void> _touchCounselorReadAt(
     FirebaseFirestore db,
     String studentId,
+    Timestamp? seenThrough,
   ) async {
+    if (seenThrough == null) return;
     try {
       await db.collection('counselor_threads').doc(studentId).update({
-        'counselorReadAt': FieldValue.serverTimestamp(),
+        'counselorReadAt': seenThrough,
       });
     } catch (_) {
       debugPrint('COUNSELOR_READ_AT_SKIPPED');
@@ -540,7 +544,7 @@ class CounselorInboxUnreadController extends ChangeNotifier {
       });
       batch.set(receipt, _receiptFields(studentId, watermark));
       await batch.commit();
-      unawaited(_touchCounselorReadAt(db, studentId));
+      unawaited(_touchCounselorReadAt(db, studentId, watermark));
       if (!_disposed &&
           epoch == _authEpoch &&
           _activeUid == uid &&

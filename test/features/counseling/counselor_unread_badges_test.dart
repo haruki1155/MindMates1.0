@@ -1278,9 +1278,39 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         expect(
           db.getEntry('counselor_threads/s1')?.data['counselorReadAt'],
-          isA<Timestamp>(),
+          tStudent,
+          reason: 'the student message the counselor saw, not the commit time',
         );
       });
+
+      test(
+        'no counselorReadAt is stamped when no student message was seen',
+        () async {
+          db.seedDoc('counselor_threads/s1', {
+            'userId': 's1',
+            'collegeId': 'CITE',
+          });
+          final controller = CounselorInboxUnreadController(
+            firestore: db,
+            auth: auth,
+          );
+          addTearDown(controller.dispose);
+          await Future<void>.delayed(Duration.zero);
+          await controller.sendCounselorReply(
+            studentId: 's1',
+            text: 'Hello from PACC.',
+            expectedUid: 'counselor-a',
+          );
+          await Future<void>.delayed(Duration.zero);
+          expect(
+            db
+                .getEntry('counselor_threads/s1')
+                ?.data
+                .containsKey('counselorReadAt'),
+            isFalse,
+          );
+        },
+      );
 
       test(
         'a refused counselorReadAt update leaves the receipt and badge intact',
@@ -1329,7 +1359,7 @@ void main() {
           await Future<void>.delayed(Duration.zero);
           expect(
             db.getEntry('counselor_threads/s1')?.data['counselorReadAt'],
-            isA<Timestamp>(),
+            tStudent,
           );
           expect(db.committedBatches.last, hasLength(3));
 

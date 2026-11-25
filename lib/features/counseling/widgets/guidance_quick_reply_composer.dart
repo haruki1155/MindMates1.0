@@ -58,30 +58,29 @@ class GuidanceQuickReplyComposer extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (notice != null)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            notice!,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colors.error,
-                            ),
-                          ),
-                        ),
-                        if (onDiscard != null)
-                          TextButton(
-                            onPressed: onDiscard,
-                            child: const Text('Discard'),
-                          ),
-                      ],
-                    ),
-                  // Replies and alternatives scroll; Send stays in view.
+                  // Notice, replies and alternatives scroll; Send stays in view.
                   Flexible(
                     child: SingleChildScrollView(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          if (notice != null)
+                            Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(
+                                  notice!,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colors.error,
+                                  ),
+                                ),
+                                if (onDiscard != null)
+                                  TextButton(
+                                    onPressed: onDiscard,
+                                    child: const Text('Discard'),
+                                  ),
+                              ],
+                            ),
                           if (collapsed)
                             Align(
                               alignment: Alignment.centerLeft,
