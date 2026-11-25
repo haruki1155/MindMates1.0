@@ -795,7 +795,7 @@ class _ManualBulkImportPanelState extends State<ManualBulkImportPanel> {
                             border: Border.all(color: AdminColors.border),
                           ),
                           child: Text(
-                            i == 3
+                            i == 3 || i == 8
                                 ? '${rosterTemplateHeaders[i]} (opt.)'
                                 : '${rosterTemplateHeaders[i]} *',
                             style: const TextStyle(
