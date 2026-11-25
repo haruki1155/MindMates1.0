@@ -1,4 +1,5 @@
 import {createHash, randomUUID} from "node:crypto";
+import {assertNotFirstLogin} from "../access";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {FieldValue, Timestamp, getFirestore} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
@@ -44,6 +45,7 @@ const limits = db.collection("assessment_limits");
 const MAX_SUBMISSION_ID_LENGTH = 100;
 
 function uidFrom(request: {auth?: {uid?: string}}): string {
+  assertNotFirstLogin(request);
   const uid = request.auth?.uid?.trim();
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
   return uid;

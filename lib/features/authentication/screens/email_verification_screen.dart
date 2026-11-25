@@ -265,7 +265,7 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen>
       await auth.cancelPendingRegistration();
       if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil(
-        wasStudent ? RouteNames.studentActivation : RouteNames.signup,
+        wasStudent ? RouteNames.studentLoginRequest : RouteNames.signup,
         (route) => false,
       );
     } catch (_) {

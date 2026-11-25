@@ -1,7 +1,7 @@
 import {getApps, initializeApp} from "firebase-admin/app";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
-import {configuredSuperAdminUid, requireClinical} from "./access";
+import {assertNotFirstLogin, configuredSuperAdminUid, requireClinical} from "./access";
 import {AUDIT_CATEGORIES, actorName, writeAuditBatch} from "./audit";
 import {defaultSchoolYear, listAcademicYears, readPopulationConfig} from "./counseling_population";
 import {
@@ -722,6 +722,7 @@ export function buildReportAnalytics(
 }
 
 export const getReportAnalytics = onCall(async (request) => {
+  assertNotFirstLogin(request);
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
   const actor = await requireClinical(uid);

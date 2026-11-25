@@ -12,6 +12,10 @@ String destinationAfterAuthentication({
 /// when nothing is pending. Students owing Student Information come first.
 String? gateRouteForUser(UserModel user) {
   if (user.effectivePopulationRole == PopulationRole.student &&
+      user.mustChangePassword) {
+    return RouteNames.studentChangePassword;
+  }
+  if (user.effectivePopulationRole == PopulationRole.student &&
       user.personalInfoRequired) {
     return RouteNames.studentInformation;
   }

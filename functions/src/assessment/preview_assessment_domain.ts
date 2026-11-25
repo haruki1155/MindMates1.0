@@ -1,4 +1,5 @@
 import {getFirestore} from "firebase-admin/firestore";
+import {assertNotFirstLogin} from "../access";
 import {CallableRequest, HttpsError} from "firebase-functions/v2/https";
 
 import {AssessmentValidationError} from "./calculator";
@@ -19,6 +20,7 @@ function requestData(value: unknown): Record<string, unknown> {
 }
 
 function uidFrom(request: {auth?: {uid?: string}}): string {
+  assertNotFirstLogin(request);
   const uid = request.auth?.uid?.trim();
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
   return uid;

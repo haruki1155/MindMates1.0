@@ -5,7 +5,16 @@ import {defineString} from "firebase-functions/params";
 
 export const superAdminUid = defineString("SUPER_ADMIN_UID");
 
+/** A student still on the temporary password may only set a permanent one; every other callable refuses them. */
+export function assertNotFirstLogin(request: {auth?: unknown}): void {
+  const auth = request.auth as {token?: {firstLoginPending?: boolean}} | null | undefined;
+  if (auth?.token?.firstLoginPending === true) {
+    throw new HttpsError("permission-denied", "Set your new password first.", {reason: "first-login-pending"});
+  }
+}
+
 export function requireUid(request: {auth?: {uid: string} | null}): string {
+  assertNotFirstLogin(request);
   const userId = request.auth?.uid;
   if (!userId) throw new HttpsError("unauthenticated", "Sign in is required.");
   return userId;

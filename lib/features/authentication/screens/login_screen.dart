@@ -206,7 +206,7 @@ class _LoginBodyState extends State<_LoginBody> {
   }
 
   void _openStudentActivation() {
-    Navigator.of(context).pushNamed(RouteNames.studentActivation);
+    Navigator.of(context).pushNamed(RouteNames.studentLoginRequest);
   }
 
   @override
@@ -445,7 +445,7 @@ class _LoginFormCard extends StatelessWidget {
           FilledButton.tonalIcon(
             onPressed: onActivateStudent,
             icon: const Icon(Icons.school_outlined, size: 18),
-            label: const Text('Activate student account'),
+            label: const Text('Email me my login'),
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(46),
               foregroundColor: _LoginColors.text,
