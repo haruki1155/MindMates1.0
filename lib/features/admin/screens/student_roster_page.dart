@@ -200,7 +200,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Student Roster',
+            'Student Directory',
             style: Theme.of(context).textTheme.headlineLarge,
           ),
           const SizedBox(height: 6),
