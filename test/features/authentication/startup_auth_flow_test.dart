@@ -90,6 +90,32 @@ void main() {
     expect(find.text('student info target'), findsOneWidget);
   });
 
+  testWidgets('splash resumes a student on the temporary password at Change password', (
+    tester,
+  ) async {
+    final userRepository = _FakeUserRepository(
+      user: const UserModel(
+        id: 'user_1',
+        email: 'leo@example.com',
+        populationRole: PopulationRole.student,
+        mustChangePassword: true,
+        personalInfoRequired: true,
+        profileVersion: 3,
+      ),
+    );
+    await tester.pumpWidget(
+      _SplashHarness(
+        authProvider: AuthProvider(
+          _FakeAuthRepository(currentUserId: 'user_1'),
+        ),
+        userProvider: UserProvider(userRepository),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 1901));
+    await tester.pumpAndSettle();
+    expect(find.text('change password target'), findsOneWidget);
+  });
+
   testWidgets('splash sends an unverified Student ID account to recovery-email verification', (
     tester,
   ) async {
@@ -162,6 +188,8 @@ class _SplashHarness extends StatelessWidget {
           RouteNames.home: (_) => const _RouteMarker('home target'),
           RouteNames.studentInformation: (_) =>
               const _RouteMarker('student info target'),
+          RouteNames.studentChangePassword: (_) =>
+              const _RouteMarker('change password target'),
           RouteNames.profileSetup: (_) =>
               const _RouteMarker('profile setup target'),
           RouteNames.emailVerification: (_) =>

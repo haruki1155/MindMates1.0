@@ -112,58 +112,16 @@ export function canonicalLoginId(value: unknown): string {
   return canonical;
 }
 
+// Pre-login School-ID resolution is a pure function of its input. It returns
+// only the deterministic legacy alias (`<id>@mindmate.local`) that anyone can
+// derive from the ID, and never reads Firestore or Auth. It therefore cannot
+// disclose a stored (real) account email and cannot reveal whether an
+// account exists, is disabled or is revoked. Accounts with a real email sign
+// in with that email; Firebase Auth then enforces the credential itself.
 async function resolveSchoolIdAuthEmailHandler(request: CallableRequest) {
   const rawSchoolId = request.data?.schoolId;
-  const canonical = canonicalLoginId(rawSchoolId);
-  const entered = String(rawSchoolId).trim();
-
-  // Student and employee IDs are reserved during profile provisioning. Using
-  // these server-only indexes also makes this work for accounts created before
-  // School-ID sign-in was introduced.
-  const [studentReservation, employeeReservation] = await Promise.all([
-    db.collection("student_id_reservations").doc(canonical).get(),
-    db.collection("employee_id_reservations").doc(canonical).get(),
-  ]);
-  const reservation = studentReservation.exists
-    ? studentReservation
-    : employeeReservation.exists
-      ? employeeReservation
-      : null;
-  let userId = reservation?.data()?.userId;
-
-  // Older profiles may predate the reservation collections. Fall back to the
-  // protected profile data so already-registered users are not locked out.
-  if (typeof userId !== "string" || userId.length === 0) {
-    const candidateValues = [...new Set([entered, canonical])];
-    const profileQueries = candidateValues.flatMap((value) => [
-      db.collection("users").where("schoolId", "==", value).limit(1).get(),
-      db.collection("users").where("employeeId", "==", value).limit(1).get(),
-    ]);
-    const profileResults = await Promise.all(profileQueries);
-    const matchedProfile = profileResults.find((result) => !result.empty);
-    userId = matchedProfile?.docs[0]?.id;
-  }
-
-  if (typeof userId === "string" && userId.length > 0) {
-    const user = await getAuth().getUser(userId);
-    if (user.email) return {email: user.email};
-  }
-
-  // Retain support for legacy accounts whose Firebase credential was created
-  // directly from the School ID but whose profile was never provisioned.
-  try {
-    const legacy = await getAuth().getUserByEmail(
-      authEmailForSchoolId(String(rawSchoolId)),
-    );
-    if (legacy.email) return {email: legacy.email};
-  } catch (error: unknown) {
-    const code = (error as {code?: string})?.code;
-    if (code !== "auth/user-not-found") throw error;
-  }
-
-  // Keep the response generic so callers cannot distinguish an unknown ID
-  // from another invalid credential using the message alone.
-  throw new HttpsError("not-found", "School ID or password is incorrect.");
+  canonicalLoginId(rawSchoolId);
+  return {email: authEmailForSchoolId(String(rawSchoolId))};
 }
 
 export function normalizeRecoveryEmail(value: unknown): string {

@@ -285,7 +285,7 @@ void main() {
 
   for (final student in [true, false]) {
     testWidgets(
-      'Use another email routes ${student ? 'students to activation' : 'employees to signup'}',
+      'Use another email routes ${student ? 'students to the login request' : 'employees to signup'}',
       (tester) async {
         final users = UserProvider(
           _FakeUserRepository(
@@ -306,7 +306,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(
-          find.text(student ? 'activation target' : 'signup target'),
+          find.text(student ? 'login request target' : 'signup target'),
           findsOneWidget,
         );
         await tester.pumpWidget(const SizedBox());
@@ -353,8 +353,8 @@ Future<void> _pumpScreen(
         routes: {
           RouteNames.profileSetup: (_) =>
               const Scaffold(body: Text('profile setup target')),
-          RouteNames.studentActivation: (_) =>
-              const Scaffold(body: Text('activation target')),
+          RouteNames.studentLoginRequest: (_) =>
+              const Scaffold(body: Text('login request target')),
           RouteNames.studentInformation: (_) =>
               const Scaffold(body: Text('student info target')),
           RouteNames.signup: (_) => const Scaffold(body: Text('signup target')),

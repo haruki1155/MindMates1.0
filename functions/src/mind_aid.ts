@@ -1,4 +1,5 @@
 import {createHash} from "node:crypto";
+import {assertNotFirstLogin} from "./access";
 
 import type {protos} from "@google-cloud/dialogflow-cx";
 import {getApps, initializeApp} from "firebase-admin/app";
@@ -559,6 +560,7 @@ async function persistTurn(uid: string, requestId: string, conversationId: strin
 }
 
 async function sendMindAidMessageHandler(request: CallableRequest) {
+  assertNotFirstLogin(request);
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
   if (!request.data || typeof request.data !== "object" || Array.isArray(request.data)) {

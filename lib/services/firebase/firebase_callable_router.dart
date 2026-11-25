@@ -23,6 +23,7 @@ class FirebaseCallableRouter {
     'requestStudentRecoveryEmailCode',
     'confirmStudentRecoveryEmailCode',
     'requestStudentPasswordReset',
+    'requestStudentLogin',
     // Staging installs no App Check provider, so the protected
     // `createMoodEntry` (enforceAppCheck: true) always refuses there.
     'createMoodEntry',

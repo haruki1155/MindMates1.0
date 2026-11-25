@@ -1,4 +1,5 @@
 import {getApps, initializeApp} from "firebase-admin/app";
+import {assertNotFirstLogin} from "./access";
 import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 import {defineBoolean, defineString} from "firebase-functions/params";
@@ -62,6 +63,7 @@ export function requireMoodV2StagingPilot(uid: string, gate: MoodV2RolloutGate =
 }
 
 function requireUid(request: {auth?: {uid?: string}}): string {
+  assertNotFirstLogin(request);
   const uid = request.auth?.uid?.trim();
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
   return uid;

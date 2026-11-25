@@ -63,7 +63,7 @@ export {
   requestStaffEmailVerification,
   requestStaffEmailVerificationDev,
 } from "./account_recovery";
-import {configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid as requireAuthenticatedUser} from "./access";
+import {assertNotFirstLogin, configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid as requireAuthenticatedUser} from "./access";
 import {createHash, randomBytes} from "node:crypto";
 import {ACTOR_SCOPED_AUDIT_ACTIONS, AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, auditLogOwnerField, writeAudit, writeAuditBatch} from "./audit";
 import {
@@ -1501,6 +1501,7 @@ export function activeCommentDelta(before: unknown, after: unknown): number {
 }
 
 export const rebuildMySecretChatStats = onCall(async (request) => {
+  assertNotFirstLogin(request);
   const userId = request.auth?.uid;
   if (!userId) throw new HttpsError("unauthenticated", "Sign in is required.");
   const statsRef = stats.doc(userId);
@@ -1691,6 +1692,7 @@ export function isNormalNotificationType(type: unknown): boolean {
 }
 
 export const managePortalNotification = onCall(async (request) => {
+  assertNotFirstLogin(request);
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in is required.");
   const rawIds = Array.isArray(request.data?.notificationIds)
@@ -2476,6 +2478,7 @@ export const createAppointmentRequest = onCall(async (request) => {
 });
 
 export const initializeAppointmentScheduleRevision = onCall(async (request) => {
+  assertNotFirstLogin(request);
   const staffId = request.auth?.uid;
   if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
   await requireClinicalAppointmentStaff(staffId);
@@ -2538,6 +2541,7 @@ export const respondToAppointment = onCall(async (request) => handleAppointmentA
 ));
 
 export const reviewAppointment = onCall(async (request) => {
+  assertNotFirstLogin(request);
   const staffId = request.auth?.uid;
   if (!staffId) throw new HttpsError("unauthenticated", "Sign in is required.");
   await requireClinicalAppointmentStaff(staffId);
@@ -3063,6 +3067,7 @@ export {
   confirmStudentRecoveryEmailCode, confirmStudentRecoveryEmailCodeDev,
   requestStudentPasswordReset, requestStudentPasswordResetDev,
 } from "./student_account_recovery";
+export {requestStudentLogin, requestStudentLoginDev, completeStudentPasswordChange} from "./student_login";
 export {
   getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
   reviewStudentCorrection, saveStudentPersonalInfo,
