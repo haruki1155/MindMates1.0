@@ -45,20 +45,20 @@ matches the PR. Merging only redeploys the Staging Admin Web through the Hosting
    ran is in this branch, which differs only by `main`'s newer recovery-link code and the
    resolver. The admin reset hardening (`2246a26`: timing floor, Dev project gate) is
    **not** in it; PR #78 carries it.
-3. **PR #78** after step 2. It carries the admin reset hardening from `2246a26`: the reset
+3. **PR #78**, merged as `4be1212`. It carries the admin reset hardening from `2246a26`: the reset
    handler and rate limit are identical to the deployed `requestAdminPasswordReset-00007`, and
    `requestAdminPasswordResetDev` refuses Staging. It also makes `requestStaffEmailVerificationDev`
    refuse production and unknown projects (Staging and Dev unchanged).
 
    The deployed `resolveSchoolIdAuthEmailDev` (`00008`) refuses on Staging and has **no invoker**
-   binding. `main`'s Dev resolver (after `fix/staging-dev-resolver-project-gate`) serves Staging and
+   binding. After `fix/staging-dev-resolver-project-gate`, `main`'s Dev resolver serves Staging and
    Dev only and refuses production and unknown projects. The handler is pure either way.
    The current client does not need it for roster-email students: Student ID sign-in derives the
    `students.mindmate.local` alias locally. Only the legacy "School ID" sign-in and reset path
    calls the resolver.
-4. **Recovery links**, after #78 is merged, from a clean worktree of that `main` commit with
+4. **Recovery links**, from a clean worktree of `main` at or after `4be1212`, with
    `functions/.env.mindmate-staging` copied in and `ADMIN_WEB_URL=https://paaccmindmate.com`
-   (HTTPS and `/reset-password` verified 2026-11-25):
+   (HTTPS and `/reset-password` verified 2026-11-25; the host is on `main`'s Staging allowlist):
 
    ```sh
    FUNCTIONS_DISCOVERY_TIMEOUT=90 firebase deploy --project mindmate-staging --only functions:requestAdminPasswordReset,functions:requestStaffEmailVerification,functions:requestStaffEmailVerificationDev
@@ -68,21 +68,14 @@ matches the PR. Merging only redeploys the Staging Admin Web through the Hosting
    already refuses Staging and has no invoker. firebase-tools 15.34.1 leaves invoker IAM alone
    when it updates a callable function, but sets `allUsers` when it creates one, so the no-invoker
    state cannot be guaranteed by a deploy. The three deployed functions keep their current
-   invoker (`allUsers`).
+   invoker (`allUsers`). Both School-ID resolvers are excluded too.
 
    Afterwards: re-read the invoker policy of all six recovery and resolver services, and confirm
    `requestAdminPasswordResetDev` and `resolveSchoolIdAuthEmailDev` still have none.
 
-5. **Legacy School-ID resolver** (separate approval, only if legacy School ID accounts must sign in
-   from the Staging APK):
-
-   ```sh
-   FUNCTIONS_DISCOVERY_TIMEOUT=90 firebase deploy --project mindmate-staging --only functions:resolveSchoolIdAuthEmail,functions:resolveSchoolIdAuthEmailDev
-   gcloud run services add-iam-policy-binding resolveschoolidauthemaildev --project mindmate-staging --region us-central1 --member=allUsers --role=roles/run.invoker
-   ```
-
-   The deploy alone does not reopen the Dev resolver: the IAM grant does. Undo with
-   `gcloud run services remove-iam-policy-binding` (same arguments).
+5. **School-ID resolvers: not deployed.** Leave both at `00008`. `resolveSchoolIdAuthEmailDev`
+   keeps no invoker; do not grant public access to it. Revisit only if legacy School ID accounts
+   must sign in from the Staging APK, as a separately approved change.
 
 Never use `--force` or an unrestricted `firebase deploy`.
 
