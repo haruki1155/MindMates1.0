@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/counseling/data/guidance_quick_replies.dart';
 import 'package:mind_mates/features/counseling/repositories/counselor_chat_repository.dart';
 import 'package:mind_mates/features/counseling/controllers/counselor_send_controller.dart';
 import 'package:mind_mates/features/counseling/widgets/counselor_message_timeline.dart';
@@ -34,6 +35,8 @@ class MemoryOutbox extends CounselorOutboxStore {
 class FakeChat extends CounselorChatRepository {
   final messages = StreamController<List<CounselorMessage>>.broadcast();
   final calls = <String>[];
+  final texts = <String>[];
+  DateTime? readAt;
   Completer<void>? completion;
   bool fail = false;
   Object? failure;
@@ -49,9 +52,13 @@ class FakeChat extends CounselorChatRepository {
   Future<void> send(String uid, String id, String text) async {
     calls.add(id);
     if (failure != null) throw failure!;
+    texts.add(text);
     if (fail) throw StateError('offline');
     await completion?.future;
   }
+
+  @override
+  Stream<DateTime?> watchCounselorReadAt(String uid) => Stream.value(readAt);
 
   @override
   Future<void> markRepliesRead(String uid) async {}
@@ -61,7 +68,7 @@ void main() {
   test(
     'a failed retry logs type and Firebase code only, never the text',
     () async {
-      const secret = 'my private counselor message';
+      final secret = guidanceQuickReplies[2].text;
       final repo = FakeChat()
         ..failure = FirebaseException(
           plugin: 'cloud_firestore',
@@ -75,14 +82,14 @@ void main() {
       );
       addTearDown(sender.dispose);
       await sender.restore();
-      sender.draft.text = secret;
+      sender.select(guidanceQuickReplies[2]);
       final lines = <String>[];
       final original = debugPrint;
       debugPrint = (String? m, {int? wrapWidth}) {
         if (m != null) lines.add(m);
       };
       addTearDown(() => debugPrint = original);
-      await sender.send();
+      await sender.sendSelected();
       final log = lines
           .where((l) => l.contains('counselor_send_failed'))
           .toList();
@@ -107,24 +114,76 @@ void main() {
       );
       addTearDown(sender.dispose);
       await sender.restore();
-      sender.draft.text = 'Hello PACC';
-      final sending = sender.send();
+      sender.select(guidanceQuickReplies[1]);
+      final sending = sender.sendSelected();
       expect(sender.sending, isTrue);
-      await sender.send();
+      await sender.sendSelected();
       await Future<void>.delayed(Duration.zero);
       expect(repo.calls, ['message-0']);
-      expect(sender.pending?.text, 'Hello PACC');
-      expect(sender.draft.text, 'Hello PACC');
+      expect(repo.texts, ['Noted.']);
+      expect(sender.pending?.text, 'Noted.');
+      expect(sender.selected, guidanceQuickReplies[1]);
       repo.completion!.complete();
       await sending;
       expect(sender.pending, isNull);
-      expect(sender.draft.text, isEmpty);
+      expect(sender.selected, isNull);
+      expect(sender.acknowledged.single.text, 'Noted.');
       expect(store.value, isNull);
     },
   );
 
+  test('nothing is sent without a selected reply', () async {
+    final repo = FakeChat();
+    final sender = CounselorSendController(
+      uid: 'student',
+      repository: repo,
+      store: MemoryOutbox(),
+    );
+    addTearDown(sender.dispose);
+    await sender.restore();
+    await sender.sendSelected();
+    expect(repo.calls, isEmpty);
+    expect(sender.pending, isNull);
+  });
+
   test(
-    'failure and reopen preserve text and stable retry ID without overwriting a new draft',
+    'a restored legacy draft the policy refuses is never resent and can be discarded',
+    () async {
+      final repo = FakeChat()..failure = const QuickReplyNotAllowedException();
+      final store = MemoryOutbox()
+        ..value = const OutgoingInquiry(id: 'legacy-1', text: 'Hello');
+      final sender = CounselorSendController(
+        uid: 'student',
+        repository: repo,
+        store: store,
+      );
+      addTearDown(sender.dispose);
+      await sender.restore();
+      await sender.retry();
+      expect(repo.calls, ['legacy-1']);
+      expect(sender.pendingNotAllowed, isTrue);
+      expect(
+        sender.error,
+        "This earlier message can't be sent under the new Guidance Assistance "
+        'policy. Discard it and choose a quick reply.',
+      );
+      await sender.retry();
+      sender.select(guidanceQuickReplies.first);
+      await sender.sendSelected();
+      expect(repo.calls, ['legacy-1'], reason: 'never resent or replaced');
+      await sender.discardPending();
+      expect(store.value, isNull);
+      expect(sender.pending, isNull);
+      expect(sender.pendingNotAllowed, isFalse);
+      expect(sender.error, isNull);
+      repo.failure = null;
+      await sender.sendSelected();
+      expect(repo.calls, ['legacy-1', 'message-1']);
+    },
+  );
+
+  test(
+    'failure keeps the reply and stable retry ID across reopen without overwriting a new selection',
     () async {
       final repo = FakeChat()..fail = true;
       final store = MemoryOutbox();
@@ -134,10 +193,10 @@ void main() {
         store: store,
       );
       await sender.restore();
-      sender.draft.text = 'Original inquiry';
-      await sender.send();
+      sender.select(guidanceQuickReplies[3]);
+      await sender.sendSelected();
       expect(sender.error, isNotNull);
-      expect(sender.draft.text, 'Original inquiry');
+      expect(sender.selected, guidanceQuickReplies[3]);
       final id = sender.pending!.id;
       sender.dispose();
       final restored = CounselorSendController(
@@ -148,12 +207,12 @@ void main() {
       addTearDown(restored.dispose);
       await restored.restore();
       expect(restored.pending!.id, id);
-      expect(restored.draft.text, 'Original inquiry');
-      restored.draft.text = 'New unsent draft';
+      expect(restored.pending!.text, 'I need clarification.');
+      restored.select(guidanceQuickReplies[0]);
       repo.fail = false;
       await restored.retry();
       expect(repo.calls, [id, id]);
-      expect(restored.draft.text, 'New unsent draft');
+      expect(restored.selected, guidanceQuickReplies[0]);
     },
   );
 
@@ -308,7 +367,7 @@ void main() {
 
   for (final dark in [false, true]) {
     testWidgets(
-      'chat uses MindMate theme, preserves failed drafts and sends only on retry ($dark)',
+      'chat uses MindMate theme, keeps a failed reply and sends only on retry ($dark)',
       (tester) async {
         final repo = FakeChat()..fail = true;
         final store = MemoryOutbox();
@@ -325,27 +384,18 @@ void main() {
         await tester.pumpAndSettle();
         repo.messages.add([]);
         await tester.pumpAndSettle();
-        expect(find.text('Services'), findsOneWidget);
-        await tester.enterText(find.byType(TextField), 'PACC question');
+        expect(find.byType(TextField), findsNothing);
+        await tester.tap(find.text('I am available.'));
         await tester.pump();
-        await tester.tap(find.byTooltip('Send message'));
+        await tester.tap(find.byTooltip('Send reply'));
         await tester.pumpAndSettle();
         expect(find.text('Retry'), findsOneWidget);
-        expect(find.byType(TextField), findsOneWidget);
-        expect(
-          tester.widget<TextField>(find.byType(TextField)).controller!.text,
-          'PACC question',
-        );
         expect(repo.calls, ['message-0']);
         repo.fail = false;
         await tester.tap(find.text('Retry'));
         await tester.pumpAndSettle();
         expect(repo.calls, ['message-0', 'message-0']);
         expect(find.byTooltip('Sent'), findsOneWidget);
-        expect(
-          tester.widget<TextField>(find.byType(TextField)).controller!.text,
-          isEmpty,
-        );
         final bubble = tester.widget<CounselorMessageBubble>(
           find.byType(CounselorMessageBubble),
         );
@@ -373,6 +423,196 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'no text field; nine replies; Send needs a selection, then collapses the selector',
+    (tester) async {
+      final repo = FakeChat();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: CounselorChatScreen(
+            userId: 'student',
+            repository: repo,
+            outbox: MemoryOutbox(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNothing);
+      for (final reply in guidanceQuickReplies) {
+        expect(find.text(reply.text), findsOneWidget, reason: reply.id);
+      }
+      final send = find.byTooltip('Send reply');
+      expect(
+        tester
+            .widget<ButtonStyleButton>(
+              find.descendant(
+                of: send,
+                matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+              ),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.ensureVisible(find.text('I need further assistance.'));
+      await tester.tap(find.text('I need further assistance.'));
+      await tester.pump();
+      await tester.tap(send);
+      await tester.pumpAndSettle();
+      expect(repo.texts, ['I need further assistance.']);
+      expect(find.text('Noted.'), findsNothing, reason: 'selector collapsed');
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+      expect(find.text('Noted.'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await repo.messages.close();
+    },
+  );
+
+  testWidgets('info icon explains Guidance Assistance', (tester) async {
+    final repo = FakeChat();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CounselorChatScreen(
+          userId: 'student',
+          repository: repo,
+          outbox: MemoryOutbox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('About Guidance Assistance'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Guidance Assistance allows you to receive instructions from your '
+        'guidance counselor and respond using predefined Quick Replies. For '
+        'concerns requiring detailed discussion, please request a counseling '
+        'session.',
+      ),
+      findsOneWidget,
+    );
+    await tester.pumpWidget(const SizedBox());
+    await repo.messages.close();
+  });
+
+  testWidgets('session and urgent support open PACC counseling', (
+    tester,
+  ) async {
+    final repo = FakeChat();
+    final opened = <bool>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CounselorChatScreen(
+          userId: 'student',
+          repository: repo,
+          outbox: MemoryOutbox(),
+          openPaccCounseling: (context, {required startBooking}) =>
+              opened.add(startBooking),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Request a counseling session'));
+    await tester.tap(find.text('Request a counseling session'));
+    await tester.ensureVisible(find.text('Urgent support'));
+    await tester.tap(find.text('Urgent support'));
+    expect(opened, [true, false]);
+    await tester.pumpWidget(const SizedBox());
+    await repo.messages.close();
+  });
+
+  testWidgets('legacy draft shows the policy message and Discard', (
+    tester,
+  ) async {
+    final repo = FakeChat()..failure = const QuickReplyNotAllowedException();
+    final store = MemoryOutbox()
+      ..value = const OutgoingInquiry(id: 'legacy-1', text: 'Old free text');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CounselorChatScreen(
+          userId: 'student',
+          repository: repo,
+          outbox: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining("can't be sent under the new"), findsWidgets);
+    await tester.tap(find.text('Discard'));
+    await tester.pumpAndSettle();
+    expect(store.value, isNull);
+    expect(find.text('Old free text'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await repo.messages.close();
+  });
+
+  testWidgets(
+    'own message shows Read only when counselorReadAt has passed it',
+    (tester) async {
+      final readAt = DateTime(2026, 11, 13, 17, 30);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CounselorMessageTimeline(
+              uid: 'student',
+              counterpartReadAt: readAt,
+              messages: [
+                CounselorMessage(
+                  id: 'before',
+                  text: 'Noted.',
+                  senderId: 'student',
+                  createdAt: readAt.subtract(const Duration(minutes: 1)),
+                ),
+                CounselorMessage(
+                  id: 'after',
+                  text: 'I am available.',
+                  senderId: 'student',
+                  createdAt: readAt.add(const Duration(minutes: 1)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byTooltip('Read'), findsOneWidget);
+      expect(find.byTooltip('Sent'), findsOneWidget);
+    },
+  );
+
+  testWidgets('the chat screen streams counselorReadAt into the timeline', (
+    tester,
+  ) async {
+    final readAt = DateTime(2026, 11, 13, 17, 30);
+    final repo = FakeChat()..readAt = readAt;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CounselorChatScreen(
+          userId: 'student',
+          repository: repo,
+          outbox: MemoryOutbox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    repo.messages.add([
+      CounselorMessage(
+        id: 'm',
+        text: 'Noted.',
+        senderId: 'student',
+        createdAt: readAt.subtract(const Duration(minutes: 1)),
+      ),
+    ]);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Read'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await repo.messages.close();
+  });
+
   test('secure outbox is isolated by Firebase project and user', () async {
     FlutterSecureStorage.setMockInitialValues({});
     final store = CounselorOutboxStore(projectId: 'staging', uid: 'student');
@@ -395,7 +635,7 @@ void main() {
     expect(await store.load(), isNull);
   });
 
-  testWidgets('small screen keyboard and large text keep composer visible', (
+  testWidgets('small screen at 2x text keeps every reply and Send reachable', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(360, 640);
@@ -420,15 +660,20 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull, reason: 'before keyboard');
-    tester.view.viewInsets = FakeViewPadding(bottom: 260);
-    addTearDown(tester.view.resetViewInsets);
+    expect(tester.takeException(), isNull);
+    final last = find.text(guidanceQuickReplies.last.text);
+    await tester.ensureVisible(last);
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Send message').hitTestable(), findsOneWidget);
+    await tester.tap(last);
+    await tester.pump();
+    await tester.ensureVisible(find.byTooltip('Send reply'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Send reply').hitTestable(), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await repo.messages.close();
   });
+
   test(
     'storage failures never submit or overwrite saved outgoing messages',
     () async {
@@ -441,16 +686,16 @@ void main() {
       );
       addTearDown(sender.dispose);
       await sender.restore();
-      sender.draft.text = 'Keep this inquiry';
-      await sender.send();
+      sender.select(guidanceQuickReplies[4]);
+      await sender.sendSelected();
       expect(repo.calls, isEmpty);
       expect(sender.ready, isFalse);
       store.failLoad = false;
       await sender.restore();
       store.failSave = true;
-      await sender.send();
+      await sender.sendSelected();
       expect(repo.calls, isEmpty);
-      expect(sender.draft.text, 'Keep this inquiry');
+      expect(sender.selected, guidanceQuickReplies[4]);
       expect(sender.error, contains('Keep this screen open'));
       final id = sender.pending!.id;
       store.failSave = false;

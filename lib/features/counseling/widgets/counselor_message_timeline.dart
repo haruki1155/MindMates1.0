@@ -27,8 +27,13 @@ class CounselorMessageTimeline extends StatefulWidget {
     this.onRetry,
     this.onAtBottom,
     this.now,
+    this.counterpartReadAt,
   });
   final String uid;
+
+  /// When the other side last read this thread; own messages created at or
+  /// before it show Read.
+  final DateTime? counterpartReadAt;
   final bool showEmptyState;
 
   /// Chronological server history; adding older pages does not change the bottom anchor.
@@ -347,6 +352,12 @@ class _CounselorMessageTimelineState extends State<CounselorMessageTimeline>
                       child: CounselorMessageBubble(
                         message: message,
                         own: message.senderId == widget.uid,
+                        read:
+                            message.createdAt != null &&
+                            widget.counterpartReadAt != null &&
+                            !message.createdAt!.isAfter(
+                              widget.counterpartReadAt!,
+                            ),
                         failed:
                             pending?.id == message.id && widget.error != null,
                         sending: pending?.id == message.id
@@ -384,10 +395,14 @@ class CounselorMessageBubble extends StatelessWidget {
     required this.own,
     this.failed = false,
     this.sending = false,
+    this.read = false,
     this.onRetry,
   });
   final CounselorMessage message;
   final bool own;
+
+  /// The other side has read this message (shown only once it is sent).
+  final bool read;
   final bool failed;
   final bool sending;
   final VoidCallback? onRetry;
@@ -481,6 +496,15 @@ class CounselorMessageBubble extends StatelessWidget {
                               SizedBox(width: 6),
                               Text('Sending…'),
                             ],
+                          ),
+                        )
+                      : read
+                      ? Tooltip(
+                          message: 'Read',
+                          child: Icon(
+                            Icons.done_all,
+                            size: 16,
+                            color: colors.primary,
                           ),
                         )
                       : Tooltip(
