@@ -64,6 +64,8 @@ export {
   requestStaffEmailVerificationDev,
 } from "./account_recovery";
 import {assertNotFirstLogin, configuredSuperAdminUid, requireStaff, requireSuperAdmin, requireUid as requireAuthenticatedUser} from "./access";
+import {assertForumTextAllowed} from "./secret_chat_publish";
+export {addSecretChatComment, createSecretChatPost} from "./secret_chat_publish";
 import {createHash, randomBytes} from "node:crypto";
 import {ACTOR_SCOPED_AUDIT_ACTIONS, AUDIT_ACTIONS, AUDIT_CATEGORIES, actorName, auditLogOwnerField, writeAudit, writeAuditBatch} from "./audit";
 import {
@@ -186,6 +188,7 @@ function callableProfile(
 export const saveSecretChatProfile = onCall(async (request) => {
   const userId = requireAuthenticatedUser(request);
   const alias = normalizeSecretChatAlias(request.data?.alias);
+  await assertForumTextAllowed(alias, {userId, kind: "alias"});
   const aliasKey = alias.toLowerCase();
   const profileRef = secretChatProfiles.doc(userId);
   const aliasRef = secretChatAliases.doc(aliasKey);
