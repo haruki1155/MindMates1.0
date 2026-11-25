@@ -1250,5 +1250,131 @@ void main() {
         expect(controller.stateFor('s1')?.status, CounselorReadStatus.unread);
       },
     );
+
+    group('counselorReadAt for the student Read indicator', () {
+      final tStudent = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10, 0));
+      void seedThread() => db.seedDoc('counselor_threads/s1', {
+        'userId': 's1',
+        'collegeId': 'CITE',
+        'studentName': 'Ana',
+        'updatedAt': tStudent,
+        'lastStudentMessageAt': tStudent,
+        'lastStudentMessageId': 'm1',
+      });
+
+      test('markThreadRead stamps counselorReadAt after the receipt', () async {
+        seedThread();
+        final controller = CounselorInboxUnreadController(
+          firestore: db,
+          auth: auth,
+        );
+        addTearDown(controller.dispose);
+        await Future<void>.delayed(Duration.zero);
+        await controller.markThreadRead(
+          studentId: 's1',
+          studentMessageAt: tStudent,
+          expectedUid: 'counselor-a',
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          db.getEntry('counselor_threads/s1')?.data['counselorReadAt'],
+          tStudent,
+          reason: 'the student message the counselor saw, not the commit time',
+        );
+      });
+
+      test(
+        'no counselorReadAt is stamped when no student message was seen',
+        () async {
+          db.seedDoc('counselor_threads/s1', {
+            'userId': 's1',
+            'collegeId': 'CITE',
+          });
+          final controller = CounselorInboxUnreadController(
+            firestore: db,
+            auth: auth,
+          );
+          addTearDown(controller.dispose);
+          await Future<void>.delayed(Duration.zero);
+          await controller.sendCounselorReply(
+            studentId: 's1',
+            text: 'Hello from PACC.',
+            expectedUid: 'counselor-a',
+          );
+          await Future<void>.delayed(Duration.zero);
+          expect(
+            db
+                .getEntry('counselor_threads/s1')
+                ?.data
+                .containsKey('counselorReadAt'),
+            isFalse,
+          );
+        },
+      );
+
+      test(
+        'a refused counselorReadAt update leaves the receipt and badge intact',
+        () async {
+          seedThread();
+          db.updateErrors['counselor_threads/s1'] = FirebaseException(
+            plugin: 'cloud_firestore',
+            code: 'permission-denied',
+          );
+          final controller = CounselorInboxUnreadController(
+            firestore: db,
+            auth: auth,
+          );
+          addTearDown(controller.dispose);
+          await Future<void>.delayed(Duration.zero);
+          await controller.markThreadRead(
+            studentId: 's1',
+            studentMessageAt: tStudent,
+            expectedUid: 'counselor-a',
+          );
+          await Future<void>.delayed(Duration.zero);
+          expect(
+            db.getEntry('counselor_inbox_reads/counselor-a/threads/s1'),
+            isNotNull,
+          );
+          expect(controller.stateFor('s1')?.status, CounselorReadStatus.read);
+          expect(controller.unreadCount(), 0);
+        },
+      );
+
+      test(
+        'sendCounselorReply commits and stamps counselorReadAt, and still commits when refused',
+        () async {
+          seedThread();
+          final controller = CounselorInboxUnreadController(
+            firestore: db,
+            auth: auth,
+          );
+          addTearDown(controller.dispose);
+          await Future<void>.delayed(Duration.zero);
+          await controller.sendCounselorReply(
+            studentId: 's1',
+            text: 'Please visit PACC on Monday.',
+            expectedUid: 'counselor-a',
+          );
+          await Future<void>.delayed(Duration.zero);
+          expect(
+            db.getEntry('counselor_threads/s1')?.data['counselorReadAt'],
+            tStudent,
+          );
+          expect(db.committedBatches.last, hasLength(3));
+
+          db.updateErrors['counselor_threads/s1'] = FirebaseException(
+            plugin: 'cloud_firestore',
+            code: 'permission-denied',
+          );
+          await controller.sendCounselorReply(
+            studentId: 's1',
+            text: 'See you then.',
+            expectedUid: 'counselor-a',
+          );
+          expect(db.committedBatches, hasLength(2));
+        },
+      );
+    });
   });
 }

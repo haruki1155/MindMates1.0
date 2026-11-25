@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../../services/firebase/firebase_callable_router.dart';
+import '../data/guidance_quick_replies.dart';
 import '../widgets/counselor_unread_badges.dart';
 
 class CounselorMessage {
@@ -21,8 +22,33 @@ class CounselorMessage {
   final bool acknowledged;
 }
 
+/// The text is not one of the approved quick replies and was never written.
+class QuickReplyNotAllowedException implements Exception {
+  const QuickReplyNotAllowedException();
+  @override
+  String toString() => 'QuickReplyNotAllowedException';
+}
+
+/// The latest moment a counselor is known to have seen this thread: an
+/// explicit read stamp, or a counselor reply (which implies the earlier
+/// messages were read). Own messages at or before it show Seen.
+DateTime? counselorSeenThrough(Map<String, dynamic> thread) {
+  DateTime? latest;
+  for (final key in const ['counselorReadAt', 'lastCounselorMessageAt']) {
+    final value = thread[key];
+    if (value is Timestamp &&
+        (latest == null || value.toDate().isAfter(latest))) {
+      latest = value.toDate();
+    }
+  }
+  return latest;
+}
+
 abstract class CounselorChatRepository {
   Stream<List<CounselorMessage>> watch(String uid);
+
+  /// When a counselor last opened this thread, or null if never (or unknown).
+  Stream<DateTime?> watchCounselorReadAt(String uid) => Stream.value(null);
   String newMessageId(String uid);
   Future<void> send(String uid, String id, String text);
   Future<void> markRepliesRead(String uid);
@@ -70,6 +96,13 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
       });
 
   @override
+  Stream<DateTime?> watchCounselorReadAt(String uid) => _db
+      .collection('counselor_threads')
+      .doc(uid)
+      .snapshots()
+      .map((snapshot) => counselorSeenThrough(snapshot.data() ?? {}));
+
+  @override
   String newMessageId(String uid) => _db
       .collection('counselor_threads')
       .doc(uid)
@@ -103,6 +136,11 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
           throw StateError('Message ID conflict');
         }
         return;
+      }
+      // Checked after the ID lookup so an already delivered legacy message
+      // reconciles, while an undelivered one is never written.
+      if (!isGuidanceAllowedText(text)) {
+        throw const QuickReplyNotAllowedException();
       }
       final profile = await db.collection('users').doc(uid).get();
       String collegeId =
@@ -161,8 +199,17 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
     if (_auth.currentUser?.uid != uid) return;
     final thread = _db.collection('counselor_threads').doc(uid);
     final snapshot = await thread.get();
-    if (studentThreadUnread(snapshot.data() ?? {})) {
-      await thread.update({'studentReadAt': FieldValue.serverTimestamp()});
+    final data = snapshot.data() ?? {};
+    if (studentThreadUnread(data)) {
+      // The counselor message actually seen, so a later reply is never Read.
+      try {
+        // The counselor message actually seen, so a later reply is never Seen.
+        await thread.update({'studentReadAt': data['lastCounselorMessageAt']});
+      } on FirebaseException catch (error) {
+        // Rules from before quick replies accept only the write time.
+        if (error.code != 'permission-denied') rethrow;
+        await thread.update({'studentReadAt': FieldValue.serverTimestamp()});
+      }
     }
   }
 }

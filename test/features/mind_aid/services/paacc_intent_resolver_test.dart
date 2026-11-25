@@ -103,4 +103,45 @@ void main() {
       isFalse,
     );
   });
+
+  test('counseling and appointment questions route to appointment help', () {
+    for (final text in [
+      'I want to see a counselor',
+      'How do I get counseling?',
+      'Where can I talk to a guidance counselor?',
+      'Paano magpa-schedule sa counselor?',
+      'Gusto ko mag-book ng appointment',
+      'Pwede ba akong makipag-usap sa counselor?',
+    ]) {
+      final decision = resolver.resolve(text, null);
+      expect(decision.route, PaaccRouteType.appointmentHelp, reason: text);
+      expect(decision.reason, 'appointment_cue', reason: text);
+    }
+  });
+
+  test('managing an existing appointment is its own appointment reason', () {
+    for (final text in [
+      'I need to reschedule my appointment',
+      'Can I cancel my appointment?',
+      'Where can I see my appointments?',
+    ]) {
+      final decision = resolver.resolve(text, null);
+      expect(decision.route, PaaccRouteType.appointmentHelp, reason: text);
+      expect(decision.reason, 'appointment_manage', reason: text);
+    }
+  });
+
+  test('service questions route to service information', () {
+    for (final text in [
+      'What services does PACC offer?',
+      'Ano ang mga services ng PACC?',
+      'What does PACC provide for students?',
+    ]) {
+      expect(
+        resolver.resolve(text, null).route,
+        PaaccRouteType.serviceInformation,
+        reason: text,
+      );
+    }
+  });
 }

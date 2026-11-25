@@ -4,6 +4,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/counseling/data/guidance_quick_replies.dart';
 import 'package:mind_mates/features/counseling/repositories/counselor_chat_repository.dart';
 
 // Small SDK doubles exercise the actual repository transaction and schema.
@@ -44,6 +45,16 @@ class TestReference extends Fake
   Future<DocumentSnapshot<Map<String, dynamic>>> get([
     GetOptions? options,
   ]) async => TestSnapshot(db.documents[path]);
+  @override
+  Future<void> update(Map<Object, Object?> data) async {
+    final error = db.updateErrors.remove(path);
+    if (error != null) throw error;
+    db.updates.add(data.map((k, v) => MapEntry(k.toString(), v)));
+    db.documents[path] = {
+      ...?db.documents[path],
+      ...data.map((k, v) => MapEntry(k.toString(), v)),
+    };
+  }
 }
 
 class TestCollection extends Fake
@@ -86,6 +97,8 @@ class TestFirestore extends Fake implements FirebaseFirestore {
   };
   int committedMessages = 0;
   bool loseAcknowledgment = false;
+  final updateErrors = <String, Object>{};
+  final updates = <Map<String, Object?>>[];
   @override
   CollectionReference<Map<String, dynamic>> collection(String path) =>
       TestCollection(this, path);
@@ -119,13 +132,13 @@ void main() {
         auth: TestAuth(),
       );
       await expectLater(
-        repo.send('student', 'stable-id', 'PACC inquiry'),
+        repo.send('student', 'stable-id', 'Noted.'),
         throwsA(isA<FirebaseException>()),
       );
       final thread = Map<String, dynamic>.from(
         db.documents['counselor_threads/student']!,
       );
-      await repo.send('student', 'stable-id', 'PACC inquiry');
+      await repo.send('student', 'stable-id', 'Noted.');
       expect(db.committedMessages, 1);
       expect(db.documents['counselor_threads/student'], thread);
       expect(thread['collegeId'], 'college-1');
@@ -142,17 +155,132 @@ void main() {
       final db = TestFirestore();
       final auth = TestAuth();
       final repo = FirestoreCounselorChatRepository(firestore: db, auth: auth);
-      await repo.send('student', 'id', 'Original');
+      await repo.send('student', 'id', 'Noted.');
       await expectLater(
-        repo.send('student', 'id', 'Changed'),
+        repo.send('student', 'id', 'I understand.'),
         throwsStateError,
       );
       auth.signedIn = null;
       await expectLater(
-        repo.send('student', 'other-id', 'Original'),
+        repo.send('student', 'other-id', 'Noted.'),
         throwsA(isA<FirebaseException>()),
       );
       expect(db.committedMessages, 1);
     },
   );
+
+  test('send rejects free text before any write', () async {
+    final db = TestFirestore();
+    final repo = FirestoreCounselorChatRepository(
+      firestore: db,
+      auth: TestAuth(),
+    );
+    await expectLater(
+      repo.send('student', 'm1', 'Hello counselor'),
+      throwsA(isA<QuickReplyNotAllowedException>()),
+    );
+    expect(db.committedMessages, 0);
+    expect(db.documents.containsKey('counselor_threads/student'), isFalse);
+  });
+
+  test('send writes each approved reply with its canonical text', () async {
+    final db = TestFirestore();
+    final repo = FirestoreCounselorChatRepository(
+      firestore: db,
+      auth: TestAuth(),
+    );
+    for (final (index, reply) in guidanceQuickReplies.indexed) {
+      await repo.send('student', 'm$index', reply.text);
+      expect(
+        db.documents['counselor_threads/student/messages/m$index']!['text'],
+        reply.text,
+      );
+    }
+    expect(db.committedMessages, guidanceQuickReplies.length);
+  });
+
+  test('a delivered legacy message reconciles without a new write', () async {
+    final db = TestFirestore();
+    db.documents['counselor_threads/student/messages/legacy-1'] = {
+      'senderId': 'student',
+      'senderRole': 'user',
+      'text': 'An old free-text message',
+    };
+    final repo = FirestoreCounselorChatRepository(
+      firestore: db,
+      auth: TestAuth(),
+    );
+    await repo.send('student', 'legacy-1', 'An old free-text message');
+    expect(db.committedMessages, 0);
+  });
+
+  test('a retried approved reply with the same ID is idempotent', () async {
+    final db = TestFirestore();
+    final repo = FirestoreCounselorChatRepository(
+      firestore: db,
+      auth: TestAuth(),
+    );
+    await repo.send('student', 'same', 'I am available.');
+    await repo.send('student', 'same', 'I am available.');
+    expect(db.committedMessages, 1);
+  });
+
+  test(
+    'markRepliesRead records the counselor message the student saw',
+    () async {
+      final db = TestFirestore();
+      final seen = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10));
+      db.documents['counselor_threads/student'] = {
+        'userId': 'student',
+        'lastCounselorMessageAt': seen,
+      };
+      final repo = FirestoreCounselorChatRepository(
+        firestore: db,
+        auth: TestAuth(),
+      );
+      await repo.markRepliesRead('student');
+      expect(db.documents['counselor_threads/student']!['studentReadAt'], seen);
+    },
+  );
+
+  test(
+    'older rules refuse the seen time, so the read time falls back to now',
+    () async {
+      final db = TestFirestore();
+      final seen = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10));
+      db.documents['counselor_threads/student'] = {
+        'userId': 'student',
+        'lastCounselorMessageAt': seen,
+      };
+      db.updateErrors['counselor_threads/student'] = FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'permission-denied',
+      );
+      final repo = FirestoreCounselorChatRepository(
+        firestore: db,
+        auth: TestAuth(),
+      );
+      await repo.markRepliesRead('student');
+      expect(db.updates, hasLength(1));
+      expect(db.updates.single['studentReadAt'], isA<FieldValue>());
+    },
+  );
+
+  test('a counselor reply after a message also counts as seen', () {
+    final read = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 9));
+    final reply = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10));
+    expect(counselorSeenThrough({}), isNull);
+    expect(counselorSeenThrough({'counselorReadAt': read}), read.toDate());
+    expect(
+      counselorSeenThrough({
+        'counselorReadAt': read,
+        'lastCounselorMessageAt': reply,
+      }),
+      reply.toDate(),
+    );
+    expect(
+      counselorSeenThrough({'lastCounselorMessageAt': reply}),
+      reply.toDate(),
+    );
+  });
 }

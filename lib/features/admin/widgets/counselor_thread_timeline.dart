@@ -18,9 +18,13 @@ class CounselorThreadTimeline extends StatefulWidget {
     this.onRetryFailed,
     this.onDismissFailed,
     this.now,
+    this.studentReadAt,
   });
 
   final String uid;
+
+  /// Own messages created at or before this show Read.
+  final DateTime? studentReadAt;
   final String studentLabel;
   final List<CounselorTimelineMessage> messages;
   final bool hasMoreOlder;
@@ -430,6 +434,12 @@ class _CounselorThreadTimelineState extends State<CounselorThreadTimeline>
                           key: _keys.putIfAbsent(message.id, GlobalKey.new),
                           child: _CounselorTimelineBubble(
                             message: message,
+                            read:
+                                message.createdAt != null &&
+                                widget.studentReadAt != null &&
+                                !message.createdAt!.isAfter(
+                                  widget.studentReadAt!,
+                                ),
                             studentLabel: widget.studentLabel,
                             use24HourFormat: use24Hour,
                             onRetry:
@@ -473,11 +483,13 @@ class _CounselorTimelineBubble extends StatelessWidget {
     required this.message,
     required this.studentLabel,
     required this.use24HourFormat,
+    this.read = false,
     this.onRetry,
     this.onDismiss,
   });
 
   final CounselorTimelineMessage message;
+  final bool read;
   final String studentLabel;
   final bool use24HourFormat;
   final VoidCallback? onRetry;
@@ -565,7 +577,7 @@ class _CounselorTimelineBubble extends StatelessWidget {
                   if (isCounselor)
                     Padding(
                       padding: const EdgeInsets.only(top: 4, right: 2),
-                      child: _buildSenderDeliveryFooter(deliveryState),
+                      child: _buildSenderDeliveryFooter(deliveryState, read),
                     ),
                 ],
               ),
@@ -578,6 +590,7 @@ class _CounselorTimelineBubble extends StatelessWidget {
 
   Widget _buildSenderDeliveryFooter(
     CounselorMessageDeliveryState deliveryState,
+    bool read,
   ) {
     switch (deliveryState) {
       case CounselorMessageDeliveryState.sending:
@@ -588,6 +601,22 @@ class _CounselorTimelineBubble extends StatelessWidget {
             SizedBox(width: 4),
             Text(
               'Sending…',
+              style: TextStyle(
+                color: AdminColors.muted,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        );
+      case CounselorMessageDeliveryState.confirmed when read:
+        return const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.done_all, size: 14, color: AdminColors.muted),
+            SizedBox(width: 4),
+            Text(
+              'Seen',
               style: TextStyle(
                 color: AdminColors.muted,
                 fontSize: 11.5,

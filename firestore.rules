@@ -340,6 +340,52 @@ service cloud.firestore {
         && hasPortalAccess();
     }
 
+    // App users answer counselors only with these exact texts: the quick
+    // replies, then the PACC service inquiry templates. Must equal
+    // guidanceStudentMessageTexts in lib/features/counseling/data/guidance_quick_replies.dart.
+    function guidanceStudentMessageTexts() {
+      return [
+        'I understand.',
+        'Noted.',
+        'Thank you for your guidance.',
+        'I need clarification.',
+        'I am available.',
+        'I am not available.',
+        'I would like a follow-up session.',
+        'I need further assistance.',
+        'My concern has been addressed.',
+        'Good day! I would like to inquire about Information Service, specifically the Personal Field. May I ask what information and assistance PACC provides regarding personal concerns? Thank you!',
+        'Good day! I would like to inquire about Information Service, specifically the Psychological Field. May I ask what information and guidance PACC provides in this area? Thank you!',
+        'Good day! I would like to inquire about Information Service, specifically the Social Field. May I ask what information and support PACC provides regarding social adjustment and relationships? Thank you!',
+        'Good day! I would like to inquire about Information Service, specifically the Educational Field. May I ask what educational information and guidance are available to students? Thank you!',
+        'Good day! I would like to inquire about Information Service, specifically the Vocational Field. May I ask what vocational information and guidance PACC provides? Thank you!',
+        'Good day! I would like to inquire about Information Service, specifically General Inquiry. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Individual Inventory Service, specifically Student Records. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Individual Inventory Service, specifically Interview Requirements. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Individual Inventory Service, specifically Required Forms. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Individual Inventory Service, specifically Consent to Release Information. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Individual Inventory Service, specifically General Inquiry. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Testing Service, specifically Testing Process. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Testing Service, specifically Testing Schedule. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Testing Service, specifically Requirements. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Testing Service, specifically Test Report. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Testing Service, specifically General Inquiry. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Counseling Service, specifically Counseling Process. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Counseling Service, specifically Appointment Inquiry. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Counseling Service, specifically General Inquiry. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Follow-up Service, specifically Follow-up Process. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Follow-up Service, specifically Adding, Changing & Dropping Subjects. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Follow-up Service, specifically Shifting of Course. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Follow-up Service, specifically General Inquiry. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Career Guidance and Placement Service, specifically Career Planning. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Career Guidance and Placement Service, specifically Placement Assistance. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Career Guidance and Placement Service, specifically Signing of Clearance for Graduation. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Career Guidance and Placement Service, specifically General Inquiry. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Referral Service, specifically Referral Process. May I ask PACC for information and guidance about this topic? Thank you!',
+        'Good day! I would like to inquire about Referral Service, specifically General Inquiry. May I ask PACC for information and guidance about this topic? Thank you!'
+      ];
+    }
+
     function registeredCounselorName(userId) {
       let profile = get(/databases/$(database)/documents/users/$(userId)).data;
       let first = profile.get('firstName', '');
@@ -405,19 +451,31 @@ service cloud.firestore {
                 && request.resource.data.lastStudentMessageAt == request.time
                 && request.resource.data.lastStudentMessageId != resource.data.get('lastStudentMessageId', '')
                 && linkedCounselorMessage(userId, request.resource.data.lastStudentMessageId, userId, 'user')))
+            // The latest counselor message the student has seen (the counselor's Read).
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['studentReadAt'])
-              || request.resource.data.studentReadAt == request.time)
+              || (request.resource.data.studentReadAt is timestamp
+                && request.resource.data.studentReadAt <= request.time))
             && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['studentName'])
               || (request.resource.data.studentName is string
                 && request.resource.data.studentName.size() <= 160
                 && registeredCounselorName(userId))))
           || (isApprovedCounselor()
+            && request.resource.data.diff(resource.data).affectedKeys().size() > 0
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
-              ['updatedAt', 'lastCounselorMessageAt', 'lastCounselorMessageId'])
-            && request.resource.data.updatedAt == request.time
-            && request.resource.data.lastCounselorMessageAt == request.time
-            && request.resource.data.lastCounselorMessageId != resource.data.get('lastCounselorMessageId', '')
-            && linkedCounselorMessage(userId, request.resource.data.lastCounselorMessageId, request.auth.uid, 'counselor'))
+              ['updatedAt', 'lastCounselorMessageAt', 'lastCounselorMessageId', 'counselorReadAt'])
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(
+                ['updatedAt', 'lastCounselorMessageAt', 'lastCounselorMessageId'])
+              || (request.resource.data.updatedAt == request.time
+                && request.resource.data.lastCounselorMessageAt == request.time
+                && request.resource.data.lastCounselorMessageId != resource.data.get('lastCounselorMessageId', '')
+                && linkedCounselorMessage(userId, request.resource.data.lastCounselorMessageId, request.auth.uid, 'counselor')))
+            // The latest student message a counselor has seen (the student's Read).
+            // Never in the future and never moving backwards.
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['counselorReadAt'])
+              || (request.resource.data.counselorReadAt is timestamp
+                && request.resource.data.counselorReadAt <= request.time
+                && (!('counselorReadAt' in resource.data)
+                  || request.resource.data.counselorReadAt >= resource.data.counselorReadAt))))
         );
       allow delete: if false;
 
@@ -431,6 +489,8 @@ service cloud.firestore {
           && request.resource.data.text is string
           && request.resource.data.text.size() >= 1
           && request.resource.data.text.size() <= 1600
+          // Counselors write free text; the thread's own user only a quick reply.
+          && (!isOwner(userId) || request.resource.data.text in guidanceStudentMessageTexts())
           && request.resource.data.createdAt == request.time;
         allow update, delete: if false;
       }

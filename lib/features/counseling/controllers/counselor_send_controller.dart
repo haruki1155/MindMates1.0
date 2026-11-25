@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../../services/firebase/firebase_runtime_diagnostics.dart';
+import '../data/guidance_quick_replies.dart';
 import '../repositories/counselor_chat_repository.dart';
 
 class OutgoingInquiry {
@@ -43,8 +44,13 @@ class CounselorSendController extends ChangeNotifier {
   final String uid;
   final CounselorChatRepository repository;
   final CounselorOutboxStore store;
-  final draft = TextEditingController();
+
+  /// The quick reply chosen but not yet sent.
+  GuidanceQuickReply? selected;
   OutgoingInquiry? pending;
+
+  /// The pending message predates quick replies and may never be sent.
+  bool pendingNotAllowed = false;
   final acknowledged = <OutgoingInquiry>[];
   String? error;
   bool sending = false;
@@ -61,9 +67,6 @@ class CounselorSendController extends ChangeNotifier {
     _changed();
     try {
       pending = await store.load();
-      if (!_disposed && draft.text.isEmpty && pending != null) {
-        draft.text = pending!.text;
-      }
       ready = true;
       error = pending == null
           ? null
@@ -76,16 +79,45 @@ class CounselorSendController extends ChangeNotifier {
     }
   }
 
-  Future<void> send() async {
-    if (!ready || sending || pending != null) return;
-    final text = draft.text.trim();
-    if (text.isEmpty || text.length > 1600) return;
-    pending = OutgoingInquiry(id: repository.newMessageId(uid), text: text);
+  void select(GuidanceQuickReply reply) {
+    if (sending) return;
+    selected = reply;
+    _changed();
+  }
+
+  void clearSelection() {
+    if (sending) return;
+    selected = null;
+    _changed();
+  }
+
+  /// Sends the selected reply's canonical text; never any other text.
+  Future<void> sendSelected() async {
+    final reply = selected;
+    if (!ready || sending || pending != null || reply == null) return;
+    pending = OutgoingInquiry(
+      id: repository.newMessageId(uid),
+      text: reply.text,
+    );
     await retry();
   }
 
+  /// Drops a pending message the quick reply policy refuses.
+  Future<void> discardPending() async {
+    if (sending || pending == null) return;
+    try {
+      await store.clear();
+      pending = null;
+      pendingNotAllowed = false;
+      error = null;
+    } catch (_) {
+      error = 'Unable to discard the saved message. Please retry.';
+    }
+    _changed();
+  }
+
   Future<void> retry() async {
-    if (sending) return;
+    if (sending || pendingNotAllowed) return;
     if (!ready) return restore();
     final attempt = pending;
     if (attempt == null) return;
@@ -98,7 +130,7 @@ class CounselorSendController extends ChangeNotifier {
       await store.save(attempt);
       saved = true;
       await repository.send(uid, attempt.id, attempt.text);
-      if (!_disposed && draft.text.trim() == attempt.text) draft.clear();
+      if (selected?.text == attempt.text) selected = null;
       acknowledged.add(attempt);
       pending = null;
       // If cleanup fails, next launch reconciles this same ID with the server.
@@ -107,6 +139,12 @@ class CounselorSendController extends ChangeNotifier {
       } catch (_) {
         /* Keep the acknowledged ID safe to reconcile. */
       }
+    } on QuickReplyNotAllowedException {
+      // Never delivered and not allowed any more: keep it out of retries.
+      pendingNotAllowed = true;
+      error =
+          "This earlier message can't be sent under the new Guidance "
+          'Assistance policy. Discard it and choose a quick reply.';
     } catch (e) {
       // Diagnostics only: runtime type and Firebase code/plugin. Never the
       // message text, user identifiers or the exception message.
@@ -135,7 +173,6 @@ class CounselorSendController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    draft.dispose();
     super.dispose();
   }
 }

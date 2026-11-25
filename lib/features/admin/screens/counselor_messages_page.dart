@@ -1139,6 +1139,10 @@ class _CounselorMessagesPageState extends State<CounselorMessagesPage> {
                     onRetryFailed: _retryFailedMessage,
                     onDismissFailed: _dismissFailedMessage,
                     now: widget.now,
+                    studentReadAt: controller
+                        .stateFor(studentId)
+                        ?.studentReadAt
+                        ?.toDate(),
                   );
                 }(),
               ),

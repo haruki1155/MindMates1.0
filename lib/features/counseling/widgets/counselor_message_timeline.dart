@@ -27,8 +27,13 @@ class CounselorMessageTimeline extends StatefulWidget {
     this.onRetry,
     this.onAtBottom,
     this.now,
+    this.counterpartReadAt,
   });
   final String uid;
+
+  /// When the other side last read this thread; own messages created at or
+  /// before it show Read.
+  final DateTime? counterpartReadAt;
   final bool showEmptyState;
 
   /// Chronological server history; adding older pages does not change the bottom anchor.
@@ -347,6 +352,12 @@ class _CounselorMessageTimelineState extends State<CounselorMessageTimeline>
                       child: CounselorMessageBubble(
                         message: message,
                         own: message.senderId == widget.uid,
+                        read:
+                            message.createdAt != null &&
+                            widget.counterpartReadAt != null &&
+                            !message.createdAt!.isAfter(
+                              widget.counterpartReadAt!,
+                            ),
                         failed:
                             pending?.id == message.id && widget.error != null,
                         sending: pending?.id == message.id
@@ -384,10 +395,14 @@ class CounselorMessageBubble extends StatelessWidget {
     required this.own,
     this.failed = false,
     this.sending = false,
+    this.read = false,
     this.onRetry,
   });
   final CounselorMessage message;
   final bool own;
+
+  /// The other side has read this message (shown only once it is sent).
+  final bool read;
   final bool failed;
   final bool sending;
   final VoidCallback? onRetry;
@@ -483,13 +498,12 @@ class CounselorMessageBubble extends StatelessWidget {
                             ],
                           ),
                         )
-                      : Tooltip(
-                          message: 'Sent',
-                          child: Icon(
-                            Icons.check,
-                            size: 16,
-                            color: colors.onSurfaceVariant,
-                          ),
+                      : _DeliveryLabel(
+                          label: read ? 'Seen' : 'Sent',
+                          icon: read ? Icons.done_all : Icons.check,
+                          color: read
+                              ? colors.primary
+                              : colors.onSurfaceVariant,
                         ),
                 ),
             ],
@@ -498,4 +512,32 @@ class CounselorMessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A check and "Sent", or a double check and "Seen", under one's own message.
+class _DeliveryLabel extends StatelessWidget {
+  const _DeliveryLabel({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: label,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+        ),
+      ],
+    ),
+  );
 }

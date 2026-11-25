@@ -34,7 +34,7 @@ async function studentSend(firestore, name='Ana Santos', id='m1') {
     lastStudentMessageAt:serverTimestamp(),lastStudentMessageId:id,studentName:name
   },{merge:true});
   batch.set(doc(firestore,`counselor_threads/student/messages/${id}`),{
-    senderId:'student',senderRole:'user',text:'Hello',createdAt:serverTimestamp()
+    senderId:'student',senderRole:'user',text:'Noted.',createdAt:serverTimestamp()
   });
   return batch.commit();
 }

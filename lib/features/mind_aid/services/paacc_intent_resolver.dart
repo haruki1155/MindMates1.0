@@ -19,16 +19,31 @@ class PaaccIntentResolver {
     final request = has(
       r'\b(can i|can we|could i|please|show|open|start|book|schedule|reschedule|take|view|what.*services|how.*assessment)\b',
     );
+    // A clear wish or question (English or Filipino) about seeing a counselor.
+    final asksAboutCounseling =
+        has(
+          r'\b(want|need|see|talk|meet|get|book|schedule|reschedule|cancel|how|where|paano|gusto|pwede|makipag|magpa|mag)\b',
+        ) &&
+        has(
+          r'\b(counselor|counsellor|counseling|counselling|appointment|appointments)\b',
+        );
     final appointment =
-        request &&
-        (has(r'\b(appointment|schedule|booking|reschedule)\b') ||
-            has(
-              r'\b(book|schedule)\b.*\b(counselor|counselling|counseling|pacc|paacc)\b',
-            ));
+        (request &&
+            (has(r'\b(appointment|schedule|booking|reschedule)\b') ||
+                has(
+                  r'\b(book|schedule)\b.*\b(counselor|counselling|counseling|pacc|paacc)\b',
+                ))) ||
+        asksAboutCounseling;
+    final managesAppointment = has(
+      r'\b(reschedule|cancel|my appointment|my appointments)\b',
+    );
     final assessment =
         request && has(r'\b(assessment|screening|self assessment)\b');
     final services =
-        request && has(r'\b(services|pacc services|paacc services)\b');
+        (has(r'\b(services|serbisyo)\b') &&
+            (request || has(r'\b(what|which|ano|anong|list)\b'))) ||
+        (has(r'\b(pacc|paacc)\b') &&
+            has(r'\b(offer|offers|provide|provides|available)\b'));
     final breathing =
         request &&
         has(
@@ -48,7 +63,7 @@ class PaaccIntentResolver {
       return _decision(
         PaaccRouteType.appointmentHelp,
         prediction,
-        'appointment_cue',
+        managesAppointment ? 'appointment_manage' : 'appointment_cue',
       );
     }
     if (assessment) {

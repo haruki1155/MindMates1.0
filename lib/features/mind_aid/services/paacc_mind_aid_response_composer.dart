@@ -1,3 +1,4 @@
+import '../domain/mind_aid_companion_models.dart';
 import '../domain/mind_aid_integration_models.dart';
 import '../models/paacc_route_decision.dart';
 
@@ -7,6 +8,14 @@ class PaaccMindAidResponse {
   final String text;
   final List<MindAidAction> actions;
 }
+
+/// Whether a PACC action button may show. Service and appointment questions
+/// are direct requests for PACC, so their buttons show in any mode.
+bool paaccActionAllowed(MindAidConversationMode mode, PaaccRouteType route) =>
+    route == PaaccRouteType.appointmentHelp ||
+    route == PaaccRouteType.serviceInformation ||
+    mode == MindAidConversationMode.navigation ||
+    mode == MindAidConversationMode.coaching;
 
 class PaaccMindAidResponseComposer {
   const PaaccMindAidResponseComposer();
@@ -19,13 +28,18 @@ class PaaccMindAidResponseComposer {
       case PaaccRouteType.uncertain:
         return const PaaccMindAidResponse(text: '');
       case PaaccRouteType.appointmentHelp:
-        return const PaaccMindAidResponse(
+        return PaaccMindAidResponse(
           text: '',
           actions: [
-            MindAidAction(
-              type: MindAidActionType.viewAppointments,
-              label: 'View appointment options',
-            ),
+            decision.reason == 'appointment_manage'
+                ? const MindAidAction(
+                    type: MindAidActionType.viewAppointments,
+                    label: 'View my appointments',
+                  )
+                : const MindAidAction(
+                    type: MindAidActionType.bookAppointment,
+                    label: 'Book a counseling appointment',
+                  ),
           ],
         );
       case PaaccRouteType.assessmentHelp:
