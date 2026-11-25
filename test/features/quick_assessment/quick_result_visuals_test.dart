@@ -153,6 +153,7 @@ Future<void> _pumpResult(
     ..beginQuickAssessment(role: AssessmentRole.student, name: 'Leo');
   for (final question in QuickAssessmentQuestions.questions) {
     provider.selectAnswer(
+      question.id,
       pickLowestConcern ? question.options.first : question.options.last,
     );
     provider.moveToNextQuestion();
