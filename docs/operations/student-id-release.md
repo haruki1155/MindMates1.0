@@ -50,24 +50,41 @@ matches the PR. Merging only redeploys the Staging Admin Web through the Hosting
    `requestAdminPasswordResetDev` refuses Staging. It also makes `requestStaffEmailVerificationDev`
    refuse production and unknown projects (Staging and Dev unchanged).
 
-   One remaining difference from Staging: the deployed `resolveSchoolIdAuthEmailDev`
-   (`00008`) refuses on Staging, while `main`'s Dev resolver serves it. Both use the same pure,
-   non-disclosing handler, so `main`'s version leaks nothing, but deploying it would re-enable
-   Student ID resolution for the Staging APK. That is an owner decision; the resolvers are not
-   in the recovery deploy below.
-4. **Recovery links** (from the Hosting migration) after steps 2 and 3, from `main`. Until #78
-   is merged, a deploy of these from `main` would drop the deployed reset hardening:
+   The deployed `resolveSchoolIdAuthEmailDev` (`00008`) refuses on Staging and has **no invoker**
+   binding. `main`'s Dev resolver (after `fix/staging-dev-resolver-project-gate`) serves Staging and
+   Dev only and refuses production and unknown projects. The handler is pure either way.
+   The current client does not need it for roster-email students: Student ID sign-in derives the
+   `students.mindmate.local` alias locally. Only the legacy "School ID" sign-in and reset path
+   calls the resolver.
+4. **Recovery links**, after #78 is merged, from a clean worktree of that `main` commit with
+   `functions/.env.mindmate-staging` copied in and `ADMIN_WEB_URL=https://paaccmindmate.com`
+   (HTTPS and `/reset-password` verified 2026-11-25):
 
    ```sh
-   # functions/.env.mindmate-staging: ADMIN_WEB_URL=https://paaccmindmate.com
-   # (or leave it empty to use https://mindmate-staging.web.app)
-   FUNCTIONS_DISCOVERY_TIMEOUT=90 firebase deploy --project mindmate-staging \
-     --only functions:requestAdminPasswordReset,functions:requestAdminPasswordResetDev,functions:requestStaffEmailVerification,functions:requestStaffEmailVerificationDev
+   FUNCTIONS_DISCOVERY_TIMEOUT=90 firebase deploy --project mindmate-staging --only functions:requestAdminPasswordReset,functions:requestStaffEmailVerification,functions:requestStaffEmailVerificationDev
    ```
 
-   Never include `resolveSchoolIdAuthEmail*` without the owner decision in step 3. Never use
-   `--force`. Re-read invoker IAM afterwards: `requestAdminPasswordResetDev`
-   must keep no invoker.
+   `requestAdminPasswordResetDev` is deliberately excluded. Its deployed revision (`00008`)
+   already refuses Staging and has no invoker. firebase-tools 15.34.1 leaves invoker IAM alone
+   when it updates a callable function, but sets `allUsers` when it creates one, so the no-invoker
+   state cannot be guaranteed by a deploy. The three deployed functions keep their current
+   invoker (`allUsers`).
+
+   Afterwards: re-read the invoker policy of all six recovery and resolver services, and confirm
+   `requestAdminPasswordResetDev` and `resolveSchoolIdAuthEmailDev` still have none.
+
+5. **Legacy School-ID resolver** (separate approval, only if legacy School ID accounts must sign in
+   from the Staging APK):
+
+   ```sh
+   FUNCTIONS_DISCOVERY_TIMEOUT=90 firebase deploy --project mindmate-staging --only functions:resolveSchoolIdAuthEmail,functions:resolveSchoolIdAuthEmailDev
+   gcloud run services add-iam-policy-binding resolveschoolidauthemaildev --project mindmate-staging --region us-central1 --member=allUsers --role=roles/run.invoker
+   ```
+
+   The deploy alone does not reopen the Dev resolver: the IAM grant does. Undo with
+   `gcloud run services remove-iam-policy-binding` (same arguments).
+
+Never use `--force` or an unrestricted `firebase deploy`.
 
 Indexes: none to deploy. If a future change adds some, use
 `firebase deploy --project mindmate-staging --only firestore:indexes` and never `--force`.
@@ -91,6 +108,10 @@ Note the current Firestore rules release (Firebase console, Firestore, Rules, Hi
 - **Functions:** route traffic back to the recorded revision, per function:
   `gcloud run services update-traffic <service> --to-revisions=<revision>=100 --project mindmate-staging --region us-central1`.
   Never roll the School-ID resolvers back to `00007-*` (they disclose emails).
+  Revisions serving on 2026-11-25, before the recovery deploy: `requestadminpasswordreset-00007-jaj`,
+  `requestadminpasswordresetdev-00008-mub`, `requeststaffemailverification-00005-hez`,
+  `requeststaffemailverificationdev-00005-yex`, `resolveschoolidauthemail-00008-mol`,
+  `resolveschoolidauthemaildev-00008-rex`.
 - **Rules:** re-release the recorded ruleset. Re-releasing a ruleset older than the first-login
   gate lifts the gate for any account still on a temporary password, so finish or revoke
   those logins first.

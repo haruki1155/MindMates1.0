@@ -433,9 +433,16 @@ export const resolveSchoolIdAuthEmail = onCall(
   resolveSchoolIdAuthEmailHandler,
 );
 
+// Skips App Check for the Staging APK, so only the Staging and Dev projects (and
+// demo emulators) serve it. The handler is pure: it never reads any account.
 export const resolveSchoolIdAuthEmailDev = onCall(
   {enforceAppCheck: false},
-  resolveSchoolIdAuthEmailHandler,
+  (request) => {
+    if (!isAuthorizedDevProject()) {
+      throw new HttpsError("permission-denied", "Development-only endpoint is disabled for this project.");
+    }
+    return resolveSchoolIdAuthEmailHandler(request);
+  },
 );
 
 export const requestAdminPasswordReset = onCall(
