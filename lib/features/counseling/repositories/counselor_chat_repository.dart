@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../../services/firebase/firebase_callable_router.dart';
+import '../data/guidance_quick_replies.dart';
 import '../widgets/counselor_unread_badges.dart';
 
 class CounselorMessage {
@@ -21,8 +22,18 @@ class CounselorMessage {
   final bool acknowledged;
 }
 
+/// The text is not one of the approved quick replies and was never written.
+class QuickReplyNotAllowedException implements Exception {
+  const QuickReplyNotAllowedException();
+  @override
+  String toString() => 'QuickReplyNotAllowedException';
+}
+
 abstract class CounselorChatRepository {
   Stream<List<CounselorMessage>> watch(String uid);
+
+  /// When a counselor last opened this thread, or null if never (or unknown).
+  Stream<DateTime?> watchCounselorReadAt(String uid) => Stream.value(null);
   String newMessageId(String uid);
   Future<void> send(String uid, String id, String text);
   Future<void> markRepliesRead(String uid);
@@ -70,6 +81,16 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
       });
 
   @override
+  Stream<DateTime?> watchCounselorReadAt(String uid) => _db
+      .collection('counselor_threads')
+      .doc(uid)
+      .snapshots()
+      .map((snapshot) {
+        final value = snapshot.data()?['counselorReadAt'];
+        return value is Timestamp ? value.toDate() : null;
+      });
+
+  @override
   String newMessageId(String uid) => _db
       .collection('counselor_threads')
       .doc(uid)
@@ -103,6 +124,11 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
           throw StateError('Message ID conflict');
         }
         return;
+      }
+      // Checked after the ID lookup so an already delivered legacy message
+      // reconciles, while an undelivered one is never written.
+      if (!isGuidanceQuickReplyText(text)) {
+        throw const QuickReplyNotAllowedException();
       }
       final profile = await db.collection('users').doc(uid).get();
       String collegeId =
