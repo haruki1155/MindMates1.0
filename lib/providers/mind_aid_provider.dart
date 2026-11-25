@@ -356,7 +356,11 @@ class MindAidProvider extends ChangeNotifier {
             : _supportCardsFor(result, effectiveContext),
         actions: isSafety
             ? _actionsFor(result)
-            : _allowsPaaccAction(_companionState.mode)
+            : _lastPaaccRouteDecision != null &&
+                  paaccActionAllowed(
+                    _companionState.mode,
+                    _lastPaaccRouteDecision!.route,
+                  )
             ? paaccResponse?.actions ?? const []
             : const [],
         source: result.chatResponse.source,
@@ -533,10 +537,6 @@ class MindAidProvider extends ChangeNotifier {
       r'\b(mood|assessment|score|result|progress|trend)\b',
     ).hasMatch(input);
   }
-
-  bool _allowsPaaccAction(MindAidConversationMode mode) =>
-      mode == MindAidConversationMode.navigation ||
-      mode == MindAidConversationMode.coaching;
 
   bool _allowsSupportCards(MindAidConversationMode mode) =>
       mode == MindAidConversationMode.coaching;
