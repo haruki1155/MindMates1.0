@@ -817,6 +817,30 @@ void main() {
       expect(firestore.createdDocuments, hasLength(2));
     });
 
+    test('off-topic redirect prevents cloud calls', () async {
+      final firestore = _CapturingFirestoreService();
+      var cloudCalled = false;
+      final repository = MindAidRepository(
+        datasetLoader: MindAidDatasetLoader(bundle: _MindAidTestBundle()),
+        firestoreService: firestore,
+        cloudService: _TestCloudService(() async {
+          cloudCalled = true;
+          throw StateError('off-topic message must not reach cloud');
+        }),
+      );
+      final result = await repository.sendMessage(
+        userId: 'auth_user_1',
+        text: 'How to code?',
+        preferences: _cloudPreferences,
+        requestId: 'topic-redirect-12345678',
+      );
+
+      expect(cloudCalled, isFalse);
+      expect(result.chatResponse.fallbackReason, 'topic_redirect');
+      expect(result.message.text, MindAidChatEngine.defaultGreeting);
+      expect(firestore.createdDocuments, hasLength(2));
+    });
+
     test('returns typed suggestions and assistant message models', () async {
       final repository = MindAidRepository(
         datasetLoader: MindAidDatasetLoader(bundle: _MindAidTestBundle()),

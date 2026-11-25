@@ -209,6 +209,7 @@ class MindAidRepository {
     var cloudAttempted = false;
     if (preferences?.cloudConsent == true &&
         userId != 'guest' &&
+        result.fallbackReason != 'topic_redirect' &&
         !result.requiresEscalation &&
         !result.safetyLevel.blocksCloud) {
       cloudAttempted = true;

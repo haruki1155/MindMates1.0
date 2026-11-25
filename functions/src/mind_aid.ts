@@ -11,6 +11,7 @@ import {GeminiMindAidProvider} from "./mind_aid_llm/gemini_mind_aid_provider";
 import type {MindAidLlmResponse, MindAidRecentTurn} from "./mind_aid_llm/mind_aid_llm_models";
 import {GEMINI_MINDAID_MODEL} from "./mind_aid_llm/gemini_mind_aid_provider";
 import {createOrUpdateMindAidEmergencyAlert} from "./mind_aid_emergency";
+import {isMindAidTopic, mindAidWelcome} from "./mind_aid_topic_policy";
 
 if (!getApps().length) initializeApp();
 
@@ -25,7 +26,7 @@ const CONVERSATION_ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 type SafetyLevel = "safeSupport" | "needsClarification" | "highDistress" | "crisisOrImmediateRisk";
 type ConversationMode = "supportive" | "listening" | "reflective" | "coaching" | "casual" | "navigation";
-type MindAidSource = "dialogflow" | "gemini" | "controlled_safety";
+type MindAidSource = "dialogflow" | "gemini" | "controlled_safety" | "controlled_topic";
 
 interface MindAidAction {
   type: string;
@@ -527,6 +528,11 @@ function extractDialogflowResponse(result: protos.google.cloud.dialogflow.cx.v3.
   };
 }
 
+async function hasActiveWellnessContext(uid: string, conversationId: string): Promise<boolean> {
+  const context = (await db.collection("_mind_aid_rate_limits").doc(uid).get()).data();
+  return context?.topicConversationId === conversationId && context?.topicActive === true;
+}
+
 async function persistTurn(uid: string, requestId: string, conversationId: string, userText: string, response: MindAidResponse, latencyMs: number): Promise<void> {
   const userMessage = db.collection("mind_aid_messages").doc(`${uid}_${requestId}_user`);
   const assistantMessage = db.collection("mind_aid_messages").doc(response.messageId);
@@ -554,6 +560,10 @@ async function persistTurn(uid: string, requestId: string, conversationId: strin
       [`safetyCounts.${safeMetricKey(response.safetyLevel)}`]: FieldValue.increment(1),
       fallbackCount: FieldValue.increment(response.fallbackReason ? 1 : 0),
       latencyTotalMs: FieldValue.increment(latencyMs), updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+    transaction.set(db.collection("_mind_aid_rate_limits").doc(uid), {
+      topicConversationId: conversationId,
+      topicActive: response.fallbackReason !== "topic_redirect",
     }, {merge: true});
     transaction.create(marker, {userId: uid, requestId, processedAt: FieldValue.serverTimestamp()});
   });
@@ -624,6 +634,12 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
       confidence: 1, safetyLevel, source: "controlled_safety", suggestions: [], actions: controlled.actions,
       requiresEscalation: true, fallbackReason: "safety_intercept",
       effectiveConversationMode: "supportive",
+    };
+  } else if (!isMindAidTopic(text, await hasActiveWellnessContext(uid, conversationId))) {
+    response = {
+      messageId: `${uid}_${requestId}_assistant`, text: mindAidWelcome, intent: "general_support",
+      confidence: 1, safetyLevel, source: "controlled_topic", suggestions: [], actions: [],
+      requiresEscalation: false, fallbackReason: "topic_redirect", effectiveConversationMode: conversationMode,
     };
   } else {
     const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "";
