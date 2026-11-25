@@ -81,11 +81,8 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
       });
 
   @override
-  Stream<DateTime?> watchCounselorReadAt(String uid) => _db
-      .collection('counselor_threads')
-      .doc(uid)
-      .snapshots()
-      .map((snapshot) {
+  Stream<DateTime?> watchCounselorReadAt(String uid) =>
+      _db.collection('counselor_threads').doc(uid).snapshots().map((snapshot) {
         final value = snapshot.data()?['counselorReadAt'];
         return value is Timestamp ? value.toDate() : null;
       });
