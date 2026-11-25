@@ -246,8 +246,12 @@ class SecretChatProvider extends ChangeNotifier {
   Future<void> recordUniqueRead(String postId) async {
     final post = _findPost(postId);
     if (post == null) return;
-    final updated = await repository.recordUniqueRead(post);
-    _replacePost(updated);
+    try {
+      final updated = await repository.recordUniqueRead(post);
+      _replacePost(updated);
+    } catch (_) {
+      // The read count is best-effort: reading the thread still succeeds.
+    }
   }
 
   Future<void> loadProfile() async {
