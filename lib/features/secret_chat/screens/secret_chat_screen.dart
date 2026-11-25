@@ -1,3 +1,4 @@
+import '../domain/forum_live_check.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/mindmate_bottom_navigation.dart';
@@ -41,6 +42,7 @@ class SecretChatScreen extends StatefulWidget {
     this.onPostOpened,
     this.onRetryPost,
     this.onDeletePost,
+    this.onCheckText,
   });
 
   final List<SecretChatModel> posts;
@@ -63,6 +65,9 @@ class SecretChatScreen extends StatefulWidget {
   final Future<void> Function(String postId)? onPostOpened;
   final Future<void> Function(String postId)? onRetryPost;
   final Future<void> Function(String postId)? onDeletePost;
+
+  /// Server check of a draft while typing (posts and comments).
+  final CheckForumText? onCheckText;
 
   @override
   State<SecretChatScreen> createState() => _SecretChatScreenState();
@@ -211,6 +216,7 @@ class _SecretChatScreenState extends State<SecretChatScreen>
         return SecretChatComposeSheet(
           categories: widget.categories,
           onSubmit: widget.onCreatePost,
+          onCheckText: widget.onCheckText,
         );
       },
     );
@@ -229,6 +235,7 @@ class _SecretChatScreenState extends State<SecretChatScreen>
           onToggleLike: widget.onToggleLike,
           onToggleSave: widget.onToggleSave,
           onDeletePost: widget.onDeletePost,
+          onCheckText: widget.onCheckText,
         ),
       ),
     );
