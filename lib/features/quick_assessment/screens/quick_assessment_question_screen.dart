@@ -126,7 +126,7 @@ class _QuestionPage extends StatelessWidget {
                   _OptionTile(
                     option: option,
                     selected: selectedOption?.id == option.id,
-                    onTap: () => provider.selectAnswer(option),
+                    onTap: () => provider.selectAnswer(question.id, option),
                   ),
                   const SizedBox(height: 15),
                 ],
@@ -162,6 +162,8 @@ class _QuestionPage extends StatelessWidget {
   }
 
   Future<void> _goNext(BuildContext context) async {
+    // A second Next from a page that already advanced must not skip a question.
+    if (provider.currentQuestion.id != question.id) return;
     if (!provider.hasSelectedAnswer) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select an answer to continue.')),

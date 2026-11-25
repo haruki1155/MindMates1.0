@@ -48,6 +48,35 @@ test("quick assessment emits response-pattern labels for one-item indicators", (
   assert.match(String(domains[0].bandLabel), /Well-being|strain|support|responses/i);
 });
 
+test("quick assessment rejects an option from another question and a changed value", () => {
+  const valid = (): QuickAnswer[] => QUICK_QUESTIONS.map((question) => ({
+    questionId: question.id,
+    optionId: question.options[0].id,
+    value: question.options[0].value,
+  }));
+  const index = QUICK_QUESTIONS.findIndex((question) => question.id === "little_interest");
+
+  // The payload a stray tap produced: a "connected" option sent as little_interest.
+  const stray = valid();
+  stray[index] = {questionId: "little_interest", optionId: "very_disconnected", value: 1};
+  assert.throws(() => calculateQuick("student", "Test User", stray), /does not match the question catalog/);
+
+  const changedValue = valid();
+  changedValue[index] = {...changedValue[index], value: changedValue[index].value + 1};
+  assert.throws(() => calculateQuick("student", "Test User", changedValue), /does not match the question catalog/);
+});
+
+test("quick assessment accepts every catalog option of every question", () => {
+  for (const question of QUICK_QUESTIONS) {
+    for (const option of question.options) {
+      const answers: QuickAnswer[] = QUICK_QUESTIONS.map((item) => item.id === question.id ?
+        {questionId: item.id, optionId: option.id, value: option.value} :
+        {questionId: item.id, optionId: item.options[0].id, value: item.options[0].value});
+      assert.doesNotThrow(() => calculateQuick("student", "Test User", answers), `${question.id}/${option.id}`);
+    }
+  }
+});
+
 test("quick v3 server interpretation matches personal focus copy", () => {
   const answers: QuickAnswer[] = QUICK_QUESTIONS.map((question) => ({
     questionId: question.id,

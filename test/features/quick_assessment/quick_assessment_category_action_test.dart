@@ -166,7 +166,7 @@ void _completeWithOptions(
     index += 1
   ) {
     final question = QuickAssessmentQuestions.questions[index];
-    provider.selectAnswer(question.options[optionIndexes[index]]);
+    provider.selectAnswer(question.id, question.options[optionIndexes[index]]);
     provider.moveToNextQuestion();
   }
 }

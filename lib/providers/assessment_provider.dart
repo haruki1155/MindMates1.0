@@ -270,8 +270,15 @@ class AssessmentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void selectAnswer(QuickAssessmentOption option) {
-    _selectedOptions[currentQuestion.id] = option;
+  /// Records [option] for [questionId]. A tap from a page that is no longer
+  /// current, or an option from another question, is ignored: option IDs
+  /// repeat across questions, so a stray tap would otherwise answer the wrong one.
+  void selectAnswer(String questionId, QuickAssessmentOption option) {
+    final question = currentQuestion;
+    if (question.id != questionId || !question.options.contains(option)) {
+      return;
+    }
+    _selectedOptions[questionId] = option;
     _quickResult = null;
     notifyListeners();
   }
@@ -314,6 +321,11 @@ class AssessmentProvider extends ChangeNotifier {
       final option = _selectedOptions[question.id];
       if (option == null) {
         throw StateError('Every quick assessment question must be answered.');
+      }
+      if (!question.options.contains(option)) {
+        throw StateError(
+          'Quick answer ${question.id} is not one of its options.',
+        );
       }
 
       responses.add(

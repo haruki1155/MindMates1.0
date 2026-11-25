@@ -262,13 +262,107 @@ void main() {
       expect(provider.currentQuestionIndex, 0);
     });
 
+    test('ignores a selection from a question that is no longer current', () {
+      final provider = _readyProvider();
+      final questions = provider.questions;
+      provider.selectAnswer(questions[0].id, questions[0].options.first);
+      provider.moveToNextQuestion();
+
+      provider.selectAnswer(questions[0].id, questions[0].options.last);
+      // An option of another question, offered for the current one.
+      provider.selectAnswer(questions[1].id, questions[2].options.last);
+
+      expect(provider.selectedOptionFor(questions[0].id)?.id, 'all_time');
+      expect(provider.selectedOptionFor(questions[1].id), isNull);
+      expect(provider.hasSelectedAnswer, isFalse);
+    });
+
+    for (final question in QuickAssessmentQuestions.questions) {
+      for (final option in question.options) {
+        test(
+          'accepts ${question.id}/${option.id} and submits it unchanged',
+          () {
+            final provider = _readyProvider();
+            for (final q in provider.questions) {
+              provider.selectAnswer(
+                q.id,
+                q.id == question.id ? option : q.options.first,
+              );
+              expect(provider.moveToNextQuestion(), isTrue);
+            }
+            final response = provider.quickResult!.responses.singleWhere(
+              (r) => r.questionId == question.id,
+            );
+            expect(response.optionId, option.id);
+            expect(response.value, option.value);
+            for (final r in provider.quickResult!.responses) {
+              final catalog = provider.questions.singleWhere(
+                (q) => q.id == r.questionId,
+              );
+              expect(
+                catalog.options.any(
+                  (o) => o.id == r.optionId && o.value == r.value,
+                ),
+                isTrue,
+              );
+            }
+          },
+        );
+      }
+    }
+
+    test(
+      'a failed save keeps every answer and the retry submits them',
+      () async {
+        var attempts = 0;
+        final submitted = <QuickAssessmentResult>[];
+        final repository = AssessmentRepository(
+          stagingQuickAssessmentSubmitter:
+              ({required userId, required result}) async {
+                attempts += 1;
+                if (attempts == 1) throw StateError('network down');
+                submitted.add(result);
+                return <String, Object>{'saved': true};
+              },
+          callableTimeout: const Duration(seconds: 1),
+        );
+        final provider = AssessmentProvider(repository)
+          ..bindAuthenticatedUser('student_a')
+          ..selectRole(AssessmentRole.student)
+          ..updateName('Leo');
+        for (final question in provider.questions) {
+          provider.selectAnswer(question.id, question.options[1]);
+          provider.moveToNextQuestion();
+        }
+
+        await expectLater(
+          provider.saveQuickAssessmentForUser('student_a'),
+          throwsStateError,
+        );
+        expect(provider.isSavingQuickAssessment, isFalse);
+        expect(provider.isLastQuestion, isTrue);
+        for (final question in provider.questions) {
+          expect(provider.selectedOptionFor(question.id), question.options[1]);
+        }
+
+        expect(provider.moveToNextQuestion(), isTrue);
+        expect(
+          await provider.saveQuickAssessmentForUser('student_a'),
+          isNotNull,
+        );
+        expect(submitted.single.responses.map((r) => r.optionId), [
+          for (final q in provider.questions) q.options[1].id,
+        ]);
+      },
+    );
+
     test('calculates final average score from all five answers', () {
       final provider = _readyProvider();
       final questions = provider.questions;
 
       for (var index = 0; index < questions.length; index += 1) {
         final question = questions[index];
-        provider.selectAnswer(question.options.last);
+        provider.selectAnswer(question.id, question.options.last);
         provider.moveToNextQuestion();
       }
 
@@ -295,7 +389,7 @@ void main() {
       );
 
       for (final question in QuickAssessmentQuestions.questions) {
-        provider.selectAnswer(question.options.first);
+        provider.selectAnswer(question.id, question.options.first);
         provider.moveToNextQuestion();
       }
 
@@ -323,7 +417,7 @@ void main() {
         final provider = _readyProvider(repository: repository);
 
         for (final question in QuickAssessmentQuestions.questions) {
-          provider.selectAnswer(question.options.last);
+          provider.selectAnswer(question.id, question.options.last);
           provider.moveToNextQuestion();
         }
 
@@ -365,7 +459,7 @@ void main() {
       final provider = _readyProvider(repository: repository);
 
       for (final question in QuickAssessmentQuestions.questions) {
-        provider.selectAnswer(question.options.first);
+        provider.selectAnswer(question.id, question.options.first);
         provider.moveToNextQuestion();
       }
 
@@ -410,7 +504,7 @@ void main() {
         final provider = _readyProvider(repository: repository);
 
         for (final question in QuickAssessmentQuestions.questions) {
-          provider.selectAnswer(question.options.first);
+          provider.selectAnswer(question.id, question.options.first);
           provider.moveToNextQuestion();
         }
 
@@ -446,7 +540,7 @@ void main() {
         final provider = _readyProvider(repository: repository);
 
         for (final question in QuickAssessmentQuestions.questions) {
-          provider.selectAnswer(question.options.first);
+          provider.selectAnswer(question.id, question.options.first);
           provider.moveToNextQuestion();
         }
 
@@ -476,7 +570,7 @@ void main() {
           ..updateName('Leo');
 
         for (final question in QuickAssessmentQuestions.questions) {
-          provider.selectAnswer(question.options.first);
+          provider.selectAnswer(question.id, question.options.first);
           provider.moveToNextQuestion();
         }
 
@@ -503,6 +597,7 @@ void main() {
       )..resetQuestions();
       for (var i = 0; i < 2; i++) {
         provider.selectAnswer(
+          QuickAssessmentQuestions.questions[i].id,
           QuickAssessmentQuestions.questions[i].options.first,
         );
         provider.moveToNextQuestion();
@@ -525,6 +620,53 @@ void main() {
       await tester.pumpAndSettle();
       expect(provider.currentQuestion.id, 'little_interest');
     });
+    testWidgets(
+      'a tap on the previous question while advancing never answers the next one',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(900, 1400));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final provider = _readyProvider(
+          repository: _RecordingQuickAssessmentRepository(
+            _FakeFirestoreService(),
+          ),
+        )..resetQuestions();
+        for (var i = 0; i < 2; i++) {
+          provider.selectAnswer(
+            QuickAssessmentQuestions.questions[i].id,
+            QuickAssessmentQuestions.questions[i].options.first,
+          );
+          provider.moveToNextQuestion();
+        }
+        await tester.pumpWidget(
+          ChangeNotifierProvider<AssessmentProvider>.value(
+            value: provider,
+            child: const MaterialApp(home: QuickAssessmentQuestionScreen()),
+          ),
+        );
+
+        await tester.tap(find.text('Very connected'));
+        await tester.pump();
+        await tester.tap(find.text('Next'));
+        // A second tap handled before the next frame still reaches the old page,
+        // as happens on a slow device. Only the "connected" page shows this option.
+        await tester.tap(find.text('Very disconnected'), warnIfMissed: false);
+        // A double Next from the same page must not skip little_interest.
+        await tester.tap(find.text('Next'), warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 60));
+        await tester.tap(find.text('Very disconnected'), warnIfMissed: false);
+        await tester.pumpAndSettle();
+
+        expect(provider.currentQuestion.id, 'little_interest');
+        expect(provider.selectedOptionFor('connected')?.id, 'very_connected');
+        final next = provider.selectedOptionFor('little_interest');
+        expect(
+          next == null ||
+              QuickAssessmentQuestions.questions[3].options.contains(next),
+          isTrue,
+          reason: 'little_interest was answered with ${next?.id}',
+        );
+      },
+    );
     testWidgets('question screen explains why the item is asked', (
       tester,
     ) async {
@@ -738,7 +880,10 @@ void main() {
   group('Quick assessment uses the profile name', () {
     test('beginQuickAssessment uses profile name and starts fresh', () {
       final provider = _readyProvider()
-        ..selectAnswer(QuickAssessmentQuestions.questions.first.options.first);
+        ..selectAnswer(
+          QuickAssessmentQuestions.questions.first.id,
+          QuickAssessmentQuestions.questions.first.options.first,
+        );
 
       provider.beginQuickAssessment(
         role: AssessmentRole.faculty,
