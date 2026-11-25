@@ -21,8 +21,6 @@ class MindMateApp extends StatelessWidget {
       themeMode: ThemeMode.light,
       initialRoute: RouteNames.splash,
       onGenerateRoute: RouteGenerator.generateRoute,
-      builder: (context, child) =>
-          MindAidLauncherOverlay(child: child ?? const SizedBox.shrink()),
     );
   }
 }
