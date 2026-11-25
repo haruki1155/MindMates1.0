@@ -616,7 +616,7 @@ class _CounselorTimelineBubble extends StatelessWidget {
             Icon(Icons.done_all, size: 14, color: AdminColors.muted),
             SizedBox(width: 4),
             Text(
-              'Read',
+              'Seen',
               style: TextStyle(
                 color: AdminColors.muted,
                 fontSize: 11.5,

@@ -498,22 +498,12 @@ class CounselorMessageBubble extends StatelessWidget {
                             ],
                           ),
                         )
-                      : read
-                      ? Tooltip(
-                          message: 'Read',
-                          child: Icon(
-                            Icons.done_all,
-                            size: 16,
-                            color: colors.primary,
-                          ),
-                        )
-                      : Tooltip(
-                          message: 'Sent',
-                          child: Icon(
-                            Icons.check,
-                            size: 16,
-                            color: colors.onSurfaceVariant,
-                          ),
+                      : _DeliveryLabel(
+                          label: read ? 'Seen' : 'Sent',
+                          icon: read ? Icons.done_all : Icons.check,
+                          color: read
+                              ? colors.primary
+                              : colors.onSurfaceVariant,
                         ),
                 ),
             ],
@@ -522,4 +512,32 @@ class CounselorMessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A check and "Sent", or a double check and "Seen", under one's own message.
+class _DeliveryLabel extends StatelessWidget {
+  const _DeliveryLabel({
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: label,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+        ),
+      ],
+    ),
+  );
 }

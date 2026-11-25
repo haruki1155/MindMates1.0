@@ -85,6 +85,12 @@ class CounselorSendController extends ChangeNotifier {
     _changed();
   }
 
+  void clearSelection() {
+    if (sending) return;
+    selected = null;
+    _changed();
+  }
+
   /// Sends the selected reply's canonical text; never any other text.
   Future<void> sendSelected() async {
     final reply = selected;

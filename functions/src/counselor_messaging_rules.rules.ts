@@ -72,6 +72,12 @@ test("an app user can send each of the nine approved replies", async () => {
   }
 });
 
+test("an app user can send a PACC service inquiry template exactly", async () => {
+  const template = "Good day! I would like to inquire about Counseling Service, specifically Appointment Inquiry. May I ask PACC for information and guidance about this topic? Thank you!";
+  await assertSucceeds(studentSend(student(), "s1", "svc", reply(template)));
+  await assertFails(studentSend(student(), "s1", "svc2", reply(template + " Also, hi!")));
+});
+
 test("an app user cannot send free text or a near-miss of an approved reply", async () => {
   for (const text of ["Hello counselor", "Noted", "Noted. ", "noted.", "I UNDERSTAND."]) {
     await assertFails(studentSend(student(), "s1", "m1", reply(text)));

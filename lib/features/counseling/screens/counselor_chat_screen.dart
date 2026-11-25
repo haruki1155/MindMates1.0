@@ -3,11 +3,14 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import '../../../routes/mindmate_back_navigation.dart';
 import '../controllers/counselor_send_controller.dart';
+import '../data/guidance_quick_replies.dart';
 import '../repositories/counselor_chat_repository.dart';
 import '../widgets/counselor_message_timeline.dart';
 import '../widgets/guidance_quick_reply_composer.dart';
 import '../widgets/messaging_dashboard_theme.dart';
+import '../widgets/service_inquiry_composer.dart';
 import 'pacc_counseling_screen.dart';
+import 'services_screen.dart';
 
 typedef OpenPaccCounseling =
     void Function(BuildContext context, {required bool startBooking});
@@ -51,7 +54,7 @@ class _CounselorChatScreenState extends State<CounselorChatScreen> {
   CounselorSendController? _sender;
   Stream<List<CounselorMessage>>? _messages;
   Stream<DateTime?>? _counselorReadAt;
-  bool _collapsed = false;
+  bool _routeServiceChecked = false;
   bool _markingRead = false;
   String? _lastReadCounselorId;
 
@@ -84,6 +87,32 @@ class _CounselorChatScreenState extends State<CounselorChatScreen> {
     if (mounted) setState(() {});
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_routeServiceChecked) return;
+    _routeServiceChecked = true;
+    // "Make an inquiry" on a service page opens this chat with that service.
+    final service = ModalRoute.of(context)?.settings.arguments;
+    if (service is String &&
+        ServicesScreen.services.any((s) => s.title == service)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _pickService(service);
+      });
+    }
+  }
+
+  Future<void> _pickService([String? initialService]) async {
+    final sender = _sender;
+    if (sender == null) return;
+    final text = await showServiceInquiryPicker(
+      context,
+      initialService: initialService,
+    );
+    if (!mounted || text == null) return;
+    sender.select(GuidanceQuickReply('service_inquiry', text));
+  }
+
   Future<void> _markRead(String messageId) async {
     if (_markingRead ||
         !mounted ||
@@ -102,13 +131,7 @@ class _CounselorChatScreenState extends State<CounselorChatScreen> {
     }
   }
 
-  Future<void> _sendReply() async {
-    final sender = _sender!;
-    await sender.sendSelected();
-    if (mounted && sender.pending == null && sender.error == null) {
-      setState(() => _collapsed = true);
-    }
-  }
+  Future<void> _sendReply() => _sender!.sendSelected();
 
   void _showInfo() {
     showDialog<void>(
@@ -175,13 +198,40 @@ class _CounselorChatScreenState extends State<CounselorChatScreen> {
                   // Capped and scrollable so it never crowds out the timeline.
                   ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxHeight: MediaQuery.sizeOf(context).height * .15,
+                      maxHeight: MediaQuery.sizeOf(context).height * .18,
                     ),
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(12),
-                      child: Text(
-                        'PACC counselor · Manual messaging\nNot a live emergency service.',
-                        style: Theme.of(context).textTheme.bodySmall,
+                      padding: const EdgeInsets.fromLTRB(12, 4, 4, 0),
+                      child: Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            'PACC counselor · Not a live emergency service.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          TextButton.icon(
+                            onPressed: () => widget.openPaccCounseling(
+                              context,
+                              startBooking: true,
+                            ),
+                            icon: const Icon(
+                              Icons.event_available_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Book a session'),
+                          ),
+                          TextButton.icon(
+                            onPressed: () => widget.openPaccCounseling(
+                              context,
+                              startBooking: false,
+                            ),
+                            icon: const Icon(
+                              Icons.health_and_safety_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Urgent help'),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -277,12 +327,8 @@ class _CounselorChatScreenState extends State<CounselorChatScreen> {
                       ? null
                       : _sendReply,
                   sending: sender.sending,
-                  collapsed: _collapsed,
-                  onExpand: () => setState(() => _collapsed = false),
-                  onRequestSession: () =>
-                      widget.openPaccCounseling(context, startBooking: true),
-                  onUrgentSupport: () =>
-                      widget.openPaccCounseling(context, startBooking: false),
+                  onPickService: sender.sending ? null : _pickService,
+                  onClear: sender.sending ? null : sender.clearSelection,
                   notice: sender.pendingNotAllowed ? sender.error : null,
                   onDiscard: sender.pendingNotAllowed
                       ? sender.discardPending

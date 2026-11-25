@@ -8,6 +8,7 @@ import 'package:mind_mates/features/counseling/repositories/counselor_chat_repos
 import 'package:mind_mates/features/counseling/controllers/counselor_send_controller.dart';
 import 'package:mind_mates/features/counseling/widgets/counselor_message_timeline.dart';
 import 'package:mind_mates/features/counseling/widgets/guidance_quick_reply_composer.dart';
+import 'package:mind_mates/features/counseling/widgets/service_inquiry_composer.dart';
 import 'package:mind_mates/features/counseling/screens/counselor_chat_screen.dart';
 import 'package:mind_mates/core/theme/app_theme.dart';
 
@@ -386,6 +387,7 @@ void main() {
         repo.messages.add([]);
         await tester.pumpAndSettle();
         expect(find.byType(TextField), findsNothing);
+        await tester.ensureVisible(find.text('I am available.'));
         await tester.tap(find.text('I am available.'));
         await tester.pump();
         await tester.tap(find.byTooltip('Send reply'));
@@ -426,7 +428,7 @@ void main() {
   }
 
   testWidgets(
-    'no text field; nine replies; Send needs a selection, then collapses the selector',
+    'no text field; nine replies; Send needs a selection and clears it after sending',
     (tester) async {
       final repo = FakeChat();
       await tester.pumpWidget(
@@ -462,10 +464,12 @@ void main() {
       await tester.tap(send);
       await tester.pumpAndSettle();
       expect(repo.texts, ['I need further assistance.']);
-      expect(find.text('Noted.'), findsNothing, reason: 'selector collapsed');
-      await tester.tap(find.text('Reply'));
-      await tester.pumpAndSettle();
-      expect(find.text('Noted.'), findsOneWidget);
+      expect(
+        find.text('Noted.'),
+        findsOneWidget,
+        reason: 'replies stay in place',
+      );
+      expect(find.byKey(const Key('guidance_selected_preview')), findsNothing);
       await tester.pumpWidget(const SizedBox());
       await repo.messages.close();
     },
@@ -515,10 +519,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Request a counseling session'));
-    await tester.tap(find.text('Request a counseling session'));
-    await tester.ensureVisible(find.text('Urgent support'));
-    await tester.tap(find.text('Urgent support'));
+    await tester.ensureVisible(find.text('Book a session'));
+    await tester.tap(find.text('Book a session'));
+    await tester.ensureVisible(find.text('Urgent help'));
+    await tester.tap(find.text('Urgent help'));
     expect(opened, [true, false]);
     await tester.pumpWidget(const SizedBox());
     await repo.messages.close();
@@ -580,8 +584,8 @@ void main() {
         ),
       );
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.byTooltip('Read'), findsOneWidget);
-      expect(find.byTooltip('Sent'), findsOneWidget);
+      expect(find.text('Seen'), findsOneWidget);
+      expect(find.text('Sent'), findsOneWidget);
     },
   );
 
@@ -609,7 +613,7 @@ void main() {
       ),
     ]);
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Read'), findsOneWidget);
+    expect(find.text('Seen'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await repo.messages.close();
   });
@@ -761,6 +765,73 @@ void main() {
       await tester.ensureVisible(find.text('Discard'));
       await tester.pumpAndSettle();
       expect(find.text('Discard').hitTestable(), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await repo.messages.close();
+    },
+  );
+
+  testWidgets('Services sends the chosen inquiry template exactly', (
+    tester,
+  ) async {
+    final repo = FakeChat();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: CounselorChatScreen(
+          userId: 'student',
+          repository: repo,
+          outbox: MemoryOutbox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Counseling Service'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Appointment Inquiry'));
+    await tester.pumpAndSettle();
+    final template = serviceInquiryDraft(
+      'Counseling Service',
+      'Appointment Inquiry',
+    );
+    expect(find.byKey(const Key('guidance_selected_preview')), findsOneWidget);
+    expect(find.text(template), findsOneWidget);
+    await tester.tap(find.byTooltip('Send reply'));
+    await tester.pumpAndSettle();
+    expect(repo.texts, [template]);
+    await tester.pumpWidget(const SizedBox());
+    await repo.messages.close();
+  });
+
+  testWidgets(
+    'Make an inquiry from a service opens that service in the picker',
+    (tester) async {
+      final repo = FakeChat();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  settings: const RouteSettings(arguments: 'Testing Service'),
+                  builder: (_) => CounselorChatScreen(
+                    userId: 'student',
+                    repository: repo,
+                    outbox: MemoryOutbox(),
+                  ),
+                ),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('What do you want to know about Testing Service?'),
+        findsOneWidget,
+      );
       await tester.pumpWidget(const SizedBox());
       await repo.messages.close();
     },

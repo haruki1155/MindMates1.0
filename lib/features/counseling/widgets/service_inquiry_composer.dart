@@ -59,6 +59,86 @@ String serviceInquiryDraft(String service, String topic) {
   return 'Good day! I would like to inquire about $service, specifically $topic. May I ask PACC for information and guidance about this topic? Thank you!';
 }
 
+/// Lets the user pick a PACC service and topic; returns that topic's fixed
+/// inquiry text ([serviceInquiryDraft]), or null when dismissed.
+Future<String?> showServiceInquiryPicker(
+  BuildContext context, {
+  String? initialService,
+}) async {
+  String? selectedService = initialService;
+  return showModalBottomSheet<String>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (sheetContext) => StatefulBuilder(
+      builder: (context, update) {
+        final service = selectedService;
+        return SizedBox(
+          height: MediaQuery.sizeOf(context).height * .75,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  service == null
+                      ? 'Select a PACC service'
+                      : 'What do you want to know about $service?',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  key: ValueKey(service),
+                  primary: false,
+                  children: service == null
+                      ? [
+                          for (final item in ServicesScreen.services)
+                            ListTile(
+                              title: Text(item.title),
+                              onTap: () =>
+                                  update(() => selectedService = item.title),
+                            ),
+                        ]
+                      : [
+                          for (final topic in [
+                            ...?serviceInquiryTopics[service],
+                            'General Inquiry',
+                          ])
+                            ListTile(
+                              title: Text(topic),
+                              onTap: () => Navigator.pop(
+                                sheetContext,
+                                serviceInquiryDraft(service, topic),
+                              ),
+                            ),
+                        ],
+                ),
+              ),
+              SafeArea(
+                top: false,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (service != null)
+                      TextButton(
+                        onPressed: () => update(() => selectedService = null),
+                        child: const Text('Back'),
+                      ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(sheetContext),
+                      child: const Text('Cancel'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
 /// Shares the existing chat controller and explicit send callback; no backend IO.
 class ServiceInquiryComposer extends StatefulWidget {
   const ServiceInquiryComposer({
@@ -97,77 +177,9 @@ class _ServiceInquiryComposerState extends State<ServiceInquiryComposer> {
 
   Future<void> _select([String? initialService]) async {
     FocusScope.of(context).unfocus();
-    String? selectedService = initialService;
-    final draft = await showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (context, update) {
-          final service = selectedService;
-          return SizedBox(
-            height: MediaQuery.sizeOf(context).height * .75,
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    service == null
-                        ? 'Select a PACC service'
-                        : 'What do you want to know about $service?',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                Expanded(
-                  child: ListView(
-                    key: ValueKey(service),
-                    primary: false,
-                    children: service == null
-                        ? [
-                            for (final item in ServicesScreen.services)
-                              ListTile(
-                                title: Text(item.title),
-                                onTap: () =>
-                                    update(() => selectedService = item.title),
-                              ),
-                          ]
-                        : [
-                            for (final topic in [
-                              ...?serviceInquiryTopics[service],
-                              'General Inquiry',
-                            ])
-                              ListTile(
-                                title: Text(topic),
-                                onTap: () => Navigator.pop(
-                                  sheetContext,
-                                  serviceInquiryDraft(service, topic),
-                                ),
-                              ),
-                          ],
-                  ),
-                ),
-                SafeArea(
-                  top: false,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      if (service != null)
-                        TextButton(
-                          onPressed: () => update(() => selectedService = null),
-                          child: const Text('Back'),
-                        ),
-                      TextButton(
-                        onPressed: () => Navigator.pop(sheetContext),
-                        child: const Text('Cancel'),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
+    final draft = await showServiceInquiryPicker(
+      context,
+      initialService: initialService,
     );
     if (!mounted || draft == null || widget.sending) return;
     if (widget.controller.text.isNotEmpty) {

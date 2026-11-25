@@ -4,33 +4,29 @@ import 'package:flutter/material.dart';
 
 import '../data/guidance_quick_replies.dart';
 
-/// Guidance Assistance reply area: one approved reply at a time, an explicit
-/// Send, and routes to a session request or urgent support. No free text.
+/// Guidance Assistance reply bar: one approved reply or PACC service inquiry
+/// at a time, then an explicit Send. No free text.
 class GuidanceQuickReplyComposer extends StatelessWidget {
   const GuidanceQuickReplyComposer({
     super.key,
     required this.selected,
     required this.onSelected,
+    required this.onPickService,
+    required this.onClear,
     required this.onSend,
     required this.sending,
-    required this.collapsed,
-    required this.onExpand,
-    required this.onRequestSession,
-    required this.onUrgentSupport,
     this.notice,
     this.onDiscard,
   });
 
   final GuidanceQuickReply? selected;
   final ValueChanged<GuidanceQuickReply>? onSelected;
+  final VoidCallback? onPickService;
+  final VoidCallback? onClear;
 
   /// Null disables Send (nothing selected, sending, or a message pending).
   final VoidCallback? onSend;
   final bool sending;
-  final bool collapsed;
-  final VoidCallback onExpand;
-  final VoidCallback onRequestSession;
-  final VoidCallback onUrgentSupport;
 
   /// Shown above the replies, with [onDiscard] as its action when given.
   final String? notice;
@@ -40,8 +36,10 @@ class GuidanceQuickReplyComposer extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    // The timeline keeps most of the screen; the reply area scrolls when tall.
-    final maxHeight = math.min(360.0, MediaQuery.sizeOf(context).height * .45);
+    final chosen = selected;
+    // A service inquiry is long; show it in full above the bar.
+    final showPreview =
+        chosen != null && !isGuidanceQuickReplyText(chosen.text);
     return Material(
       color: colors.surface,
       child: SafeArea(
@@ -50,16 +48,20 @@ class GuidanceQuickReplyComposer extends StatelessWidget {
           decoration: BoxDecoration(
             border: Border(top: BorderSide(color: colors.outlineVariant)),
           ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: maxHeight),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Notice, replies and alternatives scroll; Send stays in view.
-                  Flexible(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (notice != null || showPreview)
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: math.max(
+                        96,
+                        MediaQuery.sizeOf(context).height * .22,
+                      ),
+                    ),
                     child: SingleChildScrollView(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -81,64 +83,69 @@ class GuidanceQuickReplyComposer extends StatelessWidget {
                                   ),
                               ],
                             ),
-                          if (collapsed)
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: OutlinedButton.icon(
-                                onPressed: onExpand,
-                                icon: const Icon(Icons.reply),
-                                label: const Text('Reply'),
+                          if (showPreview)
+                            Container(
+                              key: const Key('guidance_selected_preview'),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                              decoration: BoxDecoration(
+                                color: colors.primaryContainer,
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                            )
-                          else ...[
-                            Text(
-                              'Choose a quick reply',
-                              style: theme.textTheme.labelLarge,
-                            ),
-                            const SizedBox(height: 6),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 4,
-                              children: [
-                                for (final reply in guidanceQuickReplies)
-                                  ChoiceChip(
-                                    label: Text(reply.text),
-                                    selected: selected?.id == reply.id,
-                                    onSelected: onSelected == null
-                                        ? null
-                                        : (_) => onSelected!(reply),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      chosen.text,
+                                      style: theme.textTheme.bodySmall,
+                                    ),
                                   ),
-                              ],
+                                  IconButton(
+                                    tooltip: 'Clear',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: onClear,
+                                    icon: const Icon(Icons.close, size: 18),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ],
-                          Wrap(
-                            alignment: WrapAlignment.spaceBetween,
-                            children: [
-                              TextButton.icon(
-                                onPressed: onRequestSession,
-                                icon: const Icon(
-                                  Icons.event_available_outlined,
-                                ),
-                                label: const Text(
-                                  'Request a counseling session',
-                                ),
-                              ),
-                              TextButton.icon(
-                                onPressed: onUrgentSupport,
-                                icon: const Icon(
-                                  Icons.health_and_safety_outlined,
-                                ),
-                                label: const Text('Urgent support'),
-                              ),
-                            ],
-                          ),
                         ],
                       ),
                     ),
                   ),
-                  if (!collapsed)
-                    Align(
-                      alignment: Alignment.centerRight,
+                SingleChildScrollView(
+                  key: const Key('guidance_quick_replies'),
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      for (final reply in guidanceQuickReplies)
+                        Padding(
+                          padding: const EdgeInsetsDirectional.only(end: 8),
+                          child: ChoiceChip(
+                            label: Text(reply.text),
+                            selected: chosen?.id == reply.id,
+                            onSelected: onSelected == null
+                                ? null
+                                : (_) => onSelected!(reply),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Two equal buttons keep the bar uniform at any text size.
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: onPickService,
+                        icon: const Icon(Icons.list_alt),
+                        label: const Text('Services'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
                       child: Tooltip(
                         message: 'Send reply',
                         child: FilledButton.icon(
@@ -156,8 +163,9 @@ class GuidanceQuickReplyComposer extends StatelessWidget {
                         ),
                       ),
                     ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ),
           ),
         ),

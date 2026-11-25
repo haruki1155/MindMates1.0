@@ -9,7 +9,7 @@ import '../counseling/fake_counselor_inbox_firebase.dart';
 
 void main() {
   testWidgets(
-    "a counselor's own message shows Read once studentReadAt passes it",
+    "a counselor's own message shows Seen once studentReadAt passes it",
     (tester) async {
       final readAt = DateTime(2026, 11, 22, 10, 30);
       CounselorTimelineMessage counselorMessage(String id, DateTime at) =>
@@ -42,7 +42,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Read'), findsOneWidget);
+      expect(find.text('Seen'), findsOneWidget);
       expect(find.text('Sent'), findsOneWidget);
     },
   );

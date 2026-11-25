@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/counseling/data/guidance_quick_replies.dart';
+import 'package:mind_mates/features/counseling/widgets/service_inquiry_composer.dart';
 
 void main() {
   test('catalog holds the nine approved replies in order', () {
@@ -36,13 +37,34 @@ void main() {
   test('rules allowlist equals the catalog', () {
     final rules = File('firestore.rules').readAsStringSync();
     final body = RegExp(
-      r'function guidanceQuickReplyTexts\(\)\s*\{\s*return\s*\[(.*?)\];',
+      r'function guidanceStudentMessageTexts\(\)\s*\{\s*return\s*\[(.*?)\];',
       dotAll: true,
     ).firstMatch(rules);
-    expect(body, isNotNull, reason: 'guidanceQuickReplyTexts() not found');
+    expect(body, isNotNull, reason: 'guidanceStudentMessageTexts() not found');
     final texts = RegExp(
       r"'([^']*)'",
     ).allMatches(body!.group(1)!).map((m) => m.group(1)).toList();
-    expect(texts, guidanceQuickReplies.map((r) => r.text).toList());
+    expect(texts, guidanceStudentMessageTexts);
+  });
+
+  test('service inquiry templates are allowed exactly as written', () {
+    final template = serviceInquiryDraft(
+      'Counseling Service',
+      'Appointment Inquiry',
+    );
+    expect(guidanceServiceInquiryTexts, hasLength(29));
+    expect(guidanceServiceInquiryTexts, contains(template));
+    expect(
+      guidanceServiceInquiryTexts,
+      contains(serviceInquiryDraft('Referral Service', 'General Inquiry')),
+    );
+    expect(isGuidanceAllowedText(template), isTrue);
+    expect(isGuidanceAllowedText('Noted.'), isTrue);
+    expect(isGuidanceAllowedText('$template Also, hi!'), isFalse);
+    expect(isGuidanceAllowedText('Hello counselor'), isFalse);
+    expect(guidanceStudentMessageTexts, [
+      ...guidanceQuickReplies.map((r) => r.text),
+      ...guidanceServiceInquiryTexts,
+    ]);
   });
 }

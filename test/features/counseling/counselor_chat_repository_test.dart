@@ -47,6 +47,9 @@ class TestReference extends Fake
   ]) async => TestSnapshot(db.documents[path]);
   @override
   Future<void> update(Map<Object, Object?> data) async {
+    final error = db.updateErrors.remove(path);
+    if (error != null) throw error;
+    db.updates.add(data.map((k, v) => MapEntry(k.toString(), v)));
     db.documents[path] = {
       ...?db.documents[path],
       ...data.map((k, v) => MapEntry(k.toString(), v)),
@@ -94,6 +97,8 @@ class TestFirestore extends Fake implements FirebaseFirestore {
   };
   int committedMessages = 0;
   bool loseAcknowledgment = false;
+  final updateErrors = <String, Object>{};
+  final updates = <Map<String, Object?>>[];
   @override
   CollectionReference<Map<String, dynamic>> collection(String path) =>
       TestCollection(this, path);
@@ -237,4 +242,45 @@ void main() {
       expect(db.documents['counselor_threads/student']!['studentReadAt'], seen);
     },
   );
+
+  test(
+    'older rules refuse the seen time, so the read time falls back to now',
+    () async {
+      final db = TestFirestore();
+      final seen = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10));
+      db.documents['counselor_threads/student'] = {
+        'userId': 'student',
+        'lastCounselorMessageAt': seen,
+      };
+      db.updateErrors['counselor_threads/student'] = FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'permission-denied',
+      );
+      final repo = FirestoreCounselorChatRepository(
+        firestore: db,
+        auth: TestAuth(),
+      );
+      await repo.markRepliesRead('student');
+      expect(db.updates, hasLength(1));
+      expect(db.updates.single['studentReadAt'], isA<FieldValue>());
+    },
+  );
+
+  test('a counselor reply after a message also counts as seen', () {
+    final read = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 9));
+    final reply = Timestamp.fromDate(DateTime.utc(2026, 11, 22, 10));
+    expect(counselorSeenThrough({}), isNull);
+    expect(counselorSeenThrough({'counselorReadAt': read}), read.toDate());
+    expect(
+      counselorSeenThrough({
+        'counselorReadAt': read,
+        'lastCounselorMessageAt': reply,
+      }),
+      reply.toDate(),
+    );
+    expect(
+      counselorSeenThrough({'lastCounselorMessageAt': reply}),
+      reply.toDate(),
+    );
+  });
 }

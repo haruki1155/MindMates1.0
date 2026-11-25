@@ -29,6 +29,21 @@ class QuickReplyNotAllowedException implements Exception {
   String toString() => 'QuickReplyNotAllowedException';
 }
 
+/// The latest moment a counselor is known to have seen this thread: an
+/// explicit read stamp, or a counselor reply (which implies the earlier
+/// messages were read). Own messages at or before it show Seen.
+DateTime? counselorSeenThrough(Map<String, dynamic> thread) {
+  DateTime? latest;
+  for (final key in const ['counselorReadAt', 'lastCounselorMessageAt']) {
+    final value = thread[key];
+    if (value is Timestamp &&
+        (latest == null || value.toDate().isAfter(latest))) {
+      latest = value.toDate();
+    }
+  }
+  return latest;
+}
+
 abstract class CounselorChatRepository {
   Stream<List<CounselorMessage>> watch(String uid);
 
@@ -81,11 +96,11 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
       });
 
   @override
-  Stream<DateTime?> watchCounselorReadAt(String uid) =>
-      _db.collection('counselor_threads').doc(uid).snapshots().map((snapshot) {
-        final value = snapshot.data()?['counselorReadAt'];
-        return value is Timestamp ? value.toDate() : null;
-      });
+  Stream<DateTime?> watchCounselorReadAt(String uid) => _db
+      .collection('counselor_threads')
+      .doc(uid)
+      .snapshots()
+      .map((snapshot) => counselorSeenThrough(snapshot.data() ?? {}));
 
   @override
   String newMessageId(String uid) => _db
@@ -124,7 +139,7 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
       }
       // Checked after the ID lookup so an already delivered legacy message
       // reconciles, while an undelivered one is never written.
-      if (!isGuidanceQuickReplyText(text)) {
+      if (!isGuidanceAllowedText(text)) {
         throw const QuickReplyNotAllowedException();
       }
       final profile = await db.collection('users').doc(uid).get();
@@ -187,7 +202,14 @@ class FirestoreCounselorChatRepository implements CounselorChatRepository {
     final data = snapshot.data() ?? {};
     if (studentThreadUnread(data)) {
       // The counselor message actually seen, so a later reply is never Read.
-      await thread.update({'studentReadAt': data['lastCounselorMessageAt']});
+      try {
+        // The counselor message actually seen, so a later reply is never Seen.
+        await thread.update({'studentReadAt': data['lastCounselorMessageAt']});
+      } on FirebaseException catch (error) {
+        // Rules from before quick replies accept only the write time.
+        if (error.code != 'permission-denied') rethrow;
+        await thread.update({'studentReadAt': FieldValue.serverTimestamp()});
+      }
     }
   }
 }

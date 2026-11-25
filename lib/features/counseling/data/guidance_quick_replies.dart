@@ -1,3 +1,5 @@
+import '../widgets/service_inquiry_composer.dart';
+
 /// A fixed answer an app user can send in Guidance Assistance.
 class GuidanceQuickReply {
   const GuidanceQuickReply(this.id, this.text);
@@ -5,7 +7,7 @@ class GuidanceQuickReply {
   /// Stable internal identifier.
   final String id;
 
-  /// Canonical message text. `firestore.rules` (`guidanceQuickReplyTexts`)
+  /// Canonical message text. `firestore.rules` (`guidanceStudentMessageTexts`)
   /// holds the same strings; a test keeps the two identical.
   final String text;
 }
@@ -25,3 +27,20 @@ const List<GuidanceQuickReply> guidanceQuickReplies = [
 /// Exact match only: the rules compare the stored text byte for byte.
 bool isGuidanceQuickReplyText(String text) =>
     guidanceQuickReplies.any((reply) => reply.text == text);
+
+/// Every PACC service inquiry the Services picker can produce, unedited.
+final List<String> guidanceServiceInquiryTexts = [
+  for (final entry in serviceInquiryTopics.entries)
+    for (final topic in [...entry.value, 'General Inquiry'])
+      serviceInquiryDraft(entry.key, topic),
+];
+
+/// Everything an app user may send: quick replies, then service inquiries.
+/// Must equal `guidanceStudentMessageTexts()` in `firestore.rules`.
+final List<String> guidanceStudentMessageTexts = [
+  for (final reply in guidanceQuickReplies) reply.text,
+  ...guidanceServiceInquiryTexts,
+];
+
+bool isGuidanceAllowedText(String text) =>
+    guidanceStudentMessageTexts.contains(text);
