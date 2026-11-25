@@ -17,8 +17,10 @@ import {
   limit,
   orderBy,
   query,
+  serverTimestamp,
   setDoc,
   Timestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
 
@@ -199,6 +201,64 @@ test("post owners cannot bypass the trusted delete backend", async () => {
       doc(environment.authenticatedContext("other").firestore(), "secret_chats/post_1"),
     ),
   );
+});
+
+const forumPost = (overrides: Record<string, unknown> = {}) => ({
+  authorId: "owner",
+  message: "I feel stressed and need support.",
+  category: "Stress",
+  categories: ["Stress"],
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+  likeCount: 0,
+  commentCount: 0,
+  readCount: 0,
+  moderationStatus: "active",
+  safetyLabels: ["stress"],
+  isAnonymous: true,
+  ...overrides,
+});
+
+test("clients cannot publish posts or comments directly, bypassing moderation", async () => {
+  await environment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "secret_chats/post_1"), {...forumPost(), createdAt: Timestamp.now()});
+  });
+  const ownerDb = environment.authenticatedContext("owner").firestore();
+  await assertFails(setDoc(doc(ownerDb, "secret_chats/direct"), forumPost()));
+  await assertFails(setDoc(doc(ownerDb, "secret_chat_comments/direct"), {
+    postId: "post_1",
+    authorId: "owner",
+    message: "A direct comment",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    moderationStatus: "active",
+    safetyLabels: [],
+    isAnonymous: true,
+  }));
+});
+
+test("staff can change moderation status but never rewrite published text", async () => {
+  await environment.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await setDoc(doc(db, "users/admin"), {
+      role: "admin", accessRole: "admin", accountStatus: "active",
+    });
+    await setDoc(doc(db, "secret_chats/post_1"), {...forumPost(), createdAt: Timestamp.now()});
+    await setDoc(doc(db, "secret_chat_comments/comment_1"), {
+      postId: "post_1", authorId: "owner", message: "Kaya mo yan!",
+      createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
+      moderationStatus: "active", safetyLabels: [], isAnonymous: true,
+    });
+  });
+  const adminDb = environment.authenticatedContext("admin", {email_verified: true}).firestore();
+  await assertSucceeds(updateDoc(doc(adminDb, "secret_chats/post_1"), {
+    moderationStatus: "hidden", updatedAt: serverTimestamp(),
+  }));
+  await assertFails(updateDoc(doc(adminDb, "secret_chats/post_1"), {message: "Rewritten by staff"}));
+  await assertSucceeds(updateDoc(doc(adminDb, "secret_chat_comments/comment_1"), {
+    moderationStatus: "hidden",
+  }));
+  await assertFails(updateDoc(doc(adminDb, "secret_chat_comments/comment_1"), {message: "Rewritten"}));
 });
 
 test("Storage accepts only owned valid profile images", async () => {
