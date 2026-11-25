@@ -31,6 +31,7 @@ import '../features/admin/domain/backup_job.dart';
 import '../features/admin/domain/inquiry_scope.dart';
 import '../features/admin/domain/inquiry_sla.dart';
 import '../features/admin/domain/report_generation_models.dart';
+import '../services/firebase/firebase_app_check_service.dart';
 import '../services/firebase/firebase_callable_router.dart';
 import '../services/firebase/firestore_service.dart';
 
@@ -573,7 +574,10 @@ class AdminPortalRepository {
     }
   }
 
+  /// Requests a reset email through the App Check protected callable. The
+  /// App Check token must be ready first; the server rejects unattested calls.
   Future<void> sendPasswordReset(String email) async {
+    await FirebaseAppCheckService.requireToken();
     await FirebaseFunctions.instance
         .routedCallable('requestAdminPasswordReset')
         .call<void>({'email': email.trim()});

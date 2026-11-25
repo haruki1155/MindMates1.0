@@ -3,6 +3,19 @@ import {getAuth} from "firebase-admin/auth";
 import {HttpsError} from "firebase-functions/v2/https";
 import {defineString} from "firebase-functions/params";
 
+const AUTHORIZED_DEV_PROJECTS = new Set(["mindmate-staging", "mindmate-dev-4e91c"]);
+
+/**
+ * True only on the dedicated Dev/Staging projects or a demo-* emulator project.
+ * Pass allowStaging:false for Dev aliases that must not serve hosted Staging.
+ */
+export function isAuthorizedDevProject({allowStaging = true} = {}): boolean {
+  const project = (process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "").trim();
+  if (!allowStaging && project === "mindmate-staging") return false;
+  const demoEmulator = project.startsWith("demo-") && Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+  return AUTHORIZED_DEV_PROJECTS.has(project) || demoEmulator;
+}
+
 export const superAdminUid = defineString("SUPER_ADMIN_UID");
 
 /** A student still on the temporary password may only set a permanent one; every other callable refuses them. */

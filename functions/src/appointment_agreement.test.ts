@@ -183,7 +183,7 @@ test("counterproposal history preserves each target and staff context privately"
   assert.equal(JSON.stringify(notes.docs.map(d => d.data())).includes("PRIVATE"), false);
 });
 
-test("two-way agreement enforces assigned-college eligibility and super-admin exception privacy", async () => {
+test("two-way agreement enforces assigned-college eligibility and super-admin exception privacy", async (t) => {
   const prefix = `agreement-college-${Date.now()}`;
   const college = `${prefix}-cite`;
   const otherCollege = `${prefix}-cas`;
@@ -207,6 +207,11 @@ test("two-way agreement enforces assigned-college eligibility and super-admin ex
     db.doc(`users/${staff}`).set({accessRole: "admin", accountStatus: "active"}),
   ]);
   const apptId = `${prefix}-appt`;
+  // The accepted move keeps a reservation; release only the one this test owns.
+  t.after(async () => {
+    const owned = await db.collection("appointment_slots").where("appointmentId", "==", apptId).get();
+    await Promise.all(owned.docs.map((doc) => doc.ref.delete()));
+  });
   await db.doc(`appointments/${apptId}`).set({userId: cStudent, status: "confirmed", scheduledAt: Timestamp.fromMillis(a), scheduledTime: "09:00 AM", scheduleRevision: 0, concern: "PRIVATE CONCERN"});
   await db.doc(`appointment_slots/pacc_${a}`).set({appointmentId: apptId});
   await db.doc(`appointment_user_locks/${cStudent}`).set({appointmentId: apptId});

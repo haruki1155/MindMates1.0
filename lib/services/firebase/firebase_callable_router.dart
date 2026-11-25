@@ -10,7 +10,8 @@ class FirebaseCallableRouter {
     'repairMyStudentCollege',
     'cancelPendingRegistration',
     'resolveSchoolIdAuthEmail',
-    'requestAdminPasswordReset',
+    // `requestAdminPasswordReset` is intentionally absent: its Dev alias can
+    // mail any account without attestation and is closed on Staging (D3a).
     'requestStaffEmailVerification',
     'getAssessmentStatus',
     'submitQuickAssessment',

@@ -19,7 +19,6 @@ void main() {
       'previewAssessmentDomain',
       'createMoodEntry',
       'getStudentAcademicCalendar',
-      'requestAdminPasswordReset',
     ]) {
       expect(FirebaseCallableRouter.name(name), expected(name), reason: name);
     }
@@ -51,6 +50,15 @@ void main() {
 
   test('does not rewrite an unknown callable', () {
     expect(FirebaseCallableRouter.name('unlistedCallable'), 'unlistedCallable');
+  });
+
+  test('admin password reset never routes to its blocked Dev alias', () {
+    // Pre-login and able to mail any account; the Dev alias is closed on
+    // Staging (D3a), so every environment calls the protected callable.
+    expect(
+      FirebaseCallableRouter.name('requestAdminPasswordReset'),
+      'requestAdminPasswordReset',
+    );
   });
 
   test(

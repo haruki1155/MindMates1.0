@@ -45,9 +45,16 @@ matches the PR. Merging only redeploys the Staging Admin Web through the Hosting
    ran is in this branch, which differs only by `main`'s newer recovery-link code and the
    resolver. The admin reset hardening (`2246a26`: timing floor, Dev project gate) is
    **not** in it; PR #78 carries it.
-3. **PR #78** after step 2. It changes admin reset delivery in `account_recovery.ts`, so its
-   backend rollout needs the resolver and reset fixes from step 2. It does not depend on this
-   PR and does not need to ship with it.
+3. **PR #78** after step 2. It carries the admin reset hardening from `2246a26`: the reset
+   handler and rate limit are identical to the deployed `requestAdminPasswordReset-00007`, and
+   `requestAdminPasswordResetDev` refuses Staging. It also makes `requestStaffEmailVerificationDev`
+   refuse production and unknown projects (Staging and Dev unchanged).
+
+   One remaining difference from Staging: the deployed `resolveSchoolIdAuthEmailDev`
+   (`00008`) refuses on Staging, while `main`'s Dev resolver serves it. Both use the same pure,
+   non-disclosing handler, so `main`'s version leaks nothing, but deploying it would re-enable
+   Student ID resolution for the Staging APK. That is an owner decision; the resolvers are not
+   in the recovery deploy below.
 4. **Recovery links** (from the Hosting migration) after steps 2 and 3, from `main`. Until #78
    is merged, a deploy of these from `main` would drop the deployed reset hardening:
 
@@ -58,8 +65,8 @@ matches the PR. Merging only redeploys the Staging Admin Web through the Hosting
      --only functions:requestAdminPasswordReset,functions:requestAdminPasswordResetDev,functions:requestStaffEmailVerification,functions:requestStaffEmailVerificationDev
    ```
 
-   Never include `resolveSchoolIdAuthEmail*` unless the deployed source is the non-disclosing
-   version. Never use `--force`. Re-read invoker IAM afterwards: `requestAdminPasswordResetDev`
+   Never include `resolveSchoolIdAuthEmail*` without the owner decision in step 3. Never use
+   `--force`. Re-read invoker IAM afterwards: `requestAdminPasswordResetDev`
    must keep no invoker.
 
 Indexes: none to deploy. If a future change adds some, use

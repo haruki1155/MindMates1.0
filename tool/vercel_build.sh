@@ -31,6 +31,14 @@ if [[ "$app_env" != "staging" && "$app_env" != "production" ]]; then
   exit 1
 fi
 echo "Building MindMate Admin Portal with APP_ENV=$app_env"
+# Staging App Check is opt-in per deployment: enable it only after the Staging
+# reCAPTCHA Enterprise key allows this host, or protected callables will fail.
+staging_app_check="${MINDMATES_ENABLE_STAGING_APP_CHECK:-false}"
+if [[ "$staging_app_check" != "true" && "$staging_app_check" != "false" ]]; then
+  echo "MINDMATES_ENABLE_STAGING_APP_CHECK must be true or false." >&2
+  exit 1
+fi
 flutter build web --release --target lib/admin_main.dart \
   --dart-define=APP_ENV="$app_env" \
+  --dart-define=ENABLE_STAGING_APP_CHECK="$staging_app_check" \
   --dart-define=VERCEL_DEPLOYMENT_ENV="${VERCEL_ENV:-}"

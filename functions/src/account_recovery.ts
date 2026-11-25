@@ -1,3 +1,4 @@
+import {isAuthorizedDevProject} from "./access";
 import {getApps, initializeApp} from "firebase-admin/app";
 import {getAuth} from "firebase-admin/auth";
 import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
@@ -345,29 +346,53 @@ async function requestStaffEmailVerificationHandler(request: CallableRequest) {
   return {accepted: true};
 }
 
-async function requestAdminPasswordResetHandler(request: CallableRequest) {
+export interface PasswordResetMessage {to: string; subject: string; text: string; html: string}
+
+/** Side effects of a reset request, injectable so tests never send mail. */
+export interface PasswordResetDelivery {
+  generateLink(email: string, continueUrl: string): Promise<string>;
+  send(message: PasswordResetMessage): Promise<void>;
+}
+
+const liveResetDelivery: PasswordResetDelivery = {
+  generateLink: (email, continueUrl) => getAuth().generatePasswordResetLink(email, {url: continueUrl}),
+  send: async (message) => {
+    await accountEmailTransporter().sendMail({from: `MindMate <${smtpSender.value().trim()}>`, ...message});
+  },
+};
+
+/**
+ * Every accepted request answers no sooner than this, whether or not the
+ * account exists and whether or not mail was sent, so response time does not
+ * reveal account existence. A slower-than-floor SMTP send can still be
+ * observed; that residual is documented rather than hidden.
+ */
+export const MIN_PASSWORD_RESET_RESPONSE_MS = 3000;
+
+function safeErrorCode(error: unknown): string {
+  const code = (error as {code?: unknown})?.code;
+  if (typeof code === "string" && /^[\w./-]{1,64}$/.test(code)) return code;
+  return error instanceof Error ? error.name : "unknown";
+}
+
+export async function processAdminPasswordReset(
+  request: CallableRequest,
+  delivery: PasswordResetDelivery = liveResetDelivery,
+  minResponseMs = MIN_PASSWORD_RESET_RESPONSE_MS,
+): Promise<{accepted: true}> {
+  const started = Date.now();
+  // Format and rate-limit outcomes do not depend on whether an account exists.
   const email = normalizeRecoveryEmail(request.data?.email);
   await enforcePasswordResetRateLimit(email, requestIp(request));
 
+  // The same allowlisted admin origin used for staff verification links; the
+  // link opens that origin's /reset-password route.
   const webBaseUrl = resolveStaffVerificationWebUrl();
-  let firebaseLink: string;
   try {
-    firebaseLink = await getAuth().generatePasswordResetLink(email, {
-      url: `${webBaseUrl}/`,
-    });
-  } catch (error: unknown) {
-    if ((error as {code?: string})?.code === "auth/user-not-found") {
-      return {accepted: true};
-    }
-    throw error;
-  }
-
-  const resetLink = directPasswordResetLink(firebaseLink, webBaseUrl);
-  const sender = smtpSender.value().trim();
-  const safeEmail = escapeHtml(email);
-  try {
-    await accountEmailTransporter().sendMail({
-      from: `MindMate <${sender}>`,
+    const firebaseLink = await delivery.generateLink(email, `${webBaseUrl}/`);
+    const resetLink = directPasswordResetLink(firebaseLink, webBaseUrl);
+    const safeEmail = escapeHtml(email);
+    await delivery.send({
       to: email,
       subject: "Reset your MindMate Admin password",
       text: [
@@ -386,19 +411,21 @@ async function requestAdminPasswordResetHandler(request: CallableRequest) {
       }),
     });
   } catch (error) {
-    const correlationId = randomUUID();
-    logError("Admin password reset email delivery failed", {
-      correlationId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw new HttpsError(
-      "unavailable",
-      "The reset email could not be delivered. Please try again shortly.",
-      {correlationId},
-    );
+    // Unknown accounts and delivery failures answer exactly like a success.
+    // Logs carry only an error code and correlation ID: never the address,
+    // the reset link or a provider message that might echo them.
+    if (safeErrorCode(error) !== "auth/user-not-found") {
+      logError("Admin password reset delivery failed", {correlationId: randomUUID(), errorCode: safeErrorCode(error)});
+    }
   }
 
+  const remaining = minResponseMs - (Date.now() - started);
+  if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
   return {accepted: true};
+}
+
+function requestAdminPasswordResetHandler(request: CallableRequest) {
+  return processAdminPasswordReset(request);
 }
 
 export const resolveSchoolIdAuthEmail = onCall(
@@ -416,9 +443,16 @@ export const requestAdminPasswordReset = onCall(
   requestAdminPasswordResetHandler,
 );
 
+// Unauthenticated and without App Check it can be used to send reset mail to
+// any account, so hosted Staging must use the protected callable (D3a).
 export const requestAdminPasswordResetDev = onCall(
   {enforceAppCheck: false, secrets: [smtpAppPassword]},
-  requestAdminPasswordResetHandler,
+  (request) => {
+    if (!isAuthorizedDevProject({allowStaging: false})) {
+      throw new HttpsError("permission-denied", "Development-only endpoint is disabled for this project.");
+    }
+    return requestAdminPasswordResetHandler(request);
+  },
 );
 
 export const requestStaffEmailVerification = onCall(
@@ -426,7 +460,13 @@ export const requestStaffEmailVerification = onCall(
   requestStaffEmailVerificationHandler,
 );
 
+// Unauthenticated mail sender without App Check: never served by production.
 export const requestStaffEmailVerificationDev = onCall(
   {enforceAppCheck: false, secrets: [smtpAppPassword]},
-  requestStaffEmailVerificationHandler,
+  (request) => {
+    if (!isAuthorizedDevProject()) {
+      throw new HttpsError("permission-denied", "Development-only endpoint is disabled for this project.");
+    }
+    return requestStaffEmailVerificationHandler(request);
+  },
 );
