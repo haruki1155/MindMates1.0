@@ -661,7 +661,8 @@ test("revokeStudentActivation disables the claimant and frees the Student No. wi
   const retired = await getAuth().getUser(first.uid);
   assert.notEqual(retired.email, alias, "the revoked account was moved off the alias");
   assert.equal(retired.disabled, true, "and it stays disabled");
-  assert.deepEqual(await resolveEmail.run({data: {schoolId: `${run}-RV1`}}), {email: alias});
+  // The pre-login resolver is pure: it never looks the account up, so it cannot reveal the alias or the revocation.
+  assert.deepEqual(await resolveEmail.run({data: {schoolId: `${run}-RV1`}}), {email: `${run.toLowerCase()}.rv1@mindmate.local`});
 
   await denied(revoke.run({auth, data: {studentNo: `${run}-S1`, reason: "nope"}}), "failed-precondition");
 });
