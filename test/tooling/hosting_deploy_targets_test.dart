@@ -246,4 +246,21 @@ void main() {
       {'source': '**', 'destination': '/index.html'},
     ]);
   });
+
+  test('browsers revalidate every Flutter Web file after a deploy', () {
+    // Flutter Web file names carry no content hash, and each build re-subsets
+    // the icon fonts. A cached file from the previous deploy mixed with a new
+    // one draws missing-glyph boxes, so every response must be revalidated.
+    final hosting =
+        (jsonDecode(read('firebase.json')) as Map<String, dynamic>)['hosting']
+            as Map<String, dynamic>;
+    expect(hosting['headers'], [
+      {
+        'source': '**',
+        'headers': [
+          {'key': 'Cache-Control', 'value': 'no-cache'},
+        ],
+      },
+    ]);
+  });
 }
