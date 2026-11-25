@@ -340,6 +340,22 @@ service cloud.firestore {
         && hasPortalAccess();
     }
 
+    // App users answer counselors only with these exact texts. Must equal
+    // lib/features/counseling/data/guidance_quick_replies.dart (a test checks).
+    function guidanceQuickReplyTexts() {
+      return [
+        'I understand.',
+        'Noted.',
+        'Thank you for your guidance.',
+        'I need clarification.',
+        'I am available.',
+        'I am not available.',
+        'I would like a follow-up session.',
+        'I need further assistance.',
+        'My concern has been addressed.'
+      ];
+    }
+
     function registeredCounselorName(userId) {
       let profile = get(/databases/$(database)/documents/users/$(userId)).data;
       let first = profile.get('firstName', '');
@@ -412,12 +428,18 @@ service cloud.firestore {
                 && request.resource.data.studentName.size() <= 160
                 && registeredCounselorName(userId))))
           || (isApprovedCounselor()
+            && request.resource.data.diff(resource.data).affectedKeys().size() > 0
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
-              ['updatedAt', 'lastCounselorMessageAt', 'lastCounselorMessageId'])
-            && request.resource.data.updatedAt == request.time
-            && request.resource.data.lastCounselorMessageAt == request.time
-            && request.resource.data.lastCounselorMessageId != resource.data.get('lastCounselorMessageId', '')
-            && linkedCounselorMessage(userId, request.resource.data.lastCounselorMessageId, request.auth.uid, 'counselor'))
+              ['updatedAt', 'lastCounselorMessageAt', 'lastCounselorMessageId', 'counselorReadAt'])
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(
+                ['updatedAt', 'lastCounselorMessageAt', 'lastCounselorMessageId'])
+              || (request.resource.data.updatedAt == request.time
+                && request.resource.data.lastCounselorMessageAt == request.time
+                && request.resource.data.lastCounselorMessageId != resource.data.get('lastCounselorMessageId', '')
+                && linkedCounselorMessage(userId, request.resource.data.lastCounselorMessageId, request.auth.uid, 'counselor')))
+            // Lets the student see that a counselor opened the thread (Read).
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['counselorReadAt'])
+              || request.resource.data.counselorReadAt == request.time))
         );
       allow delete: if false;
 
@@ -431,6 +453,8 @@ service cloud.firestore {
           && request.resource.data.text is string
           && request.resource.data.text.size() >= 1
           && request.resource.data.text.size() <= 1600
+          // Counselors write free text; the thread's own user only a quick reply.
+          && (!isOwner(userId) || request.resource.data.text in guidanceQuickReplyTexts())
           && request.resource.data.createdAt == request.time;
         allow update, delete: if false;
       }
