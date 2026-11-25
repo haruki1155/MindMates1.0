@@ -940,6 +940,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
     if (index < 0 || index >= _manualRows.length) return;
     final copy = _manualRows[index].toDraftMap();
     copy['studentNo'] = '';
+    copy['email'] = '';
     setState(() {
       _manualRows.insert(index + 1, ManualRosterRowControllers(initial: copy));
       _manualValidation = validateManualRosterDrafts([
