@@ -138,6 +138,16 @@ class SecretChatProvider extends ChangeNotifier {
         categories.toSet().length != categories.length) {
       throw ArgumentError('Choose between 1 and 3 unique categories.');
     }
+    // Posting the same text again after a lost response retries the failed
+    // post's ID, which the server treats idempotently: never a duplicate.
+    for (final post in _posts) {
+      if (post.isMine &&
+          post.hasFailed &&
+          !post.isPending &&
+          post.message == message.trim()) {
+        return retryPost(post.id);
+      }
+    }
     final id = repository.newPostId();
     final optimistic = SecretChatModel(
       id: id,

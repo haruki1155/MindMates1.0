@@ -156,3 +156,39 @@ test("comments are moderated and only reach active posts", {skip: !emulated}, as
     "thread_unavailable",
   );
 });
+
+test("repeated refusals are rate limited and stop writing audit rows", {skip: !emulated}, async () => {
+  const author = uid();
+  const bad = post({message: "Putangina ng thesis na to, stress na stress ako."});
+  for (let i = 0; i < 20; i++) {
+    await rejectsWith(createSecretChatPostHandler(request(author, bad)), "invalid-argument");
+  }
+  await rejectsWith(createSecretChatPostHandler(request(author, bad)), "resource-exhausted");
+  await rejectsWith(createSecretChatPostHandler(request(author, post())), "resource-exhausted");
+  const audit = await db.collection("_secret_chat_moderation_events").where("userId", "==", author).get();
+  assert.equal(audit.size, 20);
+});
+
+test("a comment retry only succeeds on the same post", {skip: !emulated}, async () => {
+  const author = uid();
+  const first = await createSecretChatPostHandler(request(author, post()));
+  const second = await createSecretChatPostHandler(request(author, post()));
+  const commentId = `c-${Date.now()}-${++seq}`;
+  const comment = {message: "Kaya mo yan, proud of you!", safetyLabels: [], commentId};
+  await addSecretChatCommentHandler(request(author, {...comment, postId: first.postId}));
+  assert.deepEqual(
+    await addSecretChatCommentHandler(request(author, {...comment, postId: first.postId})),
+    {commentId},
+  );
+  await rejectsWith(
+    addSecretChatCommentHandler(request(author, {...comment, postId: second.postId})),
+    "already-exists",
+  );
+});
+
+test("a post ID that still has comments cannot be reused", {skip: !emulated}, async () => {
+  const postId = `p-${Date.now()}-${++seq}`;
+  await db.doc(`secret_chat_comments/leftover-${postId}`).set({postId, authorId: "someone", message: "old"});
+  await rejectsWith(createSecretChatPostHandler(request(uid(), post({postId}))), "already-exists");
+});
+

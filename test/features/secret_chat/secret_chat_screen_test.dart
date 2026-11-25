@@ -275,6 +275,29 @@ void main() {
     expect(button.onPressed, isNull);
     expect(created, 0);
   });
+
+  testWidgets('a reply that fails to send stays in the box', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        posts: [_post()],
+        onAddComment: ({required postId, required message}) async {
+          throw StateError('offline');
+        },
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.mode_comment_outlined));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    const draft = 'Sending this while offline.';
+    await tester.enterText(find.byType(TextField).last, draft);
+    await tester.tap(find.byIcon(Icons.send_rounded));
+    await tester.pump();
+    await tester.pump();
+    expect(
+      tester.widget<TextField>(find.byType(TextField).last).controller!.text,
+      draft,
+    );
+  });
 }
 
 Widget _app({

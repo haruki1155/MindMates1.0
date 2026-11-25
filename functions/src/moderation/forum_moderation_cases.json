@@ -205,14 +205,6 @@
    "why": "tagalog insult phrase"
   },
   {
-   "text": "katangahan ko talaga",
-   "why": "filipino prefix and suffix"
-  },
-  {
-   "text": "nakakabobo yung lesson",
-   "why": "filipino prefix nakaka"
-  },
-  {
    "text": "kalapating mababa ang lipad",
    "why": "tagalog idiom"
   },
@@ -223,6 +215,198 @@
   {
    "text": "anak ng puta",
    "why": "tagalog phrase"
+  },
+  {
+   "text": "Gago!",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "Fuck!",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "Shit!",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "bitch!",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "putangina!",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "tanginaaa!!!",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "gagoooo!",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "Gago1",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "Fuck0",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "!gago",
+   "why": "edge punctuation or digit"
+  },
+  {
+   "text": "niggers",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "faggots",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "retards",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "sluts",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "whores",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "fuckers",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "fuckin",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "fuckyou",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "fuck off",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "kiss my ass",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "bitch@ss",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "gagoako",
+   "why": "inflection or compound"
+  },
+  {
+   "text": "f uc k",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "f u.c k",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "f.u.c k",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "fu cking",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "putan gina",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "p*ta",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "g*go",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "b*bo ka",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "t*nga mo",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "fvck",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "phuck",
+   "why": "split, wildcard or swap"
+  },
+  {
+   "text": "\ua731\u029c\u026a\u1d1b",
+   "why": "non-decomposing look-alike letters"
+  },
+  {
+   "text": "\u0192uck",
+   "why": "non-decomposing look-alike letters"
+  },
+  {
+   "text": "p\u00f8ta",
+   "why": "non-decomposing look-alike letters"
+  },
+  {
+   "text": "mamatay ka",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "sana mamatay ka",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "mamatay ka sana",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "patayin mo sarili mo",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "magbigti ka na",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "kill your self",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "unalive yourself",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "papatayin kita",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "I will kill you",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "bobo mo",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "tanga ka talaga",
+   "why": "harassment or death wish"
+  },
+  {
+   "text": "u\u0142ol",
+   "why": "non-decomposing look-alike letters"
   }
  ],
  "notBlocked": [
@@ -327,6 +511,66 @@
   {
    "text": "I sometimes think kms when exams pile up.",
    "why": "crisis abbreviation is not profanity"
+  },
+  {
+   "text": "Kaya mo yan, go ok?",
+   "why": "join false positive"
+  },
+  {
+   "text": "Let's go ok",
+   "why": "join false positive"
+  },
+  {
+   "text": "I put ang notes ko sa bag",
+   "why": "join false positive"
+  },
+  {
+   "text": "He was dumb as a rock about it",
+   "why": "join false positive"
+  },
+  {
+   "text": "I love boba milk tea",
+   "why": "boba is a drink"
+  },
+  {
+   "text": "I want to puke before exams",
+   "why": "puke means vomit"
+  },
+  {
+   "text": "Lady Gaga songs calm me",
+   "why": "name"
+  },
+  {
+   "text": "Ang bobo ko talaga, I feel useless",
+   "why": "self-critical distress"
+  },
+  {
+   "text": "Ang tanga ko",
+   "why": "self-critical distress"
+  },
+  {
+   "text": "inutil ako",
+   "why": "self-critical distress"
+  },
+  {
+   "text": "nakakatanga na ang thesis",
+   "why": "feeling, not an insult"
+  },
+  {
+   "text": "nakakabobo yung lesson",
+   "why": "feeling, not an insult"
+  },
+  {
+   "text": "Bitter melon and potatoes for lunch",
+   "why": "ordinary"
+  },
+  {
+   "text": "This exam will be the death of me",
+   "why": "idiom"
+  },
+  {
+   "text": "katangahan ko talaga",
+   "why": "self-critical distress"
   }
  ]
 }

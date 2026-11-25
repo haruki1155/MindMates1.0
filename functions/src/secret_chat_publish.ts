@@ -21,6 +21,8 @@ const LABEL_PATTERN = /^[a-z_]{1,32}$/;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMITS = {post: 5, comment: 20} as const;
+/** Refusals per window, so the filter cannot be probed or the audit flooded. */
+const REJECTION_LIMIT = 20;
 
 type ForumTextKind = "post" | "comment" | "alias";
 export interface PublishDeps {
@@ -39,6 +41,15 @@ export async function assertForumTextAllowed(
   deps: Partial<PublishDeps> = {},
 ): Promise<void> {
   const {moderate, crisis} = {...defaultDeps, ...deps};
+  const audited = context.audit !== false;
+  const rejectionsRef = getFirestore().collection("_secret_chat_rate_limits")
+    .doc(`${context.userId}_rejected`);
+  if (audited) {
+    const snapshot = await rejectionsRef.get();
+    if (rejectionWindow(snapshot.data()).count >= REJECTION_LIMIT) {
+      throw new HttpsError("resource-exhausted", "Please wait a few minutes before trying again.");
+    }
+  }
   let result: ForumModerationResult;
   let isCrisis: boolean;
   try {
@@ -55,17 +66,31 @@ export async function assertForumTextAllowed(
     throw new HttpsError("failed-precondition", CRISIS_REDIRECT, {reason: "crisis_support"});
   }
   if (result.allowed) return;
-  if (context.audit !== false) {
-    await getFirestore().collection("_secret_chat_moderation_events").add({
-      userId: context.userId,
-      kind: context.kind,
-      categories: result.categories,
-      severity: result.severity,
-      dictionaryVersion: FORUM_DICTIONARY_VERSION,
-      createdAt: FieldValue.serverTimestamp(),
+  if (audited) {
+    const db = getFirestore();
+    await db.runTransaction(async (transaction) => {
+      const window = rejectionWindow((await transaction.get(rejectionsRef)).data());
+      if (window.count >= REJECTION_LIMIT) return;
+      transaction.set(rejectionsRef, {windowStart: window.start, count: window.count + 1});
+      transaction.set(db.collection("_secret_chat_moderation_events").doc(), {
+        userId: context.userId,
+        kind: context.kind,
+        categories: result.categories,
+        severity: result.severity,
+        dictionaryVersion: FORUM_DICTIONARY_VERSION,
+        createdAt: FieldValue.serverTimestamp(),
+      });
     });
   }
   throw new HttpsError("invalid-argument", FORUM_LANGUAGE_WARNING, {reason: "inappropriate_language"});
+}
+
+function rejectionWindow(data: FirebaseFirestore.DocumentData | undefined): {start: Timestamp; count: number} {
+  const start = data?.windowStart instanceof Timestamp ? data.windowStart as Timestamp : null;
+  if (!start || Date.now() - start.toMillis() >= RATE_WINDOW_MS) {
+    return {start: Timestamp.now(), count: 0};
+  }
+  return {start, count: Number(data?.count ?? 0)};
 }
 
 function text(value: unknown, min: number, max: number): string {
@@ -144,6 +169,13 @@ export async function createSecretChatPostHandler(
       if (existing.data()?.authorId === userId && existing.data()?.message === message) return;
       throw new HttpsError("already-exists", "That post ID is already used.");
     }
+    if (requestedId) {
+      // A deleted post's comments may still be cleaning up: never reuse its ID.
+      const leftovers = await transaction.get(
+        db.collection("secret_chat_comments").where("postId", "==", requestedId).limit(1),
+      );
+      if (!leftovers.empty) throw new HttpsError("already-exists", "That post ID is already used.");
+    }
     const commitRate = await consumeRate(transaction, userId, "post");
     commitRate();
     transaction.set(ref, {
@@ -184,7 +216,9 @@ export async function addSecretChatCommentHandler(
   await db.runTransaction(async (transaction) => {
     const [post, existing] = await Promise.all([transaction.get(postRef), transaction.get(ref)]);
     if (existing.exists) {
-      if (existing.data()?.authorId === userId && existing.data()?.message === message) return;
+      const same = existing.data()?.authorId === userId &&
+        existing.data()?.postId === postId && existing.data()?.message === message;
+      if (same) return;
       throw new HttpsError("already-exists", "That comment ID is already used.");
     }
     if (!post.exists || post.data()?.moderationStatus !== "active") {

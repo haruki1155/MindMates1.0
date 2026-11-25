@@ -92,9 +92,13 @@ void main() {
       'p u t a n g i n a',
       'tang ina mo',
       'fuuuuuck this school',
-      'katangahan ko na naman',
       'Gago​ka',
       'ANG BOBO MO',
+      'Gago!',
+      'fuckers everywhere',
+      'p*ta naman',
+      'f uc k this',
+      'gago1',
     ]) {
       final result = validator.validateComment(text);
       expect(
@@ -113,6 +117,11 @@ void main() {
       'Leche flan made my stressful day better.',
       'I was abused and therapy is helping slowly.',
       'Tangan ko pa rin ang pag-asa.',
+      'Ang tanga ko talaga today.',
+      'katangahan ko na naman',
+      'Kaya mo yan, go ok?',
+      'I love boba milk tea.',
+      'nakakabobo yung lesson pero kaya ko.',
     ]) {
       expect(
         validator.validateComment(text).code,

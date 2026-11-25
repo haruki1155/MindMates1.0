@@ -7,7 +7,7 @@
  * never be entries: they are disclosures, handled by the crisis path.
  */
 
-export const FORUM_DICTIONARY_VERSION = "2026-11-26.1";
+export const FORUM_DICTIONARY_VERSION = "2026-11-26.2";
 
 export type ModerationCategory =
   | "profanity" | "vulgar" | "sexual" | "discriminatory" | "harassment";
@@ -20,8 +20,10 @@ export interface TermEntry {
   language: ModerationLanguage;
   category: ModerationCategory;
   severity: ModerationSeverity;
-  /** Also match Filipino prefixes and suffixes (kagaguhan, putanginamo). */
-  affixes?: boolean;
+  /** Also match affix forms: Filipino (kagaguhan) or English (fuckers). */
+  affixes?: "tl" | "en";
+  /** An insult the speaker may use about themselves ("ang tanga ko"). */
+  selfAllowed?: boolean;
   /** Next words that make this an innocent phrase ("leche flan"). */
   exceptNext?: string[];
 }
@@ -34,26 +36,31 @@ export interface PhraseEntry {
 }
 
 export const FILIPINO_PREFIXES = ["", "ka", "pinaka", "naka", "nakaka", "mag", "pag", "i"];
-export const FILIPINO_SUFFIXES = ["", "mo", "ka", "ng", "han", "an", "in", "ito", "yan", "nyo"];
+export const FILIPINO_SUFFIXES = ["", "mo", "ka", "ng", "han", "an", "in", "ito", "yan", "nyo", "ako", "kayo"];
+export const ENGLISH_SUFFIXES = ["", "s", "es", "er", "ers", "in", "ing", "ed", "y"];
+/** Self-description, not an insult: "tanga ko", "inutil ako", "nakakatanga". */
+export const SELF_REFERENCE_NEXT = ["ko", "ako"];
+export const SELF_REFERENCE_PREFIXES = ["nakaka"];
 
 const en = (category: ModerationCategory, severity: ModerationSeverity, ...stems: string[]): TermEntry =>
-  ({stems, language: "en", category, severity});
+  ({stems, language: "en", category, severity, affixes: "en"});
 const tl = (category: ModerationCategory, severity: ModerationSeverity, ...stems: string[]): TermEntry =>
-  ({stems, language: "tl", category, severity, affixes: true});
+  ({stems, language: "tl", category, severity, affixes: "tl"});
 
 export const TERM_ENTRIES: TermEntry[] = [
   // English profanity and abbreviations.
   en("profanity", "high", "fuck", "fucking", "fucker", "fucked", "fucks", "fck", "fk", "fuk", "fking",
-    "fcking", "fukin", "fuking", "motherfucker", "motherfucking", "mofo", "fml", "fuq"),
+    "fcking", "fukin", "fuking", "motherfucker", "motherfucking", "mofo", "fml", "fuq", "fvck", "phuck",
+    "phuk", "fuckyou", "fuckoff", "fuckface"),
   en("profanity", "high", "shit", "shitty", "shits", "bullshit", "sht", "shithead", "shite"),
-  en("profanity", "high", "bitch", "bitches", "bitchy", "btch", "biatch"),
+  en("profanity", "high", "bitch", "bitches", "bitchy", "btch", "biatch", "bitchass"),
   en("profanity", "high", "asshole", "assholes", "asshat", "jackass", "dumbass", "arse", "arsehole"),
   en("profanity", "high", "bastard", "bastards", "prick", "twat", "wanker", "douche", "douchebag"),
   en("profanity", "low", "damn", "goddamn", "dammit", "crap", "crappy"),
   en("profanity", "high", "stfu", "wtf", "gtfo", "omfg", "lmfao"),
   // English vulgar and sexual.
   en("vulgar", "high", "dick", "dickhead", "cock", "cunt", "pussy", "tits", "titties", "boner"),
-  en("sexual", "high", "whore", "slut", "slutty", "hoe", "jizz", "blowjob", "handjob",
+  en("sexual", "high", "whore", "slut", "slutty", "jizz", "blowjob", "handjob",
     "dildo", "horny", "porn", "porno", "nudes"),
   // Discriminatory slurs.
   en("discriminatory", "high", "retard", "retarded", "faggot", "fag", "nigger", "nigga", "tranny",
@@ -66,13 +73,12 @@ export const TERM_ENTRIES: TermEntry[] = [
     "tanginamo", "tngina", "ptngina", "tangna", "pota", "puta", "putragis", "pucha", "punyeta",
     "pakshet", "pakingshet", "pakyu", "pakyo", "lintik", "hinayupak",
     "tarantado", "tarantada"),
-  tl("profanity", "high", "gago", "gagu", "gaga", "ulol", "ulul", "olol", "kupal", "ungas",
-    "inutil", "engot", "siraulo"),
-  tl("harassment", "high", "tanga", "tangatanga", "bobo", "boba", "bubu"),
+  tl("profanity", "high", "gago", "gagu", "ulol", "ulul", "olol", "kupal", "ungas", "siraulo"),
+  {...tl("harassment", "high", "tanga", "tangatanga", "bobo", "bubu", "inutil", "engot"), selfAllowed: true},
   {stems: ["leche", "letse"], language: "tl", category: "profanity", severity: "low",
-    affixes: true, exceptNext: ["flan", "plan"]},
+    affixes: "tl", exceptNext: ["flan", "plan"]},
   // Filipino vulgar and sexual.
-  tl("vulgar", "high", "puke", "pekpek", "titi", "tite", "burat", "bayag", "jakol", "kantot",
+  tl("vulgar", "high", "pekpek", "titi", "tite", "burat", "bayag", "jakol", "kantot",
     "kantut", "chupa", "tamod"),
   tl("sexual", "high", "pokpok", "malandi"),
   // Filipino discriminatory.
@@ -90,6 +96,16 @@ export const PHRASE_ENTRIES: PhraseEntry[] = [
   {words: ["magpakamatay", "ka"], language: "tl", category: "harassment", severity: "high"},
   {words: ["patayin", "kita"], language: "tl", category: "harassment", severity: "high"},
   {words: ["kill", "yourself"], language: "en", category: "harassment", severity: "high"},
+  {words: ["kill", "your", "self"], language: "en", category: "harassment", severity: "high"},
+  {words: ["unalive", "yourself"], language: "en", category: "harassment", severity: "high"},
+  {words: ["i", "will", "kill", "you"], language: "en", category: "harassment", severity: "high"},
+  {words: ["ill", "kill", "you"], language: "en", category: "harassment", severity: "high"},
+  {words: ["gonna", "kill", "you"], language: "en", category: "harassment", severity: "high"},
+  {words: ["kiss", "my", "ass"], language: "en", category: "profanity", severity: "high"},
+  {words: ["mamatay", "ka"], language: "tl", category: "harassment", severity: "high"},
+  {words: ["patayin", "mo", "sarili", "mo"], language: "tl", category: "harassment", severity: "high"},
+  {words: ["magbigti", "ka"], language: "tl", category: "harassment", severity: "high"},
+  {words: ["papatayin", "kita"], language: "tl", category: "harassment", severity: "high"},
   {words: ["kill", "urself"], language: "en", category: "harassment", severity: "high"},
   {words: ["go", "die"], language: "en", category: "harassment", severity: "high"},
   {words: ["you", "should", "die"], language: "en", category: "harassment", severity: "high"},

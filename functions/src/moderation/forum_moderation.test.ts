@@ -31,7 +31,8 @@ test("a blocked result names categories and a severity, never the matched word",
 });
 
 test("distress and crisis disclosures are not profanity", () => {
-  for (const text of ["I want to kill myself", "Gusto ko nang mamatay", "I keep cutting myself"]) {
+  for (const text of ["I want to kill myself", "Gusto ko nang mamatay", "I keep cutting myself",
+    "I want to k1ll myself", "I want to die", "gusto ko na lang mamatay"]) {
     assert.equal(moderateForumText(text).allowed, true, text);
     assert.equal(isCrisisDisclosure(text), true, text);
   }

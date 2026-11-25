@@ -257,6 +257,26 @@ void main() {
     );
     expect(provider.posts, isEmpty);
   });
+
+  test(
+    'posting again after a lost response reuses the failed post ID',
+    () async {
+      final repository = _FakeSecretChatRepository(
+        createError: StateError('timeout'),
+      );
+      final provider = SecretChatProvider(repository);
+      const message = 'I feel stressed about exams and need support.';
+      await expectLater(
+        provider.createPost(message: message, categories: ['Stress']),
+        throwsA(isA<StateError>()),
+      );
+      repository.createError = null;
+      await provider.createPost(message: message, categories: ['Stress']);
+      expect(repository.createdPostIds.toSet(), hasLength(1));
+      expect(provider.posts, hasLength(1));
+      expect(provider.posts.single.hasFailed, isFalse);
+    },
+  );
 }
 
 SecretChatProfile _profile(String alias) => SecretChatProfile(
@@ -291,7 +311,7 @@ class _FakeSecretChatRepository extends SecretChatRepository {
   }) : recentPosts = recentPosts ?? [];
 
   final Object? commentError;
-  final Object? createError;
+  Object? createError;
   final Completer<void>? createGate;
   SecretChatProfile? profile;
   final Object? activityError;
@@ -303,6 +323,7 @@ class _FakeSecretChatRepository extends SecretChatRepository {
   int activityLoads = 0;
   final deletedPostIds = <String>[];
   final createdMessages = <String>[];
+  final createdPostIds = <String?>[];
   final comments = <SecretChatComment>[];
 
   @override
@@ -372,6 +393,7 @@ class _FakeSecretChatRepository extends SecretChatRepository {
     List<String> safetyLabels = const [],
   }) async {
     await createGate?.future;
+    createdPostIds.add(postId);
     if (createError != null) throw createError!;
     createdMessages.add(message);
     return SecretChatModel(

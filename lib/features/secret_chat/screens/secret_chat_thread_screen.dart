@@ -258,57 +258,51 @@ class _SecretChatThreadScreenState extends State<SecretChatThreadScreen> {
       });
       _showReplyMessage('Reply posted anonymously.');
     } on SecretChatValidationException catch (error) {
-      // Refused by moderation: remove it and give the text back to edit.
-      if (mounted) {
-        setState(() {
-          _comments = [
-            for (final comment in _comments)
-              if (comment.id != optimistic.id) comment,
-          ];
-          if (_controller.text.isEmpty) {
-            _controller.text = message;
-            _controller.selection = TextSelection.collapsed(
-              offset: message.length,
-            );
-          }
-          _validation = error.result;
-        });
-      }
+      _restoreDraft(optimistic.id, message, error.result);
       _showReplyMessage(error.result.message);
     } on SecretChatActionException catch (error) {
-      _markCommentFailed(optimistic.id);
-      setState(
-        () => _validation = SecretChatValidationResult(
+      _restoreDraft(
+        optimistic.id,
+        message,
+        SecretChatValidationResult(
           code: SecretChatValidationCode.unsafe,
           message: error.message,
         ),
       );
       _showReplyMessage(error.message);
     } catch (_) {
-      _markCommentFailed(optimistic.id);
-      const message = 'Unable to send this reply. Please try again.';
-      setState(
-        () => _validation = const SecretChatValidationResult(
+      const failure = 'Unable to send this reply. Please try again.';
+      _restoreDraft(
+        optimistic.id,
+        message,
+        const SecretChatValidationResult(
           code: SecretChatValidationCode.unsafe,
-          message: message,
+          message: failure,
         ),
       );
-      _showReplyMessage(message);
+      _showReplyMessage(failure);
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
   }
 
-  void _markCommentFailed(String id) {
+  /// A reply that was not saved leaves the thread and goes back into the box.
+  void _restoreDraft(
+    String optimisticId,
+    String message,
+    SecretChatValidationResult result,
+  ) {
     if (!mounted) return;
     setState(() {
       _comments = [
         for (final comment in _comments)
-          if (comment.id == id)
-            comment.copyWith(isPending: false, hasFailed: true)
-          else
-            comment,
+          if (comment.id != optimisticId) comment,
       ];
+      if (_controller.text.isEmpty) {
+        _controller.text = message;
+        _controller.selection = TextSelection.collapsed(offset: message.length);
+      }
+      _validation = result;
     });
   }
 
