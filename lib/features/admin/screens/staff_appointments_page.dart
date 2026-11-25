@@ -53,7 +53,8 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
   @override
   Widget build(BuildContext context) => _PageFrame(
     title: 'Appointments',
-    subtitle: 'Staff-safe counseling appointment details, filterable by college.',
+    subtitle:
+        'Staff-safe counseling appointment details, filterable by college.',
     child: StreamBuilder<List<AppointmentQueueItem>>(
       stream: _queue,
       builder: (context, snapshot) {
@@ -77,15 +78,21 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
             };
             // Offer every active college, including those with zero bookings,
             // and preserve historical appointment IDs missing from the catalog.
-            final ids = <String>{
-              for (final college in catalog)
-                if (college.active) college.id,
-              for (final item in records)
-                if (item.collegeId.trim().isNotEmpty)
-                  item.collegeId.trim(),
-            }.toList()..sort((a, b) => (known[a] ?? a).compareTo(known[b] ?? b));
-            final knownSelection = _college == 'all' ||
-                _college == 'unassigned' || ids.contains(_college);
+            final ids =
+                <String>{
+                  for (final college in catalog)
+                    if (college.active) college.id,
+                  for (final item in records)
+                    if (item.collegeId.trim().isNotEmpty) item.collegeId.trim(),
+                }.toList()..sort(
+                  (a, b) => (known[a] ?? 'College not available').compareTo(
+                    known[b] ?? 'College not available',
+                  ),
+                );
+            final knownSelection =
+                _college == 'all' ||
+                _college == 'unassigned' ||
+                ids.contains(_college);
             final selectedCollege = knownSelection ? _college : 'all';
             final query = _search.text.trim().toLowerCase();
             final now = DateTime.now();
@@ -105,9 +112,7 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
               return query.isEmpty ||
                   item.studentDisplayName.toLowerCase().contains(query) ||
                   (item.assignedCounselor ?? '').toLowerCase().contains(query);
-            }).toList()..sort(
-              (a, b) => a.scheduledAt.compareTo(b.scheduledAt),
-            );
+            }).toList()..sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
             final metrics = PortalAppointmentMetrics.fromQueue(records, now);
 
             return Column(
@@ -151,59 +156,64 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                LayoutBuilder(builder: (context, constraints) => Wrap(
-                  spacing: 16,
-                  runSpacing: 12,
-                  crossAxisAlignment: WrapCrossAlignment.end,
-                  children: [
-                    SizedBox(
-                      width: constraints.maxWidth < 320 ? constraints.maxWidth : 320,
-                      child: TextField(
-                        controller: _search,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.search),
-                          labelText: 'Search student or counselor',
-                          border: OutlineInputBorder(),
+                LayoutBuilder(
+                  builder: (context, constraints) => Wrap(
+                    spacing: 16,
+                    runSpacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.end,
+                    children: [
+                      SizedBox(
+                        width: constraints.maxWidth < 320
+                            ? constraints.maxWidth
+                            : 320,
+                        child: TextField(
+                          controller: _search,
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            prefixIcon: Icon(Icons.search),
+                            labelText: 'Search student or counselor',
+                            border: OutlineInputBorder(),
+                          ),
                         ),
                       ),
-                    ),
-                    SizedBox(
-                      width: constraints.maxWidth < 320 ? constraints.maxWidth : 320,
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey('college-$selectedCollege'),
-                        initialValue: selectedCollege,
-                        decoration: const InputDecoration(
-                          labelText: 'Filter by college',
-                          border: OutlineInputBorder(),
-                        ),
-                        isExpanded: true,
-                        items: [
-                          const DropdownMenuItem(
-                            value: 'all',
-                            child: Text('All colleges'),
+                      SizedBox(
+                        width: constraints.maxWidth < 320
+                            ? constraints.maxWidth
+                            : 320,
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey('college-$selectedCollege'),
+                          initialValue: selectedCollege,
+                          decoration: const InputDecoration(
+                            labelText: 'Filter by college',
+                            border: OutlineInputBorder(),
                           ),
-                          for (final id in ids)
-                            DropdownMenuItem(
-                              value: id,
-                              child: Text(
-                                known[id] ?? id,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                          isExpanded: true,
+                          items: [
+                            const DropdownMenuItem(
+                              value: 'all',
+                              child: Text('All colleges'),
                             ),
-                          const DropdownMenuItem(
-                            value: 'unassigned',
-                            child: Text('Unassigned college'),
-                          ),
-                        ],
-                        onChanged: (value) => setState(
-                          () => _college = value ?? 'all',
+                            for (final id in ids)
+                              DropdownMenuItem(
+                                value: id,
+                                child: Text(
+                                  known[id] ?? 'College not available',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            const DropdownMenuItem(
+                              value: 'unassigned',
+                              child: Text('Unassigned college'),
+                            ),
+                          ],
+                          onChanged: (value) =>
+                              setState(() => _college = value ?? 'all'),
                         ),
                       ),
-                    ),
-                  ],
-                )),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Text(
                   '${visible.length} ${visible.length == 1 ? 'appointment' : 'appointments'} shown',
@@ -211,9 +221,11 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                 ),
                 const SizedBox(height: 12),
                 if (visible.isEmpty)
-                  _Message(snapshot.hasError
-                      ? 'Appointment data is unavailable, not an empty schedule.'
-                      : 'No appointments match these filters.'),
+                  _Message(
+                    snapshot.hasError
+                        ? 'Appointment data is unavailable, not an empty schedule.'
+                        : 'No appointments match these filters.',
+                  ),
                 StaffAppointmentTable(items: visible, collegeNames: known),
               ],
             );
@@ -227,17 +239,21 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
 bool _matches(AppointmentQueueItem item, DateTime now, String filter) {
   final status = item.status.trim().toLowerCase();
   final day = DateTime(
-    item.scheduledAt.year, item.scheduledAt.month, item.scheduledAt.day,
+    item.scheduledAt.year,
+    item.scheduledAt.month,
+    item.scheduledAt.day,
   );
   final today = DateTime(now.year, now.month, now.day);
   return switch (filter) {
     'All' => !item.isArchived,
     'Completed' => status == 'completed' || status == 'complete',
     'Today' => !item.isArchived && status == 'confirmed' && day == today,
-    'Upcoming' => !item.isArchived &&
-        status == 'confirmed' && day.isAfter(today),
-    _ => !item.isArchived && status != 'completed' &&
-        !(status == 'confirmed' && (day == today || day.isAfter(today))),
+    'Upcoming' =>
+      !item.isArchived && status == 'confirmed' && day.isAfter(today),
+    _ =>
+      !item.isArchived &&
+          status != 'completed' &&
+          !(status == 'confirmed' && (day == today || day.isAfter(today))),
   };
 }
 
@@ -275,17 +291,29 @@ class StaffAppointmentTable extends StatelessWidget {
         ],
         rows: [
           for (final item in items)
-            DataRow(cells: [
-              DataCell(Text(item.studentDisplayName.isEmpty
-                  ? 'Student' : item.studentDisplayName)),
-              DataCell(Text(item.collegeId.isEmpty
-                  ? 'Unassigned' : (collegeNames[item.collegeId] ?? item.collegeId))),
-              const DataCell(Text('Counseling')),
-              DataCell(Text(_dateAndTime(context, item))),
-              DataCell(Text(item.assignedCounselor ?? 'Unassigned')),
-              DataCell(Text(item.status.isEmpty
-                  ? 'Requested' : item.status)),
-            ]),
+            DataRow(
+              cells: [
+                DataCell(
+                  Text(
+                    item.studentDisplayName.isEmpty
+                        ? 'Student'
+                        : item.studentDisplayName,
+                  ),
+                ),
+                DataCell(
+                  Text(
+                    item.collegeId.isEmpty
+                        ? 'Unassigned'
+                        : (collegeNames[item.collegeId] ??
+                              'College not available'),
+                  ),
+                ),
+                const DataCell(Text('Counseling')),
+                DataCell(Text(_dateAndTime(context, item))),
+                DataCell(Text(item.assignedCounselor ?? 'Unassigned')),
+                DataCell(Text(item.status.isEmpty ? 'Requested' : item.status)),
+              ],
+            ),
         ],
       ),
     ),
@@ -293,7 +321,8 @@ class StaffAppointmentTable extends StatelessWidget {
 
   String _dateAndTime(BuildContext context, AppointmentQueueItem item) {
     final day = item.scheduledAt;
-    final date = '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+    final date =
+        '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
     final time = item.scheduledTime.trim().isNotEmpty
         ? item.scheduledTime.trim()
         : TimeOfDay.fromDateTime(day).format(context);
@@ -320,9 +349,10 @@ class _PageFrame extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(
-              fontSize: 30, fontWeight: FontWeight.w900,
-            )),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 6),
             Text(subtitle, style: const TextStyle(color: AdminColors.muted)),
             const SizedBox(height: 24),

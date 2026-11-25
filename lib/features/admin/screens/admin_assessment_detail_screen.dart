@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 
 import '../../../models/assessment_explanation_model.dart';
 import '../../../repositories/admin_status_repository.dart';
+import '../domain/admin_assessment_presentation.dart';
+import '../domain/admin_status_presentation.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/admin_status_badge.dart';
 
 class AdminAssessmentDetailScreen extends StatelessWidget {
   const AdminAssessmentDetailScreen({
@@ -110,12 +113,45 @@ class _AssessmentCard extends StatelessWidget {
     }
     final interpretation = _map(assessment['interpretation']);
     if (interpretation == null) {
+      final legacyStatus = _storedAssessmentStatus(assessment);
       return Card(
-        child: ListTile(
-          title: const Text('Legacy assessment'),
-          subtitle: Text(
-            '${assessment['status'] ?? assessment['overallLevel'] ?? 'Result available'} — '
-            'not recalculated with the current algorithm.',
+        child: Padding(
+          padding: EdgeInsets.all(
+            MediaQuery.sizeOf(context).width < 600 ? 16 : 20,
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Legacy assessment',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${legacyStatus ?? 'Result available'} — '
+                      'not recalculated with the current algorithm.',
+                      style: const TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 13.5,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+                _assessmentBadge(legacyStatus),
+              ],
+            ),
           ),
         ),
       );
@@ -123,6 +159,81 @@ class _AssessmentCard extends StatelessWidget {
     final quality = _map(interpretation['responseQuality']);
     final domains = _maps(interpretation['domainResults']);
     final explanation = AssessmentExplanationModel.fromAssessment(assessment);
+    final storedStatus =
+        _storedAssessmentStatus(assessment) ??
+        _text(interpretation['responsePatternCode']) ??
+        _text(interpretation['overallLevel']) ??
+        _text(interpretation['status']) ??
+        _text(interpretation['wellBeingStatus']);
+    final headerStyle = AssessmentStatusStyle.fromStored(storedStatus);
+    final rawStoredSummary =
+        _text(interpretation['counselorSummary']) ??
+        _text(interpretation['userSummary']) ??
+        _text(assessment['summary']) ??
+        _text(assessment['message']);
+    final cleanedSummary = rawStoredSummary
+        ?.replaceFirst(
+          RegExp(
+            r'^(?:Overall well-being status|Current response pattern):[^.]+\.\s*',
+          ),
+          '',
+        )
+        .replaceAll('This is not a diagnosis.', '')
+        .replaceAll('This screening result is not a diagnosis.', '')
+        .trim();
+    final summaryText = (cleanedSummary != null && cleanedSummary.isNotEmpty)
+        ? cleanedSummary
+        : '${headerStyle.label} based on the responses provided.';
+    final storedStrengthInsights = _strings(interpretation['strengthInsights']);
+    final strengthInsights = storedStrengthInsights.isNotEmpty
+        ? storedStrengthInsights
+        : domains
+              .where((domain) {
+                final tone = resolveAdminStatus(
+                  AdminStatusDomain.assessment,
+                  _storedDomainStatus(domain),
+                ).tone;
+                return tone == AdminSemanticTone.green ||
+                    tone == AdminSemanticTone.blue;
+              })
+              .map((domain) {
+                final name = _text(domain['domain']) ?? 'This area';
+                final tone = resolveAdminStatus(
+                  AdminStatusDomain.assessment,
+                  _storedDomainStatus(domain),
+                ).tone;
+                return tone == AdminSemanticTone.green
+                    ? '$name currently shows supportive patterns.'
+                    : '$name appears generally manageable.';
+              })
+              .take(3)
+              .toList(growable: false);
+    final storedFocusInsights = _strings(interpretation['focusInsights']);
+    final focusInsights = storedFocusInsights.isNotEmpty
+        ? storedFocusInsights
+        : domains
+              .where((domain) {
+                final tone = resolveAdminStatus(
+                  AdminStatusDomain.assessment,
+                  _storedDomainStatus(domain),
+                ).tone;
+                return tone == AdminSemanticTone.amber ||
+                    tone == AdminSemanticTone.red;
+              })
+              .map((domain) {
+                final raw = _text(domain['interpretation']) ?? '';
+                return raw
+                    .replaceFirst(
+                      RegExp(
+                        r'^(?:Well-being status|Response pattern):[^.]+\.\s*',
+                      ),
+                      '',
+                    )
+                    .trim();
+              })
+              .where((value) => value.isNotEmpty)
+              .take(3)
+              .toList(growable: false);
     final String confidenceText;
     if (explanation.responseConfidence.isNotEmpty) {
       confidenceText = explanation.responseConfidence;
@@ -149,6 +260,7 @@ class _AssessmentCard extends StatelessWidget {
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
+                _assessmentBadge(storedStatus),
                 _MetadataChip(
                   icon: Icons.assignment_outlined,
                   label: _assessmentType(assessment),
@@ -171,7 +283,7 @@ class _AssessmentCard extends StatelessWidget {
             ),
             const SizedBox(height: 22),
             Text(
-              explanation.patternLabel,
+              headerStyle.label,
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                 fontSize: 25,
                 fontWeight: FontWeight.w800,
@@ -179,9 +291,7 @@ class _AssessmentCard extends StatelessWidget {
             ),
             const SizedBox(height: 9),
             Text(
-              explanation.counselorSummary.isNotEmpty
-                  ? explanation.counselorSummary
-                  : explanation.summary,
+              summaryText,
               style: const TextStyle(
                 color: AdminColors.muted,
                 fontSize: 15,
@@ -216,20 +326,42 @@ class _AssessmentCard extends StatelessWidget {
                 return Wrap(
                   spacing: 12,
                   runSpacing: 12,
-                  children: explanation.areas
-                      .map(
-                        (area) => SizedBox(
-                          width: width,
-                          child: _AreaPanel(
-                            name: area.name,
-                            pattern: area.patternLabel,
-                            completion:
-                                '${area.answeredCount}/${area.presentedCount} answered',
-                            explanation: area.explanation,
+                  children: domains.map((domain) {
+                    final domainStatus = _storedDomainStatus(domain);
+                    final domainStyle = AssessmentStatusStyle.fromStored(
+                      domainStatus,
+                    );
+                    final rawDomainExplanation = _text(
+                      domain['interpretation'],
+                    );
+                    final cleanedDomainExplanation = rawDomainExplanation
+                        ?.replaceFirst(
+                          RegExp(
+                            r'^(?:Well-being status|Response pattern):[^.]+\.\s*',
                           ),
-                        ),
-                      )
-                      .toList(),
+                          '',
+                        )
+                        .trim();
+                    final domainExplanation =
+                        (cleanedDomainExplanation != null &&
+                            cleanedDomainExplanation.isNotEmpty)
+                        ? cleanedDomainExplanation
+                        : '${domainStyle.label} based on this response area.';
+                    return SizedBox(
+                      width: width,
+                      child: _AreaPanel(
+                        name:
+                            _text(domain['domain']) ??
+                            _text(domain['name']) ??
+                            'Well-being area',
+                        pattern: domainStyle.label,
+                        status: domainStatus,
+                        completion:
+                            '${_integer(domain['answeredCount'])}/${_integer(domain['presentedCount'])} answered',
+                        explanation: domainExplanation,
+                      ),
+                    );
+                  }).toList(),
                 );
               },
             ),
@@ -248,7 +380,7 @@ class _AssessmentCard extends StatelessWidget {
                       child: _InsightPanel(
                         icon: Icons.check_circle_outline,
                         title: 'Current strengths',
-                        values: explanation.strengthInsights,
+                        values: strengthInsights,
                       ),
                     ),
                     SizedBox(
@@ -256,7 +388,7 @@ class _AssessmentCard extends StatelessWidget {
                       child: _InsightPanel(
                         icon: Icons.explore_outlined,
                         title: 'Areas to explore',
-                        values: explanation.focusInsights,
+                        values: focusInsights,
                       ),
                     ),
                   ],
@@ -344,6 +476,8 @@ class _V4AssessmentCard extends StatelessWidget {
     final compatible =
         previous?['schemaVersion'] == 'assessment_record_v4' &&
         _map(previous?['instrument'])?['version'] == instrument['version'];
+    final rawProfileStatus =
+        _text(result['profileStatus']) ?? _text(assessment['status']);
     return Card(
       child: Padding(
         padding: EdgeInsets.all(
@@ -355,7 +489,9 @@ class _V4AssessmentCard extends StatelessWidget {
             Wrap(
               spacing: 8,
               runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
+                _assessmentBadge(rawProfileStatus),
                 _MetadataChip(
                   icon: Icons.assignment_outlined,
                   label: _v4InstrumentLabel(instrument['version']?.toString()),
@@ -376,7 +512,7 @@ class _V4AssessmentCard extends StatelessWidget {
             ),
             const SizedBox(height: 22),
             Text(
-              _v4ProfileLabel(result['profileStatus']?.toString()),
+              _v4ProfileLabel(rawProfileStatus),
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                 fontSize: 25,
                 fontWeight: FontWeight.w800,
@@ -438,6 +574,7 @@ class _V4AssessmentCard extends StatelessWidget {
                             pattern: _v4DomainStatusLabel(
                               domain['status']?.toString(),
                             ),
+                            status: domain['status']?.toString(),
                             completion:
                                 '${domain['answeredCount'] ?? 0}/${domain['presentedCount'] ?? 10} answered',
                             explanation: domain['isScorable'] == true
@@ -564,9 +701,19 @@ class _V4DomainReview extends StatelessWidget {
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
       title: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
-      subtitle: Text(
-        '${_v4DomainStatusLabel(domain['status']?.toString())} · '
-        '${domain['answeredCount'] ?? 0}/${domain['presentedCount'] ?? 10} answered',
+      subtitle: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _assessmentBadge(
+            _text(domain['status']) ?? _v4DomainStatusLabel(null),
+            compact: true,
+          ),
+          Text(
+            '${domain['answeredCount'] ?? 0}/${domain['presentedCount'] ?? 10} answered',
+          ),
+        ],
       ),
       children: [
         if (summary?['summary'] != null)
@@ -681,24 +828,67 @@ class _AssessmentHistory extends StatelessWidget {
       ),
       const SizedBox(height: 8),
       for (final item in history.take(8))
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: Icon(
-            item['id']?.toString() == selectedId
-                ? Icons.visibility
-                : Icons.history,
-          ),
-          title: Text(
-            _v4InstrumentLabel(
-              _map(item['instrument'])?['version']?.toString(),
-            ),
-          ),
-          subtitle: Text(_date(item['submittedAt'] ?? item['createdAt'])),
-          trailing: Text(
-            _v4ProfileLabel(_map(item['result'])?['profileStatus']?.toString()),
-            textAlign: TextAlign.end,
-            style: const TextStyle(fontSize: 11),
-          ),
+        Builder(
+          builder: (context) {
+            final isV4 = item['schemaVersion'] == 'assessment_record_v4';
+            final rawStatus = _storedAssessmentStatus(item);
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Icon(
+                      item['id']?.toString() == selectedId
+                          ? Icons.visibility
+                          : Icons.history,
+                      size: 22,
+                      color: AdminColors.muted,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              isV4
+                                  ? _v4InstrumentLabel(
+                                      _map(
+                                        item['instrument'],
+                                      )?['version']?.toString(),
+                                    )
+                                  : _assessmentType(item),
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _date(item['submittedAt'] ?? item['createdAt']),
+                              style: const TextStyle(
+                                color: AdminColors.muted,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                        _assessmentBadge(rawStatus, compact: true),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
     ],
   );
@@ -792,9 +982,11 @@ class _MetadataChip extends StatelessWidget {
       children: [
         Icon(icon, size: 15, color: AdminColors.muted),
         const SizedBox(width: 6),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+        Flexible(
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+          ),
         ),
       ],
     ),
@@ -914,11 +1106,13 @@ class _AreaPanel extends StatelessWidget {
     required this.pattern,
     required this.completion,
     required this.explanation,
+    this.status,
   });
   final String name;
   final String pattern;
   final String completion;
   final String explanation;
+  final String? status;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -951,14 +1145,7 @@ class _AreaPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 7),
-        Text(
-          pattern,
-          style: const TextStyle(
-            color: AdminColors.accentStrong,
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
+        _assessmentBadge(_text(status) ?? pattern, compact: true),
         const SizedBox(height: 7),
         Text(
           explanation,
@@ -998,9 +1185,14 @@ class _InsightPanel extends StatelessWidget {
           children: [
             Icon(icon, size: 18),
             const SizedBox(width: 8),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
           ],
         ),
@@ -1186,11 +1378,50 @@ String _assessmentType(Map<String, dynamic> assessment) {
   return type == 'quick' ? 'Quick Assessment' : 'Psychological Assessment';
 }
 
-String _v4ProfileLabel(String? value) => switch (value) {
-  'generallySupported' => 'Well-being appears generally supported.',
-  'mostlySupported' => 'Mostly supported, with an area to explore.',
-  'someAreasNeedAttention' => 'Some areas may benefit from attention.',
-  'supportMayHelp' => 'Support may be helpful right now.',
+Widget _assessmentBadge(String? raw, {bool compact = false}) {
+  final style = AssessmentStatusStyle.fromStored(raw);
+  return AdminStatusBadge.fromStatus(
+    domain: AdminStatusDomain.assessment,
+    status: raw,
+    labelOverride: style.label,
+    compact: compact,
+  );
+}
+
+String? _storedAssessmentStatus(Map<String, dynamic> item) =>
+    _text(_map(item['result'])?['profileStatus']) ??
+    _text(item['overallLevel']) ??
+    _text(item['status']) ??
+    _text(item['wellBeingStatus']) ??
+    _text(item['responsePatternCode']);
+
+String? _storedDomainStatus(Map<String, dynamic> domain) =>
+    _text(domain['status']) ??
+    _text(domain['responsePatternCode']) ??
+    _text(domain['wellBeingStatus']) ??
+    _text(domain['bandLabel']) ??
+    _text(domain['band']);
+
+int _integer(Object? value) =>
+    value is num ? value.toInt() : int.tryParse(value?.toString() ?? '') ?? 0;
+
+String? _text(Object? value) {
+  final text = value?.toString().trim() ?? '';
+  return text.isEmpty ? null : text;
+}
+
+String _normalizedKey(String? value) =>
+    (value ?? '').trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+String _v4ProfileLabel(String? value) => switch (_normalizedKey(value)) {
+  'generallysupported' || 'supported' || 'wellbeingappearsgenerallysupported' =>
+    'Well-being appears generally supported.',
+  'mostlysupported' || 'mostlysupportedwithanareatoexplore' =>
+    'Mostly supported, with an area to explore.',
+  'someareasneedattention' || 'someareasmaybenefitfromattention' =>
+    'Some areas may benefit from attention.',
+  'supportmayhelp' ||
+  'supportmaybehelpfulrightnow' => 'Support may be helpful right now.',
   _ => 'More responses are needed for a complete profile.',
 };
 
@@ -1206,16 +1437,27 @@ String _v4DomainLabel(String? value) => switch (value) {
   'academic' => 'Academic',
   'financial' => 'Financial',
   'socialAdjustment' => 'Social Adjustment',
+  'teachingWorkloadDemands' => 'Teaching Workload & Role Demands',
+  'teachingSupport' => 'Collegial & Organizational Support',
+  'teachingEngagementMeaning' => 'Professional Engagement & Meaning',
+  'nonTeachingWorkloadDemands' => 'Workload & Role Demands',
+  'nonTeachingSupport' => 'Supervisor, Team & Organizational Support',
+  'nonTeachingEngagementMeaning' => 'Work Engagement & Meaning',
   'sleepRest' => 'Sleep and Rest',
   'emotionalWellbeing' => 'Emotional Well-Being',
   _ => 'Well-being area',
 };
 
-String _v4DomainStatusLabel(String? value) => switch (value) {
-  'supported' => 'Supported at present',
-  'mostlySupported' => 'Mostly supported; some areas to explore',
-  'someStrain' => 'Some strain indicated',
-  'supportMayHelp' => 'Support may be helpful',
+String _v4DomainStatusLabel(String? value) => switch (_normalizedKey(value)) {
+  'supported' ||
+  'generallysupported' ||
+  'supportedatpresent' => 'Supported at present',
+  'mostlysupported' || 'mostlysupportedsomeareastoexplore' =>
+    'Mostly supported; some areas to explore',
+  'somestrain' ||
+  'someareasneedattention' ||
+  'somestrainindicated' => 'Some strain indicated',
+  'supportmayhelp' || 'supportmaybehelpful' => 'Support may be helpful',
   _ => 'More responses needed',
 };
 

@@ -41,6 +41,7 @@ export const AUDIT_ACTIONS = [
   "INQUIRY_ROUTED", "INQUIRY_ACKNOWLEDGED", "INQUIRY_REASSIGNED", "INQUIRY_ESCALATED",
   "INQUIRY_TAKEN_OVER", "INQUIRY_SLA_UPDATED", "REPORT_VIEWED",
   "REPORT_GENERATED", "REPORT_EXPORTED_PDF", "REPORT_EXPORTED_CSV", "REPORT_EXPORTED_XLSX",
+  "REPORT_PRINTED",
   "ACADEMIC_YEAR_CREATED", "ACADEMIC_YEAR_CLOSED", "ACADEMIC_YEAR_CHANGED",
   "POPULATION_SNAPSHOT_CREATED", "POPULATION_SNAPSHOT_UPDATED",
   "STUDENT_ROSTER_IMPORTED", "STUDENT_ACCOUNT_ACTIVATED", "STUDENT_PERSONAL_INFO_VIEWED",
@@ -59,9 +60,10 @@ export const AUDIT_ACTIONS = [
  * log lists them under the staff member who performed them (actorId). */
 export const ACTOR_SCOPED_AUDIT_ACTIONS: readonly string[] = [
   "STUDENT_PERSONAL_INFO_VIEWED", "COUNSELING_HISTORY_VIEWED",
-  // Server-only (case_remarks_callable.ts); deliberately absent from
-  // AUDIT_ACTIONS so recordAuditEvent cannot forge them.
+  // Server-only (case_remarks_callable.ts, appointment_session_evidence.ts);
+  // deliberately absent from AUDIT_ACTIONS so recordAuditEvent cannot forge them.
   "CASE_REMARKS_VIEWED", "CASE_REMARKS_UPDATED",
+  "CLINICAL_ATTACHMENT_DOWNLOADED",
 ];
 
 export function auditLogOwnerField(action: string): "actorId" | "targetUserId" {

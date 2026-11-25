@@ -6,8 +6,6 @@ import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
 import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
-import 'package:mind_mates/features/mood/screens/log_mood_screen.dart';
-import 'package:mind_mates/features/mood/screens/mood_journey_screen.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
 import 'package:mind_mates/models/mood_model.dart';
 import 'package:mind_mates/models/report_model.dart';
@@ -33,10 +31,14 @@ import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
-  test('home dashboard no longer includes Journal', () {
+  test('home dashboard no longer includes Journal or wellness check', () {
     expect(
       HomeDashboardData.mock().toolkitItems.map((item) => item.title),
       isNot(contains('My Journal')),
+    );
+    expect(
+      HomeDashboardData.mock().insights.map((item) => item.title),
+      isNot(contains('Time for a wellness check?')),
     );
   });
 
@@ -162,7 +164,11 @@ void main() {
 
     expect(find.text('Welcome, Leonardo!'), findsOneWidget);
     expect(find.byKey(const Key('home-profile-photo')), findsOneWidget);
-    expect(find.text('Today’s mood: Good'), findsOneWidget);
+    expect(find.text('How are you feeling today?'), findsOneWidget);
+    expect(find.textContaining('Today’s mood:'), findsNothing);
+    expect(find.byKey(const Key('home-view-todays-mood')), findsNothing);
+    expect(find.text('Verify pilot session'), findsNothing);
+    expect(find.text('Time for a wellness check?'), findsNothing);
     expect(find.text('Student'), findsOneWidget);
     expect(find.text('Day streak'), findsOneWidget);
     expect(find.text('View ->'), findsNothing);
@@ -379,110 +385,17 @@ void main() {
 
   const viewTodaysMood = Key('home-view-todays-mood');
 
-  testWidgets('home shows View today’s mood only after a check-in', (
+  testWidgets('home omits today’s mood badge and button even after check-in', (
     tester,
   ) async {
     await pumpHomeWithMoods(tester, const []);
+    expect(find.text('How are you feeling today?'), findsOneWidget);
+    expect(find.textContaining('Today’s mood:'), findsNothing);
     expect(find.byKey(viewTodaysMood), findsNothing);
 
     await pumpHomeWithMoods(tester, [moodAt(DateTime.now())]);
-    final chip = find.text('Today’s mood: Okay');
-    expect(chip, findsOneWidget);
-    expect(find.byKey(viewTodaysMood), findsOneWidget);
-    expect(find.text('View today’s mood'), findsOneWidget);
-    expect(
-      tester.getTopLeft(find.byKey(viewTodaysMood)).dy,
-      greaterThan(tester.getTopLeft(chip).dy),
-    );
-  });
-
-  testWidgets(
-    'View today’s mood opens Log Mood when Journey is unavailable',
-    (tester) async {
-      await pumpHomeWithMoods(tester, [moodAt(DateTime.now())]);
-      await tester.tap(find.byKey(viewTodaysMood));
-      await tester.pumpAndSettle();
-      expect(find.byType(LogMoodScreen), findsOneWidget);
-    },
-    skip: MoodV2FeatureFlag.historyRead,
-  );
-
-  testWidgets(
-    'V2: View today’s mood shows the V2 check-in and opens My Mood Journey',
-    (tester) async {
-      await tester.binding.setSurfaceSize(const Size(900, 1400));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      // Noon in Manila on 2026-11-12.
-      final now = DateTime.utc(2026, 11, 12, 4);
-      final userProvider = UserProvider(_FakeUserRepository())
-        ..setUser(
-          const UserModel(
-            id: 'user_1',
-            email: 'leo@example.com',
-            role: 'student',
-          ),
-        );
-      final moodProvider = MoodProvider(
-        _FakeMoodRepository(),
-        nowProvider: () => now,
-        combinedHistoryRepository: _V2History([
-          NormalizedMoodEvent(
-            id: 'v2-today',
-            userId: 'user_1',
-            level: 5,
-            dateKey: '2026-11-12',
-            occurredAt: DateTime.utc(2026, 11, 12, 2),
-            source: MoodEventSource.v2,
-            label: 'Excited',
-          ),
-        ]),
-        useMoodV2Read: true,
-      );
-      await moodProvider.loadMoodV2History('user_1', now: now);
-
-      await tester.pumpWidget(
-        MultiProvider(
-          providers: [
-            ChangeNotifierProvider<UserProvider>.value(value: userProvider),
-            ChangeNotifierProvider<MoodProvider>.value(value: moodProvider),
-            ChangeNotifierProvider<ReportProvider>(
-              create: (_) => ReportProvider(_FakeReportRepository()),
-            ),
-            ChangeNotifierProvider<InsightsProvider>(
-              create: (_) => InsightsProvider(InsightsRepository()),
-            ),
-            ChangeNotifierProvider(
-              create: (_) => AssessmentProvider(AssessmentRepository()),
-            ),
-            ChangeNotifierProvider(
-              create: (_) => BreathingProvider(_FakeBreathingRepository()),
-            ),
-          ],
-          child: MaterialApp(
-            theme: ThemeData(splashFactory: NoSplash.splashFactory),
-            routes: _testRoutes(),
-            home: HomeScreen(nowProvider: () => now),
-          ),
-        ),
-      );
-      await tester.pump();
-
-      expect(find.text('Today’s mood: Excited'), findsOneWidget);
-      await tester.tap(find.byKey(viewTodaysMood));
-      await tester.pumpAndSettle();
-      expect(find.byType(MoodJourneyScreen), findsOneWidget);
-      expect(find.byType(LogMoodScreen), findsNothing);
-    },
-    skip: !MoodV2FeatureFlag.historyRead || !MoodV2FeatureFlag.homeRead,
-  );
-
-  testWidgets('a mood from yesterday shows no View today’s mood', (
-    tester,
-  ) async {
-    await pumpHomeWithMoods(tester, [
-      moodAt(DateTime.now().subtract(const Duration(days: 1))),
-    ]);
-    expect(find.textContaining('Today’s mood'), findsNothing);
+    expect(find.text('How are you feeling today?'), findsOneWidget);
+    expect(find.textContaining('Today’s mood:'), findsNothing);
     expect(find.byKey(viewTodaysMood), findsNothing);
   });
 
@@ -494,7 +407,8 @@ void main() {
     await pumpHomeWithMoods(tester, [
       moodAt(DateTime.now()),
     ], size: const Size(360, 1400));
-    expect(find.byKey(viewTodaysMood), findsOneWidget);
+    expect(find.text('How are you feeling today?'), findsOneWidget);
+    expect(find.byKey(viewTodaysMood), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

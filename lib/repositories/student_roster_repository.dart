@@ -31,6 +31,18 @@ typedef AcademicOptions = ({
 
 typedef AcademicOptionsLoader = Future<AcademicOptions> Function();
 
+class RecoveryCodeRequest {
+  const RecoveryCodeRequest({
+    this.alreadyVerified = false,
+    this.maskedEmail = '',
+    this.expiresInSeconds = 0,
+  });
+
+  final bool alreadyVerified;
+  final String maskedEmail;
+  final int expiresInSeconds;
+}
+
 class StudentRosterRepository {
   StudentRosterRepository({
     FirebaseFunctions? functions,
@@ -89,34 +101,111 @@ class StudentRosterRepository {
 
   // ---------------------------------------------------------- activation
 
-  /// Returns the email the account was created with.
-  Future<String> activate({
+  /// Returns the Firebase Auth email the account was created with. Students sign
+  /// in with their Student ID, so this is the internal alias the server returns
+  /// as `authEmail` (the real email is only a recovery contact). A server that
+  /// predates Student ID sign-in returns just `email`.
+  Future<String> startAccountSetup({
     required String studentNo,
-    required String activationCode,
+    required String firstName,
+    required String middleName,
+    required String lastName,
     required String dateOfBirthKey,
-    required String email,
+    String? email,
     required String password,
   }) async {
     try {
-      final result = await _callMap('activateStudentAccount', {
+      // The email is only sent when PACC has none on file for the record; otherwise the server uses its own.
+      final result = await _callMap('startStudentAccountSetup', {
         'studentNo': studentNo,
-        'activationCode': activationCode,
+        'firstName': firstName,
+        'middleName': middleName,
+        'lastName': lastName,
         'dateOfBirth': dateOfBirthKey,
-        'email': email,
+        if (email != null && email.trim().isNotEmpty) 'email': email.trim(),
         'password': password,
       });
-      final returned = asText(result['email']);
-      return returned.isEmpty ? email : returned;
+      final authEmail = asText(result['authEmail']);
+      if (authEmail.isEmpty) {
+        throw const StudentActivationException(
+          StudentActivationFailure.unknown,
+        );
+      }
+      return authEmail;
     } on FirebaseFunctionsException catch (error) {
       final details = error.details;
+      final emailRequired =
+          details is Map && details['reason'] == 'email-required';
       throw StudentActivationException(
-        StudentActivationFailure.parse(
-          details is Map ? details['reason'] : null,
-        ),
+        emailRequired
+            ? StudentActivationFailure.emailRequired
+            : StudentActivationFailure.fromCode(error.code),
         message: error.message,
       );
     }
   }
+
+  /// Submits the verified setup for PACC approval, or reports it approved.
+  /// Safe to repeat. Returns `approved` or `awaiting-approval`.
+  Future<String> completeAccountSetup() async {
+    final result = await _callMap('completeStudentAccountSetup');
+    return asText(result['status']) == 'approved'
+        ? 'approved'
+        : 'awaiting-approval';
+  }
+
+  // ---------------------------------------------- administrator review
+
+  Future<List<StudentAccountClaim>> listAccountClaims() async {
+    final result = await _callMap('listStudentAccountClaims');
+    return [
+      for (final c in asList(result['claims']))
+        StudentAccountClaim.fromJson(asStringMap(c)),
+    ];
+  }
+
+  /// The server refuses unless the administrator attests they verified the
+  /// student's identity.
+  Future<void> approveAccountClaim(String uid) => _call(
+    'approveStudentAccountClaim',
+    {'uid': uid, 'identityVerified': true},
+  );
+
+  Future<void> rejectAccountClaim(String uid) =>
+      _call('rejectStudentAccountClaim', {'uid': uid});
+
+  // ------------------------------------------- recovery email and reset
+
+  /// Emails a one-time code to the student's recovery address. The response
+  /// carries only a masked address, never the code.
+  Future<RecoveryCodeRequest> requestRecoveryEmailCode() async {
+    final result = await _callMap('requestStudentRecoveryEmailCode');
+    final expires = result['expiresInSeconds'];
+    return RecoveryCodeRequest(
+      alreadyVerified: result['alreadyVerified'] == true,
+      maskedEmail: asText(result['maskedEmail']),
+      expiresInSeconds: expires is num ? expires.toInt() : 0,
+    );
+  }
+
+  Future<void> confirmRecoveryEmailCode(String code) =>
+      _call('confirmStudentRecoveryEmailCode', {'code': code});
+
+  /// Asks for a password-reset link to the student's verified recovery email.
+  /// The server answers identically for every Student ID.
+  Future<void> requestPasswordResetForStudentId(String studentId) =>
+      _call('requestStudentPasswordReset', {'studentId': studentId.trim()});
+
+  // ----------------------------------------- student login by roster email
+
+  /// Asks for a login email. The server answers identically for every Student ID.
+  Future<void> requestStudentLogin(String studentId) =>
+      _call('requestStudentLogin', {'studentId': studentId.trim()});
+
+  /// Sets the permanent password on the server. The session that called it is
+  /// revoked, so the caller signs in again with the new password afterwards.
+  Future<void> completePasswordChange(String newPassword) =>
+      _call('completeStudentPasswordChange', {'newPassword': newPassword});
 
   // ------------------------------------------------- student information
 
@@ -206,10 +295,7 @@ class StudentRosterRepository {
   ) async {
     final result = await _callMap(
       'importStudentRoster',
-      {
-        'fileName': fileName,
-        'rows': rows,
-      },
+      {'fileName': fileName, 'rows': rows},
       HttpsCallableOptions(timeout: const Duration(minutes: 10)),
     );
     final message = asText(result['message']);
@@ -244,41 +330,12 @@ class StudentRosterRepository {
 
   // ---------------------------------------------------------- roster
 
-  Future<
-    ({
-      List<IssuedActivationCode> codes,
-      List<({String studentNo, String reason})> skipped,
-    })
-  >
-  issueActivationCodes(List<String> studentNos) async {
-    final result = await _callMap('issueStudentActivationCodes', {
-      'studentNos': studentNos,
-    });
-    return (
-      codes: [
-        for (final c in asList(result['codes']))
-          IssuedActivationCode.fromJson(asStringMap(c)),
-      ],
-      skipped: [
-        for (final s in asList(result['skipped']))
-          (
-            studentNo: asText(asStringMap(s)['studentNo']),
-            reason: asText(asStringMap(s)['reason']),
-          ),
-      ],
-    );
-  }
-
-  Future<IssuedActivationCode> revokeActivation(
-    String studentNo,
-    String reason,
-  ) async {
-    final result = await _callMap('revokeStudentActivation', {
-      'studentNo': studentNo,
-      'reason': reason,
-    });
-    return IssuedActivationCode.fromJson(asStringMap(result['code']));
-  }
+  /// Releases the student's claim so they can set up the account again. No
+  /// code is issued.
+  Future<void> revokeActivation(String studentNo, String reason) => _call(
+    'revokeStudentActivation',
+    {'studentNo': studentNo, 'reason': reason},
+  );
 
   Future<({List<RosterRowView> rows, String? nextPageToken})> listRoster({
     String? search,

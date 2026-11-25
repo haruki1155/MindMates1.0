@@ -38,6 +38,12 @@ class _LoginBodyState extends State<_LoginBody> {
   final _identificationController = TextEditingController();
   final _passwordController = TextEditingController();
 
+  /// Students sign in with their Student ID. Employees and older accounts
+  /// choose the School ID path explicitly; nothing falls back automatically.
+  bool _legacySignIn = false;
+
+  void _togglePath() => setState(() => _legacySignIn = !_legacySignIn);
+
   @override
   void dispose() {
     _identificationController.dispose();
@@ -54,7 +60,13 @@ class _LoginBodyState extends State<_LoginBody> {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(content: Text('Enter your School ID and password.')),
+          SnackBar(
+            content: Text(
+              _legacySignIn
+                  ? 'Enter your School ID and password.'
+                  : 'Enter your Student ID and password.',
+            ),
+          ),
         );
       return;
     }
@@ -62,10 +74,12 @@ class _LoginBodyState extends State<_LoginBody> {
     final authProvider = context.read<AuthProvider>();
     final userProvider = context.read<UserProvider>();
     final assessmentProvider = context.read<AssessmentProvider>();
-    final userId = await authProvider.signIn(
-      schoolId: schoolId,
-      password: password,
-    );
+    final userId = _legacySignIn
+        ? await authProvider.signIn(schoolId: schoolId, password: password)
+        : await authProvider.signInWithStudentId(
+            studentId: schoolId,
+            password: password,
+          );
 
     if (!mounted) return;
 
@@ -97,6 +111,14 @@ class _LoginBodyState extends State<_LoginBody> {
       final profileLoaded = await userProvider.loadProfile(userId);
       if (!mounted) return;
       if (!profileLoaded || userProvider.user == null) {
+        if (authProvider.currentUserIsStudentAlias) {
+          // Verified but never finished: the verification screen completes it.
+          Navigator.of(context).pushNamedAndRemoveUntil(
+            RouteNames.emailVerification,
+            (route) => false,
+          );
+          return;
+        }
         throw StateError('Your profile could not be loaded.');
       }
       final gateRoute = gateRouteForUser(userProvider.user!);
@@ -184,7 +206,7 @@ class _LoginBodyState extends State<_LoginBody> {
   }
 
   void _openStudentActivation() {
-    Navigator.of(context).pushNamed(RouteNames.studentActivation);
+    Navigator.of(context).pushNamed(RouteNames.studentLoginRequest);
   }
 
   @override
@@ -220,6 +242,8 @@ class _LoginBodyState extends State<_LoginBody> {
                           identificationController: _identificationController,
                           passwordController: _passwordController,
                           isLoading: authProvider.isLoading,
+                          legacySignIn: _legacySignIn,
+                          onTogglePath: _togglePath,
                           onForgotPassword: _openForgotPassword,
                           onEmployeeSignUp: _openSignup,
                           onActivateStudent: _openStudentActivation,
@@ -304,6 +328,8 @@ class _LoginFormCard extends StatelessWidget {
     required this.identificationController,
     required this.passwordController,
     required this.isLoading,
+    required this.legacySignIn,
+    required this.onTogglePath,
     required this.onForgotPassword,
     required this.onEmployeeSignUp,
     required this.onActivateStudent,
@@ -314,6 +340,8 @@ class _LoginFormCard extends StatelessWidget {
   final TextEditingController identificationController;
   final TextEditingController passwordController;
   final bool isLoading;
+  final bool legacySignIn;
+  final VoidCallback onTogglePath;
   final VoidCallback onForgotPassword;
   final VoidCallback onEmployeeSignUp;
   final VoidCallback onActivateStudent;
@@ -342,7 +370,7 @@ class _LoginFormCard extends StatelessWidget {
         children: [
           _LoginField(
             controller: identificationController,
-            label: 'School ID',
+            label: legacySignIn ? 'School ID' : 'Student ID',
             assetIconPath: 'assets/images/Login/mail.png',
             keyboardType: TextInputType.text,
             textInputAction: TextInputAction.next,
@@ -376,7 +404,29 @@ class _LoginFormCard extends StatelessWidget {
               child: const Text('Forgot password?'),
             ),
           ),
-          const SizedBox(height: 14),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: const Key('login-path-toggle'),
+              onPressed: isLoading ? null : onTogglePath,
+              style: TextButton.styleFrom(
+                foregroundColor: _LoginColors.mutedText,
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                textStyle: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              child: Text(
+                legacySignIn
+                    ? 'Student? Sign in with your Student ID'
+                    : 'Employee or older account? Use School ID sign-in',
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           _SignInButton(onPressed: isLoading ? null : onSignIn),
           const SizedBox(height: 12),
           OutlinedButton.icon(
@@ -395,7 +445,7 @@ class _LoginFormCard extends StatelessWidget {
           FilledButton.tonalIcon(
             onPressed: onActivateStudent,
             icon: const Icon(Icons.school_outlined, size: 18),
-            label: const Text('Activate student account'),
+            label: const Text('Email me my login'),
             style: FilledButton.styleFrom(
               minimumSize: const Size.fromHeight(46),
               foregroundColor: _LoginColors.text,

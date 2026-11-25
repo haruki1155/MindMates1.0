@@ -4,11 +4,14 @@ import {getAuth} from "firebase-admin/auth";
 import {getFirestore, Timestamp} from "firebase-admin/firestore";
 
 import {
+  archiveAppointments,
   changeAppointmentAgreement,
   getAppointmentForApproval,
   initializeAppointmentScheduleRevision,
+  rescheduleStudentAppointment,
   respondToAppointment,
   reviewAppointment,
+  saveCaseRemarks,
   setStaffCollegeAssignments,
 } from "./index";
 import {
@@ -140,31 +143,36 @@ test("wrong-college, suspended, unverified counselors, operational staff and stu
   assert.equal((await audits(id, "APPOINTMENT_CONFIRMED")).length, 0);
 });
 
-test("missing, unverified, unknown or unstaffed colleges go to super-admin triage; counselors cannot act on them", {skip: !emulated}, async () => {
-  for (const [student, reason] of [["none", "missing_college"], ["unverified", "unverified_profile"], ["cba", "no_eligible_counselor"]] as const) {
+test("missing, unverified, unknown or unstaffed colleges deny both counselors and read-only admins without writes", {skip: !emulated}, async () => {
+  for (const [student] of [["none", "missing_college"], ["unverified", "unverified_profile"], ["cba", "no_eligible_counselor"]] as const) {
     const {id, at} = await seed(student);
     await rejects(call(reviewAppointment, "cA", confirm(id, at)), "permission-denied");
-    await call(reviewAppointment, "admin", confirm(id, at));
-    const [entry] = await history(id);
-    assert.equal(entry.approvalMode, "admin_triage", student);
-    assertNoInternalApprovalDetail(entry);
-    const [row] = await audits(id, "APPOINTMENT_CONFIRMED");
-    assert.deepEqual([row.metadata.approval.mode, row.metadata.approval.scopeReason], ["admin_triage", reason]);
+    await rejects(call(reviewAppointment, "admin", confirm(id, at)), "permission-denied");
+    await rejects(call(reviewAppointment, "admin", confirm(id, at, {exceptionReason: "Admin attempt"})), "permission-denied");
+    assert.equal((await appointment(id)).status, "requested");
+    assert.equal((await history(id)).length, 0);
+    assert.equal((await audits(id, "APPOINTMENT_CONFIRMED")).length, 0);
   }
 });
 
-test("the super-admin overrides a college-scoped appointment only with a written reason", {skip: !emulated}, async () => {
+test("administrators cannot mutate college-scoped appointments even with an exceptionReason or forged payload fields", {skip: !emulated}, async () => {
   const {id, at} = await seed("cite");
-  await rejects(call(reviewAppointment, "admin", confirm(id, at)), "failed-precondition");
-  await rejects(call(reviewAppointment, "admin", confirm(id, at, {exceptionReason: "no"})), "failed-precondition");
+  await rejects(call(reviewAppointment, "admin", confirm(id, at)), "permission-denied");
+  await rejects(call(reviewAppointment, "admin", confirm(id, at, {exceptionReason: "Counselor on approved leave"})), "permission-denied");
+  await rejects(
+    call(reviewAppointment, "admin", confirm(id, at, {
+      role: "counselor",
+      accessRole: "counselor",
+      assignedCollegeIds: [cite],
+      exceptionReason: "Forged counselor payload",
+    })),
+    "permission-denied",
+  );
+  await rejects(call(reviewAppointment, "otherAdmin", confirm(id, at, {exceptionReason: "Other admin"})), "permission-denied");
+  await rejects((reviewAppointment as unknown as Callable).run({data: confirm(id, at)}), "unauthenticated");
   assert.equal((await appointment(id)).status, "requested");
-  await call(reviewAppointment, "admin", confirm(id, at, {exceptionReason: "Counselor on approved leave"}));
-  const [entry] = await history(id);
-  assert.equal(entry.approvalMode, "admin_override");
-  assertNoInternalApprovalDetail(entry);
-  assert.ok(!JSON.stringify(entry).includes("approved leave"), "the student-readable history must not carry the override reason");
-  const [row] = await audits(id, "APPOINTMENT_CONFIRMED");
-  assert.deepEqual([row.metadata.approval.mode, row.metadata.approval.exceptionReason], ["admin_override", "Counselor on approved leave"]);
+  assert.equal((await history(id)).length, 0);
+  assert.equal((await audits(id, "APPOINTMENT_CONFIRMED")).length, 0);
 });
 
 test("the two-way agreement still works for the assigned counselor and refuses others", {skip: !emulated}, async () => {
@@ -249,12 +257,12 @@ test("My College's Approvals lists only the counselor's colleges; the super-admi
 });
 
 test("internal approval detail is only in the admin-only audit log, never in student-readable history", {skip: !emulated}, async () => {
-  const {id, at} = await seed("cba");
-  await call(reviewAppointment, "admin", confirm(id, at));
+  const {id, at} = await seed("cite");
+  await call(reviewAppointment, "cA", confirm(id, at));
   const [entry] = await history(id);
   assertNoInternalApprovalDetail(entry);
   const [row] = await audits(id, "APPOINTMENT_CONFIRMED");
-  assert.deepEqual([row.metadata.approval.mode, row.metadata.approval.scopeReason, row.metadata.approval.collegeId], ["admin_triage", "no_eligible_counselor", cba]);
+  assert.deepEqual([row.metadata.approval.mode, row.metadata.approval.collegeId], ["college", cite]);
 });
 
 test("counselor college reassignment and transactional TOCTOU verification revoke authority immediately", {skip: !emulated}, async () => {
@@ -460,23 +468,19 @@ test("initializeAppointmentScheduleRevision enforces college scope and audits at
     await rejects(call(initializeAppointmentScheduleRevision, "cA", initPayload(leg1.id, leg1.at)), "failed-precondition");
     assert.equal((await audits(leg1.id, "APPOINTMENT_SCHEDULE_REVISION_INITIALIZED")).length, 1);
 
-    // Super-admin override requires valid reason and writes reason only to admin_audit_logs.
+    // Administrators are read-only and denied from initializing schedule revisions (with or without exceptionReason).
     const leg2 = await mkLegacy("cite");
-    await rejects(call(initializeAppointmentScheduleRevision, "admin", initPayload(leg2.id, leg2.at)), "failed-precondition");
+    await rejects(call(initializeAppointmentScheduleRevision, "admin", initPayload(leg2.id, leg2.at)), "permission-denied");
+    await rejects(call(initializeAppointmentScheduleRevision, "admin", initPayload(leg2.id, leg2.at, {exceptionReason: "Legacy backfill exception"})), "permission-denied");
     assert.equal((await appointment(leg2.id)).scheduleRevision, undefined);
     assert.equal((await audits(leg2.id, "APPOINTMENT_SCHEDULE_REVISION_INITIALIZED")).length, 0);
-    await call(initializeAppointmentScheduleRevision, "admin", initPayload(leg2.id, leg2.at, {exceptionReason: "Legacy backfill exception"}));
-    assert.equal((await appointment(leg2.id)).scheduleRevision, 0);
-    assert.equal((await history(leg2.id)).length, 0);
-    const [overrideAudit] = await audits(leg2.id, "APPOINTMENT_SCHEDULE_REVISION_INITIALIZED");
-    assert.deepEqual([overrideAudit.metadata.approval.mode, overrideAudit.metadata.approval.exceptionReason], ["admin_override", "Legacy backfill exception"]);
 
-    // Super-admin triage succeeds cleanly on missing/unverified/no_eligible_counselor college.
+    // Exception-scope legacy appointments deny both counselors and read-only admins without writes.
     const leg3 = await mkLegacy("none");
     await rejects(call(initializeAppointmentScheduleRevision, "cA", initPayload(leg3.id, leg3.at)), "permission-denied");
-    await call(initializeAppointmentScheduleRevision, "admin", initPayload(leg3.id, leg3.at));
-    const [triageAudit] = await audits(leg3.id, "APPOINTMENT_SCHEDULE_REVISION_INITIALIZED");
-    assert.deepEqual([triageAudit.metadata.approval.mode, triageAudit.metadata.approval.scopeReason], ["admin_triage", "missing_college"]);
+    await rejects(call(initializeAppointmentScheduleRevision, "admin", initPayload(leg3.id, leg3.at)), "permission-denied");
+    assert.equal((await appointment(leg3.id)).scheduleRevision, undefined);
+    assert.equal((await audits(leg3.id, "APPOINTMENT_SCHEDULE_REVISION_INITIALIZED")).length, 0);
   } finally {
     await Promise.all([
       db.doc(`users/${pendUid}`).delete().catch(() => undefined),
@@ -730,4 +734,108 @@ test("getAppointmentForApproval enforces college/exception scope, lifecycle gate
       getAuth().deleteUser(tempCounselorUid).catch(() => undefined),
     ]);
   }
+});
+
+test("Admin read-only appointment policy: admins can read permitted approvals but are denied all appointment mutations with zero writes", {skip: !emulated}, async () => {
+  const req = await seed("cite", "requested");
+  const conf = await seed("cite", "confirmed");
+  const exc = await seed("none", "requested");
+  const targetSlot = await freeSlot();
+
+  // 1. Admin retains read access to permitted approval endpoints.
+  const listed = await call(listAppointmentApprovals, "admin", {});
+  assert.ok(listed.items.some((i: {appointmentId: string}) => i.appointmentId === exc.id));
+  const detail = await call(getAppointmentForApproval, "admin", {appointmentId: exc.id});
+  assert.equal(detail.available, true);
+  assert.equal(detail.appointment.id, exc.id);
+
+  // 2. Admin (super-admin & non-super-admin) is denied all appointment mutations — including forged payloads.
+  const forged = {role: "counselor", accessRole: "counselor", assignedCollegeIds: [cite], exceptionReason: "Override attempt"};
+  for (const adminActor of ["admin", "otherAdmin"]) {
+    // Confirm
+    await rejects(call(reviewAppointment, adminActor, confirm(req.id, req.at, forged)), "permission-denied");
+    await rejects(call(reviewAppointment, adminActor, confirm(exc.id, exc.at, forged)), "permission-denied");
+    // Reschedule via reviewAppointment
+    await rejects(
+      call(reviewAppointment, adminActor, {
+        appointmentId: conf.id, action: "rescheduled", reply: "Move time", rescheduleReason: "Admin move",
+        scheduledAt: targetSlot, expectedScheduledAt: conf.at, expectedScheduleRevision: 0, expectedStatus: "confirmed", ...forged,
+      }),
+      "permission-denied",
+    );
+    // Complete & No-show via reviewAppointment
+    await rejects(
+      call(reviewAppointment, adminActor, {
+        appointmentId: conf.id, action: "completed", reply: "Done", sessionSummary: "Summary text",
+        expectedScheduledAt: conf.at, expectedScheduleRevision: 0, expectedStatus: "confirmed", ...forged,
+      }),
+      "permission-denied",
+    );
+    await rejects(
+      call(reviewAppointment, adminActor, {
+        appointmentId: conf.id, action: "no_show", reply: "Missed",
+        expectedScheduledAt: conf.at, expectedScheduleRevision: 0, expectedStatus: "confirmed", ...forged,
+      }),
+      "permission-denied",
+    );
+    // Agreement / Reschedule / Respond callables
+    await rejects(
+      call(changeAppointmentAgreement, adminActor, {
+        appointmentId: conf.id, action: "propose", requestId: `${p}-${adminActor}-chg`,
+        scheduledAt: targetSlot, reason: "Admin propose",
+        expectedScheduledAt: conf.at, expectedScheduleRevision: 0, expectedProposalRevision: 0, ...forged,
+      }),
+      "permission-denied",
+    );
+    await rejects(
+      call(rescheduleStudentAppointment, adminActor, {
+        appointmentId: conf.id, requestId: `${p}-${adminActor}-resch`,
+        scheduledAt: targetSlot, reason: "Admin reschedule",
+        expectedScheduledAt: conf.at, expectedScheduleRevision: 0, expectedProposalRevision: 0, ...forged,
+      }),
+      "permission-denied",
+    );
+    await rejects(
+      call(respondToAppointment, adminActor, {
+        appointmentId: conf.id, action: "cancel", requestId: `${p}-${adminActor}-cancel`,
+        expectedScheduledAt: conf.at, expectedScheduleRevision: 0, expectedProposalRevision: 0, ...forged,
+      }),
+      "permission-denied",
+    );
+    // Case remarks mutation
+    await rejects(
+      call(saveCaseRemarks, adminActor, {appointmentId: conf.id, text: "Admin note", expectedRevision: 0, ...forged}),
+      "permission-denied",
+    );
+  }
+
+  // 3. Unauthenticated, PAACC staff (ops), and students cannot perform appointment management mutations.
+  await rejects((reviewAppointment as unknown as Callable).run({data: confirm(req.id, req.at)}), "unauthenticated");
+  await rejects((archiveAppointments as unknown as Callable).run({data: {appointmentIds: [conf.id], archived: true}}), "unauthenticated");
+  await rejects((changeAppointmentAgreement as unknown as Callable).run({data: {appointmentId: conf.id, action: "cancel"}}), "unauthenticated");
+  await rejects(call(reviewAppointment, "ops", confirm(req.id, req.at)), "permission-denied");
+  await rejects((reviewAppointment as unknown as Callable).run({auth: {uid: uid("student-cite")}, data: confirm(req.id, req.at)}), "permission-denied");
+
+  // 4. Verify zero partial writes occurred on any appointment.
+  assert.equal((await appointment(req.id)).status, "requested");
+  assert.equal((await appointment(conf.id)).status, "confirmed");
+  assert.equal((await appointment(conf.id)).scheduledAt.toMillis(), conf.at);
+  assert.equal((await appointment(exc.id)).status, "requested");
+  assert.equal((await history(req.id)).length, 0);
+  assert.equal((await history(conf.id)).length, 0);
+  assert.equal((await db.doc(`appointment_slots/pacc_${targetSlot}`).get()).exists, false);
+
+  // 5. Assigned counselor can confirm and complete normally, creating audit & notification; then archive, while admin still cannot archive.
+  await call(reviewAppointment, "cA", confirm(req.id, req.at));
+  assert.equal((await appointment(req.id)).status, "confirmed");
+  assert.equal((await audits(req.id, "APPOINTMENT_CONFIRMED")).length, 1);
+  await call(reviewAppointment, "cA", {
+    appointmentId: conf.id, action: "completed", reply: "Session completed",
+    sessionSummary: "Discussed coping strategies and follow-up plan.",
+    expectedScheduledAt: conf.at, expectedScheduleRevision: 0, expectedStatus: "confirmed",
+  });
+  assert.equal((await appointment(conf.id)).status, "completed");
+  await rejects(call(archiveAppointments, "admin", {appointmentIds: [conf.id], archived: true, ...forged}), "permission-denied");
+  await call(archiveAppointments, "cA", {appointmentIds: [conf.id], archived: true});
+  assert.ok((await appointment(conf.id)).archivedAt != null);
 });

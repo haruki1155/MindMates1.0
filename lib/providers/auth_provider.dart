@@ -75,6 +75,16 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// True for a roster-activated student whose Firebase Auth email is the
+  /// internal Student ID alias.
+  bool get currentUserIsStudentAlias =>
+      AuthRepository.isStudentAuthAlias(currentUserEmail);
+
+  /// The Auth email to show or use as a contact address. It is null for the
+  /// internal Student ID alias, which must never be displayed or mailed.
+  String? get currentUserContactEmail =>
+      currentUserIsStudentAlias ? null : currentUserEmail;
+
   Future<void> reloadCurrentUser() => _repository.reloadCurrentUser();
   Future<void> sendEmailVerification() => _repository.sendEmailVerification();
   Future<void> cancelPendingRegistration() async {
@@ -106,6 +116,60 @@ class AuthProvider extends ChangeNotifier {
             'Unable to cancel this pending registration. Please try again.',
       );
       rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Student ID + password sign-in (the primary student credential).
+  Future<String?> signInWithStudentId({
+    required String studentId,
+    required String password,
+  }) async {
+    return _runAuthAction(() async {
+      final credential = await _repository.signInWithStudentId(
+        studentId: studentId,
+        password: password,
+      );
+      return credential.user?.uid ?? _repository.currentUserId;
+    }, signOutOnFailure: true);
+  }
+
+  /// Emails a one-time code to the signed-in student's recovery address.
+  Future<RecoveryCodeRequest> requestRecoveryEmailCode() =>
+      (_rosterRepository ?? StudentRosterRepository())
+          .requestRecoveryEmailCode();
+
+  /// Verifies the emailed code, then refreshes the session so the verified
+  /// state and fresh ID token are visible immediately.
+  Future<void> confirmRecoveryEmailCode(String code) async {
+    await (_rosterRepository ?? StudentRosterRepository())
+        .confirmRecoveryEmailCode(code);
+    await _repository.refreshSession();
+  }
+
+  /// Student ID password recovery. Always reports the same outcome for any
+  /// Student ID; the link goes only to a verified recovery email.
+  Future<bool> sendPasswordResetForStudentId(String studentId) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await (_rosterRepository ?? StudentRosterRepository())
+          .requestPasswordResetForStudentId(studentId);
+      return true;
+    } catch (error, stackTrace) {
+      FirebaseErrorMessage.log(
+        error,
+        stackTrace,
+        area: 'Student ID password reset failed.',
+      );
+      _errorMessage = FirebaseErrorMessage.describe(
+        error,
+        fallback: 'Unable to send a password reset link. Please try again.',
+      );
+      return false;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -223,15 +287,18 @@ class AuthProvider extends ChangeNotifier {
     }, signOutOnFailure: true);
   }
 
-  /// Activates a roster record, signs in with the new credentials and sends
-  /// the verification email. Throws [StudentActivationException] when the
-  /// server rejects the activation and [StudentActivationSignInException]
-  /// when the account was created but the follow-up sign-in failed.
-  Future<void> activateStudentAccount({
+  /// Starts no-code account setup for a roster record and signs in with the
+  /// new credentials. The roster record is only claimed once the personal email
+  /// is verified ([completeStudentAccountSetup]). Throws
+  /// [StudentActivationException] when the server rejects the details and
+  /// [StudentActivationSignInException] when the sign-in afterwards failed.
+  Future<void> startStudentAccountSetup({
     required String studentNo,
-    required String activationCode,
+    required String firstName,
+    required String middleName,
+    required String lastName,
     required String dateOfBirthKey,
-    required String email,
+    String? email,
     required String password,
   }) async {
     _requiresExplicitReauthentication = false;
@@ -242,9 +309,11 @@ class AuthProvider extends ChangeNotifier {
       final repository = _rosterRepository ?? StudentRosterRepository();
       final String activatedEmail;
       try {
-        activatedEmail = await repository.activate(
+        activatedEmail = await repository.startAccountSetup(
           studentNo: studentNo,
-          activationCode: activationCode,
+          firstName: firstName,
+          middleName: middleName,
+          lastName: lastName,
           dateOfBirthKey: dateOfBirthKey,
           email: email,
           password: password,
@@ -280,21 +349,18 @@ class AuthProvider extends ChangeNotifier {
         );
         throw const StudentActivationSignInException();
       }
-      try {
-        await _repository.sendEmailVerification();
-      } catch (error, stackTrace) {
-        // Non-fatal: the verification screen offers a resend button.
-        FirebaseErrorMessage.log(
-          error,
-          stackTrace,
-          area: 'Verification email after student activation failed.',
-        );
-      }
+      // The alias cannot receive mail: the verification screen requests the
+      // emailed code for the personal email itself.
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
+
+  /// Submits the verified setup for PACC approval. Returns `approved` once an
+  /// administrator has approved it, otherwise `awaiting-approval`. Idempotent.
+  Future<String> completeStudentAccountSetup() =>
+      (_rosterRepository ?? StudentRosterRepository()).completeAccountSetup();
 
   Future<String?> signInWithGoogle() {
     return _runAuthAction(() async {

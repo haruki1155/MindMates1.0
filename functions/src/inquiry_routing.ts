@@ -33,6 +33,65 @@ export class InquiryRoutingError extends Error {
   }
 }
 
+export const ESCALATION_TYPES = {
+  counselorConfirmation: "counselor_confirmation",
+  staffReasoned: "staff_reasoned",
+} as const;
+export type EscalationType = typeof ESCALATION_TYPES[keyof typeof ESCALATION_TYPES];
+
+export type EscalationInput = {
+  escalationType: EscalationType;
+  reason: string | null;
+};
+
+export class InquiryEscalationInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InquiryEscalationInputError";
+  }
+}
+
+export function parseEscalationInput(data: unknown, role: string): EscalationInput {
+  const input = (data && typeof data === "object" && !Array.isArray(data)
+    ? data
+    : {}) as {reason?: unknown; escalationType?: unknown};
+  const rawReason = input.reason;
+  const rawType = input.escalationType;
+
+  if (rawType !== undefined && rawType !== null && typeof rawType !== "string") {
+    throw new InquiryEscalationInputError("Invalid escalation type.");
+  }
+  const normalizedType = typeof rawType === "string" ? rawType.trim() : null;
+
+  if (rawReason !== undefined && rawReason !== null) {
+    if (typeof rawReason !== "string") {
+      throw new InquiryEscalationInputError("Reason must be 3-500 characters.");
+    }
+    const reason = rawReason.trim();
+    if (reason.length < 3 || reason.length > 500) {
+      throw new InquiryEscalationInputError("Reason must be 3-500 characters.");
+    }
+    if (normalizedType !== null && normalizedType !== ESCALATION_TYPES.staffReasoned) {
+      throw new InquiryEscalationInputError("Invalid escalation type.");
+    }
+    return {
+      escalationType: ESCALATION_TYPES.staffReasoned,
+      reason,
+    };
+  }
+
+  if (role !== "counselor") {
+    throw new InquiryEscalationInputError("Reason must be 3-500 characters.");
+  }
+  if (normalizedType !== null && normalizedType !== ESCALATION_TYPES.counselorConfirmation) {
+    throw new InquiryEscalationInputError("Invalid escalation type.");
+  }
+  return {
+    escalationType: ESCALATION_TYPES.counselorConfirmation,
+    reason: null,
+  };
+}
+
 export const MAX_INQUIRY_ASSIGNEES = 10;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const ALLOWED_CATEGORIES = new Set(["Service Form", "General", "Academic", "Counseling", "Feedback"]);

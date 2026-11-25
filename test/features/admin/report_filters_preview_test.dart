@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/domain/report_generation_models.dart';
@@ -447,4 +448,303 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'UserReport shows empty state instead of synthetic 100% when userCategories is empty',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final repo = _CustomReportRepository(
+        report: AdminReportAnalytics.fromJson({
+          'generatedAt': '2026-11-16T04:00:00Z',
+          'population': {
+            'schoolYear': '2026-2027',
+            'configured': true,
+            'status': 'current',
+            'years': [
+              {
+                'schoolYear': '2026-2027',
+                'startDate': '2026-06-01',
+                'endDate': '2027-05-31',
+                'status': 'current',
+              },
+            ],
+          },
+          'users': {
+            'scopeKey': 'all',
+            'scopeLabel': 'Whole app-user population',
+            'overallActivePercentage': 0,
+            'categories': const [],
+          },
+        }),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(body: ReportGenerationPage(repository: repo)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(
+          'No app-user activity data available for the selected filters.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('100%'), findsNothing);
+      expect(find.text('No recent activity'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'AppointmentReport distinguishes 0 appointments empty state from <5 unique students privacy banner',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final emptyApptRepo = _CustomReportRepository(
+        report: AdminReportAnalytics.fromJson({
+          'generatedAt': '2026-11-16T04:00:00Z',
+          'population': {
+            'schoolYear': '2026-2027',
+            'configured': true,
+            'status': 'current',
+            'departments': ['CAS'],
+            'populations': {'CAS': 100},
+            'totalPopulation': 100,
+            'years': [
+              {
+                'schoolYear': '2026-2027',
+                'startDate': '2026-06-01',
+                'endDate': '2027-05-31',
+                'status': 'current',
+              },
+            ],
+          },
+          'appointments': {'totalAppointments': 0, 'uniqueStudentsServed': 0},
+        }),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: ReportGenerationPage(
+              key: const ValueKey('zero-appts'),
+              repository: emptyApptRepo,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Counseling appointments'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('No counseling appointments matched the selected filters.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('fewer than 5 unique students'), findsNothing);
+
+      final smallCohortRepo = _CustomReportRepository(
+        report: AdminReportAnalytics.fromJson({
+          'generatedAt': '2026-11-16T04:00:00Z',
+          'population': {
+            'schoolYear': '2026-2027',
+            'configured': true,
+            'status': 'current',
+            'departments': ['CAS'],
+            'populations': {'CAS': 100},
+            'totalPopulation': 100,
+            'years': [
+              {
+                'schoolYear': '2026-2027',
+                'startDate': '2026-06-01',
+                'endDate': '2027-05-31',
+                'status': 'current',
+              },
+            ],
+          },
+          'appointments': {'totalAppointments': 4, 'uniqueStudentsServed': 3},
+        }),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(
+            body: ReportGenerationPage(
+              key: const ValueKey('small-cohort'),
+              repository: smallCohortRepo,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Counseling appointments'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('fewer than 5 unique students'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'ErrorPanel surfaces safe FirebaseFunctionsException messages while keeping Reset filters',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      for (final entry in [
+        (
+          error: FirebaseFunctionsException(
+            code: 'failed-precondition',
+            message: 'Planned academic years cannot generate official reports.',
+          ),
+          expected: 'Planned academic years cannot generate official reports.',
+        ),
+        (
+          error: FirebaseFunctionsException(
+            code: 'permission-denied',
+            message: 'raw secret path /users/123',
+          ),
+          expected: 'You do not have permission to complete this action.',
+        ),
+        (
+          error: FirebaseFunctionsException(
+            code: 'internal',
+            message: 'Firestore stack trace /internal/doc',
+          ),
+          expected:
+              'Check your filters, access scope, or report service connection, then try again.',
+        ),
+      ]) {
+        final repo = _FiltersPreviewFakeRepository()..fetchError = entry.error;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AdminTheme.data,
+            home: Scaffold(
+              body: ReportGenerationPage(
+                key: ValueKey(entry.error.code),
+                repository: repo,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('The report could not be loaded.'), findsOneWidget);
+        expect(find.text('Reset filters'), findsOneWidget);
+        expect(find.text(entry.expected), findsOneWidget);
+        expect(find.textContaining('/users/123'), findsNothing);
+        expect(find.textContaining('/internal/doc'), findsNothing);
+      }
+    },
+  );
+
+  testWidgets(
+    'Users tab filters Selected app-user category only table to selected categoryKey',
+    (tester) async {
+      tester.view.physicalSize = const Size(1440, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final repo = _CustomReportRepository(
+        report: AdminReportAnalytics.fromJson({
+          'generatedAt': '2026-11-16T04:00:00Z',
+          'population': {
+            'schoolYear': '2026-2027',
+            'configured': true,
+            'status': 'current',
+            'years': [
+              {
+                'schoolYear': '2026-2027',
+                'startDate': '2026-06-01',
+                'endDate': '2027-05-31',
+                'status': 'current',
+              },
+            ],
+          },
+          'users': {
+            'scopeKey': 'students',
+            'scopeLabel': 'Students',
+            'overallActivePercentage': 50,
+            'categoryOptions': [
+              {'key': 'students', 'label': 'Students'},
+              {'key': 'faculty', 'label': 'Faculty'},
+            ],
+            'categories': [
+              {
+                'key': 'students',
+                'label': 'Students',
+                'populationPercentage': 30,
+                'activePercentage': 50,
+              },
+              {
+                'key': 'faculty',
+                'label': 'Faculty',
+                'populationPercentage': 70,
+                'activePercentage': 20,
+              },
+            ],
+          },
+        }),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(body: ReportGenerationPage(repository: repo)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Students'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Selected app-user category only'), findsOneWidget);
+      expect(find.text('30%'), findsWidgets);
+      expect(find.text('70%'), findsNothing);
+      expect(find.text('20%'), findsNothing);
+    },
+  );
+}
+
+class _CustomReportRepository extends AdminPortalRepository {
+  _CustomReportRepository({required this.report});
+
+  final AdminReportAnalytics report;
+
+  @override
+  AccessRole get currentAccessRole => AccessRole.admin;
+
+  @override
+  bool get isSuperAdmin => true;
+
+  @override
+  Future<AdminReportAnalytics> fetchFilteredReportAnalytics({
+    String userCategory = 'all',
+    String appointmentDepartment = 'all',
+    String program = 'all',
+    String? schoolYear,
+    String? periodLabel,
+    DateTime? startDate,
+    DateTime? endDate,
+    String emotionalSource = 'all',
+  }) async => report;
+
+  @override
+  Future<List<ImportedWalkInFile>> listWalkInImports() async => [];
 }

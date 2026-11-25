@@ -25,6 +25,9 @@ class UserProvider extends ChangeNotifier {
   }
 
   Future<bool> loadProfile(String uid) async {
+    // Never keep another account's profile (or a stale one) when this load
+    // fails: callers must not mistake it for this user's profile.
+    if (_user != null && _user!.id != uid) _user = null;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();

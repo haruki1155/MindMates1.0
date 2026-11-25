@@ -56,8 +56,28 @@ class _SplashScreenState extends State<SplashScreen>
       try {
         final userProvider = context.read<UserProvider>();
         final assessmentProvider = context.read<AssessmentProvider>();
+        // A Student ID account that restarted mid-setup has no profile until
+        // its email is verified and the setup is finished; the verification
+        // screen resumes exactly that.
+        final unfinishedStudentSetup = authProvider.currentUserIsStudentAlias;
+        if (unfinishedStudentSetup && !authProvider.currentUserEmailVerified) {
+          if (mounted) {
+            Navigator.of(
+              context,
+            ).pushReplacementNamed(RouteNames.emailVerification);
+          }
+          return;
+        }
         final profileLoaded = await userProvider.loadProfile(userId);
         if (!profileLoaded || userProvider.user == null) {
+          if (unfinishedStudentSetup) {
+            if (mounted) {
+              Navigator.of(
+                context,
+              ).pushReplacementNamed(RouteNames.emailVerification);
+            }
+            return;
+          }
           throw StateError('Your profile could not be loaded.');
         }
         final authEmail = authProvider.currentUserEmail;

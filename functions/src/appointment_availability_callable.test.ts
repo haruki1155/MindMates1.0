@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {after, before, beforeEach, test} from "node:test";
-import {getFirestore} from "firebase-admin/firestore";
+import {FieldPath, getFirestore} from "firebase-admin/firestore";
 
 import {getAvailableAppointmentSlots, savePaccAvailability} from "./index";
 import {ensureAuthUser} from "./test_auth_helper";
@@ -15,10 +15,6 @@ const studentId = `${prefix}-student`;
 const current = db.collection("pacc_availability").doc("current");
 const save = savePaccAvailability as unknown as Callable;
 const slots = getAvailableAppointmentSlots as unknown as Callable;
-// A date no suite reaches with its "days from now" fixtures, and that stays in the future.
-const slotFriday = "2099-01-09";
-const slotSaturday = "2099-01-10";
-const firstFridaySlot = db.collection("appointment_slots").doc(`pacc_${Date.parse(`${slotFriday}T08:00:00+08:00`)}`);
 const v1 = {openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, notice: "", blackoutDates: []};
 const v2 = {
   schemaVersion: 2, timezone: "Asia/Manila", notice: "",
@@ -26,6 +22,15 @@ const v2 = {
   overrides: [],
 };
 const request = (availability: Record<string, unknown>, expectedRevision: number, confirmConflicts = true, uid = adminId) => save.run({auth: {uid}, data: {availability, expectedRevision, confirmConflicts}});
+// Other appointment suites choose dates relative to Date.now() and share this emulator, so on some
+// calendar days they leave occupied slots on the fixed fixture day (2027-01-08 Asia/Manila). Clear
+// that whole Manila day (2027-01-07T16:00Z inclusive to 2027-01-08T16:00Z exclusive) before each test.
+async function clearSlotsForFixtureDay() {
+  const start = `pacc_${Date.UTC(2027, 0, 7, 16)}`;
+  const end = `pacc_${Date.UTC(2027, 0, 8, 16)}`;
+  const stale = await db.collection("appointment_slots").where(FieldPath.documentId(), ">=", start).where(FieldPath.documentId(), "<", end).get();
+  await Promise.all(stale.docs.map((doc) => doc.ref.delete()));
+}
 async function rejects(promise: Promise<unknown>, code: string) { await assert.rejects(promise, (error: {code?: string}) => error.code === code); }
 
 before(async () => {
@@ -41,7 +46,7 @@ before(async () => {
 });
 beforeEach(async () => {
   await current.set(v1);
-  await firstFridaySlot.delete();
+  await clearSlotsForFixtureDay();
   const appointments = await db.collection("appointments").where("testOwner", "==", prefix).get();
   await Promise.all(appointments.docs.map((doc) => doc.ref.delete()));
   const audits = await db.collection("admin_audit_logs").where("actorId", "==", adminId).get();
@@ -49,7 +54,6 @@ beforeEach(async () => {
 });
 after(async () => {
   await Promise.all([adminId, counselorId, staffId, studentId].map((userId) => db.collection("users").doc(userId).delete()));
-  await firstFridaySlot.delete();
   await current.set(v1);
 });
 
@@ -118,9 +122,10 @@ test("conflicts require confirmation, preserve appointments, recalculate at save
 });
 
 test("slot callable returns safe unavailable metadata and preserves whole-hour starts", async () => {
+  const friday = "2027-01-08";
   const day = (overrides: Record<string, unknown> = {}) => ({enabled: true, opensAt: "08:00", closesAt: "17:00", presence: "in_office", appointmentsEnabled: true, acceptsWalkIns: true, ...overrides});
   const schedule = (fridayDay: Record<string, unknown>) => ({...v2, weekdays: {...v2.weekdays, 5: fridayDay}});
-  const read = async () => slots.run({auth: {uid: studentId}, data: {date: slotFriday}}) as Promise<{slots: Array<{label: string}>; availability: {status: string}}>;
+  const read = async () => slots.run({auth: {uid: studentId}, data: {date: friday}}) as Promise<{slots: Array<{label: string}>; availability: {status: string}}>;
 
   await current.set(schedule(day({enabled: false, appointmentsEnabled: false, acceptsWalkIns: false, presence: "out_of_office"})));
   assert.equal((await read()).availability.status, "office_closed");
@@ -133,9 +138,9 @@ test("slot callable returns safe unavailable metadata and preserves whole-hour s
   await current.set(schedule(day({opensAt: "07:30", closesAt: "12:00"})));
   assert.equal((await read()).slots[0].label, "08:00 AM");
   await current.set(schedule(day({opensAt: "08:00", closesAt: "09:00"})));
-  await firstFridaySlot.set({appointmentId: `${prefix}-occupied`});
+  await db.collection("appointment_slots").doc(`pacc_${Date.UTC(2027, 0, 8, 0)}`).set({appointmentId: `${prefix}-occupied`});
   assert.equal((await read()).availability.status, "fully_booked");
-  const saturday = await slots.run({auth: {uid: studentId}, data: {date: slotSaturday}}) as {slots: unknown[]; availability: {status: string}};
+  const saturday = await slots.run({auth: {uid: studentId}, data: {date: "2027-01-09"}}) as {slots: unknown[]; availability: {status: string}};
   assert.equal(saturday.slots.length, 0);
   assert.equal(saturday.availability.status, "office_closed");
 });

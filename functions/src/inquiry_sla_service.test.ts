@@ -139,7 +139,8 @@ test("replies are refused for portalStaff (even monitoring), wrong college, susp
   await rejects(call(replyToInquiry, "c1", {inquiryId: id, message: "", expectedRevision: 2, requestId: requestId("empty")}), "invalid-argument");
   await rejects(call(replyToInquiry, "c1", {inquiryId: id, message: "Hi", expectedRevision: 2, requestId: "bad/id"}), "invalid-argument");
   await rejects(call(replyToInquiry, "c1", {inquiryId: id, message: "Hi", expectedRevision: 1, requestId: requestId("stale")}), "failed-precondition");
-  await call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 2});
+  await call(acknowledgeInquiry, "c1", {inquiryId: id, expectedRevision: 2});
+  await call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 3});
   const resolved = await inquiry(id);
   await rejects(call(replyToInquiry, "c1", {inquiryId: id, message: "Late", expectedRevision: resolved.routingRevision, requestId: requestId("late")}), "failed-precondition");
   assert.equal((await db.collection(`inquiries/${id}/replies`).get()).size, 0);
@@ -166,11 +167,12 @@ test("concurrent staff and administrator replies, reply vs takeover, and reply v
   const loser1 = takeoverRace.find((o) => o.status === "rejected") as PromiseRejectedResult;
   assert.ok(loser1.reason instanceof HttpsError && ["failed-precondition", "permission-denied"].includes(loser1.reason.code));
 
-  // Reply vs resolve concurrency at revision 1.
+  // Reply vs resolve concurrency at revision 2 (after acknowledgment).
   const idResolveRace = await routedInquiry();
+  await call(acknowledgeInquiry, "c1", {inquiryId: idResolveRace, expectedRevision: 1});
   const resolveRace = await Promise.allSettled([
-    call(replyToInquiry, "c1", {inquiryId: idResolveRace, message: "Reply during resolve", expectedRevision: 1, requestId: requestId("race-res")}),
-    call(setInquiryStatus, "c1", {inquiryId: idResolveRace, status: "resolved", expectedRevision: 1}),
+    call(replyToInquiry, "c1", {inquiryId: idResolveRace, message: "Reply during resolve", expectedRevision: 2, requestId: requestId("race-res")}),
+    call(setInquiryStatus, "c1", {inquiryId: idResolveRace, status: "resolved", expectedRevision: 2}),
   ]);
   assert.equal(resolveRace.filter((o) => o.status === "fulfilled").length, 1);
   const loser2 = resolveRace.find((o) => o.status === "rejected") as PromiseRejectedResult;
@@ -218,9 +220,10 @@ test("takeover is super-admin only, updates projection safely, and revokes couns
 
 test("status changes accept an expected revision and advance it", {skip: !emulated}, async () => {
   const id = await routedInquiry();
-  await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 0}), "failed-precondition");
-  await call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 1});
-  assert.equal((await inquiry(id)).routingRevision, 2);
+  await call(acknowledgeInquiry, "c1", {inquiryId: id, expectedRevision: 1});
+  await rejects(call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 1}), "failed-precondition");
+  await call(setInquiryStatus, "c1", {inquiryId: id, status: "resolved", expectedRevision: 2});
+  assert.equal((await inquiry(id)).routingRevision, 3);
 });
 
 test("reassignment after takeover hands the inquiry back to the new assignees", {skip: !emulated}, async () => {
@@ -279,10 +282,19 @@ test("a stale acknowledgement changes nothing: no status change, receipt or audi
 
 test("escalation advances the revision too", {skip: !emulated}, async () => {
   const id = await routedInquiry();
-  await call(escalateInquiry, "c1", {inquiryId: id, reason: "Needs supervisor review"});
-  assert.equal((await inquiry(id)).routingRevision, 2);
+  await call(escalateInquiry, "c1", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 1});
+  const escalated = await inquiry(id);
+  assert.equal(escalated.routingRevision, 2);
+  assert.equal(escalated.escalation.type, "counselor_confirmation");
+  assert.equal(escalated.escalation.reason, null);
   await rejects(call(takeOverInquiry, "admin", {inquiryId: id, expectedRevision: 1, reason: "Past the response target"}), "failed-precondition");
   await rejects(call(replyToInquiry, "c1b", {inquiryId: id, message: "Hi", expectedRevision: 1, requestId: requestId("esc-stale")}), "failed-precondition");
+  // takeOverInquiry still enforces 3-500 char reason and preserves escalation.type when marking handled.
+  await rejects(call(takeOverInquiry, "admin", {inquiryId: id, expectedRevision: 2, reason: "no"}), "invalid-argument");
+  await call(takeOverInquiry, "admin", {inquiryId: id, expectedRevision: 2, reason: "Past the response target"});
+  const taken = await inquiry(id);
+  assert.equal(taken.escalation.status, "handled");
+  assert.equal(taken.escalation.type, "counselor_confirmation");
 });
 
 test("legacy PR #4 clients that omit the revision are still served, and the audit says it was unchecked", {skip: !emulated}, async () => {

@@ -2,8 +2,10 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // A student on the temporary password carries firstLoginPending and may only read their own profile
+    // until completeStudentPasswordChange clears it, so every rule built on signedIn()/isOwner() excludes them.
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null && request.auth.token.get("firstLoginPending", false) != true;
     }
 
     function isOwner(userId) {
@@ -100,7 +102,7 @@ service cloud.firestore {
       // written only by the setStaffCollegeAssignments callable; they are
       // deliberately absent from validSelfProfileUpdate's allow-list.
       allow create: if false;
-      allow read: if isOwner(userId) || isSystemAdmin();
+      allow read: if (request.auth != null && request.auth.uid == userId) || isSystemAdmin();
       allow update: if (isOwner(userId) && validSelfProfileUpdate());
       allow delete: if isSystemAdmin();
     }
@@ -365,8 +367,12 @@ service cloud.firestore {
       allow create, update: if isApprovedCounselor()
         && request.auth.uid == counselorUid
         && exists(/databases/$(database)/documents/counselor_threads/$(studentId))
-        && request.resource.data.keys().hasOnly(['readAt'])
-        && request.resource.data.readAt == request.time;
+        && request.resource.data.keys().hasOnly(['readAt', 'readThrough'])
+        && request.resource.data.readAt == request.time
+        && (!('readThrough' in request.resource.data) || (
+          request.resource.data.readThrough is timestamp
+          && request.resource.data.readThrough <= request.time
+        ));
       allow delete: if false;
     }
 

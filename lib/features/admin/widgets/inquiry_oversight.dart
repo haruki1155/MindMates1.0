@@ -1,19 +1,14 @@
-import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/admin_inquiry_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../repositories/admin_portal_repository.dart';
+import '../../../services/firebase/firebase_error_message.dart';
 import '../domain/inquiry_sla.dart';
 import '../theme/admin_theme.dart';
 
 String _failure(Object error, String fallback) =>
-    error is FirebaseFunctionsException &&
-        error.message?.trim().isNotEmpty == true
-    ? error.message!
-    : error is FirebaseFunctionsException
-    ? '$fallback (${error.code}).'
-    : '$fallback.';
+    FirebaseErrorMessage.describe(error, fallback: '$fallback.');
 
 String _lastAction(AdminInquiryModel inquiry) {
   if (inquiry.lastResponseByName != null) {
@@ -98,7 +93,7 @@ class InquiryOverduePanel extends StatelessWidget {
                         [
                           inquiry.collegeId.isEmpty
                               ? 'College not identified'
-                              : 'College ${inquiry.collegeId}',
+                              : 'College assigned',
                           inquiry.assigneeIds.isEmpty
                               ? 'No one assigned'
                               : inquiry.assigneeIds
@@ -260,79 +255,83 @@ class _InquiryReplyThreadState extends State<InquiryReplyThread> {
   Widget build(BuildContext context) {
     if (_isOperationalOnly) return const SizedBox.shrink();
     return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Text('Replies', style: TextStyle(fontWeight: FontWeight.w900)),
-      const SizedBox(height: 8),
-      StreamBuilder<List<InquiryReply>>(
-        stream: _replies,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Text('Replies could not be loaded.');
-          }
-          final replies = snapshot.data ?? const <InquiryReply>[];
-          if (replies.isEmpty) {
-            return const Text(
-              'No reply has been sent yet.',
-              style: TextStyle(color: AdminColors.muted),
-            );
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final reply in replies)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${reply.authorName}${reply.isAdministrator ? ' (administrator)' : ''}',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      Text(reply.message),
-                    ],
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
-      if (widget.inquiry.isTakenOver && !widget.repository.isSuperAdmin)
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: Text(
-            '${widget.inquiry.takeoverByName} took over this inquiry. '
-            'You can still read it but cannot reply.',
-            style: const TextStyle(color: AdminColors.muted),
-          ),
-        ),
-      if (_canReply) ...[
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Replies', style: TextStyle(fontWeight: FontWeight.w900)),
         const SizedBox(height: 8),
-        TextField(
-          controller: _draft,
-          enabled: !_sending,
-          minLines: 2,
-          maxLines: 6,
-          maxLength: 2000,
-          onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(labelText: 'Reply to the student'),
+        StreamBuilder<List<InquiryReply>>(
+          stream: _replies,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return const Text('Replies could not be loaded.');
+            }
+            final replies = snapshot.data ?? const <InquiryReply>[];
+            if (replies.isEmpty) {
+              return const Text(
+                'No reply has been sent yet.',
+                style: TextStyle(color: AdminColors.muted),
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final reply in replies)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${reply.authorName}${reply.isAdministrator ? ' (administrator)' : ''}',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        Text(reply.message),
+                      ],
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
-        if (_error != null)
+        if (widget.inquiry.isTakenOver && !widget.repository.isSuperAdmin)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(top: 6),
             child: Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              '${widget.inquiry.takeoverByName} took over this inquiry. '
+              'You can still read it but cannot reply.',
+              style: const TextStyle(color: AdminColors.muted),
             ),
           ),
-        FilledButton.icon(
-          onPressed: !_sending && _draft.text.trim().isNotEmpty ? _send : null,
-          icon: const Icon(Icons.send_outlined),
-          label: const Text('Send reply'),
-        ),
+        if (_canReply) ...[
+          const SizedBox(height: 8),
+          TextField(
+            controller: _draft,
+            enabled: !_sending,
+            minLines: 2,
+            maxLines: 6,
+            maxLength: 2000,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              labelText: 'Reply to the student',
+            ),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          FilledButton.icon(
+            onPressed: !_sending && _draft.text.trim().isNotEmpty
+                ? _send
+                : null,
+            icon: const Icon(Icons.send_outlined),
+            label: const Text('Send reply'),
+          ),
+        ],
       ],
-    ],
-  );
+    );
   }
 }

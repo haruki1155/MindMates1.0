@@ -789,6 +789,309 @@ void main() {
       isNull,
     );
   });
+
+  test(
+    'loadMoodCalendarRange requests Manila date range, drains cursor pages, and does not replace recent v2History',
+    () async {
+      final recordedRequests = <MoodHistorySourceRequest>[];
+      final page1Events = List.generate(
+        100,
+        (i) => _event(
+          'oct-$i',
+          DateTime.utc(2026, 10, 15, 2).subtract(Duration(minutes: i)),
+          3,
+          MoodEventSource.v2,
+        ),
+      );
+      final page2Events = [
+        _event('oct-100', DateTime.utc(2026, 10, 2, 2), 4, MoodEventSource.v2),
+      ];
+      final v2Source = _RecordingPagedMoodSource(MoodEventSource.v2, {
+        null: MoodHistorySourcePage(
+          events: page1Events,
+          nextCursor: 'oct-page-2',
+        ),
+        'oct-page-2': MoodHistorySourcePage(events: page2Events),
+      }, onFetch: recordedRequests.add);
+      final legacySource = _MoodSource(MoodEventSource.legacy, [
+        _event(
+          'nov-today',
+          DateTime.utc(2026, 11, 12, 1),
+          5,
+          MoodEventSource.legacy,
+        ),
+      ]);
+      final provider = MoodProvider(
+        _FakeMoodRepository(),
+        nowProvider: () => DateTime.utc(2026, 11, 12, 3),
+        useMoodV2Read: true,
+        combinedHistoryRepository: MoodCombinedHistoryRepository(
+          identity: const _MoodIdentity('user_1'),
+          legacySource: legacySource,
+          v2Source: v2Source,
+        ),
+      );
+      provider.bindAuthenticatedUser('user_1');
+      await provider.loadMoodV2History('user_1');
+      expect(provider.v2Analytics!.streak.currentDays, 1);
+
+      recordedRequests.clear();
+      await provider.loadMoodCalendarRange(
+        'user_1',
+        startDateKey: '2026-09-28',
+        endExclusiveDateKey: '2026-11-02',
+      );
+
+      expect(recordedRequests, hasLength(2));
+      // 2026-09-28T00:00:00+08:00 == 2026-09-27T16:00:00Z
+      expect(
+        recordedRequests.first.startInclusive,
+        DateTime.utc(2026, 9, 27, 16),
+      );
+      // 2026-11-02T00:00:00+08:00 == 2026-11-01T16:00:00Z
+      expect(
+        recordedRequests.first.endExclusive,
+        DateTime.utc(2026, 11, 1, 16),
+      );
+      expect(provider.moodCalendarHistory, isNotNull);
+      expect(provider.moodCalendarHistory!.uniqueEvents, hasLength(101));
+      expect(
+        provider.moodCalendarHistory!.coverage,
+        MoodHistoryCoverage.complete,
+      );
+      expect(provider.loadedMoodCalendarStartKey, '2026-09-28');
+      expect(provider.loadedMoodCalendarEndExclusiveKey, '2026-11-02');
+      expect(provider.isLoadingMoodCalendarRange, isFalse);
+      expect(provider.moodCalendarRangeError, isNull);
+      // Recent v2History and streak remain untouched.
+      expect(provider.v2Analytics!.streak.currentDays, 1);
+      expect(
+        provider.v2History!.uniqueEvents.any((e) => e.id == 'nov-today'),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'loadMoodCalendarRange keeps partial status on source failure and permits explicit retry',
+    () async {
+      final legacy = _PagedMoodSource(MoodEventSource.legacy, {
+        null: MoodHistorySourcePage(
+          events: [
+            _event(
+              'leg-oct',
+              DateTime.utc(2026, 10, 10, 1),
+              3,
+              MoodEventSource.legacy,
+            ),
+          ],
+        ),
+      })..failCursors.add(null);
+      final v2 = _PagedMoodSource(MoodEventSource.v2, {
+        null: MoodHistorySourcePage(
+          events: [
+            _event(
+              'v2-oct',
+              DateTime.utc(2026, 10, 11, 1),
+              4,
+              MoodEventSource.v2,
+            ),
+          ],
+        ),
+      });
+      final provider = MoodProvider(
+        _FakeMoodRepository(),
+        useMoodV2Read: true,
+        combinedHistoryRepository: MoodCombinedHistoryRepository(
+          identity: const _MoodIdentity('user_1'),
+          legacySource: legacy,
+          v2Source: v2,
+        ),
+      )..bindAuthenticatedUser('user_1');
+
+      await provider.loadMoodCalendarRange(
+        'user_1',
+        startDateKey: '2026-10-01',
+        endExclusiveDateKey: '2026-11-01',
+      );
+
+      expect(provider.moodCalendarHistory, isNotNull);
+      expect(
+        provider.moodCalendarHistory!.coverage,
+        MoodHistoryCoverage.partial,
+      );
+      expect(provider.moodCalendarHistory!.uniqueEvents.map((e) => e.id), [
+        'v2-oct',
+      ]);
+      expect(provider.moodCalendarRangeError, isNotNull);
+
+      legacy.failCursors.clear();
+      await provider.loadMoodCalendarRange(
+        'user_1',
+        startDateKey: '2026-10-01',
+        endExclusiveDateKey: '2026-11-01',
+      );
+
+      expect(
+        provider.moodCalendarHistory!.coverage,
+        MoodHistoryCoverage.complete,
+      );
+      expect(provider.moodCalendarHistory!.uniqueEvents, hasLength(2));
+      expect(provider.moodCalendarRangeError, isNull);
+    },
+  );
+
+  test(
+    'loadMoodCalendarRange discards stale month A result when month B is requested',
+    () async {
+      final monthACompleter = Completer<MoodHistorySourcePage>();
+      final monthBCompleter = Completer<MoodHistorySourcePage>();
+      final v2Source = _RangeDeferredMoodSource(MoodEventSource.v2, {
+        '2026-09-27T16:00:00.000Z': monthACompleter,
+        '2026-10-25T16:00:00.000Z': monthBCompleter,
+      });
+      final provider = MoodProvider(
+        _FakeMoodRepository(),
+        useMoodV2Read: true,
+        combinedHistoryRepository: MoodCombinedHistoryRepository(
+          identity: const _MoodIdentity('user_1'),
+          legacySource: const _MoodSource(MoodEventSource.legacy, []),
+          v2Source: v2Source,
+        ),
+      )..bindAuthenticatedUser('user_1');
+
+      final futureA = provider.loadMoodCalendarRange(
+        'user_1',
+        startDateKey: '2026-09-28',
+        endExclusiveDateKey: '2026-11-02',
+      );
+      final futureB = provider.loadMoodCalendarRange(
+        'user_1',
+        startDateKey: '2026-10-26',
+        endExclusiveDateKey: '2026-12-07',
+      );
+
+      monthBCompleter.complete(
+        MoodHistorySourcePage(
+          events: [
+            _event(
+              'nov-entry',
+              DateTime.utc(2026, 11, 15, 2),
+              5,
+              MoodEventSource.v2,
+            ),
+          ],
+        ),
+      );
+      await futureB;
+
+      expect(provider.loadedMoodCalendarStartKey, '2026-10-26');
+      expect(provider.moodCalendarHistory!.uniqueEvents.single.id, 'nov-entry');
+
+      monthACompleter.complete(
+        MoodHistorySourcePage(
+          events: [
+            _event(
+              'stale-oct-entry',
+              DateTime.utc(2026, 10, 10, 2),
+              1,
+              MoodEventSource.v2,
+            ),
+          ],
+        ),
+      );
+      await futureA;
+
+      expect(provider.loadedMoodCalendarStartKey, '2026-10-26');
+      expect(provider.moodCalendarHistory!.uniqueEvents.single.id, 'nov-entry');
+    },
+  );
+
+  test(
+    'loadMoodCalendarRange discards stale previous-account response and loads older-day notes only for current owner',
+    () async {
+      final identity = _MutableMoodIdentity('user_1');
+      final pendingMonth = Completer<MoodHistorySourcePage>();
+      var usePending = true;
+      final v2Source = _CallbackMoodSource(MoodEventSource.v2, (request) {
+        if (request.userId == 'user_1' && usePending) {
+          return pendingMonth.future;
+        }
+        if (request.userId == 'user_1') {
+          return Future.value(
+            MoodHistorySourcePage(
+              events: [
+                _event(
+                  'older-cal-note',
+                  DateTime.utc(2026, 8, 14, 3),
+                  4,
+                  MoodEventSource.v2,
+                ),
+              ],
+            ),
+          );
+        }
+        return Future.value(const MoodHistorySourcePage(events: []));
+      });
+      final provider = MoodProvider(
+        _FakeMoodRepository(),
+        useMoodV2Read: true,
+        combinedHistoryRepository: MoodCombinedHistoryRepository(
+          identity: identity,
+          legacySource: const _MoodSource(MoodEventSource.legacy, []),
+          v2Source: v2Source,
+          ownerNoteDocumentReader: (source, id) async => {
+            'userId': 'user_1',
+            'note': 'August private reflection',
+          },
+        ),
+      )..bindAuthenticatedUser('user_1');
+
+      // 1. Load older month for user_1, verify note loading works from calendar history even when v2History is null.
+      usePending = false;
+      await provider.loadMoodCalendarRange(
+        'user_1',
+        startDateKey: '2026-08-01',
+        endExclusiveDateKey: '2026-09-01',
+      );
+      expect(provider.v2History, isNull);
+      await provider.loadMoodV2DayNotes('user_1', '2026-08-14');
+      expect(
+        provider.v2PersonalNotes['v2:older-cal-note'],
+        'August private reflection',
+      );
+
+      // 2. Start an in-flight calendar load for user_1, switch to user_2, complete user_1's load.
+      usePending = true;
+      final inFlight = provider.loadMoodCalendarRange(
+        'user_1',
+        startDateKey: '2026-09-01',
+        endExclusiveDateKey: '2026-10-01',
+      );
+      identity.currentUserId = 'user_2';
+      provider.bindAuthenticatedUser('user_2');
+      expect(provider.moodCalendarHistory, isNull);
+      expect(provider.v2PersonalNotes, isEmpty);
+
+      pendingMonth.complete(
+        MoodHistorySourcePage(
+          events: [
+            _event(
+              'leaked',
+              DateTime.utc(2026, 9, 10, 2),
+              2,
+              MoodEventSource.v2,
+            ),
+          ],
+        ),
+      );
+      await inFlight;
+
+      expect(provider.moodCalendarHistory, isNull);
+      expect(provider.loadedMoodCalendarStartKey, isNull);
+      expect(provider.v2PersonalNotes, isEmpty);
+    },
+  );
 }
 
 NormalizedMoodEvent _event(
@@ -937,4 +1240,44 @@ class _PendingLegacyRepository extends MoodRepository {
     String? expressionModelVersion,
     DateTime? now,
   }) => save.future;
+}
+
+class _RecordingPagedMoodSource extends _PagedMoodSource {
+  _RecordingPagedMoodSource(super.source, super.pages, {required this.onFetch});
+
+  final void Function(MoodHistorySourceRequest request) onFetch;
+
+  @override
+  Future<MoodHistorySourcePage> fetch(MoodHistorySourceRequest request) {
+    onFetch(request);
+    return super.fetch(request);
+  }
+}
+
+class _RangeDeferredMoodSource implements MoodHistorySource {
+  _RangeDeferredMoodSource(this.source, this.byStartIso);
+
+  @override
+  final MoodEventSource source;
+  final Map<String, Completer<MoodHistorySourcePage>> byStartIso;
+
+  @override
+  Future<MoodHistorySourcePage> fetch(MoodHistorySourceRequest request) {
+    final key = request.startInclusive?.toUtc().toIso8601String() ?? '';
+    return byStartIso[key]?.future ??
+        Future.value(const MoodHistorySourcePage(events: []));
+  }
+}
+
+class _CallbackMoodSource implements MoodHistorySource {
+  _CallbackMoodSource(this.source, this.handler);
+
+  @override
+  final MoodEventSource source;
+  final Future<MoodHistorySourcePage> Function(MoodHistorySourceRequest request)
+  handler;
+
+  @override
+  Future<MoodHistorySourcePage> fetch(MoodHistorySourceRequest request) =>
+      handler(request);
 }

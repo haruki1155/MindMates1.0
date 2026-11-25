@@ -23,7 +23,7 @@ export type ApprovalAuthority = {
 
 export type AuthState = {disabled: boolean; emailVerified: boolean} | null;
 
-export type ApprovalErrorCode = "wrong_college" | "needs_triage" | "not_super_admin" | "override_reason_required" | "operational_staff";
+export type ApprovalErrorCode = "wrong_college" | "needs_triage" | "not_super_admin" | "override_reason_required" | "operational_staff" | "admin_read_only";
 
 export class ApprovalError extends Error {
   constructor(public readonly code: ApprovalErrorCode, message: string) {
@@ -77,19 +77,11 @@ export function decideApprovalAuthority(input: {
     if (!serves) throw new ApprovalError("wrong_college", "Only counselors assigned to this student's college can act on this appointment.");
     return {mode: "college", collegeId: scope.collegeId, scopeReason: null, exceptionReason: null};
   }
-  if (actor.role !== "admin") {
-    throw new ApprovalError("operational_staff", "Counselor or administrator access is required for clinical appointment actions.");
+  if (actor.role === "admin") {
+    throw new ApprovalError(
+      "admin_read_only",
+      "Administrators have read-only access to appointments. Only assigned counselors can modify appointments.",
+    );
   }
-  if (!actor.isSuperAdmin) {
-    throw new ApprovalError("not_super_admin", "Only the configured super-administrator handles appointment exceptions.");
-  }
-  if (scope.scope === "exception") {
-    return {mode: "admin_triage", collegeId: scope.collegeId, scopeReason: scope.reason, exceptionReason: null};
-  }
-  const reason = typeof input.exceptionReason === "string" ? input.exceptionReason.trim() : "";
-  if (reason.length < 3 || reason.length > 500) {
-    throw new ApprovalError("override_reason_required",
-      "A counselor is assigned to this student's college. Enter an administrator exception reason (3-500 characters) to act on it.");
-  }
-  return {mode: "admin_override", collegeId: scope.collegeId, scopeReason: null, exceptionReason: reason};
+  throw new ApprovalError("operational_staff", "Counselor access is required for clinical appointment actions.");
 }

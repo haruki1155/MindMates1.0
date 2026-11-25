@@ -1,5 +1,11 @@
+import {createHash, randomBytes} from "node:crypto";
+import {getApp} from "firebase-admin/app";
+import {getFirestore} from "firebase-admin/firestore";
 import {getStorage} from "firebase-admin/storage";
 import {HttpsError} from "firebase-functions/v2/https";
+
+import {configuredSuperAdminUid, requireClinical, roleOf} from "./access";
+import {AUDIT_CATEGORIES, AuditWrite, actorName, writeAuditBatch} from "./audit";
 
 export interface ClinicalEvidenceAttachment {
   path: string;
@@ -70,10 +76,52 @@ export function validateSessionEvidence(
   return {attachments};
 }
 
+export function resolveEvidenceBucket() {
+  let configBucket: string | undefined;
+  try {
+    const parsed = JSON.parse(process.env.FIREBASE_CONFIG ?? "{}") as {storageBucket?: unknown};
+    if (typeof parsed.storageBucket === "string" && parsed.storageBucket.trim()) {
+      configBucket = parsed.storageBucket.trim();
+    }
+  } catch {
+    // Ignore malformed FIREBASE_CONFIG and fall back to app options / env.
+  }
+  const bucketName =
+    getApp().options.storageBucket ||
+    process.env.FIREBASE_STORAGE_BUCKET?.trim() ||
+    configBucket ||
+    (process.env.FIREBASE_STORAGE_EMULATOR_HOST && process.env.GCLOUD_PROJECT?.trim() ? `${process.env.GCLOUD_PROJECT.trim()}.appspot.com` : undefined);
+  return bucketName ? getStorage().bucket(bucketName) : getStorage().bucket();
+}
+
+export function parseSessionEvidenceUpload(data: Record<string, unknown>, appointmentId: string, uid: string) {
+  const extension = typeof data.name === "string" ? data.name.split(".").pop()?.toLowerCase() ?? "" : "";
+  const path = sessionEvidencePathFor(appointmentId, uid, randomBytes(16).toString("hex"), extension);
+  const [attachment] = validateSessionEvidence({attachments: [{...data, path}]}, appointmentId, uid).attachments;
+  const encoded = data.dataBase64;
+  if (typeof encoded !== "string" || encoded.length !== 4 * Math.ceil(attachment.size / 3)) {
+    throw new HttpsError("invalid-argument", "Invalid private attachment data.");
+  }
+  const bytes = Buffer.from(encoded, "base64");
+  if (bytes.length !== attachment.size || bytes.toString("base64") !== encoded) {
+    throw new HttpsError("invalid-argument", "Invalid private attachment data.");
+  }
+  return {attachment, bytes};
+}
+
+export async function storeSessionEvidenceFile(attachment: ClinicalEvidenceAttachment, bytes: Buffer, appointmentId: string, uid: string) {
+  // GCS writes bypass Firebase Storage client upload token creation.
+  await resolveEvidenceBucket().file(attachment.path).save(bytes, {
+    resumable: false,
+    preconditionOpts: {ifGenerationMatch: 0},
+    metadata: {contentType: attachment.contentType, metadata: {uploadedBy: uid, appointmentId}},
+  });
+}
+
 /** The privileged callable verifies each uploaded object before committing clinical references. */
 export async function verifySessionEvidenceObjects(evidence: SessionEvidence, appointmentId: string, uploaderUid: string): Promise<void> {
   if (evidence.attachments.length === 0) return;
-  const bucket = getStorage().bucket();
+  const bucket = resolveEvidenceBucket();
   for (const file of evidence.attachments) {
     let metadata;
     try {
@@ -86,4 +134,247 @@ export async function verifySessionEvidenceObjects(evidence: SessionEvidence, ap
       throw new HttpsError("failed-precondition", "A selected interview file failed verification.");
     }
   }
+}
+
+const SESSION_EVIDENCE_PATH_PATTERN =
+  /^counseling_session_files\/([A-Za-z0-9_-]{1,120})\/([A-Za-z0-9_-]{1,120})\/([a-f0-9]{32}\.(jpg|jpeg|png|pdf|doc|docx))$/;
+
+export interface SessionEvidenceDownloadRequest {
+  appointmentId: string;
+  path: string;
+}
+
+export interface DownloadSessionEvidenceResult {
+  name: string;
+  contentType: string;
+  size: number;
+  dataBase64: string;
+}
+
+export interface StorageObjectMetadataView {
+  size?: unknown;
+  contentType?: unknown;
+  contentEncoding?: unknown;
+  generation?: string | number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DownloadSessionEvidenceDeps {
+  requireClinical?: (uid: string) => Promise<FirebaseFirestore.DocumentData>;
+  superAdminUid?: () => string;
+  readAppointment?: (appointmentId: string) => Promise<FirebaseFirestore.DocumentData | null>;
+  readStudentUser?: (studentId: string) => Promise<FirebaseFirestore.DocumentData | null>;
+  readSessionNote?: (appointmentId: string) => Promise<FirebaseFirestore.DocumentData | null>;
+  readObjectMetadata?: (path: string) => Promise<StorageObjectMetadataView | null>;
+  downloadObjectBytes?: (path: string, generation?: string | number) => Promise<Buffer>;
+  writeAudit?: (event: AuditWrite) => Promise<void>;
+}
+
+export function validateSessionEvidenceDownloadRequest(data: unknown): SessionEvidenceDownloadRequest {
+  if (data == null || typeof data !== "object" || Array.isArray(data)) {
+    throw new HttpsError("invalid-argument", "Invalid private attachment request.");
+  }
+  const record = data as Record<string, unknown>;
+  const appointmentId = typeof record.appointmentId === "string" ? record.appointmentId.trim() : "";
+  const path = typeof record.path === "string" ? record.path : "";
+  if (!validId(appointmentId) ||
+      path.trim() !== path ||
+      path.includes("..") ||
+      path.includes("\\") ||
+      path.includes("%") ||
+      /[\x00-\x1f]/.test(path)) {
+    throw new HttpsError("invalid-argument", "Invalid private attachment request.");
+  }
+  const matched = SESSION_EVIDENCE_PATH_PATTERN.exec(path);
+  if (!matched || matched[1] !== appointmentId) {
+    throw new HttpsError("invalid-argument", "Invalid private attachment request.");
+  }
+  return {appointmentId, path};
+}
+
+function isStorageNotFoundError(error: unknown): boolean {
+  if (error == null || typeof error !== "object") return false;
+  const err = error as {code?: unknown; status?: unknown; message?: unknown};
+  if (err.code === 404 || err.status === 404 || err.code === "storage/object-not-found") return true;
+  const msg = String(err.message ?? "");
+  return msg.includes("No such object") || msg.includes("Not Found");
+}
+
+function safeDisplayFilename(rawName: unknown, extension: string): string {
+  if (typeof rawName === "string") {
+    const trimmed = rawName.trim();
+    if (trimmed.length > 0 && trimmed.length <= 120 && !/[\\/\x00-\x1f]/.test(trimmed)) {
+      return trimmed;
+    }
+  }
+  return `attachment.${extension}`;
+}
+
+export async function downloadSessionEvidenceFile(
+  input: {actorId: string; appointmentId: string; path: string},
+  deps: DownloadSessionEvidenceDeps = {},
+): Promise<DownloadSessionEvidenceResult> {
+  const {appointmentId, path} = validateSessionEvidenceDownloadRequest(input);
+  const matched = SESSION_EVIDENCE_PATH_PATTERN.exec(path)!;
+  const pathUploaderUid = matched[2];
+  const extension = matched[4];
+  const expectedMime = mimeByExtension[extension];
+
+  const requireClinicalFn = deps.requireClinical ?? requireClinical;
+  const actor = await requireClinicalFn(input.actorId);
+  const role = roleOf(actor);
+
+  const safeSuperAdminUid = (): string => {
+    try {
+      return (deps.superAdminUid ?? configuredSuperAdminUid)().trim();
+    } catch {
+      return "";
+    }
+  };
+
+  if (role === "admin") {
+    const superUid = safeSuperAdminUid();
+    if (!superUid || input.actorId !== superUid) {
+      throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
+    }
+  } else if (role !== "counselor") {
+    throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
+  }
+
+  const readAppointmentFn =
+    deps.readAppointment ??
+    (async (id: string) => {
+      const snap = await getFirestore().collection("appointments").doc(id).get();
+      return snap.exists ? snap.data() ?? {} : null;
+    });
+  const appointment = await readAppointmentFn(appointmentId);
+  if (!appointment) {
+    throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
+  }
+
+  if (role === "counselor") {
+    const studentId = typeof appointment.userId === "string" ? appointment.userId.trim() : "";
+    if (!validId(studentId)) {
+      throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
+    }
+    const readStudentFn =
+      deps.readStudentUser ??
+      (async (uid: string) => {
+        const snap = await getFirestore().collection("users").doc(uid).get();
+        return snap.exists ? snap.data() ?? {} : null;
+      });
+    const student = await readStudentFn(studentId);
+    const studentCollegeId = typeof student?.collegeId === "string" ? student.collegeId.trim() : "";
+    const assignedColleges = Array.isArray(actor.assignedCollegeIds) ? actor.assignedCollegeIds : [];
+    if (!student ||
+        String(student.verificationStatus ?? "") !== "verified" ||
+        studentCollegeId.length === 0 ||
+        !assignedColleges.includes(studentCollegeId)) {
+      throw new HttpsError("permission-denied", "You do not have permission to download this private file.");
+    }
+  }
+
+  const readSessionNoteFn =
+    deps.readSessionNote ??
+    (async (id: string) => {
+      const snap = await getFirestore().collection("appointments").doc(id).collection("clinical_notes").doc("session").get();
+      return snap.exists ? snap.data() ?? {} : null;
+    });
+  const sessionNote = await readSessionNoteFn(appointmentId);
+  const attachments = Array.isArray(sessionNote?.attachments) ? sessionNote.attachments : [];
+  const attachmentEntry = attachments.find(
+    (entry: unknown): entry is Record<string, unknown> =>
+      entry != null && typeof entry === "object" && !Array.isArray(entry) && (entry as Record<string, unknown>).path === path,
+  );
+  if (!attachmentEntry) {
+    throw new HttpsError("not-found", "This private file is no longer available.");
+  }
+  if (attachmentEntry.contentType != null && attachmentEntry.contentType !== expectedMime) {
+    throw new HttpsError("failed-precondition", "This private file failed verification.");
+  }
+
+  const readObjectMetadataFn =
+    deps.readObjectMetadata ??
+    (async (objectPath: string): Promise<StorageObjectMetadataView | null> => {
+      try {
+        const [metadata] = await resolveEvidenceBucket().file(objectPath).getMetadata();
+        return {
+          size: metadata.size,
+          contentType: metadata.contentType,
+          contentEncoding: metadata.contentEncoding,
+          generation: metadata.generation,
+          metadata: metadata.metadata as Record<string, unknown> | undefined,
+        };
+      } catch (error) {
+        if (isStorageNotFoundError(error)) return null;
+        throw error;
+      }
+    });
+
+  const metadata = await readObjectMetadataFn(path);
+  if (!metadata) {
+    throw new HttpsError("not-found", "This private file is no longer available.");
+  }
+  const size = Number(metadata.size);
+  if (!Number.isSafeInteger(size) ||
+      size <= 0 ||
+      size > maxFileBytes ||
+      metadata.contentType !== expectedMime ||
+      (metadata.contentEncoding && metadata.contentEncoding !== "identity") ||
+      metadata.metadata?.uploadedBy !== pathUploaderUid ||
+      metadata.metadata?.appointmentId !== appointmentId) {
+    throw new HttpsError("failed-precondition", "This private file failed verification.");
+  }
+
+  const downloadObjectBytesFn =
+    deps.downloadObjectBytes ??
+    (async (objectPath: string, generation?: string | number) => {
+      try {
+        const file = resolveEvidenceBucket().file(objectPath, {generation});
+        const [bytes] = await file.download({decompress: false});
+        return bytes;
+      } catch (error) {
+        if (isStorageNotFoundError(error)) {
+          throw new HttpsError("not-found", "This private file is no longer available.");
+        }
+        throw error;
+      }
+    });
+
+  const bytes = await downloadObjectBytesFn(path, metadata.generation);
+  if (bytes.length <= 0 || bytes.length > maxFileBytes || bytes.length !== size) {
+    throw new HttpsError("failed-precondition", "This private file failed verification.");
+  }
+
+  const attachmentPathHash = createHash("sha256").update(path).digest("hex").slice(0, 16);
+  const writeAuditFn =
+    deps.writeAudit ??
+    (async (event: AuditWrite) => {
+      const db = getFirestore();
+      const batch = db.batch();
+      writeAuditBatch(batch, db, event);
+      await batch.commit();
+    });
+
+  await writeAuditFn({
+    actorId: input.actorId,
+    actorNameSnapshot: actorName(actor),
+    actorRoleSnapshot: role,
+    action: "CLINICAL_ATTACHMENT_DOWNLOADED",
+    category: AUDIT_CATEGORIES.security,
+    targetType: "appointment",
+    targetId: appointmentId,
+    metadata: {
+      contentType: expectedMime,
+      size: bytes.length,
+      attachmentPathHash,
+    },
+  });
+
+  return {
+    name: safeDisplayFilename(attachmentEntry.name, extension),
+    contentType: expectedMime,
+    size: bytes.length,
+    dataBase64: bytes.toString("base64"),
+  };
 }

@@ -10,11 +10,13 @@ class CounselorInquiryWorkspace extends StatefulWidget {
     required this.messages,
     required this.otherServices,
     this.initialSection = CounselorInquirySection.messages,
+    this.messagesBadge,
   });
 
   final Widget messages;
   final Widget otherServices;
   final CounselorInquirySection initialSection;
+  final Widget? messagesBadge;
 
   @override
   State<CounselorInquiryWorkspace> createState() =>
@@ -41,13 +43,19 @@ class _CounselorInquiryWorkspaceState extends State<CounselorInquiryWorkspace> {
       children: [
         SegmentedButton<CounselorInquirySection>(
           showSelectedIcon: false,
-          segments: const [
+          segments: [
             ButtonSegment(
               value: CounselorInquirySection.messages,
-              icon: Icon(Icons.forum_outlined),
-              label: Text('Messages'),
+              icon: const Icon(Icons.forum_outlined),
+              label: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Messages'),
+                  if (widget.messagesBadge != null) widget.messagesBadge!,
+                ],
+              ),
             ),
-            ButtonSegment(
+            const ButtonSegment(
               value: CounselorInquirySection.otherServices,
               icon: Icon(Icons.support_agent_outlined),
               label: Text('Other services'),

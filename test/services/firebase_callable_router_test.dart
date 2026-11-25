@@ -2,40 +2,49 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/services/firebase/firebase_callable_router.dart';
 
 void main() {
-  test('routes protected callables for the configured environment', () {
-    const environment = String.fromEnvironment(
-      'APP_ENV',
-      defaultValue: 'development',
-    );
-    final expected = environment == 'staging'
-        ? 'provisionAppUserProfileDev'
-        : 'provisionAppUserProfile';
+  const environment = String.fromEnvironment(
+    'APP_ENV',
+    defaultValue: 'development',
+  );
+  const appCheck = bool.fromEnvironment('ENABLE_STAGING_APP_CHECK');
+  // Only a Staging build without App Check may use the Dev aliases, which skip it.
+  const usesDevAliases = environment == 'staging' && !appCheck;
+  String expected(String name) => usesDevAliases ? '${name}Dev' : name;
 
-    expect(FirebaseCallableRouter.name('provisionAppUserProfile'), expected);
-    final assessmentExpected = environment == 'staging'
-        ? 'submitQuickAssessmentDev'
-        : 'submitQuickAssessment';
+  test('routes protected callables for the configured environment', () {
+    for (final name in [
+      'provisionAppUserProfile',
+      'submitQuickAssessment',
+      'submitFullAssessment',
+      'previewAssessmentDomain',
+      'createMoodEntry',
+      'getStudentAcademicCalendar',
+    ]) {
+      expect(FirebaseCallableRouter.name(name), expected(name), reason: name);
+    }
+  });
+
+  test('routes the Student ID setup and recovery callables', () {
+    for (final name in [
+      'startStudentAccountSetup',
+      'completeStudentAccountSetup',
+      'requestStudentRecoveryEmailCode',
+      'confirmStudentRecoveryEmailCode',
+      'requestStudentPasswordReset',
+    ]) {
+      expect(FirebaseCallableRouter.name(name), expected(name), reason: name);
+    }
+  });
+
+  test('an App Check build never selects a Dev alias', () {
+    if (!appCheck) return;
     expect(
-      FirebaseCallableRouter.name('submitQuickAssessment'),
-      assessmentExpected,
+      FirebaseCallableRouter.name('requestStudentPasswordReset'),
+      'requestStudentPasswordReset',
     );
-    final fullExpected = environment == 'staging'
-        ? 'submitFullAssessmentDev'
-        : 'submitFullAssessment';
-    expect(FirebaseCallableRouter.name('submitFullAssessment'), fullExpected);
-    final previewExpected = environment == 'staging'
-        ? 'previewAssessmentDomainDev'
-        : 'previewAssessmentDomain';
     expect(
-      FirebaseCallableRouter.name('previewAssessmentDomain'),
-      previewExpected,
-    );
-    expect(
-      FirebaseCallableRouter.name('createMoodEntry'),
-      environment == 'staging' ? 'createMoodEntryDev' : 'createMoodEntry',
-      reason:
-          'Staging installs no App Check provider, so it must use the Dev '
-          'callable; every other environment keeps the protected one.',
+      FirebaseCallableRouter.name('requestAdminPasswordReset'),
+      'requestAdminPasswordReset',
     );
   });
 
@@ -51,4 +60,14 @@ void main() {
       'requestAdminPasswordReset',
     );
   });
+
+  test(
+    'routes downloadClinicalSessionEvidence consistently across environments',
+    () {
+      expect(
+        FirebaseCallableRouter.name('downloadClinicalSessionEvidence'),
+        'downloadClinicalSessionEvidence',
+      );
+    },
+  );
 }

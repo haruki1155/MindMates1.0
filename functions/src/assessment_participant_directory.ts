@@ -1,4 +1,5 @@
 import {getApps, initializeApp} from "firebase-admin/app";
+import {assertNotFirstLogin} from "./access";
 import {getFirestore} from "firebase-admin/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 
@@ -9,6 +10,7 @@ const db = getFirestore();
  * Never permits general account lookup: each requested ID must own an assessment.
  */
 export const getAssessmentParticipantDirectory = onCall(async (request) => {
+  assertNotFirstLogin(request);
   const callerId = request.auth?.uid;
   if (!callerId || request.auth?.token.email_verified !== true) {
     throw new HttpsError("unauthenticated", "Sign in with a verified account.");

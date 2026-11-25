@@ -14,7 +14,7 @@ import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
-  testWidgets('login uses School ID label and validation copy', (tester) async {
+  testWidgets('login uses the Student ID label and validation copy', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -22,18 +22,20 @@ void main() {
     await tester.pumpWidget(_LoginHarness(authProvider: authProvider));
 
     expect(find.textContaining('Unofficial'), findsNothing);
-    expect(find.text('School ID'), findsOneWidget);
+    expect(find.text('Student ID'), findsOneWidget);
+    expect(find.text('School ID'), findsNothing);
     expect(find.text('Email'), findsNothing);
 
     await tester.ensureVisible(find.text('Sign in'));
     await tester.tap(find.text('Sign in'));
     await tester.pump();
 
-    expect(find.text('Enter your School ID and password.'), findsOneWidget);
+    expect(find.text('Enter your Student ID and password.'), findsOneWidget);
+    expect(authProvider.studentIdCalls, 0);
     expect(authProvider.signInCalls, 0);
   });
 
-  testWidgets('login submits the School ID as the primary credential', (
+  testWidgets('login submits the Student ID as the primary credential', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(900, 1200));
@@ -43,7 +45,7 @@ void main() {
     await tester.pumpWidget(_LoginHarness(authProvider: authProvider));
 
     await tester.enterText(
-      find.widgetWithText(TextField, 'School ID'),
+      find.widgetWithText(TextField, 'Student ID'),
       'UCU 2026-0001',
     );
     await tester.enterText(
@@ -55,27 +57,28 @@ void main() {
     await tester.tap(find.text('Sign in'));
     await tester.pumpAndSettle();
 
-    expect(authProvider.signInCalls, 1);
-    expect(authProvider.schoolId, 'UCU 2026-0001');
+    expect(authProvider.studentIdCalls, 1);
+    expect(authProvider.studentId, 'UCU 2026-0001');
+    expect(authProvider.signInCalls, 0, reason: 'the legacy path is never used implicitly');
     expect(find.text('home target'), findsOneWidget);
   });
 
   testWidgets(
-    'login offers activation and employee sign up, not Create account',
+    'login offers an emailed student login and employee sign up, not Create account',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(900, 1200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
       await tester.pumpWidget(_LoginHarness(authProvider: _FakeAuthProvider()));
 
-      expect(find.text('Activate student account'), findsOneWidget);
+      expect(find.text('Email me my login'), findsOneWidget);
       expect(find.text('Employee sign up'), findsOneWidget);
       expect(find.text('Create account'), findsNothing);
 
-      await tester.ensureVisible(find.text('Activate student account'));
-      await tester.tap(find.text('Activate student account'));
+      await tester.ensureVisible(find.text('Email me my login'));
+      await tester.tap(find.text('Email me my login'));
       await tester.pumpAndSettle();
-      expect(find.text('activation target'), findsOneWidget);
+      expect(find.text('login request target'), findsOneWidget);
     },
   );
 
@@ -94,7 +97,7 @@ void main() {
     );
 
     await tester.enterText(
-      find.widgetWithText(TextField, 'School ID'),
+      find.widgetWithText(TextField, 'Student ID'),
       'UCU 2026-0001',
     );
     await tester.enterText(
@@ -148,6 +151,116 @@ void main() {
     expect(authProvider.googleCalls, 1);
     expect(find.text('home target'), findsOneWidget);
   });
+
+  testWidgets('employees and older accounts choose the School ID path explicitly', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider();
+    await tester.pumpWidget(_LoginHarness(authProvider: authProvider));
+
+    await tester.ensureVisible(find.byKey(const Key('login-path-toggle')));
+    await tester.tap(find.byKey(const Key('login-path-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.text('School ID'), findsOneWidget);
+    expect(find.text('Student ID'), findsNothing);
+
+    await tester.enterText(find.widgetWithText(TextField, 'School ID'), 'EMP-001');
+    await tester.enterText(find.widgetWithText(TextField, 'Password'), 'password123');
+    await tester.ensureVisible(find.text('Sign in'));
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    expect(authProvider.signInCalls, 1);
+    expect(authProvider.schoolId, 'EMP-001');
+    expect(authProvider.studentIdCalls, 0);
+  });
+
+  testWidgets('the School ID path has its own validation copy and can be left again', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(_LoginHarness(authProvider: _FakeAuthProvider()));
+    await tester.ensureVisible(find.byKey(const Key('login-path-toggle')));
+    await tester.tap(find.byKey(const Key('login-path-toggle')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Sign in'));
+    await tester.tap(find.text('Sign in'));
+    await tester.pump();
+    expect(find.text('Enter your School ID and password.'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('login-path-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.text('Student ID'), findsOneWidget);
+  });
+
+  testWidgets('a failed Student ID sign-in shows one generic message and never falls back', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider()..failStudentId = true;
+    await tester.pumpWidget(_LoginHarness(authProvider: authProvider));
+    await tester.enterText(find.widgetWithText(TextField, 'Student ID'), '2020-12345');
+    await tester.enterText(find.widgetWithText(TextField, 'Password'), 'wrong');
+    await tester.ensureVisible(find.text('Sign in'));
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Student ID or password is incorrect.'), findsOneWidget);
+    expect(authProvider.studentIdCalls, 1);
+    expect(authProvider.signInCalls, 0);
+    expect(find.text('home target'), findsNothing);
+  });
+
+  testWidgets('an unverified Student ID account is sent to recovery-email verification', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider()
+      ..email = '202012345@students.mindmate.local'
+      ..emailVerified = false;
+    await tester.pumpWidget(_LoginHarness(authProvider: authProvider));
+    await tester.enterText(find.widgetWithText(TextField, 'Student ID'), '2020-12345');
+    await tester.enterText(find.widgetWithText(TextField, 'Password'), 'password123');
+    await tester.ensureVisible(find.text('Sign in'));
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('verification target'), findsOneWidget);
+    expect(find.text('home target'), findsNothing);
+    expect(find.textContaining('mindmate.local'), findsNothing);
+  });
+
+  testWidgets('a verified Student ID account continues to the Student Information gate', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final authProvider = _FakeAuthProvider()
+      ..email = '202012345@students.mindmate.local'
+      ..emailVerified = true;
+    await tester.pumpWidget(
+      _LoginHarness(
+        authProvider: authProvider,
+        userRepository: _FakeUserRepository(gated: true),
+      ),
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Student ID'), '2020-12345');
+    await tester.enterText(find.widgetWithText(TextField, 'Password'), 'password123');
+    await tester.ensureVisible(find.text('Sign in'));
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('student information target'), findsOneWidget);
+  });
 }
 
 class _LoginHarness extends StatelessWidget {
@@ -174,8 +287,8 @@ class _LoginHarness extends StatelessWidget {
         routes: {
           RouteNames.onboarding: (_) =>
               const Scaffold(body: Center(child: Text('onboarding target'))),
-          RouteNames.studentActivation: (_) =>
-              const Scaffold(body: Center(child: Text('activation target'))),
+          RouteNames.studentLoginRequest: (_) =>
+              const Scaffold(body: Center(child: Text('login request target'))),
           RouteNames.home: (_) =>
               const Scaffold(body: Center(child: Text('home target'))),
           RouteNames.signup: (_) =>
@@ -183,6 +296,8 @@ class _LoginHarness extends StatelessWidget {
           RouteNames.studentInformation: (_) => const Scaffold(
             body: Center(child: Text('student information target')),
           ),
+          RouteNames.emailVerification: (_) =>
+              const Scaffold(body: Center(child: Text('verification target'))),
         },
       ),
     );
@@ -193,8 +308,31 @@ class _FakeAuthProvider extends AuthProvider {
   _FakeAuthProvider() : super(_FakeAuthRepository());
 
   int signInCalls = 0;
+  int studentIdCalls = 0;
   int googleCalls = 0;
   String? schoolId;
+  String? studentId;
+  bool failStudentId = false;
+  String? email;
+  bool emailVerified = true;
+  String? _error;
+
+  @override
+  String? get errorMessage => _error;
+
+  @override
+  Future<String?> signInWithStudentId({
+    required String studentId,
+    required String password,
+  }) async {
+    studentIdCalls += 1;
+    this.studentId = studentId;
+    if (failStudentId) {
+      _error = 'Student ID or password is incorrect.';
+      return null;
+    }
+    return 'user_1';
+  }
 
   @override
   Future<String?> signIn({
@@ -213,10 +351,10 @@ class _FakeAuthProvider extends AuthProvider {
   }
 
   @override
-  String? get currentUserEmail => null;
+  String? get currentUserEmail => email;
 
   @override
-  bool get currentUserEmailVerified => true;
+  bool get currentUserEmailVerified => emailVerified;
 }
 
 class _FakeAuthRepository extends AuthRepository {

@@ -26,17 +26,6 @@ AdminImportFile _csvFile(List<String> rows, {String name = 'roster.csv'}) =>
       bytes: Uint8List.fromList(utf8.encode('$_header\n${rows.join('\n')}\n')),
     );
 
-IssuedActivationCode _code(String studentNo, String code) =>
-    IssuedActivationCode(
-      studentNo: studentNo,
-      name: 'Student $studentNo',
-      college: 'CITE',
-      course: 'BSIT',
-      yearLevel: '1st Year',
-      code: code,
-      expiresAt: DateTime.utc(2027, 1, 12),
-    );
-
 RosterRowView _rosterRow(
   String no, {
   bool activated = false,
@@ -69,7 +58,6 @@ class _Repo extends StudentRosterRepository {
   Object? importsError;
   Future<void>? importsDelay;
   var _commitCalls = 0;
-  var _codeSeq = 0;
   Map<String, String>? lastUpdateFields;
   String? lastReviewReason;
   String? lastRevokeReason;
@@ -127,18 +115,11 @@ class _Repo extends StudentRosterRepository {
     await beforeCommit?.call(index);
     final override = commitOverride?.call(index);
     if (override != null) return override;
-    final codes = [
-      for (final r in rows)
-        _code(
-          r['studentNo']!,
-          'CODE${(_codeSeq++).toString().padLeft(5, '0')}',
-        ),
-    ];
     return RosterImportResult(
       status: RosterImportStatus.complete,
       importId: 'imp-$index',
       counts: {'new': rows.length, 'updated': 0, 'linked': 0},
-      codes: codes,
+      codes: const [],
     );
   }
 
@@ -174,29 +155,30 @@ class _Repo extends StudentRosterRepository {
     calls.add('lock:$studentNo');
   }
 
+  List<StudentAccountClaim> claims = [];
+
   @override
-  Future<
-    ({
-      List<IssuedActivationCode> codes,
-      List<({String studentNo, String reason})> skipped,
-    })
-  >
-  issueActivationCodes(List<String> studentNos) async {
-    calls.add('issue:${studentNos.join('|')}');
-    return (
-      codes: [for (final n in studentNos) _code(n, 'ISSUE${n.length}')],
-      skipped: const <({String studentNo, String reason})>[],
-    );
+  Future<List<StudentAccountClaim>> listAccountClaims() async {
+    calls.add('claims');
+    return List.of(claims);
   }
 
   @override
-  Future<IssuedActivationCode> revokeActivation(
-    String studentNo,
-    String reason,
-  ) async {
+  Future<void> approveAccountClaim(String uid) async {
+    calls.add('approve:$uid');
+    claims.removeWhere((c) => c.uid == uid);
+  }
+
+  @override
+  Future<void> rejectAccountClaim(String uid) async {
+    calls.add('reject:$uid');
+    claims.removeWhere((c) => c.uid == uid);
+  }
+
+  @override
+  Future<void> revokeActivation(String studentNo, String reason) async {
     calls.add('revoke:$studentNo');
     lastRevokeReason = reason;
-    return _code(studentNo, 'REVOKE-NEWCODE');
   }
 
   @override
@@ -391,16 +373,12 @@ void main() {
   });
 
   testWidgets(
-    'import sends one call per chunk, summarises and offers every code once',
+    'import sends one call per chunk and summarises, with no activation codes',
     (tester) async {
       final repo = _Repo();
-      final downloads = _Downloads();
-      final guard = StudentRosterLeaveGuard();
       await _pump(
         tester,
         repo,
-        downloads: downloads,
-        guard: guard,
         file: _csvFile([for (var i = 0; i < 2500; i++) _csvRow('S-$i')]),
       );
       await _chooseAndPreview(tester);
@@ -409,77 +387,10 @@ void main() {
 
       expect(repo.commitSizes, [1000, 1000, 500]);
       expect(find.text('2500 new · 0 updated · 0 linked'), findsOneWidget);
-      expect(find.text('Download activation slips (2500)'), findsOneWidget);
-      expect(find.text(codesShownOnceWarning), findsOneWidget);
-      expect(guard.hasUndownloadedCodes, isTrue);
-
-      // Leaving with undownloaded codes asks first.
-      final context = tester.element(find.byType(StudentRosterPage));
-      var left = true;
-      final pending = guard.confirmLeave(context).then((v) => left = v);
-      await tester.pumpAndSettle();
-      expect(find.text('Leave without downloading?'), findsOneWidget);
-      await tester.tap(find.text('Stay on page'));
-      await tester.pumpAndSettle();
-      await pending;
-      expect(left, isFalse);
-
-      await tester.tap(find.text('Download activation slips (2500)'));
-      await tester.pumpAndSettle();
-      expect(downloads.files, hasLength(1));
-      expect(guard.hasUndownloadedCodes, isFalse);
-      expect(await guard.confirmLeave(context), isTrue);
-
-      final book = excel.Excel.decodeBytes(downloads.files.single.bytes);
-      final rows = book.tables.values.first.rows
-          .skip(1)
-          .map((r) => r[5]?.value.toString())
-          .toList();
-      expect(rows, hasLength(2500));
-      expect(rows.toSet(), hasLength(2500));
-      expect(rows.first, 'CODE00000');
-      expect(rows.last, 'CODE02499');
+      expect(find.textContaining('activation slips'), findsNothing);
+      expect(find.textContaining('Activation code'), findsNothing);
     },
   );
-
-  testWidgets('codes are never written to debug logs', (tester) async {
-    final logged = <String>[];
-    final original = debugPrint;
-    debugPrint = (String? message, {int? wrapWidth}) =>
-        logged.add(message ?? '');
-    final repo = _Repo();
-    await _pump(tester, repo, file: _csvFile([_csvRow('S-1'), _csvRow('S-2')]));
-    await _chooseAndPreview(tester);
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Download activation slips (2)'));
-    await tester.pumpAndSettle();
-    debugPrint = original;
-    expect(logged.where((l) => l.contains('CODE0')), isEmpty);
-  });
-
-  testWidgets('an in-flight import counts as codes at risk for leaving', (
-    tester,
-  ) async {
-    final gate = Completer<void>();
-    final repo = _Repo()..beforeCommit = (i) => gate.future;
-    final guard = StudentRosterLeaveGuard();
-    await _pump(tester, repo, guard: guard, file: _csvFile([_csvRow('S-1')]));
-    await _chooseAndPreview(tester);
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pump();
-    expect(guard.hasUndownloadedCodes, isTrue);
-    final context = tester.element(find.byType(StudentRosterPage));
-    final pending = guard.confirmLeave(context);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Leave without downloading?'), findsOneWidget);
-    await tester.tap(find.text('Stay on page'));
-    await tester.pump();
-    expect(await pending, isFalse);
-    gate.complete();
-    await tester.pumpAndSettle();
-  });
 
   testWidgets('no further chunks are sent once the page is disposed', (
     tester,
@@ -501,48 +412,14 @@ void main() {
     expect(repo.commitSizes, [1000]);
   });
 
-  testWidgets('slips stay available after choosing a new file and a new '
-      'import asks before discarding undownloaded codes', (tester) async {
-    final repo = _Repo();
-    final guard = StudentRosterLeaveGuard();
-    await _pump(tester, repo, guard: guard, file: _csvFile([_csvRow('S-1')]));
-    await _chooseAndPreview(tester);
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pumpAndSettle();
-    expect(find.text('Download activation slips (1)'), findsOneWidget);
-
-    await tester.tap(find.text('Choose roster file'));
-    await tester.pumpAndSettle();
-    expect(find.text('Download activation slips (1)'), findsOneWidget);
-    expect(guard.hasUndownloadedCodes, isTrue);
-
-    await tester.tap(find.text('Preview'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pumpAndSettle();
-    expect(find.text('Discard undownloaded codes?'), findsOneWidget);
-    await tester.tap(find.text('Go back'));
-    await tester.pumpAndSettle();
-    expect(repo.commitSizes, [1]);
-    expect(find.text('Download activation slips (1)'), findsOneWidget);
-
-    await tester.tap(find.widgetWithText(FilledButton, 'Import'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Discard and import'));
-    await tester.pumpAndSettle();
-    expect(repo.commitSizes, [1, 1]);
-  });
-
-  testWidgets('a partial result stops, warns and still offers the slips', (
-    tester,
-  ) async {
+  testWidgets('a partial result stops and warns', (tester) async {
     final repo = _Repo()
       ..commitOverride = (i) => i == 1
           ? RosterImportResult(
               status: RosterImportStatus.partial,
               importId: 'imp-1',
               counts: const {'new': 400, 'updated': 0, 'linked': 0},
-              codes: [_code('S-1000', 'PARTIAL001')],
+              codes: const [],
               failedRows: const [
                 RosterFailedRow(index: 400, studentNo: 'S-1400'),
                 RosterFailedRow(index: 401, studentNo: 'S-1401'),
@@ -550,11 +427,9 @@ void main() {
               message: 'A batch failed. 400 rows were committed.',
             )
           : null;
-    final guard = StudentRosterLeaveGuard();
     await _pump(
       tester,
       repo,
-      guard: guard,
       file: _csvFile([for (var i = 0; i < 2500; i++) _csvRow('S-$i')]),
     );
     await _chooseAndPreview(tester);
@@ -572,8 +447,7 @@ void main() {
       findsWidgets,
     );
     expect(find.text('2 row(s) were not imported.'), findsOneWidget);
-    expect(find.text('Download activation slips (1001)'), findsOneWidget);
-    expect(guard.hasUndownloadedCodes, isTrue);
+    expect(find.textContaining('slips'), findsNothing);
   });
 
   testWidgets('Download template produces the header row', (tester) async {
@@ -617,15 +491,15 @@ void main() {
     await _pump(tester, _Repo());
     await tester.tap(find.byTooltip('Actions for 2021-001'));
     await tester.pumpAndSettle();
-    expect(find.text('Issue new activation code'), findsOneWidget);
-    expect(find.text('Reset activation lock'), findsOneWidget);
+    expect(find.text('Reset setup lock'), findsOneWidget);
+    expect(find.textContaining('activation code'), findsNothing);
     expect(find.text('Revoke activation'), findsNothing);
     await tester.tapAt(const Offset(5, 5));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Actions for 2021-002'));
     await tester.pumpAndSettle();
     expect(find.text('Revoke activation'), findsOneWidget);
-    expect(find.text('Issue new activation code'), findsNothing);
+    expect(find.textContaining('activation code'), findsNothing);
   });
 
   testWidgets('edit, reset lock and deactivate call the repository', (
@@ -634,7 +508,7 @@ void main() {
     final repo = _Repo();
     await _pump(tester, repo);
 
-    await openMenu(tester, '2021-001', 'Reset activation lock');
+    await openMenu(tester, '2021-001', 'Reset setup lock');
     expect(repo.calls, contains('lock:2021-001'));
 
     await openMenu(tester, '2021-001', 'Edit');
@@ -672,42 +546,9 @@ void main() {
     expect(repo.calls, contains('status:2021-005:active'));
   });
 
-  testWidgets('issue new code per row and in bulk offers slips', (
-    tester,
-  ) async {
-    final repo = _Repo()
-      ..roster = [_rosterRow('2021-001'), _rosterRow('2021-003')];
-    final downloads = _Downloads();
-    await _pump(tester, repo, downloads: downloads);
-
-    await openMenu(tester, '2021-001', 'Issue new activation code');
-    await tester.tap(find.widgetWithText(FilledButton, 'Issue'));
-    await tester.pumpAndSettle();
-    expect(repo.calls, contains('issue:2021-001'));
-    expect(find.text(codesShownOnceWarning), findsOneWidget);
-    await tester.tap(find.text('Download activation slips (1)'));
-    await tester.pumpAndSettle();
-    expect(downloads.files, hasLength(1));
-    await tester.tap(find.text('Close'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byType(Checkbox).at(0));
-    await tester.tap(find.byType(Checkbox).at(1));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Issue activation codes (2)'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Issue'));
-    await tester.pumpAndSettle();
-    expect(repo.calls, contains('issue:2021-001|2021-003'));
-    expect(find.text('Download activation slips (2)'), findsOneWidget);
-  });
-
-  testWidgets('revoke needs a reason, then shows the new code to download', (
-    tester,
-  ) async {
+  testWidgets('revoke needs a reason and issues no code', (tester) async {
     final repo = _Repo();
-    final downloads = _Downloads();
-    await _pump(tester, repo, downloads: downloads);
+    await _pump(tester, repo);
     await openMenu(tester, '2021-002', 'Revoke activation');
 
     final confirm = find.widgetWithText(FilledButton, 'Revoke activation');
@@ -722,10 +563,63 @@ void main() {
 
     expect(repo.calls, contains('revoke:2021-002'));
     expect(repo.lastRevokeReason, 'Wrong person');
-    expect(find.textContaining('REVOKE-NEWCODE'), findsOneWidget);
-    await tester.tap(find.text('Download activation slips (1)'));
+    expect(find.textContaining('can set up the account again'), findsOneWidget);
+    expect(find.textContaining('activation slips'), findsNothing);
+  });
+
+  testWidgets('account requests: an administrator approves or rejects each one', (
+    tester,
+  ) async {
+    StudentAccountClaim claim(String uid, String no) => StudentAccountClaim(
+      uid: uid,
+      studentNo: no,
+      name: 'Ana Cruz',
+      college: 'CITE',
+      course: 'BSIT',
+      yearLevel: '1st Year',
+      email: '$uid@example.com',
+      submittedAt: DateTime.utc(2026, 11, 20),
+      rosterAlreadyClaimed: false,
+    );
+    final repo = _Repo()
+      ..claims = [claim('u1', '2021-001'), claim('u2', '2021-002')];
+    await _pump(tester, repo);
+    await tester.tap(find.text('Account requests'));
     await tester.pumpAndSettle();
-    expect(downloads.files, hasLength(1));
+    expect(
+      find.textContaining('Personal email: u1@example.com'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('does not prove it'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Approve').first);
+    await tester.pumpAndSettle();
+    expect(
+      repo.calls.where((c) => c.startsWith('approve')),
+      isEmpty,
+      reason: 'asks first',
+    );
+    // Approve stays disabled until the administrator attests they verified the student.
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Approve').last,
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.byKey(const Key('claim-identity-verified')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Approve').last);
+    await tester.pumpAndSettle();
+    expect(repo.calls, contains('approve:u1'));
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Reject').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Reject').last);
+    await tester.pumpAndSettle();
+    expect(repo.calls, contains('reject:u2'));
+    expect(find.text('No account requests are waiting.'), findsOneWidget);
   });
 
   testWidgets('corrections: reject needs a reason, approve works', (
@@ -968,4 +862,173 @@ void main() {
       expect(find.textContaining('FirebaseFunctionsException'), findsNothing);
     },
   );
+
+  testWidgets(
+    'bulk manual input: interactive row entry validates, previews and imports without activation slips',
+    (tester) async {
+      final repo = _Repo();
+      final downloads = _Downloads();
+      final guard = StudentRosterLeaveGuard();
+      await _pump(tester, repo, downloads: downloads, guard: guard);
+      await _openTab(tester, 'Import');
+
+      await tester.tap(find.text('Bulk manual input'));
+      await tester.pumpAndSettle();
+
+      Future<void> fillRow(int rowIndex, List<String> values) async {
+        final rowBox = find.byKey(Key('manual_row_$rowIndex'));
+        final fields = find.descendant(
+          of: rowBox,
+          matching: find.byType(TextField),
+        );
+        for (var i = 0; i < values.length; i++) {
+          await tester.enterText(fields.at(i), values[i]);
+        }
+        await tester.pumpAndSettle();
+      }
+
+      await fillRow(0, [
+        '2021-901',
+        'Santos',
+        'Ana',
+        'M',
+        '02/15/2005',
+        'CITE',
+        'BSIT',
+        '1st Year',
+      ]);
+      expect(find.text('Ready 1/1'), findsOneWidget);
+
+      await tester.tap(find.text('Add row'));
+      await tester.pumpAndSettle();
+
+      // Enter duplicate Student No. first to confirm blocking indicator.
+      await fillRow(1, [
+        '2021-901',
+        'Reyes',
+        'Carlo',
+        '',
+        '07/21/2004',
+        'CITE',
+        'BSIT',
+        '2nd Year',
+      ]);
+      expect(find.text('Duplicate Student No. 1'), findsOneWidget);
+      expect(
+        _button(tester, 'Preview').onPressed,
+        isNull,
+        reason: 'Duplicate Student No. in manual grid must block Preview',
+      );
+
+      // Fix second Student No. so both rows are ready.
+      final secondRowFields = find.descendant(
+        of: find.byKey(const Key('manual_row_1')),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(secondRowFields.first, '2021-902');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ready 2/2'), findsOneWidget);
+      await tester.ensureVisible(_buttonFinder(tester, 'Preview'));
+      await tester.tap(_buttonFinder(tester, 'Preview'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('New 2'), findsOneWidget);
+      await tester.ensureVisible(_buttonFinder(tester, 'Import'));
+      await tester.tap(_buttonFinder(tester, 'Import'));
+      await tester.pumpAndSettle();
+
+      expect(repo.commitSizes, [2]);
+      expect(find.text('2 new · 0 updated · 0 linked'), findsOneWidget);
+      // Students claim their own records, so an import issues no activation slips.
+      expect(guard.hasUndownloadedCodes, isFalse);
+      expect(find.textContaining('activation slips'), findsNothing);
+      expect(downloads.files, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'bulk manual input: spreadsheet paste populates rows matching template',
+    (tester) async {
+      final repo = _Repo();
+      await _pump(tester, repo);
+      await _openTab(tester, 'Import');
+
+      await tester.tap(find.text('Bulk manual input'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('toggle_bulk_paste_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('bulk_paste_textfield')),
+        '2022-101\tDela Cruz\tMaria\tP\t03/10/2005\tCITE\tBSIT\t1st Year\n'
+        '2022-102\tLim\tPaolo\t\t09/22/2004\tCBA\tBSBA\t2nd Year',
+      );
+      await tester.tap(find.byKey(const Key('apply_bulk_paste_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ready 2/2'), findsOneWidget);
+      expect(find.textContaining('Loaded 2 row(s)'), findsOneWidget);
+
+      await tester.ensureVisible(_buttonFinder(tester, 'Preview'));
+      await tester.tap(_buttonFinder(tester, 'Preview'));
+      await tester.pumpAndSettle();
+      expect(find.text('New 2'), findsOneWidget);
+
+      await tester.ensureVisible(_buttonFinder(tester, 'Import'));
+      await tester.tap(_buttonFinder(tester, 'Import'));
+      await tester.pumpAndSettle();
+      expect(find.text('2 new · 0 updated · 0 linked'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'roster summary strip quick-filters loaded records and responds across viewports with reduced motion',
+    (tester) async {
+      final repo = _Repo();
+      for (final size in const [
+        Size(390, 844),
+        Size(768, 1024),
+        Size(1280, 900),
+      ]) {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(disableAnimations: true),
+            child: MaterialApp(
+              theme: AdminTheme.data,
+              home: Scaffold(
+                body: StudentRosterPage(
+                  key: ValueKey(size),
+                  repository: repo,
+                  pickFile: () async => null,
+                  download: (_, _, _) {},
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Awaiting activation'));
+        await tester.pumpAndSettle();
+        expect(repo.rosterStatuses.last, 'notActivated');
+
+        await tester.tap(find.text('Import'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Bulk manual input'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
 }
+
+Finder _buttonFinder(WidgetTester tester, String label) =>
+    find.widgetWithText(FilledButton, label);

@@ -42,7 +42,7 @@ void main() {
     await _settleSignup(tester);
 
     const studentPointer =
-        "Students activate accounts through the roster. Tap 'Activate student account'.";
+        "Students get their login by email. Tap 'Email me my login'.";
     const cases = [
       ('leo@gmail.com', studentPointer),
       ('  Juan@UCU.edu.ph ', 'Institutional email detected.'),
@@ -204,10 +204,10 @@ void main() {
     );
     await tester.pump();
 
-    await tester.ensureVisible(find.text('Activate student account'));
-    await tester.tap(find.text('Activate student account'));
+    await tester.ensureVisible(find.text('Email me my login'));
+    await tester.tap(find.text('Email me my login'));
     await tester.pumpAndSettle();
-    expect(find.text('activation target'), findsOneWidget);
+    expect(find.text('login request target'), findsOneWidget);
   });
 
   testWidgets(
@@ -338,12 +338,12 @@ void main() {
     await tester.pumpWidget(_SignupHarness(authProvider: authProvider));
     await _settleSignup(tester);
 
-    await tester.ensureVisible(find.text('Activate student account'));
-    await tester.tap(find.text('Activate student account'));
+    await tester.ensureVisible(find.text('Email me my login'));
+    await tester.tap(find.text('Email me my login'));
     await tester.pumpAndSettle();
 
     expect(authProvider.signOutCalls, 1);
-    expect(find.text('activation target'), findsOneWidget);
+    expect(find.text('login request target'), findsOneWidget);
 
     // Popping activation must land on sign in, not on the orphaned signup form.
     final navigator = tester.state<NavigatorState>(find.byType(Navigator));
@@ -494,8 +494,8 @@ class _SignupHarness extends StatelessWidget {
       child: MaterialApp(
         home: const SignupScreen(),
         routes: {
-          RouteNames.studentActivation: (_) =>
-              const Scaffold(body: Center(child: Text('activation target'))),
+          RouteNames.studentLoginRequest: (_) =>
+              const Scaffold(body: Center(child: Text('login request target'))),
           RouteNames.onboarding: (_) =>
               const Scaffold(body: Center(child: Text('onboarding target'))),
           RouteNames.login: (_) =>

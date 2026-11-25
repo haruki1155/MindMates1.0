@@ -10,20 +10,21 @@ import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
 if (!getApps().length) initializeApp();
 
-const STAGING_STAFF_VERIFICATION_URL = "https://paaccmindmate.com";
+// The default Firebase Hosting host always has HTTPS. The custom domain is used
+// only when ADMIN_WEB_URL names it, so it can be enabled once it is Connected.
+const STAGING_ADMIN_WEB_URL = "https://mindmate-staging.web.app";
 const PRODUCTION_ADMIN_WEB_URL = "https://mind-mates-cd2cf.web.app";
 const STAGING_PROJECT_ID = "mindmate-staging";
 const PRODUCTION_PROJECT_ID = "mind-mates-cd2cf";
-const OBSOLETE_ADMIN_WEB_HOSTS = new Set(["mindmate-admin-staging.vercel.app"]);
+// Exactly the hosts on each project's reCAPTCHA Enterprise key, so links never
+// land where App Check fails. The firebaseapp.com hosts are deliberately absent.
 const STAGING_ADMIN_WEB_HOSTS = new Set([
   "paaccmindmate.com",
   "www.paaccmindmate.com",
   "mindmate-staging.web.app",
-  "mindmate-staging.firebaseapp.com",
 ]);
 const PRODUCTION_ADMIN_WEB_HOSTS = new Set([
   "mind-mates-cd2cf.web.app",
-  "mind-mates-cd2cf.firebaseapp.com",
 ]);
 const DEVELOPMENT_ADMIN_WEB_HOSTS = new Set([
   "mindmate-dev-4e91c.web.app",
@@ -31,10 +32,8 @@ const DEVELOPMENT_ADMIN_WEB_HOSTS = new Set([
 ]);
 
 const db = getFirestore();
-const smtpAppPassword = defineSecret("SMTP_APP_PASSWORD");
-const adminWebUrl = defineString("ADMIN_WEB_URL", {
-  default: "https://mindmate-admin-staging.vercel.app",
-});
+export const smtpAppPassword = defineSecret("SMTP_APP_PASSWORD");
+const adminWebUrl = defineString("ADMIN_WEB_URL", {default: ""});
 
 function currentFirebaseProjectId(): string | undefined {
   if (process.env.GCLOUD_PROJECT) return process.env.GCLOUD_PROJECT;
@@ -53,50 +52,35 @@ export function resolveStaffVerificationWebUrl(
   projectId = currentFirebaseProjectId(),
 ): string {
   const trimmed = configuredUrl.trim().replace(/\/$/, "");
+  // Staging and production links carry action codes, so they only ever point
+  // at an HTTPS origin on that environment's own allowlist.
   if (projectId === STAGING_PROJECT_ID) {
-    if (!trimmed) return STAGING_STAFF_VERIFICATION_URL;
-    try {
-      const parsed = new URL(trimmed);
-      const host = parsed.hostname.toLowerCase();
-      const isLocalhost = host === "localhost" || host === "127.0.0.1";
-      if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLocalhost)) {
-        return STAGING_STAFF_VERIFICATION_URL;
-      }
-      if (
-        OBSOLETE_ADMIN_WEB_HOSTS.has(host) ||
-        PRODUCTION_ADMIN_WEB_HOSTS.has(host) ||
-        DEVELOPMENT_ADMIN_WEB_HOSTS.has(host)
-      ) {
-        return STAGING_STAFF_VERIFICATION_URL;
-      }
-      return parsed.origin;
-    } catch {
-      return STAGING_STAFF_VERIFICATION_URL;
-    }
+    return trustedOrigin(trimmed, STAGING_ADMIN_WEB_HOSTS) ?? STAGING_ADMIN_WEB_URL;
   }
   if (projectId === PRODUCTION_PROJECT_ID) {
-    // An unset ADMIN_WEB_URL falls back to the obsolete Vercel host, which no
-    // longer serves the portal; links there would 404 or reach a domain that
-    // could be re-registered and harvest action codes.
-    if (!trimmed) return PRODUCTION_ADMIN_WEB_URL;
-    try {
-      const host = new URL(trimmed).hostname.toLowerCase();
-      if (OBSOLETE_ADMIN_WEB_HOSTS.has(host) || STAGING_ADMIN_WEB_HOSTS.has(host) ||
-          DEVELOPMENT_ADMIN_WEB_HOSTS.has(host)) {
-        return PRODUCTION_ADMIN_WEB_URL;
-      }
-    } catch {
-      // Preserve existing configured value handling for non-staging URLs.
-    }
+    return trustedOrigin(trimmed, PRODUCTION_ADMIN_WEB_HOSTS) ?? PRODUCTION_ADMIN_WEB_URL;
+  }
+  if (!trimmed) {
+    throw new HttpsError("failed-precondition", "ADMIN_WEB_URL is not configured for this project.");
   }
   return trimmed;
+}
+
+function trustedOrigin(url: string, allowedHosts: Set<string>): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || !allowedHosts.has(parsed.hostname.toLowerCase())) return undefined;
+    return parsed.origin;
+  } catch {
+    return undefined;
+  }
 }
 const smtpHost = defineString("SMTP_HOST", {default: "smtp.gmail.com"});
 const smtpPort = defineString("SMTP_PORT", {default: "587"});
 const smtpUsername = defineString("SMTP_USERNAME", {
   default: "dev.guntang@gmail.com",
 });
-const smtpSender = defineString("SMTP_SENDER", {
+export const smtpSender = defineString("SMTP_SENDER", {
   default: "dev.guntang@gmail.com",
 });
 
@@ -129,58 +113,16 @@ export function canonicalLoginId(value: unknown): string {
   return canonical;
 }
 
+// Pre-login School-ID resolution is a pure function of its input. It returns
+// only the deterministic legacy alias (`<id>@mindmate.local`) that anyone can
+// derive from the ID, and never reads Firestore or Auth. It therefore cannot
+// disclose a stored (real) account email and cannot reveal whether an
+// account exists, is disabled or is revoked. Accounts with a real email sign
+// in with that email; Firebase Auth then enforces the credential itself.
 async function resolveSchoolIdAuthEmailHandler(request: CallableRequest) {
   const rawSchoolId = request.data?.schoolId;
-  const canonical = canonicalLoginId(rawSchoolId);
-  const entered = String(rawSchoolId).trim();
-
-  // Student and employee IDs are reserved during profile provisioning. Using
-  // these server-only indexes also makes this work for accounts created before
-  // School-ID sign-in was introduced.
-  const [studentReservation, employeeReservation] = await Promise.all([
-    db.collection("student_id_reservations").doc(canonical).get(),
-    db.collection("employee_id_reservations").doc(canonical).get(),
-  ]);
-  const reservation = studentReservation.exists
-    ? studentReservation
-    : employeeReservation.exists
-      ? employeeReservation
-      : null;
-  let userId = reservation?.data()?.userId;
-
-  // Older profiles may predate the reservation collections. Fall back to the
-  // protected profile data so already-registered users are not locked out.
-  if (typeof userId !== "string" || userId.length === 0) {
-    const candidateValues = [...new Set([entered, canonical])];
-    const profileQueries = candidateValues.flatMap((value) => [
-      db.collection("users").where("schoolId", "==", value).limit(1).get(),
-      db.collection("users").where("employeeId", "==", value).limit(1).get(),
-    ]);
-    const profileResults = await Promise.all(profileQueries);
-    const matchedProfile = profileResults.find((result) => !result.empty);
-    userId = matchedProfile?.docs[0]?.id;
-  }
-
-  if (typeof userId === "string" && userId.length > 0) {
-    const user = await getAuth().getUser(userId);
-    if (user.email) return {email: user.email};
-  }
-
-  // Retain support for legacy accounts whose Firebase credential was created
-  // directly from the School ID but whose profile was never provisioned.
-  try {
-    const legacy = await getAuth().getUserByEmail(
-      authEmailForSchoolId(String(rawSchoolId)),
-    );
-    if (legacy.email) return {email: legacy.email};
-  } catch (error: unknown) {
-    const code = (error as {code?: string})?.code;
-    if (code !== "auth/user-not-found") throw error;
-  }
-
-  // Keep the response generic so callers cannot distinguish an unknown ID
-  // from another invalid credential using the message alone.
-  throw new HttpsError("not-found", "School ID or password is incorrect.");
+  canonicalLoginId(rawSchoolId);
+  return {email: authEmailForSchoolId(String(rawSchoolId))};
 }
 
 export function normalizeRecoveryEmail(value: unknown): string {
@@ -247,7 +189,8 @@ async function enforcePasswordResetRateLimit(email: string, ip: string): Promise
 }
 
 export function directPasswordResetLink(firebaseLink: string, webBaseUrl: string): string {
-  return directEmailActionLink(firebaseLink, webBaseUrl, "/__/auth/action");
+  // Not /__/auth/action: Firebase Hosting reserves /__/* for its own handler.
+  return directEmailActionLink(firebaseLink, webBaseUrl, "/reset-password");
 }
 
 export function directEmailActionLink(
@@ -271,7 +214,7 @@ function escapeHtml(value: string): string {
   })[character] ?? character);
 }
 
-function accountEmailTransporter() {
+export function accountEmailTransporter() {
   return nodemailer.createTransport({
     host: smtpHost.value().trim(),
     port: Number(smtpPort.value()),
@@ -442,9 +385,8 @@ export async function processAdminPasswordReset(
   const email = normalizeRecoveryEmail(request.data?.email);
   await enforcePasswordResetRateLimit(email, requestIp(request));
 
-  // The same validated, environment-specific admin origin used for staff
-  // verification links. On Staging the obsolete Vercel host maps to
-  // https://paaccmindmate.com, whose SPA serves the custom /__/auth/action handler.
+  // The same allowlisted admin origin used for staff verification links; the
+  // link opens that origin's /reset-password route.
   const webBaseUrl = resolveStaffVerificationWebUrl();
   try {
     const firebaseLink = await delivery.generateLink(email, `${webBaseUrl}/`);
@@ -518,7 +460,13 @@ export const requestStaffEmailVerification = onCall(
   requestStaffEmailVerificationHandler,
 );
 
+// Unauthenticated mail sender without App Check: never served by production.
 export const requestStaffEmailVerificationDev = onCall(
   {enforceAppCheck: false, secrets: [smtpAppPassword]},
-  requestStaffEmailVerificationHandler,
+  (request) => {
+    if (!isAuthorizedDevProject()) {
+      throw new HttpsError("permission-denied", "Development-only endpoint is disabled for this project.");
+    }
+    return requestStaffEmailVerificationHandler(request);
+  },
 );

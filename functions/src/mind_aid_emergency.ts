@@ -6,6 +6,7 @@ import {FieldValue, getFirestore} from "firebase-admin/firestore";
 import {CallableRequest, HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {requireClinical as requireSharedClinical, requireUid} from "./access";
+import {AUDIT_CATEGORIES, actorName, writeAudit} from "./audit";
 
 if (!getApps().length) initializeApp();
 
@@ -174,6 +175,16 @@ export async function acknowledgeMindAidEmergencyAlertHandler(request: CallableR
       acknowledgedBy: uid,
       acknowledgedByName: String(actor.name ?? actor.displayName ?? actor.email ?? "PACC counselor").slice(0, 120),
     });
+    writeAudit(transaction, db, {
+      actorId: uid,
+      actorNameSnapshot: actorName(actor),
+      actorRoleSnapshot: String(actor.accessRole ?? actor.role ?? "counselor"),
+      action: "EMERGENCY_ALERT_ACKNOWLEDGED",
+      category: AUDIT_CATEGORIES.security,
+      targetType: "emergency_alert",
+      targetId: alert.id,
+      metadata: {status: "acknowledged"},
+    });
   });
   return {ok: true};
 }
@@ -200,6 +211,16 @@ export async function resolveMindAidEmergencyAlertHandler(request: CallableReque
       resolutionDisposition: disposition,
     });
     transaction.delete(db.collection(ACTIVE_ALERTS).doc(String(data.userId ?? "")));
+    writeAudit(transaction, db, {
+      actorId: uid,
+      actorNameSnapshot: actorName(actor),
+      actorRoleSnapshot: String(actor.accessRole ?? actor.role ?? "counselor"),
+      action: "EMERGENCY_ALERT_RESOLVED",
+      category: AUDIT_CATEGORIES.security,
+      targetType: "emergency_alert",
+      targetId: alert.id,
+      metadata: {status: "resolved", resolutionDisposition: disposition},
+    });
   });
   return {ok: true};
 }

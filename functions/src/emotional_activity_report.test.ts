@@ -343,12 +343,110 @@ test("gates source share split at >= 10 users per source and omits draft/unscora
   });
 
   assert.equal(report.status, "ready");
-  // Fewer than 10 assessment users -> source shares remain suppressed (null).
+  // Fewer than 10 assessment users -> source shares and sub-source bucket labels are omitted.
   assert.equal(report.moodCheckInShare, null);
   assert.equal(report.assessmentShare, null);
   assert.ok(report.departmentCoverageNote.includes("unspecified role or college"));
-  // Only u-1's verified non-draft assessment counts -> cell suppressed (<10).
-  assert.equal(report.assessmentBreakdown.length, 1);
-  assert.equal(report.assessmentBreakdown[0].key, "supported");
-  assert.equal(report.assessmentBreakdown[0].suppressed, true);
+  assert.deepEqual(report.assessmentBreakdown, []);
+
+  // When >= 10 verified assessments are present, draft/rejected assessments remain excluded.
+  const tenVerifiedAssessments = Array.from({length: 10}, (_, idx) => ({
+    userId: `u-${idx + 1}`,
+    schemaVersion: "assessment_record_v4",
+    verificationStatus: "verified",
+    result: {profileStatus: "generallySupported", domainResults: []},
+    createdAt: "2026-09-10T08:00:00Z",
+  }));
+  const reportWithTenAssessments = buildEmotionalActivityReport({
+    users,
+    moodEntries,
+    moods: [],
+    assessments: [
+      ...tenVerifiedAssessments,
+      assessments[1], // draft u-2 (supportMayHelp)
+      assessments[2], // rejected u-3 (supportMayHelp)
+    ],
+    range: {
+      start: new Date("2026-06-01T00:00:00+08:00"),
+      end: new Date("2027-06-01T00:00:00+08:00"),
+      label: "Academic year 2026-2027",
+    },
+    schoolYear: "2026-2027",
+    source: "all",
+  });
+  assert.deepEqual(
+    reportWithTenAssessments.assessmentBreakdown.map((b) => [b.key, b.percentage]),
+    [["supported", 100]],
+  );
+});
+
+test("omits sub-source breakdown labels when sub-source unique users < 10 while keeping ready cohort status", () => {
+  const users = makeUsers(12);
+  const moodEntries = makeMoods(10, () => ({level: 5, label: "Great"}));
+  const assessments = [
+    {
+      userId: "u-11",
+      schemaVersion: "assessment_record_v4",
+      verificationStatus: "verified",
+      result: {profileStatus: "supportMayHelp", domainResults: []},
+      createdAt: "2026-09-10T08:00:00Z",
+    },
+  ];
+
+  const report = buildEmotionalActivityReport({
+    users,
+    moodEntries,
+    moods: [],
+    assessments,
+    range: {
+      start: new Date("2026-06-01T00:00:00+08:00"),
+      end: new Date("2027-06-01T00:00:00+08:00"),
+      label: "Academic year 2026-2027",
+    },
+    schoolYear: "2026-2027",
+    source: "all",
+  });
+
+  assert.equal(report.status, "ready");
+  assert.equal(report.assessmentShare, null);
+  assert.equal(report.moodCheckInShare, null);
+  assert.deepEqual(report.assessmentBreakdown, []);
+  assert.ok(!JSON.stringify(report.assessmentBreakdown).includes("Support May Help"));
+});
+
+test("excludes staff and admin role token variants from emotional activity aggregation", () => {
+  const users = [
+    ...makeUsers(10),
+    {id: "staff-space", data: {role: "portal staff", populationRole: "student"}},
+    {id: "staff-hyphen", data: {role: "portal-staff", populationRole: "student"}},
+    {id: "super-admin", data: {role: "super_admin", populationRole: "student"}},
+    {id: "conflict-admin", data: {accessRole: "appUser", role: "admin", populationRole: "student"}},
+  ];
+  const moodEntries = [
+    ...makeMoods(10, () => ({level: 5, label: "Great"})),
+    {userId: "staff-space", level: 1, label: "Sad", occurredAt: "2026-09-10T08:00:00.000Z"},
+    {userId: "staff-hyphen", level: 1, label: "Sad", occurredAt: "2026-09-10T08:00:00.000Z"},
+    {userId: "super-admin", level: 1, label: "Sad", occurredAt: "2026-09-10T08:00:00.000Z"},
+    {userId: "conflict-admin", level: 1, label: "Sad", occurredAt: "2026-09-10T08:00:00.000Z"},
+  ];
+
+  const report = buildEmotionalActivityReport({
+    users,
+    moodEntries,
+    moods: [],
+    assessments: [],
+    range: {
+      start: new Date("2026-06-01T00:00:00+08:00"),
+      end: new Date("2027-06-01T00:00:00+08:00"),
+      label: "Academic year 2026-2027",
+    },
+    schoolYear: "2026-2027",
+    source: "mood",
+  });
+
+  assert.equal(report.status, "ready");
+  assert.deepEqual(
+    report.valenceBreakdown.map((b) => [b.key, b.percentage]),
+    [["positive", 100]],
+  );
 });

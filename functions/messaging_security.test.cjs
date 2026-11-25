@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {initializeTestEnvironment, assertFails, assertSucceeds} = require('@firebase/rules-unit-testing');
-const {doc, setDoc, getDoc, writeBatch, serverTimestamp} = require('firebase/firestore');
+const {doc, setDoc, updateDoc, deleteDoc, getDoc, writeBatch, serverTimestamp, Timestamp} = require('firebase/firestore');
 let env;
 const projectId = 'demo-mindmate-messaging-security';
 before(async () => {
@@ -19,6 +19,8 @@ beforeEach(async () => {
       setDoc(doc(db,'users/other'),{accessRole:'appUser',collegeId:'CITE'}),
       setDoc(doc(db,'users/counselor'),{accessRole:'counselor',staffAccountStatus:'approved',accountStatus:'active'}),
       setDoc(doc(db,'users/counselor2'),{accessRole:'counselor',staffAccountStatus:'approved',accountStatus:'active'}),
+      setDoc(doc(db,'users/pendingCounselor'),{accessRole:'counselor',staffAccountStatus:'pending',accountStatus:'active'}),
+      setDoc(doc(db,'users/suspendedCounselor'),{accessRole:'counselor',staffAccountStatus:'approved',accountStatus:'suspended'}),
       setDoc(doc(db,'users/staff'),{accessRole:'portalStaff'}),
       setDoc(doc(db,'users/admin'),{accessRole:'admin'})
     ]);
@@ -87,4 +89,125 @@ test('other students, staff and admin cannot read counseling thread', async () =
 test('student may mark own counselor reply as read', async () => {
   await studentSend(db('student'));
   await assertSucceeds(setDoc(doc(db('student'),'counselor_threads/student'),{studentReadAt:serverTimestamp()},{merge:true}));
+});
+
+test('pending and suspended counselors are denied read/write on threads, messages, and receipts', async () => {
+  await studentSend(db('student'));
+  for (const id of ['pendingCounselor', 'suspendedCounselor']) {
+    const actor = db(id, true);
+    await assertFails(getDoc(doc(actor, 'counselor_threads/student')));
+    await assertFails(getDoc(doc(actor, 'counselor_threads/student/messages/m1')));
+    await assertFails(setDoc(doc(actor, 'counselor_threads/student/messages/r1'), {
+      senderId: id, senderRole: 'counselor', text: 'Denied', createdAt: serverTimestamp(),
+    }));
+    await assertFails(getDoc(doc(actor, `counselor_inbox_reads/${id}/threads/student`)));
+    await assertFails(setDoc(doc(actor, `counselor_inbox_reads/${id}/threads/student`), {
+      readAt: serverTimestamp(),
+    }));
+  }
+});
+
+test('non-counselors (admin, staff, student) are denied read and write on counselor_inbox_reads', async () => {
+  await studentSend(db('student'));
+  for (const id of ['admin', 'staff', 'student']) {
+    const actor = db(id, true);
+    await assertFails(getDoc(doc(actor, 'counselor_inbox_reads/counselor/threads/student')));
+    await assertFails(setDoc(doc(actor, 'counselor_inbox_reads/counselor/threads/student'), {
+      readAt: serverTimestamp(),
+    }));
+    await assertFails(getDoc(doc(actor, `counselor_inbox_reads/${id}/threads/student`)));
+    await assertFails(setDoc(doc(actor, `counselor_inbox_reads/${id}/threads/student`), {
+      readAt: serverTimestamp(),
+    }));
+  }
+});
+
+test('cross-counselor updateDoc and deleteDoc are denied on counselor_inbox_reads', async () => {
+  await studentSend(db('student'));
+  const counselor = db('counselor', true);
+  const other = db('counselor2', true);
+  const receipt = doc(counselor, 'counselor_inbox_reads/counselor/threads/student');
+  await assertSucceeds(setDoc(receipt, {readAt: serverTimestamp()}));
+  await assertFails(updateDoc(doc(other, 'counselor_inbox_reads/counselor/threads/student'), {
+    readAt: serverTimestamp(),
+  }));
+  await assertFails(deleteDoc(receipt));
+  await assertFails(deleteDoc(doc(other, 'counselor_inbox_reads/counselor/threads/student')));
+});
+
+test('counselor_inbox_reads rejects extra keys, client timestamps, and nonexistent thread', async () => {
+  await studentSend(db('student'));
+  const counselor = db('counselor', true);
+  const receipt = doc(counselor, 'counselor_inbox_reads/counselor/threads/student');
+  await assertFails(setDoc(receipt, {readAt: serverTimestamp(), extra: true}));
+  await assertFails(setDoc(receipt, {readAt: Timestamp.fromMillis(1700000000000)}));
+  await assertFails(setDoc(doc(counselor, 'counselor_inbox_reads/counselor/threads/nonexistent'), {
+    readAt: serverTimestamp(),
+  }));
+});
+
+test('receipt can preserve the observed student timestamp while readAt records the commit', async () => {
+  await studentSend(db('student'));
+  const counselor = db('counselor', true);
+  const thread = await getDoc(doc(counselor, 'counselor_threads/student'));
+  const readThrough = thread.data().lastStudentMessageAt;
+  const receipt = doc(counselor, 'counselor_inbox_reads/counselor/threads/student');
+  await assertSucceeds(setDoc(receipt, {readAt: serverTimestamp(), readThrough}));
+  assert.ok((await getDoc(receipt)).data().readThrough.isEqual(readThrough));
+  await assertFails(setDoc(receipt, {readAt: serverTimestamp(), readThrough: 'invalid'}));
+  await assertFails(setDoc(receipt, {readAt: serverTimestamp(), readThrough: Timestamp.fromMillis(4102444800000)}));
+});
+
+test('atomic 3-write counselor reply and mark-read batch succeeds with matching timestamps', async () => {
+  await studentSend(db('student'));
+  const counselor = db('counselor', true);
+  const batch = writeBatch(counselor);
+  batch.update(doc(counselor, 'counselor_threads/student'), {
+    updatedAt: serverTimestamp(),
+    lastCounselorMessageAt: serverTimestamp(),
+    lastCounselorMessageId: 'reply_atomic',
+  });
+  batch.set(doc(counselor, 'counselor_threads/student/messages/reply_atomic'), {
+    senderId: 'counselor',
+    senderRole: 'counselor',
+    text: 'Atomic reply',
+    createdAt: serverTimestamp(),
+  });
+  batch.set(doc(counselor, 'counselor_inbox_reads/counselor/threads/student'), {
+    readAt: serverTimestamp(),
+  });
+  await assertSucceeds(batch.commit());
+  const thread = await getDoc(doc(counselor, 'counselor_threads/student'));
+  const receipt = await getDoc(doc(counselor, 'counselor_inbox_reads/counselor/threads/student'));
+  assert.equal(
+    thread.data().lastCounselorMessageAt.toMillis(),
+    receipt.data().readAt.toMillis(),
+  );
+});
+
+test('student and counselor field tampering attempts are rejected', async () => {
+  await studentSend(db('student'));
+  const student = db('student');
+  const counselor = db('counselor', true);
+  // Student cannot forge counselor reply metadata
+  await assertFails(updateDoc(doc(student, 'counselor_threads/student'), {
+    lastCounselorMessageAt: serverTimestamp(),
+    lastCounselorMessageId: 'forged',
+  }));
+  // Student cannot bump lastStudentMessageAt without a linked message
+  await assertFails(updateDoc(doc(student, 'counselor_threads/student'), {
+    updatedAt: serverTimestamp(),
+    lastStudentMessageAt: serverTimestamp(),
+    lastStudentMessageId: 'missing_msg',
+  }));
+  // Counselor cannot overwrite studentReadAt, lastStudentMessageAt, or collegeId
+  await assertFails(updateDoc(doc(counselor, 'counselor_threads/student'), {
+    studentReadAt: serverTimestamp(),
+  }));
+  await assertFails(updateDoc(doc(counselor, 'counselor_threads/student'), {
+    lastStudentMessageAt: serverTimestamp(),
+  }));
+  await assertFails(updateDoc(doc(counselor, 'counselor_threads/student'), {
+    collegeId: 'CBA',
+  }));
 });

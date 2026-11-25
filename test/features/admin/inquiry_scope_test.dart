@@ -33,7 +33,11 @@ void main() {
         'routingRevision': 3,
         'ownerId': 'c1',
         'assigneeLabels': {'c1': 'Counselor One', 's1': 'Staff One'},
-        'escalation': {'status': 'requested', 'reason': 'Needs review'},
+        'escalation': {
+          'status': 'requested',
+          'type': 'counselor_confirmation',
+          'reason': 'Needs review',
+        },
       },
     );
     expect(inquiry.collegeId, 'cite');
@@ -44,6 +48,7 @@ void main() {
     expect(inquiry.ownerId, 'c1');
     expect(inquiry.isManuallyRouted, isTrue);
     expect(inquiry.isEscalated, isTrue);
+    expect(inquiry.escalationType, InquiryEscalationType.counselorConfirmation);
     expect(inquiry.escalationReason, 'Needs review');
   });
 
@@ -64,69 +69,72 @@ void main() {
     expect(triage.routingReason, 'missing_college');
   });
 
-  test('counselors see only assigned raw inquiries; portalStaff see only assigned operational projections', () {
-    final rawMine = _inquiry('mine', assignees: ['c1', 's1']);
-    final rawTheirs = _inquiry('theirs', assignees: ['c2']);
-    final rawTriage = _inquiry('triage', assignees: const []);
-    final rawLegacy = _inquiry('legacy');
-    final opMine = AdminInquiryModel.fromOperationalProjection({
-      'inquiryId': 'mine',
-      'category': 'Service Form',
-      'operationalLabel': 'Service Form',
-      'status': 'pending',
-      'routingStatus': 'routed',
-      'assigneeIds': ['c1'],
-      'monitoringStaffIds': ['s1'],
-      'createdAt': '2026-11-14T08:00:00.000',
-    });
-    final opOther = AdminInquiryModel.fromOperationalProjection({
-      'inquiryId': 'other',
-      'category': 'Service Form',
-      'operationalLabel': 'Service Form',
-      'status': 'pending',
-      'routingStatus': 'routed',
-      'assigneeIds': ['c2'],
-      'monitoringStaffIds': ['s2'],
-      'createdAt': '2026-11-14T08:00:00.000',
-    });
+  test(
+    'counselors see only assigned raw inquiries; portalStaff see only assigned operational projections',
+    () {
+      final rawMine = _inquiry('mine', assignees: ['c1', 's1']);
+      final rawTheirs = _inquiry('theirs', assignees: ['c2']);
+      final rawTriage = _inquiry('triage', assignees: const []);
+      final rawLegacy = _inquiry('legacy');
+      final opMine = AdminInquiryModel.fromOperationalProjection({
+        'inquiryId': 'mine',
+        'category': 'Service Form',
+        'operationalLabel': 'Service Form',
+        'status': 'pending',
+        'routingStatus': 'routed',
+        'assigneeIds': ['c1'],
+        'monitoringStaffIds': ['s1'],
+        'createdAt': '2026-11-14T08:00:00.000',
+      });
+      final opOther = AdminInquiryModel.fromOperationalProjection({
+        'inquiryId': 'other',
+        'category': 'Service Form',
+        'operationalLabel': 'Service Form',
+        'status': 'pending',
+        'routingStatus': 'routed',
+        'assigneeIds': ['c2'],
+        'monitoringStaffIds': ['s2'],
+        'createdAt': '2026-11-14T08:00:00.000',
+      });
 
-    expect(
-      scopeInquiriesForRole(
-        [rawMine, rawTheirs, rawTriage, rawLegacy, opMine],
-        role: AccessRole.counselor,
-        uid: 'c1',
-        isSuperAdmin: false,
-      ).map((i) => i.id),
-      ['mine'],
-    );
-    expect(
-      scopeInquiriesForRole(
-        [rawMine, opMine, opOther],
-        role: AccessRole.portalStaff,
-        uid: 's1',
-        isSuperAdmin: false,
-      ).map((i) => i.id),
-      ['mine'],
-    );
-    expect(
-      scopeInquiriesForRole(
-        [rawMine, rawTheirs],
-        role: AccessRole.portalStaff,
-        uid: 's1',
-        isSuperAdmin: false,
-      ),
-      isEmpty,
-    );
-    expect(
-      scopeInquiriesForRole(
-        [rawMine, opMine],
-        role: AccessRole.counselor,
-        uid: null,
-        isSuperAdmin: false,
-      ),
-      isEmpty,
-    );
-  });
+      expect(
+        scopeInquiriesForRole(
+          [rawMine, rawTheirs, rawTriage, rawLegacy, opMine],
+          role: AccessRole.counselor,
+          uid: 'c1',
+          isSuperAdmin: false,
+        ).map((i) => i.id),
+        ['mine'],
+      );
+      expect(
+        scopeInquiriesForRole(
+          [rawMine, opMine, opOther],
+          role: AccessRole.portalStaff,
+          uid: 's1',
+          isSuperAdmin: false,
+        ).map((i) => i.id),
+        ['mine'],
+      );
+      expect(
+        scopeInquiriesForRole(
+          [rawMine, rawTheirs],
+          role: AccessRole.portalStaff,
+          uid: 's1',
+          isSuperAdmin: false,
+        ),
+        isEmpty,
+      );
+      expect(
+        scopeInquiriesForRole(
+          [rawMine, opMine],
+          role: AccessRole.counselor,
+          uid: null,
+          isSuperAdmin: false,
+        ),
+        isEmpty,
+      );
+    },
+  );
 
   test('only the super-administrator sees every inquiry', () {
     final items = [
@@ -170,7 +178,10 @@ void main() {
     );
     await repository.updateInquiryStatus('i1', InquiryStatus.resolved);
     await repository.acknowledgeInquiry('i1');
-    await repository.escalateInquiry('i1', reason: 'Needs supervisor');
+    await repository.escalateInquiry(
+      'i1',
+      escalationType: InquiryEscalationType.counselorConfirmation,
+    );
     expect(
       await repository.reassignInquiry(
         'i1',
@@ -195,7 +206,10 @@ void main() {
       'routeExistingInquiries',
     ]);
     expect(calls[0].$2, {'inquiryId': 'i1', 'status': 'resolved'});
-    expect(calls[2].$2, {'inquiryId': 'i1', 'reason': 'Needs supervisor'});
+    expect(calls[2].$2, {
+      'inquiryId': 'i1',
+      'escalationType': 'counselor_confirmation',
+    });
     expect(calls[3].$2, {
       'inquiryId': 'i1',
       'assigneeIds': ['c2'],

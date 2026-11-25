@@ -6,7 +6,7 @@ import {getFirestore} from "firebase-admin/firestore";
 import {CallableRequest} from "firebase-functions/v2/https";
 import {
   MIN_PASSWORD_RESET_RESPONSE_MS, PasswordResetDelivery, PasswordResetMessage, processAdminPasswordReset,
-  requestAdminPasswordResetDev,
+  requestAdminPasswordResetDev, requestStaffEmailVerificationDev,
 } from "./account_recovery";
 
 // Task 11A.5F / D3b: the pre-login admin password reset must answer every
@@ -113,16 +113,16 @@ test("known, unknown and failed deliveries are all padded to the production floo
   });
 });
 
-test("Staging reset links use the supported admin host's action handler", async () => {
+test("Staging reset links open /reset-password on the default Staging host", async () => {
   await withProject("mindmate-staging", async () => {
     const known = `admin-${randomUUID()}@example.org`;
     const stub = stubDelivery(new Set([known]));
     await processAdminPasswordReset(request(known), stub.delivery, 0);
-    assert.deepEqual(stub.continueUrls, ["https://paaccmindmate.com/"]);
+    assert.deepEqual(stub.continueUrls, ["https://mindmate-staging.web.app/"]);
     const link = stub.sent[0].text.match(/https:\/\/\S+/)?.[0] ?? "";
     const url = new URL(link);
-    assert.equal(url.origin, "https://paaccmindmate.com");
-    assert.equal(url.pathname, "/__/auth/action");
+    assert.equal(url.origin, "https://mindmate-staging.web.app");
+    assert.equal(url.pathname, "/reset-password");
     assert.equal(url.searchParams.get("mode"), "resetPassword");
     assert.match(url.searchParams.get("oobCode") ?? "", /^oob-[0-9a-f]{12}$/);
     assert.ok(!link.includes("vercel.app"), "the obsolete Vercel host is never used");
@@ -191,6 +191,13 @@ test("the Dev reset alias refuses hosted Staging before any rate-limit write", a
       .run(request(email)), {code: "permission-denied"});
     const digest = createHash("sha256").update(email).digest("hex");
     assert.equal((await db.collection("_password_reset_limits").doc(`email_${digest}`).get()).exists, false);
+  });
+});
+
+test("the Dev staff verification alias refuses production", async () => {
+  await withProject("mind-mates-cd2cf", async () => {
+    await assert.rejects((requestStaffEmailVerificationDev as unknown as {run(r: unknown): Promise<unknown>})
+      .run(request(`dev-verify-${randomUUID()}@example.org`)), {code: "permission-denied"});
   });
 });
 

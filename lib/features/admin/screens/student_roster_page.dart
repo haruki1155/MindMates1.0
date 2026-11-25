@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
@@ -8,6 +10,7 @@ import '../services/admin_file_download.dart';
 import '../services/admin_import_file_picker.dart';
 import '../services/student_roster_file_parser.dart';
 import '../theme/admin_theme.dart';
+import '../widgets/student_roster_visuals.dart';
 
 const _xlsxMime =
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -110,13 +113,11 @@ class StudentRosterPage extends StatefulWidget {
   State<StudentRosterPage> createState() => _StudentRosterPageState();
 }
 
-enum _Tab { roster, import, corrections, history, legacy }
+enum _Tab { roster, claims, import, corrections, history, legacy }
 
 class _StudentRosterPageState extends State<StudentRosterPage> {
   late final StudentRosterRepository _repo =
       widget.repository ?? StudentRosterRepository();
-  late final StudentRosterLeaveGuard _guard =
-      widget.leaveGuard ?? StudentRosterLeaveGuard();
 
   _Tab _tab = _Tab.roster;
 
@@ -128,24 +129,29 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   String? _nextPageToken;
   bool _rosterLoading = false;
   String? _rosterError;
-  final Set<String> _selected = {};
   final Set<String> _busyRows = {};
 
   // ----------------------------------------------------------- import tab
+  RosterImportMode _importMode = RosterImportMode.file;
   AdminImportFile? _file;
   RosterParseResult? _parsed;
+  final List<ManualRosterRowControllers> _manualRows = [
+    ManualRosterRowControllers(),
+  ];
+  ManualRosterValidation _manualValidation = validateManualRosterDrafts(
+    const [],
+  );
+  AcademicOptions? _academicOptions;
+  bool _academicLoading = false;
   List<RosterPreviewRow>? _previewRows;
   Map<String, int> _previewCounts = const {};
   bool _previewing = false;
   bool _importing = false;
-  int _codeCalls = 0;
   String _progress = '';
   String? _importError;
   Map<String, int>? _importCounts;
   RosterImportResult? _partial;
   int _partialFailedCount = 0;
-  final List<IssuedActivationCode> _codes = [];
-  bool _codesDownloaded = true;
 
   // ------------------------------------------------------- other tabs
   List<StudentCorrection>? _corrections;
@@ -156,6 +162,9 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   String? _importsError;
   List<LegacyStudent>? _legacy;
   String? _legacyError;
+  List<StudentAccountClaim>? _claims;
+  String? _claimsError;
+  final Set<String> _busyClaims = {};
 
   @override
   void initState() {
@@ -165,15 +174,11 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
 
   @override
   void dispose() {
-    _guard.hasUndownloadedCodes = false;
-    _guard.codesInFlight = false;
     _search.dispose();
+    for (final row in _manualRows) {
+      row.dispose();
+    }
     super.dispose();
-  }
-
-  void _syncGuard() {
-    _guard.hasUndownloadedCodes = _codes.isNotEmpty && !_codesDownloaded;
-    _guard.codesInFlight = _importing || _codeCalls > 0;
   }
 
   void _toast(String message) {
@@ -189,63 +194,101 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !_guard.hasUndownloadedCodes,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        final navigator = Navigator.of(context);
-        if (await _guard.confirmLeave(context)) {
-          _guard.hasUndownloadedCodes = false;
-          navigator.pop();
-        }
-      },
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(28, 28, 28, 40),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Student Roster',
-              style: Theme.of(context).textTheme.headlineLarge,
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(28, 28, 28, 40),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Student Roster',
+            style: Theme.of(context).textTheme.headlineLarge,
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Import the registrar roster and manage student records. Students '
+            'set up their own accounts with their Student No., name and date '
+            'of birth.',
+          ),
+          const SizedBox(height: 20),
+          _tabBar(),
+          const SizedBox(height: 20),
+          AnimatedSwitcher(
+            duration: rosterAnimDuration(context),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: KeyedSubtree(
+              key: ValueKey(_tab),
+              child: switch (_tab) {
+                _Tab.roster => _rosterTab(),
+                _Tab.claims => _claimsTab(),
+                _Tab.import => _importTab(),
+                _Tab.corrections => _correctionsTab(),
+                _Tab.history => _historyTab(),
+                _Tab.legacy => _legacyTab(),
+              },
             ),
-            const SizedBox(height: 6),
-            const Text(
-              'Import the registrar roster, issue one-time activation codes '
-              'and manage student records.',
-            ),
-            const SizedBox(height: 20),
-            _tabBar(),
-            const SizedBox(height: 20),
-            switch (_tab) {
-              _Tab.roster => _rosterTab(),
-              _Tab.import => _importTab(),
-              _Tab.corrections => _correctionsTab(),
-              _Tab.history => _historyTab(),
-              _Tab.legacy => _legacyTab(),
-            },
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _tabBar() {
-    const labels = {
-      _Tab.roster: 'Roster',
-      _Tab.import: 'Import',
-      _Tab.corrections: 'Corrections',
-      _Tab.history: 'Import history',
-      _Tab.legacy: 'Legacy – not in roster',
+    const items = {
+      _Tab.roster: (label: 'Roster', icon: Icons.people_outline),
+      _Tab.claims: (label: 'Account requests', icon: Icons.how_to_reg_outlined),
+      _Tab.import: (label: 'Import', icon: Icons.upload_file_outlined),
+      _Tab.corrections: (
+        label: 'Corrections',
+        icon: Icons.rule_folder_outlined,
+      ),
+      _Tab.history: (label: 'Import history', icon: Icons.history_outlined),
+      _Tab.legacy: (
+        label: 'Legacy – not in roster',
+        icon: Icons.person_search_outlined,
+      ),
     };
+    final duration = rosterAnimDuration(
+      context,
+      const Duration(milliseconds: 180),
+    );
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        for (final e in labels.entries)
+        for (final e in items.entries)
           ChoiceChip(
-            label: Text(e.value),
+            showCheckmark: false,
+            label: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  e.value.icon,
+                  size: 16,
+                  color: _tab == e.key ? AdminColors.ink : AdminColors.muted,
+                ),
+                const SizedBox(width: 6),
+                Text(e.value.label),
+              ],
+            ),
             selected: _tab == e.key,
+            selectedColor: AdminColors.accentSoft,
+            side: BorderSide(
+              color: _tab == e.key
+                  ? AdminColors.accentStrong
+                  : AdminColors.border,
+            ),
             onSelected: (_) => _openTab(e.key),
+          ),
+        if (_tab == _Tab.import && (_previewing || _importing))
+          AnimatedOpacity(
+            duration: duration,
+            opacity: 1,
+            child: const RosterSemanticPill(
+              label: 'Working...',
+              tone: RosterBadgeTone.blue,
+              icon: Icons.sync,
+            ),
           ),
       ],
     );
@@ -254,13 +297,17 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   void _openTab(_Tab tab) {
     setState(() => _tab = tab);
     switch (tab) {
+      case _Tab.claims:
+        _loadClaims();
+      case _Tab.import:
+        if (_importMode == RosterImportMode.manual) _ensureAcademicOptions();
       case _Tab.corrections:
         if (_corrections == null) _loadCorrections();
       case _Tab.history:
         if (_imports == null) _loadImports();
       case _Tab.legacy:
         if (_legacy == null) _loadLegacy();
-      case _Tab.roster || _Tab.import:
+      case _Tab.roster:
         break;
     }
   }
@@ -296,7 +343,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
       setState(() {
         _rosterRows = more ? [..._rosterRows, ...page.rows] : page.rows;
         _nextPageToken = page.nextPageToken;
-        if (!more) _selected.clear();
       });
     } catch (e) {
       if (mounted) setState(() => _rosterError = _errorText(e));
@@ -306,10 +352,27 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   }
 
   Widget _rosterTab() {
-    final selectable = _rosterRows.where((r) => !r.activated).toList();
+    final activatedCount = _rosterRows
+        .where((r) => r.status != 'deactivated' && r.activated)
+        .length;
+    final notActivatedCount = _rosterRows
+        .where((r) => r.status != 'deactivated' && !r.activated)
+        .length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        RosterSummaryMetricsStrip(
+          totalLoaded: _rosterRows.length,
+          activatedCount: activatedCount,
+          notActivatedCount: notActivatedCount,
+          selectedCount: 0,
+          activeStatusFilter: _statusFilter,
+          onToggleStatusFilter: (next) {
+            _statusFilter = next;
+            _loadRoster();
+          },
+        ),
+        const SizedBox(height: 14),
         Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -381,34 +444,8 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
               icon: const Icon(Icons.refresh),
               label: const Text('Refresh'),
             ),
-            if (_selected.isNotEmpty)
-              FilledButton.icon(
-                onPressed: _issueSelected,
-                icon: const Icon(Icons.vpn_key_outlined),
-                label: Text('Issue activation codes (${_selected.length})'),
-              ),
           ],
         ),
-        if (selectable.isNotEmpty)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              onPressed: () => setState(() {
-                if (_selected.length == selectable.length) {
-                  _selected.clear();
-                } else {
-                  _selected
-                    ..clear()
-                    ..addAll(selectable.map((r) => r.studentNo));
-                }
-              }),
-              child: Text(
-                _selected.length == selectable.length
-                    ? 'Clear selection'
-                    : 'Select all not activated',
-              ),
-            ),
-          ),
         const SizedBox(height: 8),
         if (_rosterError != null) _error(_rosterError!),
         if (_rosterRows.isEmpty && !_rosterLoading && _rosterError == null)
@@ -436,31 +473,58 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
     return r.personalInfoComplete ? 'Activated' : 'Activated · info incomplete';
   }
 
+  RosterBadgeTone _statusTone(RosterRowView r) {
+    if (r.status == 'deactivated') return RosterBadgeTone.red;
+    if (!r.activated) return RosterBadgeTone.amber;
+    return r.personalInfoComplete
+        ? RosterBadgeTone.green
+        : RosterBadgeTone.blue;
+  }
+
+  IconData _statusIcon(RosterRowView r) {
+    if (r.status == 'deactivated') return Icons.block_outlined;
+    if (!r.activated) return Icons.schedule_outlined;
+    return r.personalInfoComplete
+        ? Icons.verified_user_outlined
+        : Icons.info_outline;
+  }
+
   Widget _rosterRowTile(RosterRowView row) {
     final busy = _busyRows.contains(row.studentNo);
     final deactivated = row.status == 'deactivated';
-    return Card(
+    return AnimatedContainer(
+      duration: rosterAnimDuration(context, const Duration(milliseconds: 160)),
       margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: AdminColors.border,
+          width: 1,
+        ),
+      ),
       child: ListTile(
-        leading: row.activated
-            ? const SizedBox(width: 40)
-            : Checkbox(
-                value: _selected.contains(row.studentNo),
-                onChanged: (v) => setState(() {
-                  v == true
-                      ? _selected.add(row.studentNo)
-                      : _selected.remove(row.studentNo);
-                }),
-              ),
         title: Text(
           '${row.name} · ${row.studentNo}',
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
-        subtitle: Text(
-          '${row.college} · ${row.course} · ${row.yearLevel}\n'
-          '${_statusLabel(row)}',
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('${row.college} · ${row.course} · ${row.yearLevel}'),
+              RosterSemanticPill(
+                label: _statusLabel(row),
+                tone: _statusTone(row),
+                icon: _statusIcon(row),
+                compact: true,
+              ),
+            ],
+          ),
         ),
-        isThreeLine: true,
         trailing: busy
             ? const SizedBox(
                 width: 20,
@@ -472,16 +536,11 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
                 onSelected: (v) => _rowAction(row, v),
                 itemBuilder: (_) => [
                   const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                  if (!row.activated) ...[
+                  if (!row.activated)
                     const PopupMenuItem(
                       value: 'lock',
-                      child: Text('Reset activation lock'),
+                      child: Text('Reset setup lock'),
                     ),
-                    const PopupMenuItem(
-                      value: 'issue',
-                      child: Text('Issue new activation code'),
-                    ),
-                  ],
                   if (row.activated)
                     const PopupMenuItem(
                       value: 'revoke',
@@ -510,10 +569,8 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
       case 'lock':
         await _guarded(row.studentNo, () async {
           await _repo.resetActivationLock(row.studentNo);
-          _toast('Activation lock reset for ${row.studentNo}.');
+          _toast('Setup lock reset for ${row.studentNo}.');
         });
-      case 'issue':
-        await _issueCodes([row.studentNo]);
       case 'revoke':
         await _revoke(row);
       case 'toggle':
@@ -591,130 +648,28 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         _ReasonDialog(title: title, body: body, confirmLabel: confirmLabel),
   );
 
-  // -------------------------------------------------- codes (issue/revoke)
-
-  Future<void> _issueSelected() => _issueCodes(_selected.toList());
-
-  void _codeCallStarted() {
-    _codeCalls++;
-    _syncGuard();
-  }
-
-  void _codeCallEnded() {
-    if (_codeCalls > 0) _codeCalls--;
-    _syncGuard();
-  }
-
-  Future<void> _issueCodes(List<String> studentNos) async {
-    final multiple = studentNos.length > 1;
-    final ok = await _confirm(
-      title: 'Issue new activation code${multiple ? 's' : ''}?',
-      body: multiple
-          ? 'New one-time codes will be issued for ${studentNos.length} '
-                'students. Any earlier code for them stops working.'
-          : 'A new one-time code will be issued for ${studentNos.single}. '
-                'Any earlier code stops working.',
-      confirmLabel: 'Issue',
-    );
-    if (!ok || !mounted) return;
-    setState(() {
-      _busyRows.addAll(studentNos);
-      _codeCallStarted();
-    });
-    try {
-      final result = await _repo.issueActivationCodes(studentNos);
-      if (!mounted) return;
-      setState(() {
-        _selected.removeAll(studentNos);
-        _busyRows.removeAll(studentNos);
-        _codeCallEnded();
-      });
-      await _showCodesDialog(
-        title: 'Activation codes issued',
-        codes: result.codes,
-        showCodes: false,
-        skipped: result.skipped,
-      );
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busyRows.removeAll(studentNos);
-          _codeCallEnded();
-        });
-      }
-      _toast(_errorText(e));
-    }
-  }
+  // ------------------------------------------------------------ revoke
 
   Future<void> _revoke(RosterRowView row) async {
     final reason = await _askReason(
       title: 'Revoke activation?',
       body:
           '${row.name} (${row.studentNo}) will lose access to the claimed '
-          'account. The data is kept and a new activation code is issued. '
-          'Enter the reason for the audit log.',
+          'account. The data is kept and the student can set up the account '
+          'again. Enter the reason for the audit log.',
       confirmLabel: 'Revoke activation',
     );
     if (reason == null || !mounted) return;
-    setState(() {
-      _busyRows.add(row.studentNo);
-      _codeCallStarted();
-    });
+    setState(() => _busyRows.add(row.studentNo));
     try {
-      final code = await _repo.revokeActivation(row.studentNo, reason);
+      await _repo.revokeActivation(row.studentNo, reason);
       if (!mounted) return;
-      setState(() {
-        _busyRows.remove(row.studentNo);
-        _codeCallEnded();
-      });
-      await _showCodesDialog(
-        title: 'Activation revoked',
-        codes: [code],
-        showCodes: true,
-      );
-      if (mounted) await _loadRoster();
+      setState(() => _busyRows.remove(row.studentNo));
+      _toast('Activation revoked. The student can set up the account again.');
+      await _loadRoster();
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busyRows.remove(row.studentNo);
-          _codeCallEnded();
-        });
-      }
+      if (mounted) setState(() => _busyRows.remove(row.studentNo));
       _toast(_errorText(e));
-    }
-  }
-
-  Future<void> _showCodesDialog({
-    required String title,
-    required List<IssuedActivationCode> codes,
-    required bool showCodes,
-    List<({String studentNo, String reason})> skipped = const [],
-  }) async {
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _CodesDialog(
-        title: title,
-        codes: codes,
-        showCodes: showCodes,
-        skipped: skipped,
-        onDownload: () => _downloadSlips(codes),
-      ),
-    );
-  }
-
-  /// Returns true when the browser download was started.
-  bool _downloadSlips(List<IssuedActivationCode> codes) {
-    try {
-      widget.download(
-        'activation_slips_${DateTime.now().toIso8601String().substring(0, 10)}.xlsx',
-        buildActivationSlipsXlsx(codes),
-        _xlsxMime,
-      );
-      return true;
-    } catch (_) {
-      _toast('The download could not be started.');
-      return false;
     }
   }
 
@@ -844,39 +799,12 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         _importing) {
       return;
     }
-    if (_codes.isNotEmpty && !_codesDownloaded) {
-      final discard = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Discard undownloaded codes?'),
-          content: const Text(
-            'Activation codes from the previous import have not been '
-            'downloaded. Starting a new import removes them for good. '
-            '$codesShownOnceWarning',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Go back'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Discard and import'),
-            ),
-          ],
-        ),
-      );
-      if (discard != true || !mounted) return;
-    }
     final chunks = chunkRows(parsed.rows);
     setState(() {
       _importing = true;
-      _syncGuard();
       _importError = null;
       _importCounts = null;
       _partial = null;
-      _codes.clear();
-      _codesDownloaded = true;
     });
     final totals = <String, int>{};
     try {
@@ -892,7 +820,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         for (final e in result.counts.entries) {
           totals[e.key] = (totals[e.key] ?? 0) + e.value;
         }
-        _codes.addAll(result.codes);
         if (result.isPartial) {
           if (mounted) {
             setState(() {
@@ -924,11 +851,14 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
           _importCounts = totals.isEmpty && _importError != null
               ? null
               : totals;
-          _codesDownloaded = _codes.isEmpty;
           _parsed = null;
           _previewRows = null;
           _file = null;
-          _syncGuard();
+          if (_importMode == RosterImportMode.manual &&
+              _importError == null &&
+              _partial == null) {
+            _resetManualRowsToSingleEmpty();
+          }
         });
         _imports = null;
         _loadRoster();
@@ -936,47 +866,256 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
     }
   }
 
-  void _downloadImportSlips() {
-    if (_downloadSlips(List.of(_codes))) {
-      setState(() {
-        _codesDownloaded = true;
-        _syncGuard();
-      });
+  Future<void> _ensureAcademicOptions() async {
+    if (_academicOptions != null || _academicLoading) return;
+    _academicLoading = true;
+    try {
+      final options = await _repo.listAcademicOptions();
+      if (mounted) setState(() => _academicOptions = options);
+    } catch (_) {
+      // Quick-pick suggestions are optional; manual fields remain editable.
+    } finally {
+      _academicLoading = false;
     }
+  }
+
+  String _manualSourceName() {
+    final now = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return 'manual_bulk_entry_${now.year}-${two(now.month)}-${two(now.day)}.csv';
+  }
+
+  void _switchImportMode(RosterImportMode mode) {
+    if (_importMode == mode || _importing || _previewing) return;
+    setState(() {
+      _importMode = mode;
+      _previewRows = null;
+      _previewCounts = const {};
+      _importError = null;
+      if (mode == RosterImportMode.manual) {
+        _file = null;
+        _parsed = null;
+        _recomputeManualValidation(notify: false);
+      }
+    });
+    if (mode == RosterImportMode.manual) {
+      _ensureAcademicOptions();
+    }
+  }
+
+  void _recomputeManualValidation({bool notify = true}) {
+    final validation = validateManualRosterDrafts([
+      for (final row in _manualRows) row.toDraftMap(),
+    ]);
+    if (!notify) {
+      _manualValidation = validation;
+      return;
+    }
+    setState(() {
+      _manualValidation = validation;
+      _parsed = null;
+      _file = null;
+      _previewRows = null;
+      _previewCounts = const {};
+      _importError = null;
+      _importCounts = null;
+      _partial = null;
+    });
+  }
+
+  void _addManualRows(int count) {
+    setState(() {
+      for (var i = 0; i < count; i++) {
+        _manualRows.add(ManualRosterRowControllers());
+      }
+      _manualValidation = validateManualRosterDrafts([
+        for (final row in _manualRows) row.toDraftMap(),
+      ]);
+      _previewRows = null;
+      _previewCounts = const {};
+    });
+  }
+
+  void _duplicateManualRow(int index) {
+    if (index < 0 || index >= _manualRows.length) return;
+    final copy = _manualRows[index].toDraftMap();
+    copy['studentNo'] = '';
+    setState(() {
+      _manualRows.insert(index + 1, ManualRosterRowControllers(initial: copy));
+      _manualValidation = validateManualRosterDrafts([
+        for (final row in _manualRows) row.toDraftMap(),
+      ]);
+      _previewRows = null;
+      _previewCounts = const {};
+    });
+  }
+
+  void _removeManualRow(int index) {
+    if (_manualRows.length <= 1 || index < 0 || index >= _manualRows.length) {
+      return;
+    }
+    final removed = _manualRows.removeAt(index);
+    removed.dispose();
+    _recomputeManualValidation();
+  }
+
+  void _resetManualRowsToSingleEmpty() {
+    for (final row in _manualRows) {
+      row.dispose();
+    }
+    _manualRows
+      ..clear()
+      ..add(ManualRosterRowControllers());
+    _manualValidation = validateManualRosterDrafts(const []);
+  }
+
+  void _clearManualRows() {
+    setState(() {
+      _resetManualRowsToSingleEmpty();
+      _previewRows = null;
+      _previewCounts = const {};
+      _importError = null;
+    });
+  }
+
+  ({bool ok, String? error, int addedCount}) _applyBulkPaste(
+    String rawText, {
+    required bool replaceExisting,
+  }) {
+    final parsed = parseRosterBulkText(rawText);
+    if (parsed.fileErrors.isNotEmpty) {
+      return (ok: false, error: parsed.fileErrors.first, addedCount: 0);
+    }
+    setState(() {
+      final hasOnlyBlankInitial =
+          _manualRows.length == 1 && _manualValidation.nonEmptyCount == 0;
+      if (replaceExisting || hasOnlyBlankInitial) {
+        for (final row in _manualRows) {
+          row.dispose();
+        }
+        _manualRows.clear();
+      }
+      for (final row in parsed.rows) {
+        _manualRows.add(ManualRosterRowControllers(initial: row));
+      }
+      _manualValidation = validateManualRosterDrafts([
+        for (final row in _manualRows) row.toDraftMap(),
+      ]);
+      _previewRows = null;
+      _previewCounts = const {};
+      _importError = null;
+      _importCounts = null;
+      _partial = null;
+    });
+    return (ok: true, error: null, addedCount: parsed.rows.length);
+  }
+
+  Future<void> _previewManual() async {
+    final validation = validateManualRosterDrafts([
+      for (final row in _manualRows) row.toDraftMap(),
+    ]);
+    setState(() => _manualValidation = validation);
+    if (validation.hasBlockingIssues) return;
+    final parsed = validation.toParseResult();
+    setState(() {
+      _file = AdminImportFile(name: _manualSourceName(), bytes: Uint8List(0));
+      _parsed = parsed;
+      _previewRows = null;
+      _previewCounts = const {};
+      _importError = null;
+      _importCounts = null;
+      _partial = null;
+    });
+    await _preview();
   }
 
   Widget _importTab() {
     final parsed = _parsed;
     final file = _file;
+    final hasPreparedRows = _importMode == RosterImportMode.file
+        ? parsed != null &&
+              parsed.rows.isNotEmpty &&
+              !parsed.hasBlockingProblems
+        : !_manualValidation.hasBlockingIssues;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            FilledButton.icon(
-              onPressed: _importing || _previewing ? null : _chooseFile,
-              icon: const Icon(Icons.upload_file_outlined),
-              label: const Text('Choose roster file'),
-            ),
-            OutlinedButton.icon(
-              onPressed: _downloadTemplate,
-              icon: const Icon(Icons.download_outlined),
-              label: const Text('Download template'),
-            ),
-          ],
+        ImportPipelineSteps(
+          hasPreparedRows: hasPreparedRows,
+          hasPreview: _previewRows != null,
+          hasImported: _importCounts != null,
+          isBusy: _previewing || _importing,
         ),
-        const SizedBox(height: 8),
-        const Text('Accepts .xlsx or .csv using the template columns.'),
+        const SizedBox(height: 16),
+        ImportSourceModeToggle(
+          mode: _importMode,
+          enabled: !_previewing && !_importing,
+          onChanged: _switchImportMode,
+        ),
+        const SizedBox(height: 16),
+        AnimatedSwitcher(
+          duration: rosterAnimDuration(context),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          child: _importMode == RosterImportMode.file
+              ? KeyedSubtree(
+                  key: const ValueKey('file_mode'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          FilledButton.icon(
+                            onPressed: _importing || _previewing
+                                ? null
+                                : _chooseFile,
+                            icon: const Icon(Icons.upload_file_outlined),
+                            label: const Text('Choose roster file'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _downloadTemplate,
+                            icon: const Icon(Icons.download_outlined),
+                            label: const Text('Download template'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Accepts .xlsx or .csv using the template columns.',
+                      ),
+                      if (parsed != null && file != null) ...[
+                        const SizedBox(height: 16),
+                        _fileCard(file, parsed),
+                      ],
+                    ],
+                  ),
+                )
+              : KeyedSubtree(
+                  key: const ValueKey('manual_mode'),
+                  child: ManualBulkImportPanel(
+                    rows: _manualRows,
+                    validation: _manualValidation,
+                    academicOptions: _academicOptions,
+                    yearLevels: _yearLevels,
+                    busy: _previewing || _importing,
+                    onRowsChanged: _recomputeManualValidation,
+                    onAddRow: () => _addManualRows(1),
+                    onAddFiveRows: () => _addManualRows(5),
+                    onDuplicateRow: _duplicateManualRow,
+                    onRemoveRow: _removeManualRow,
+                    onClearAll: _clearManualRows,
+                    onApplyBulkPaste: _applyBulkPaste,
+                    onDownloadTemplate: _downloadTemplate,
+                    onPreview: _previewManual,
+                  ),
+                ),
+        ),
         if (_importError != null) _error(_importError!),
         if (_partial != null) _partialBanner(_partial!),
         if (_importCounts != null) _summaryCard(),
-        if (_codes.isNotEmpty && !_importing) _slipsCard(),
-        if (parsed != null && file != null) ...[
-          const SizedBox(height: 16),
-          _fileCard(file, parsed),
-        ],
         if (_previewRows != null) ...[
           const SizedBox(height: 16),
           _previewCard(),
@@ -1011,8 +1150,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
           Text('Committed: ${_countsLine(_importCounts ?? result.counts)}'),
           Text('$_partialFailedCount row(s) were not imported.'),
           const Text(
-            'No further parts were sent. Download the slips for the rows that '
-            'were imported, then fix the file and import it again.',
+            'No further parts were sent. Fix the file and import it again.',
           ),
         ],
       ),
@@ -1030,33 +1168,6 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
             _countsLine(_importCounts!),
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
           ),
-        ],
-      ),
-    ),
-  );
-
-  Widget _slipsCard() => Card(
-    margin: const EdgeInsets.only(top: 16),
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            codesShownOnceWarning,
-            style: const TextStyle(color: AdminColors.danger),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: _downloadImportSlips,
-            icon: const Icon(Icons.download),
-            label: Text('Download activation slips (${_codes.length})'),
-          ),
-          if (_codesDownloaded)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('Activation slips downloaded.'),
-            ),
         ],
       ),
     ),
@@ -1125,12 +1236,28 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                Chip(label: Text('New ${_previewCounts['new'] ?? 0}')),
-                Chip(label: Text('Update ${_previewCounts['update'] ?? 0}')),
-                Chip(
-                  label: Text('Links account ${_previewCounts['link'] ?? 0}'),
+                RosterSemanticPill(
+                  label: 'New ${_previewCounts['new'] ?? 0}',
+                  tone: RosterBadgeTone.green,
+                  icon: Icons.person_add_alt_1_outlined,
                 ),
-                Chip(label: Text('Error ${_previewCounts['error'] ?? 0}')),
+                RosterSemanticPill(
+                  label: 'Update ${_previewCounts['update'] ?? 0}',
+                  tone: RosterBadgeTone.blue,
+                  icon: Icons.sync_alt_rounded,
+                ),
+                RosterSemanticPill(
+                  label: 'Links account ${_previewCounts['link'] ?? 0}',
+                  tone: RosterBadgeTone.amber,
+                  icon: Icons.link_rounded,
+                ),
+                RosterSemanticPill(
+                  label: 'Error ${_previewCounts['error'] ?? 0}',
+                  tone: (_previewCounts['error'] ?? 0) > 0
+                      ? RosterBadgeTone.red
+                      : RosterBadgeTone.neutral,
+                  icon: Icons.error_outline,
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -1145,19 +1272,42 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
                 separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (_, i) {
                   final r = rows[i];
-                  final label = switch (r.kind) {
-                    RosterPreviewKind.newRow => 'New',
-                    RosterPreviewKind.update => 'Update',
-                    RosterPreviewKind.link => 'Links account',
-                    RosterPreviewKind.error => 'Error',
+                  final (label, rowTone) = switch (r.kind) {
+                    RosterPreviewKind.newRow => ('New', RosterBadgeTone.green),
+                    RosterPreviewKind.update => (
+                      'Update',
+                      RosterBadgeTone.blue,
+                    ),
+                    RosterPreviewKind.link => (
+                      'Links account',
+                      RosterBadgeTone.amber,
+                    ),
+                    RosterPreviewKind.error => ('Error', RosterBadgeTone.red),
                   };
+                  final displayRow = _importMode == RosterImportMode.manual
+                      ? r.index + 1
+                      : r.index + 2;
                   return ListTile(
                     dense: true,
-                    title: Text('${r.studentNo} · $label'),
+                    title: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${r.studentNo} · $label',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        RosterSemanticPill(
+                          label: label,
+                          tone: rowTone,
+                          compact: true,
+                        ),
+                      ],
+                    ),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Row ${r.index + 2} · Born ${dobOf(r.index)}'),
+                        Text('Row $displayRow · Born ${dobOf(r.index)}'),
                         for (final c in r.changes.entries)
                           Text(
                             '${c.key}: ${_spellIfDate(c.value.from)} → '
@@ -1197,9 +1347,12 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
             ),
             const SizedBox(height: 12),
             if (_previewHasErrors)
-              const Text(
-                'Fix the error rows in your file and choose it again. '
-                'Nothing is imported while any row has an error.',
+              Text(
+                _importMode == RosterImportMode.manual
+                    ? 'Fix the error rows above and preview again. '
+                          'Nothing is imported while any row has an error.'
+                    : 'Fix the error rows in your file and choose it again. '
+                          'Nothing is imported while any row has an error.',
               ),
             if (_progress.isNotEmpty) Text(_progress),
             const SizedBox(height: 8),
@@ -1491,6 +1644,14 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
           children: [
             Row(
               children: [
+                if (record.fileName.startsWith('manual_bulk_entry_')) ...[
+                  const Icon(
+                    Icons.edit_note_rounded,
+                    size: 17,
+                    color: AdminColors.muted,
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 Expanded(
                   child: Text(
                     record.fileName,
@@ -1506,9 +1667,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
                   decoration: BoxDecoration(
                     color: style.bg,
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: style.fg.withValues(alpha: 0.25),
-                    ),
+                    border: Border.all(color: style.fg.withValues(alpha: 0.25)),
                   ),
                   child: Text(
                     style.label,
@@ -1532,6 +1691,132 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
         ),
       ),
     );
+  }
+
+  // ===================================================================
+  // Account requests tab
+  // ===================================================================
+
+  Future<void> _loadClaims() async {
+    setState(() => _claimsError = null);
+    try {
+      final list = await _repo.listAccountClaims();
+      if (mounted) setState(() => _claims = list);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _claims ??= const [];
+          _claimsError = _errorText(e);
+        });
+      }
+    }
+  }
+
+  Widget _claimsTab() {
+    final list = _claims;
+    if (list == null) return _loading();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Students who matched a roster record and verified a personal '
+          'email. Approve a request only when you have confirmed the student '
+          'is the person on the record; the email alone does not prove it.',
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _loadClaims,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh'),
+          ),
+        ),
+        if (_claimsError != null) _error(_claimsError!),
+        if (list.isEmpty && _claimsError == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text('No account requests are waiting.'),
+          ),
+        for (final c in list) _claimTile(c),
+      ],
+    );
+  }
+
+  Widget _claimTile(StudentAccountClaim c) {
+    final busy = _busyClaims.contains(c.uid);
+    return Card(
+      margin: const EdgeInsets.only(top: 8),
+      child: ListTile(
+        isThreeLine: true,
+        title: Text(
+          '${c.name} · ${c.studentNo}',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          '${c.college} · ${c.course} · ${c.yearLevel}\n'
+          'Personal email: ${c.email}'
+          '${c.rosterAlreadyClaimed ? '\nThis record is already claimed: reject the request.' : ''}',
+        ),
+        trailing: busy
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Wrap(
+                spacing: 8,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => _reviewClaim(c, approve: false),
+                    child: const Text('Reject'),
+                  ),
+                  FilledButton(
+                    onPressed: c.rosterAlreadyClaimed
+                        ? null
+                        : () => _reviewClaim(c, approve: true),
+                    child: const Text('Approve'),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Future<void> _reviewClaim(
+    StudentAccountClaim c, {
+    required bool approve,
+  }) async {
+    final ok = approve
+        ? await showDialog<bool>(
+                context: context,
+                builder: (_) => _ApproveClaimDialog(claim: c),
+              ) ??
+              false
+        : await _confirm(
+            title: 'Reject this request?',
+            body:
+                'The request is deleted and the Student ID is free for the '
+                'real student to set up. Nothing else changes.',
+            confirmLabel: 'Reject',
+          );
+    if (!ok || !mounted) return;
+    setState(() => _busyClaims.add(c.uid));
+    try {
+      if (approve) {
+        await _repo.approveAccountClaim(c.uid);
+        _toast('Approved ${c.studentNo}.');
+      } else {
+        await _repo.rejectAccountClaim(c.uid);
+        _toast('Rejected the request for ${c.studentNo}.');
+      }
+      if (mounted) setState(() => _claims?.removeWhere((x) => x.uid == c.uid));
+    } catch (e) {
+      _toast(_errorText(e));
+    } finally {
+      if (mounted) setState(() => _busyClaims.remove(c.uid));
+    }
+    if (mounted) await _loadClaims();
   }
 
   Future<void> _loadLegacy() async {
@@ -1638,102 +1923,60 @@ class _ReasonDialogState extends State<_ReasonDialog> {
   );
 }
 
-class _CodesDialog extends StatefulWidget {
-  const _CodesDialog({
-    required this.title,
-    required this.codes,
-    required this.showCodes,
-    required this.skipped,
-    required this.onDownload,
-  });
-  final String title;
-  final List<IssuedActivationCode> codes;
-  final bool showCodes;
-  final List<({String studentNo, String reason})> skipped;
-  final bool Function() onDownload;
+/// Approval needs the administrator's explicit statement that they verified
+/// the student's identity themselves; the server refuses without it.
+class _ApproveClaimDialog extends StatefulWidget {
+  const _ApproveClaimDialog({required this.claim});
+  final StudentAccountClaim claim;
 
   @override
-  State<_CodesDialog> createState() => _CodesDialogState();
+  State<_ApproveClaimDialog> createState() => _ApproveClaimDialogState();
 }
 
-class _CodesDialogState extends State<_CodesDialog> {
-  bool _downloaded = false;
-
-  Future<void> _close() async {
-    if (!_downloaded && widget.codes.isNotEmpty) {
-      final leave = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Close without downloading?'),
-          content: const Text(codesShownOnceWarning),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Go back'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Close anyway'),
-            ),
-          ],
-        ),
-      );
-      if (leave != true || !mounted) return;
-    }
-    if (mounted) Navigator.pop(context);
-  }
+class _ApproveClaimDialogState extends State<_ApproveClaimDialog> {
+  bool _verified = false;
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.title),
-    content: SingleChildScrollView(
-      child: Column(
+  Widget build(BuildContext context) {
+    final c = widget.claim;
+    return AlertDialog(
+      title: const Text('Approve this account?'),
+      content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (widget.codes.isEmpty)
-            const Text('No codes were issued.')
-          else ...[
-            Text('${widget.codes.length} code(s) issued.'),
-            const SizedBox(height: 8),
-            const Text(
-              codesShownOnceWarning,
-              style: TextStyle(color: AdminColors.danger),
+          Text(
+            '${c.name} (${c.studentNo}) will own this roster record and can '
+            'sign in with the password they chose. ${c.email} becomes their '
+            'recovery email.',
+          ),
+          const SizedBox(height: 12),
+          CheckboxListTile(
+            key: const Key('claim-identity-verified'),
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            value: _verified,
+            onChanged: (v) => setState(() => _verified = v == true),
+            title: const Text(
+              'I confirmed this person is the student on this record, '
+              'independently of what they typed (in person or against '
+              'school records).',
             ),
-          ],
-          if (widget.showCodes)
-            for (final c in widget.codes)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: SelectableText(
-                  '${c.studentNo}: ${c.code}',
-                  style: const TextStyle(
-                    fontFamily: 'monospace',
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-          for (final s in widget.skipped)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text('Skipped ${s.studentNo}: ${s.reason}'),
-            ),
+          ),
         ],
       ),
-    ),
-    actions: [
-      if (widget.codes.isNotEmpty)
-        FilledButton.icon(
-          onPressed: () {
-            if (widget.onDownload()) setState(() => _downloaded = true);
-          },
-          icon: const Icon(Icons.download),
-          label: Text('Download activation slips (${widget.codes.length})'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
         ),
-      TextButton(onPressed: _close, child: const Text('Close')),
-    ],
-  );
+        FilledButton(
+          onPressed: _verified ? () => Navigator.pop(context, true) : null,
+          child: const Text('Approve'),
+        ),
+      ],
+    );
+  }
 }
 
 class _EditRecordDialog extends StatefulWidget {

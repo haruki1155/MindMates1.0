@@ -17,6 +17,39 @@ abstract final class AdminColors {
   static const accentFaint = Color(0xFFFFFBE8);
   static const success = Color(0xFF3F7257);
   static const danger = Color(0xFFB64B4B);
+
+  // Semantic status tokens (WCAG AA contrast >= 4.5:1 for fg on bg).
+  static const amberBg = Color(0xFFFEF3C7);
+  static const amberFg = Color(0xFF92400E);
+  static const amberBorder = Color(0xFFF59E0B);
+
+  static const blueBg = Color(0xFFDBEAFE);
+  static const blueFg = Color(0xFF1E40AF);
+  static const blueBorder = Color(0xFF60A5FA);
+
+  static const greenBg = Color(0xFFDCFCE7);
+  static const greenFg = Color(0xFF166534);
+  static const greenBorder = Color(0xFF4ADE80);
+
+  static const violetBg = Color(0xFFEDE9FE);
+  static const violetFg = Color(0xFF5B21B6);
+  static const violetBorder = Color(0xFFA78BFA);
+
+  static const redBg = Color(0xFFFEE2E2);
+  static const redFg = Color(0xFF991B1B);
+  static const redBorder = Color(0xFFF87171);
+
+  static const neutralBg = Color(0xFFF3F4F6);
+  static const neutralFg = Color(0xFF374151);
+  static const neutralBorder = Color(0xFFD1D5DB);
+}
+
+/// Consistent spacing scale for Admin Web screens (8/12/16/24px).
+abstract final class AdminSpacing {
+  static const double xs = 8;
+  static const double sm = 12;
+  static const double md = 16;
+  static const double lg = 24;
 }
 
 abstract final class AdminTheme {

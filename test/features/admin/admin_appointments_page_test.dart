@@ -24,6 +24,8 @@ class _Repository extends AdminPortalRepository {
   String? agreementAction;
   int? agreementRevision;
   bool uploadCalled = false;
+  String? downloadedPath;
+  String? downloadedAppointmentId;
   Map<String, Object?>? reviewedSubmission;
 
   @override
@@ -36,7 +38,15 @@ class _Repository extends AdminPortalRepository {
   String? get currentUserId => uid;
 
   @override
-  Future<void> changeAppointmentAgreement(AppointmentModel appointment, String action, String requestId, {String? exceptionReason}) async { agreementAction = action; agreementRevision = appointment.proposalRevision; }
+  Future<void> changeAppointmentAgreement(
+    AppointmentModel appointment,
+    String action,
+    String requestId, {
+    String? exceptionReason,
+  }) async {
+    agreementAction = action;
+    agreementRevision = appointment.proposalRevision;
+  }
 
   @override
   Future<List<SessionEvidenceAttachment>> uploadClinicalEvidenceFiles({
@@ -96,6 +106,16 @@ class _Repository extends AdminPortalRepository {
   );
 
   @override
+  Future<Uint8List> getClinicalEvidenceBytes(
+    String path, {
+    String? appointmentId,
+  }) async {
+    downloadedPath = path;
+    downloadedAppointmentId = appointmentId;
+    return Uint8List.fromList([1, 2, 3]);
+  }
+
+  @override
   Stream<List<AppointmentModel>> watchAppointments() => Stream.value(records);
 
   @override
@@ -110,58 +130,122 @@ class _Repository extends AdminPortalRepository {
 }
 
 void main() {
-  testWidgets('completed-session decision preserves summary and file upload only', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1440, 1200));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final record = _appointment(
-      'confirmed', DateTime.now().subtract(const Duration(days: 1)), 'Student A',
-    );
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: AdminAppointmentsPage(
-        repository: _Repository([record], role: AccessRole.counselor),
-        onOpenAssessments: null,
-      )),
-    ));
-    await tester.pumpAndSettle();
-    expect(find.text('Needs action 1'), findsWidgets);
-    await tester.tap(find.text('Review'));
-    await tester.pumpAndSettle();
-    expect(find.text('Session summary (internal)'), findsOneWidget);
-    expect(find.text('Session attachments'), findsOneWidget);
-    expect(find.text('Add images / documents'), findsOneWidget);
-    expect(find.byKey(const Key('clinical-interview-questions')), findsNothing);
-    expect(find.byKey(const Key('clinical-requirements-checked')), findsNothing);
-    expect(find.byKey(const Key('clinical-materials-used')), findsNothing);
-  });
+  testWidgets(
+    'completed-session decision preserves summary and file upload only',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final record = _appointment(
+        'confirmed',
+        DateTime.now().subtract(const Duration(days: 1)),
+        'Student A',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: _Repository([record], role: AccessRole.counselor),
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Needs action 1'), findsWidgets);
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Session summary (internal)'), findsOneWidget);
+      expect(find.text('Session attachments'), findsOneWidget);
+      expect(find.text('Add images / documents'), findsOneWidget);
+      expect(
+        find.byKey(const Key('clinical-interview-questions')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('clinical-requirements-checked')),
+        findsNothing,
+      );
+      expect(find.byKey(const Key('clinical-materials-used')), findsNothing);
+    },
+  );
 
-  testWidgets('PACC reopens its requested-time proposal with a valid counter action', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1440, 1200));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final record = _appointment('requested', DateTime.now().add(const Duration(days: 8)), 'Pending PACC proposal').copyWith(hasScheduleRevision: true, proposalRevision: 1, proposalStatus: 'pending', proposedBy: 'counselor', proposedScheduledAt: DateTime.now().add(const Duration(days: 9)), proposedScheduledTime: '1:00 PM');
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AdminAppointmentsPage(repository: _Repository([record]), onOpenAssessments: null))));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Review'));
-    await tester.pumpAndSettle();
-    expect(find.text('Re-schedule appointment'), findsOneWidget);
-    expect(find.text('Confirm appointment'), findsNothing);
-  });
+  testWidgets(
+    'PACC reopens its requested-time proposal with a valid counter action',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final record =
+          _appointment(
+            'requested',
+            DateTime.now().add(const Duration(days: 8)),
+            'Pending PACC proposal',
+          ).copyWith(
+            hasScheduleRevision: true,
+            proposalRevision: 1,
+            proposalStatus: 'pending',
+            proposedBy: 'counselor',
+            proposedScheduledAt: DateTime.now().add(const Duration(days: 9)),
+            proposedScheduledTime: '1:00 PM',
+          );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: _Repository([record]),
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Re-schedule appointment'), findsOneWidget);
+      expect(find.text('Confirm appointment'), findsNothing);
+    },
+  );
 
-  testWidgets('PACC accepts a student proposal without moving the current time first', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1440, 1200));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final record = _appointment('confirmed', DateTime.now().add(const Duration(days: 8)), 'Agreement student').copyWith(hasScheduleRevision: true, scheduleRevision: 2, proposalRevision: 3, proposalStatus: 'pending', proposedBy: 'student', proposedScheduledAt: DateTime.now().add(const Duration(days: 9)), proposedScheduledTime: '1:00 PM');
-    final repo = _Repository([record]);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: AdminAppointmentsPage(repository: repo, onOpenAssessments: null))));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Review'));
-    await tester.pumpAndSettle();
-    expect(find.text('Current reserved time'), findsOneWidget);
-    expect(find.text('Accept student proposed time'), findsOneWidget);
-    await tester.tap(find.text('Send decision'));
-    await tester.pumpAndSettle();
-    expect(repo.agreementAction, 'accept');
-    expect(repo.agreementRevision, 3);
-  });
+  testWidgets(
+    'PACC accepts a student proposal without moving the current time first',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final record =
+          _appointment(
+            'confirmed',
+            DateTime.now().add(const Duration(days: 8)),
+            'Agreement student',
+          ).copyWith(
+            hasScheduleRevision: true,
+            scheduleRevision: 2,
+            proposalRevision: 3,
+            proposalStatus: 'pending',
+            proposedBy: 'student',
+            proposedScheduledAt: DateTime.now().add(const Duration(days: 9)),
+            proposedScheduledTime: '1:00 PM',
+          );
+      final repo = _Repository([record]);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AdminAppointmentsPage(
+              repository: repo,
+              onOpenAssessments: null,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Review'));
+      await tester.pumpAndSettle();
+      expect(find.text('Current reserved time'), findsOneWidget);
+      expect(find.text('Accept student proposed time'), findsOneWidget);
+      await tester.tap(find.text('Send decision'));
+      await tester.pumpAndSettle();
+      expect(repo.agreementAction, 'accept');
+      expect(repo.agreementRevision, 3);
+    },
+  );
 
   testWidgets('Admin Appointment categories retain finished archived records', (
     tester,
@@ -276,7 +360,7 @@ void main() {
   );
 
   testWidgets(
-    'super-admin disables attachment upload while preserving summary, follow-up, and attachment viewing',
+    'super-admin appointment review is read-only while preserving session documentation viewing',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1440, 1200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -310,52 +394,32 @@ void main() {
 
       await tester.tap(find.text('Review'));
       await tester.pumpAndSettle();
-      expect(find.text('Session summary (internal)'), findsOneWidget);
-      expect(find.text('Offer a follow-up session'), findsOneWidget);
-      expect(
-        find.text(
-          'Session attachments can only be uploaded by an assigned college counselor.',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('PACC decision'), findsNothing);
+      expect(find.text('Send decision'), findsNothing);
       expect(find.text('Add images / documents'), findsNothing);
+      expect(find.text('Close'), findsOneWidget);
 
-      await tester.enterText(
-        find.widgetWithText(TextField, 'Session summary (internal)'),
-        'Super-admin triage summary',
-      );
-      await tester.tap(find.text('Offer a follow-up session'));
+      await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
-      await tester.enterText(
-        find.widgetWithText(TextField, 'Client message'),
-        'Follow-up check-in',
-      );
-      await tester.tap(find.text('Send decision'));
-      await tester.pumpAndSettle();
-
-      expect(repo.uploadCalled, isFalse);
-      expect(repo.reviewedSubmission?['action'], 'completed');
-      expect(
-        repo.reviewedSubmission?['sessionSummary'],
-        'Super-admin triage summary',
-      );
-      expect(repo.reviewedSubmission?['offerFollowUp'], isTrue);
-      expect(
-        repo.reviewedSubmission?['followUpMessage'],
-        'Follow-up check-in',
-      );
-      expect(repo.reviewedSubmission?['attachments'], isEmpty);
 
       await tester.ensureVisible(find.text('Completed 1'));
       await tester.tap(find.text('Completed 1'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('View'));
+      await tester.tap(find.text('Review'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('View session documentation'));
       await tester.pumpAndSettle();
       expect(find.text('Existing summary'), findsOneWidget);
       expect(find.text('Existing worksheet.pdf'), findsOneWidget);
       expect(find.byTooltip('Download Existing worksheet.pdf'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Download Existing worksheet.pdf'));
+      await tester.pumpAndSettle();
+      expect(repo.downloadedAppointmentId, 'Completed Student');
+      expect(
+        repo.downloadedPath,
+        'counseling_session_files/apt/counselor/0123456789abcdef0123456789abcdef.pdf',
+      );
     },
   );
 
@@ -404,7 +468,7 @@ void main() {
     ),
   ]) {
     testWidgets(
-      '${roleCase.label} does not see attachment upload control while preserving summary and follow-up',
+      '${roleCase.label} opens read-only appointment details without decision controls',
       (tester) async {
         await tester.binding.setSurfaceSize(const Size(1440, 1200));
         addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -431,17 +495,15 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('Review'));
+        final buttonLabel = roleCase.role == AccessRole.admin
+            ? 'Review'
+            : 'View';
+        await tester.tap(find.text(buttonLabel));
         await tester.pumpAndSettle();
-        expect(find.text('Session summary (internal)'), findsOneWidget);
-        expect(find.text('Offer a follow-up session'), findsOneWidget);
-        expect(
-          find.text(
-            'Session attachments can only be uploaded by an assigned college counselor.',
-          ),
-          findsOneWidget,
-        );
+        expect(find.text('PACC decision'), findsNothing);
+        expect(find.text('Send decision'), findsNothing);
         expect(find.text('Add images / documents'), findsNothing);
+        expect(find.text('Close'), findsOneWidget);
       },
     );
   }

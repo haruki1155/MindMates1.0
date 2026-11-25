@@ -185,7 +185,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         values: const [
                           'All account statuses',
                           'Active',
-                          'Suspended',
+                          'Inactive',
                           'Pending review',
                           'More information required',
                         ],
@@ -433,8 +433,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     : const Icon(Icons.pause_circle_outline, size: 17),
                 label: Text(
                   _bulkActionInProgress == 'suspend'
-                      ? 'Suspending accounts…'
-                      : 'Suspend selected ($activeSelected)',
+                      ? 'Setting accounts inactive…'
+                      : 'Inactive account ($activeSelected)',
                 ),
               ),
             if (suspendedSelected > 0)
@@ -488,7 +488,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(
-          '${action == 'suspend' ? 'Suspend' : 'Reactivate'} ${selected.length} staff account${selected.length == 1 ? '' : 's'}?',
+          '${action == 'suspend' ? 'Set inactive' : 'Reactivate'} ${selected.length} staff account${selected.length == 1 ? '' : 's'}?',
         ),
         content: TextField(
           controller: reason,
@@ -501,7 +501,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
         ),
         actions: _confirmActions(
           dialogContext,
-          action == 'suspend' ? 'Suspend accounts' : 'Reactivate accounts',
+          action == 'suspend' ? 'Inactive accounts' : 'Reactivate accounts',
         ),
       ),
     );
@@ -595,7 +595,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
           if (status == StaffAccountStatus.approved)
             const PopupMenuItem(
               value: 'suspend',
-              child: Text('Suspend account'),
+              child: Text('Inactive account'),
             ),
           if (status == StaffAccountStatus.disabled)
             const PopupMenuItem(
@@ -652,10 +652,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
   Future<void> _clearLegacyStaffColleges(UserModel user) async {
     final cleaned = await showDialog<bool>(
       context: context,
-      builder: (_) => _LegacyStaffCleanupDialog(
-        user: user,
-        repository: widget.repository,
-      ),
+      builder: (_) =>
+          _LegacyStaffCleanupDialog(user: user, repository: widget.repository),
     );
     if (cleaned == true && mounted && Scaffold.maybeOf(context) != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -977,8 +975,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
             _detail('Email', user.email),
             _detail('Employee ID', user.employeeId),
             _detail('Position', user.position),
-            _detail('Department', user.department ?? user.departmentId),
-            _detail('College', user.collegeId),
+            _detail('Department', user.department),
             if (user.accessRole == AccessRole.counselor ||
                 user.assignedCollegeIds.isNotEmpty)
               _detail(
@@ -987,9 +984,9 @@ class _UserManagementPageState extends State<UserManagementPage> {
                     : 'Legacy college assignments',
                 user.assignedCollegeIds.isEmpty
                     ? 'Unassigned'
-                    : user.assignedCollegeIds.join(', '),
+                    : '${user.assignedCollegeIds.length} assigned',
               ),
-            _detail('Course', user.courseId),
+            _detail('Course', user.course),
             _detail('Account status', user.staffAccountStatus?.label),
             _detail('Portal role', user.accessRole.storedValue),
             _detail('Registered', _date(user.createdAt)),
@@ -1100,21 +1097,29 @@ class _UserManagementPageState extends State<UserManagementPage> {
                   ),
                   const SizedBox(height: 16),
                   if (!historyOnly) ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _detail(
-                            'Role',
-                            _accessRoleLabel(user.accessRole),
-                          ),
-                        ),
-                        Expanded(
-                          child: _detail(
-                            'Account status',
-                            _accountStatus(user),
-                          ),
-                        ),
-                      ],
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final roleDetail = _detail(
+                          'Role',
+                          _accessRoleLabel(user.accessRole),
+                        );
+                        final statusDetail = _detail(
+                          'Account status',
+                          _accountStatus(user),
+                        );
+                        if (constraints.maxWidth < 420) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [roleDetail, statusDetail],
+                          );
+                        }
+                        return Row(
+                          children: [
+                            Expanded(child: roleDetail),
+                            Expanded(child: statusDetail),
+                          ],
+                        );
+                      },
                     ),
                     _detail('Last sign-in', _date(user.lastSignInAt)),
                     _detail('Last active', _date(user.lastActiveAt)),
@@ -1168,8 +1173,8 @@ class _UserManagementPageState extends State<UserManagementPage> {
                               Navigator.pop(context);
                               await _setEnabled(user, false);
                             },
-                            icon: const Icon(Icons.pause_circle_outline),
-                            label: const Text('Suspend'),
+                            icon: const Icon(Icons.block_outlined),
+                            label: const Text('Inactive account'),
                           ),
                         if (user.staffAccountStatus ==
                             StaffAccountStatus.disabled)
@@ -1179,7 +1184,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                               await _setEnabled(user, true);
                             },
                             icon: const Icon(Icons.play_circle_outline),
-                            label: const Text('Reactivate'),
+                            label: const Text('Reactivate account'),
                           ),
                         if (user.staffAccountStatus ==
                             StaffAccountStatus.pending)
@@ -1215,10 +1220,25 @@ class _UserManagementPageState extends State<UserManagementPage> {
     ),
   );
 
-  Widget _detail(String label, String? value) => ListTile(
-    dense: true,
-    title: Text(label),
-    trailing: Text((value ?? '').isEmpty ? '—' : value!),
+  Widget _detail(String label, String? value) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 13, color: AdminColors.muted),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            (value ?? '').isEmpty ? '—' : value!,
+            textAlign: TextAlign.end,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    ),
   );
 
   Future<void> _changeRole(UserModel user) async {
@@ -1348,12 +1368,17 @@ class _UserManagementPageState extends State<UserManagementPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('${enabled ? 'Enable' : 'Disable'} ${user.displayName}'),
+        title: Text(
+          '${enabled ? 'Reactivate account' : 'Inactive account'} — ${user.displayName}',
+        ),
         content: TextField(
           controller: reason,
           decoration: const InputDecoration(labelText: 'Reason'),
         ),
-        actions: _confirmActions(dialogContext, enabled ? 'Enable' : 'Disable'),
+        actions: _confirmActions(
+          dialogContext,
+          enabled ? 'Reactivate account' : 'Inactive account',
+        ),
       ),
     );
     if (confirmed == true && reason.text.trim().length >= 3) {
@@ -1368,7 +1393,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                '${user.displayName} is now ${enabled ? 'active' : 'suspended'}.',
+                '${user.displayName} is now ${enabled ? 'active' : 'inactive'}.',
               ),
             ),
           );
@@ -1717,7 +1742,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
     'All actions',
     'Role changed',
     'Access revoked',
-    'Account suspended',
+    'Account set inactive',
     'Account reactivated',
     'Registration approved',
     'Signed in',
@@ -1790,7 +1815,7 @@ class _ActivityLogViewState extends State<_ActivityLogView> {
   String _actionValue() => switch (actionFilter) {
     'Role changed' => 'STAFF_ROLE_CHANGED',
     'Access revoked' => 'STAFF_ACCESS_REVOKED',
-    'Account suspended' => 'STAFF_ACCOUNT_SUSPENDED',
+    'Account set inactive' => 'STAFF_ACCOUNT_SUSPENDED',
     'Account reactivated' => 'STAFF_ACCOUNT_REACTIVATED',
     'Registration approved' => 'STAFF_REGISTRATION_APPROVED',
     'Signed in' => 'STAFF_SIGNED_IN',
@@ -1977,7 +2002,7 @@ String _accountStatus(UserModel user) => switch (user.staffAccountStatus) {
         : user.registrationStatus == 'email_verification_required'
         ? 'Waiting for email'
         : 'Pending review',
-  StaffAccountStatus.disabled => 'Suspended',
+  StaffAccountStatus.disabled => 'Inactive',
   StaffAccountStatus.rejected => 'Closed',
   null => 'Unknown',
 };
@@ -1992,7 +2017,7 @@ String _accessRoleLabel(AccessRole role) => switch (role) {
 String _auditActionLabel(String action) => switch (action) {
   'STAFF_ROLE_CHANGED' => 'Role changed',
   'STAFF_ACCESS_REVOKED' => 'Portal access revoked',
-  'STAFF_ACCOUNT_SUSPENDED' => 'Account suspended',
+  'STAFF_ACCOUNT_SUSPENDED' => 'Account set inactive',
   'STAFF_ACCOUNT_REACTIVATED' => 'Account reactivated',
   'STAFF_ACCOUNT_ACTIVATED' => 'Account activated',
   'STAFF_COLLEGE_ASSIGNMENTS_UPDATED' =>
@@ -2003,7 +2028,7 @@ String _auditActionLabel(String action) => switch (action) {
   'STUDENT_PERSONAL_INFO_VIEWED' => 'Student information viewed',
   'accessRoleAssigned' => 'Role changed',
   'staffAccountEnabled' => 'Account reactivated',
-  'staffAccountDisabled' => 'Account suspended',
+  'staffAccountDisabled' => 'Account set inactive',
   'staffRegistrationApproved' => 'Invitation accepted',
   'staffRegistrationRejected' => 'Invitation removed',
   _ => action.isEmpty ? 'Access updated' : action,
@@ -2082,7 +2107,9 @@ class _LegacyStaffCleanupDialogState extends State<_LegacyStaffCleanupDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text('Clear legacy college assignments · ${widget.user.displayName}'),
+    title: Text(
+      'Clear legacy college assignments · ${widget.user.displayName}',
+    ),
     content: SizedBox(
       width: 460,
       child: SingleChildScrollView(
@@ -2092,7 +2119,8 @@ class _LegacyStaffCleanupDialogState extends State<_LegacyStaffCleanupDialog> {
           children: [
             Text(
               'Portal staff accounts can no longer hold college assignments. '
-              'Removing: ${widget.user.assignedCollegeIds.join(', ')}',
+              'Removing ${widget.user.assignedCollegeIds.length} legacy assignment'
+              '${widget.user.assignedCollegeIds.length == 1 ? '' : 's'}.',
             ),
             const SizedBox(height: 12),
             TextField(

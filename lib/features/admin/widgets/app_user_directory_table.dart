@@ -20,7 +20,7 @@ bool matchesAppDirectoryGroup(UserModel user, AppDirectoryGroup group) {
 String appDirectoryStatus(UserModel user) {
   final status = (user.accountStatus ?? '').trim().toLowerCase();
   if (status == 'disabled' || status == 'suspended' || status == 'inactive') {
-    return 'Suspended';
+    return 'Inactive';
   }
   if (status == 'rejected' || status == 'closed') return 'Closed';
   return switch (user.verificationStatus) {

@@ -73,11 +73,12 @@ void main() {
         throwsA(isA<_Reached>()),
       );
       expect(functions.calls, hasLength(1));
-      // Staging installs no App Check provider, so the protected name is
-      // aliased to the Dev callable there and only there.
+      // A Staging build without an App Check provider uses the Dev callable;
+      // every other build keeps the protected one.
       expect(
         functions.calls.single.$1,
-        AppEnvironmentConfig.isStaging
+        AppEnvironmentConfig.isStaging &&
+                !AppEnvironmentConfig.stagingAppCheckEnabled
             ? 'createMoodEntryDev'
             : 'createMoodEntry',
       );

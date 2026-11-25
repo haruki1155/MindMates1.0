@@ -142,12 +142,15 @@ test("integrated reschedule, notification retries, queue, confirmation, and revi
   const id = "gate2-integrated";
   const uid = "gate2-integrated-student";
   const staff = "gate2-integrated-staff";
+  const college = "gate2-integrated-college";
   const previousSuperAdmin = process.env.SUPER_ADMIN_UID;
-  process.env.SUPER_ADMIN_UID = staff; // triage path: student has no verified college
+  process.env.SUPER_ADMIN_UID = staff;
   try {
   const ref = db.doc(`appointments/${id}`);
   await ensureAuthUser(staff, true);
-  await db.doc(`users/${staff}`).set({accessRole: "admin"});
+  await db.doc(`colleges/${college}`).set({name: "Gate2 College", code: "G2C", active: true});
+  await db.doc(`users/${uid}`).set({accessRole: "appUser", verificationStatus: "verified", collegeId: college});
+  await db.doc(`users/${staff}`).set({accessRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", assignedCollegeIds: [college]});
   await db.doc("pacc_availability/current").set({openDays: [1, 2, 3, 4, 5], opensAt: "09:00", closesAt: "17:00", presence: "in_office", acceptsWalkIns: false, blackoutDates: []});
   await ref.set({userId: uid, fullName: "Private name", concern: "PRIVATE CONCERN", status: "confirmed", scheduleRevision: 0, scheduledAt: Timestamp.fromMillis(a), scheduledTime: "11:00 AM"});
   await db.doc(`appointment_slots/pacc_${a}`).set({appointmentId: id});
