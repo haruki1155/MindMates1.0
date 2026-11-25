@@ -37,14 +37,19 @@ matches the PR. Merging only redeploys the Staging Admin Web through the Hosting
    The ordinary Staging APK keeps the Dev aliases. Every protected callable the router can
    select is deployed on Staging, except `sendMindAidMessage`, which is not deployed in
    either form (pre-existing).
-2. **Integrate the Staging-only work into `main`**:
-   - push `feat/student-roster-email-login` and open a PR based on `main` after step 1;
-   - bring `32c31db` and `2246a26` from `feat/student-self-claim-staging-integration`.
-   After that, `main` contains everything Staging runs, and a deploy from `main` is safe.
+2. **Integrate the Staging-only work into `main`** (branch
+   `integrate/staging-backend-reconciliation`):
+   - merges `feat/student-roster-email-login` onto `main`;
+   - ports the pure School-ID resolver handler (`32c31db`), byte-identical to the deployed one.
+   Checked against the deployed source archives: every file Staging's 2026-11-24 deploy
+   ran is in this branch, which differs only by `main`'s newer recovery-link code and the
+   resolver. The admin reset hardening (`2246a26`: timing floor, Dev project gate) is
+   **not** in it; PR #78 carries it.
 3. **PR #78** after step 2. It changes admin reset delivery in `account_recovery.ts`, so its
    backend rollout needs the resolver and reset fixes from step 2. It does not depend on this
    PR and does not need to ship with it.
-4. **Recovery links** (from the Hosting migration) after step 2, from `main`:
+4. **Recovery links** (from the Hosting migration) after steps 2 and 3, from `main`. Until #78
+   is merged, a deploy of these from `main` would drop the deployed reset hardening:
 
    ```sh
    # functions/.env.mindmate-staging: ADMIN_WEB_URL=https://paaccmindmate.com
