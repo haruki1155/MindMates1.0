@@ -191,4 +191,3 @@ test("a post ID that still has comments cannot be reused", {skip: !emulated}, as
   await db.doc(`secret_chat_comments/leftover-${postId}`).set({postId, authorId: "someone", message: "old"});
   await rejectsWith(createSecretChatPostHandler(request(uid(), post({postId}))), "already-exists");
 });
-
