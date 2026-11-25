@@ -225,6 +225,9 @@ class FakeCounselorFirestore extends Fake implements FirebaseFirestore {
   Object? nextWriteError;
   Object? persistentWriteError;
 
+  /// Errors thrown by `DocumentReference.update` for a path (rules refusal).
+  final Map<String, Object> updateErrors = {};
+
   int _autoId = 0;
   final Map<String, FakeDocEntry> _docs = {};
   final List<RecordedWrite> writeLog = [];
@@ -865,6 +868,19 @@ class _FakeDocumentReference extends Fake
       db._executeWrites([
         _PendingWriteItem(path: path, data: data, isUpdate: false),
       ]);
+
+  /// Only the best-effort counselorReadAt stamp uses this: applied at once,
+  /// outside the deferred write queue and write log the badge tests drive.
+  @override
+  Future<void> update(Map<Object, Object?> data) async {
+    final error = db.updateErrors[path];
+    if (error != null) throw error;
+    final resolved = db._resolveServerData(
+      data.map((k, v) => MapEntry(k.toString(), v)),
+      db.nextServerTimestamp(),
+    );
+    db.putAndEmit(path, {...?db.getEntry(path)?.data, ...resolved});
+  }
 
   @override
   Future<DocumentSnapshot<Map<String, dynamic>>> get([

@@ -28,7 +28,11 @@ class CounselorThreadReadState {
     required this.serverReadAt,
     required this.receiptHasPendingWrites,
     required this.status,
+    this.studentReadAt,
   });
+
+  /// When the student last read this thread (drives the counselor's Read).
+  final Timestamp? studentReadAt;
 
   final String studentId;
   final String? collegeId;
