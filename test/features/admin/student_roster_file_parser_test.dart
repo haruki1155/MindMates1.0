@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 import 'package:excel_plus/excel_plus.dart' as excel;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/admin/services/student_roster_file_parser.dart';
+import 'package:mind_mates/features/admin/widgets/student_roster_visuals.dart';
 import 'package:mind_mates/models/student_roster_models.dart';
 
 List<int> _workbookWith(String workbookXml) {
@@ -432,6 +433,45 @@ void main() {
       expect(result.normalizedRows.first['dateOfBirth'], '2005-02-15');
       expect(result.hasBlockingIssues, isTrue);
       expect(result.rowErrors[1], hasLength(2));
+    });
+
+    test(
+      'validateManualRosterDrafts keeps a valid Email and omits a blank one',
+      () {
+        Map<String, String> row(String studentNo, String email) => {
+          'studentNo': studentNo,
+          'surname': 'Santos',
+          'firstName': 'Ana',
+          'middleName': '',
+          'dateOfBirth': '02/15/2005',
+          'college': 'CITE',
+          'course': 'BSIT',
+          'yearLevel': '1st Year',
+          'email': email,
+        };
+        final result = validateManualRosterDrafts([
+          row('2021-001', ' Ana.Santos@Example.com '),
+          row('2021-002', ''),
+          row('2021-003', 'not-an-email'),
+        ]);
+
+        expect(result.normalizedRows[0]['email'], 'Ana.Santos@Example.com');
+        expect(result.normalizedRows[1].containsKey('email'), isFalse);
+        expect(result.rowErrors.keys, [2]);
+        expect(result.rowErrors[2], ['Email address is not valid.']);
+        expect(result.readyCount, 2);
+      },
+    );
+
+    test('a pasted Email column reaches the manual grid draft', () {
+      final pasted = parseRosterBulkText(
+        '2021-101\tCruz\tJuan\tM\t02/03/2005\tCITE\tBSIT\t1st Year\tjuan@example.com',
+      );
+      final controllers = ManualRosterRowControllers(
+        initial: pasted.rows.single,
+      );
+      addTearDown(controllers.dispose);
+      expect(controllers.toDraftMap()['email'], 'juan@example.com');
     });
 
     test(

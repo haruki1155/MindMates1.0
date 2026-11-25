@@ -89,7 +89,7 @@ void main() {
     final repo = _Repo();
     await _pumpPortal(tester, repo);
 
-    await tester.tap(find.text('Student Roster'));
+    await tester.tap(find.text('Student Directory'));
     await tester.pumpAndSettle();
     _guardOf(tester).hasUndownloadedCodes = true;
 
@@ -111,7 +111,7 @@ void main() {
     final repo = _Repo();
     await _pumpPortal(tester, repo);
 
-    await tester.tap(find.text('Student Roster'));
+    await tester.tap(find.text('Student Directory'));
     await tester.pumpAndSettle();
     _guardOf(tester).hasUndownloadedCodes = true;
 
@@ -159,7 +159,7 @@ void main() {
     expect(registered.length, 1);
     // It reports exactly the state the in-app guard uses.
     expect(registered.single(), isFalse);
-    await tester.tap(find.text('Student Roster'));
+    await tester.tap(find.text('Student Directory'));
     await tester.pumpAndSettle();
     _guardOf(tester).hasUndownloadedCodes = true;
     expect(registered.single(), isTrue);

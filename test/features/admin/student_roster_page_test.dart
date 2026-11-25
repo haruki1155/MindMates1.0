@@ -863,6 +863,27 @@ void main() {
     },
   );
 
+  testWidgets('bulk manual input shows an optional Email field', (
+    tester,
+  ) async {
+    await _pump(tester, _Repo());
+    await _openTab(tester, 'Import');
+    await tester.tap(find.text('Bulk manual input'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Email (opt.)'), findsOneWidget);
+    expect(find.text('Email *'), findsNothing);
+    final row = find.byKey(const Key('manual_row_0'));
+    expect(
+      find.descendant(of: row, matching: find.text('Email')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: row, matching: find.byType(TextField)),
+      findsNWidgets(9),
+    );
+  });
+
   testWidgets(
     'bulk manual input: interactive row entry validates, previews and imports without activation slips',
     (tester) async {

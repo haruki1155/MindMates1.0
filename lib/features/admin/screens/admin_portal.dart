@@ -91,7 +91,7 @@ extension on AdminPortalPage {
     AdminPortalPage.announcements => 'Announcements',
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
-    AdminPortalPage.studentRoster => 'Student Roster',
+    AdminPortalPage.studentRoster => 'Student Directory',
     AdminPortalPage.academicStructure => 'Academic Structure',
     AdminPortalPage.collegeAssignments => 'College Assignments',
     AdminPortalPage.profiling => 'Profiling Management',

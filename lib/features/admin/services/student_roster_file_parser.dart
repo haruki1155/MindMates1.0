@@ -545,11 +545,20 @@ ManualRosterValidation validateManualRosterDrafts(
       errors.add('Use MM/DD/YYYY (e.g. 02/15/2005) for Date of Birth.');
     }
 
+    // Format check only; the server applies the authoritative email policy.
+    final email = (draft['email'] ?? '').trim();
+    if (email.isNotEmpty &&
+        !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
+      errors.add('Email address is not valid.');
+    }
+
     final normalized = <String, String>{
       for (final key in _fieldKeys)
-        key: key == 'dateOfBirth'
-            ? (parsedDob ?? rawDob)
-            : (draft[key] ?? '').trim(),
+        if (!_optionalKeys.contains(key) ||
+            (draft[key] ?? '').trim().isNotEmpty)
+          key: key == 'dateOfBirth'
+              ? (parsedDob ?? rawDob)
+              : (draft[key] ?? '').trim(),
     };
     normalizedRows.add(normalized);
 
@@ -605,7 +614,7 @@ String displayRosterDateMmDdYyyy(String raw) {
 
 /// Parses pasted spreadsheet (tab-separated) or CSV lines into template rows.
 /// Accepts optional header row matching [rosterTemplateHeaders]; otherwise maps
-/// columns 0..7 in exact template order.
+/// columns 0..8 in exact template order (Email last, optional).
 RosterParseResult parseRosterBulkText(String rawText) {
   final trimmed = rawText.trim();
   if (trimmed.isEmpty) {

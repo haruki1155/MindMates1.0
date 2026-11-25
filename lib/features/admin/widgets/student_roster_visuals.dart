@@ -578,7 +578,8 @@ class ManualRosterRowControllers {
       ),
       college = TextEditingController(text: initial?['college'] ?? ''),
       course = TextEditingController(text: initial?['course'] ?? ''),
-      yearLevel = TextEditingController(text: initial?['yearLevel'] ?? '');
+      yearLevel = TextEditingController(text: initial?['yearLevel'] ?? ''),
+      email = TextEditingController(text: initial?['email'] ?? '');
 
   final TextEditingController studentNo;
   final TextEditingController surname;
@@ -588,6 +589,7 @@ class ManualRosterRowControllers {
   final TextEditingController college;
   final TextEditingController course;
   final TextEditingController yearLevel;
+  final TextEditingController email;
 
   Map<String, String> toDraftMap() => {
     'studentNo': studentNo.text,
@@ -598,6 +600,7 @@ class ManualRosterRowControllers {
     'college': college.text,
     'course': course.text,
     'yearLevel': yearLevel.text,
+    'email': email.text,
   };
 
   void dispose() {
@@ -609,12 +612,13 @@ class ManualRosterRowControllers {
     college.dispose();
     course.dispose();
     yearLevel.dispose();
+    email.dispose();
   }
 }
 
-/// Interactive bulk manual entry panel using the exact Student Roster
+/// Interactive bulk manual entry panel using the exact Student Directory
 /// template columns (`Student No.`, `Surname`, `First Name`, `Middle Name`,
-/// `Date of Birth (MM/DD/YYYY)`, `College`, `Course`, `Year Level`).
+/// `Date of Birth (MM/DD/YYYY)`, `College`, `Course`, `Year Level`, `Email`).
 class ManualBulkImportPanel extends StatefulWidget {
   const ManualBulkImportPanel({
     super.key,
@@ -791,7 +795,7 @@ class _ManualBulkImportPanelState extends State<ManualBulkImportPanel> {
                             border: Border.all(color: AdminColors.border),
                           ),
                           child: Text(
-                            i == 3
+                            i == 3 || i == 8
                                 ? '${rosterTemplateHeaders[i]} (opt.)'
                                 : '${rosterTemplateHeaders[i]} *',
                             style: const TextStyle(
@@ -969,7 +973,7 @@ class _ManualBulkImportPanelState extends State<ManualBulkImportPanel> {
           ),
           const SizedBox(height: 4),
           const Text(
-            'Order: Student No., Surname, First Name, Middle Name, Date of Birth (MM/DD/YYYY), College, Course, Year Level (header row optional).',
+            'Order: Student No., Surname, First Name, Middle Name, Date of Birth (MM/DD/YYYY), College, Course, Year Level, Email (Email optional; header row optional).',
             style: TextStyle(fontSize: 12.5, color: AdminColors.muted),
           ),
           const SizedBox(height: 10),
@@ -1217,6 +1221,14 @@ class _ManualRowCard extends StatelessWidget {
                         options: yearLevels,
                       ),
                     ),
+                    cell(
+                      _field(
+                        controller: controllers.email,
+                        label: rosterTemplateHeaders[8],
+                        hint: 'Optional · name@example.com',
+                        keyboardType: TextInputType.emailAddress,
+                      ),
+                    ),
                   ],
                 );
               },
@@ -1259,9 +1271,12 @@ class _ManualRowCard extends StatelessWidget {
     required TextEditingController controller,
     required String label,
     required String hint,
+    TextInputType? keyboardType,
   }) => TextField(
     controller: controller,
     enabled: !busy,
+    keyboardType: keyboardType,
+    autocorrect: keyboardType != TextInputType.emailAddress,
     onChanged: (_) => onChanged(),
     decoration: InputDecoration(labelText: label, hintText: hint),
   );
