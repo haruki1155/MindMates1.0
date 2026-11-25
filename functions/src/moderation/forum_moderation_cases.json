@@ -407,6 +407,294 @@
   {
    "text": "u\u0142ol",
    "why": "non-decomposing look-alike letters"
+  },
+  {
+   "text": "you are so stupid",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you're an idiot",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "what a moron",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you're such a loser",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you are ugly",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you are pathetic",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you're worthless",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you are useless",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you're disgusting",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you are trash",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you're garbage",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "shut up",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "i hate you",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "nobody likes you",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "no one likes you",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "you suck",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "go away loser",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "fat pig",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "this exam is stupid and so is the prof",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "the prof is an idiot",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "freak",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "weirdo ka",
+   "why": "english insult or bad-mouthing"
+  },
+  {
+   "text": "ang pangit mo",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "pangit ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "baboy ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "walang kwenta ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "wala kang kwenta",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "epal mo",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "salot ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "demonyo ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "gunggong",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "timang",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "ugok ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "unggoy ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "tangek",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "shunga mo",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "bopols",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "buang ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "yawa",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "piste",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "pisti ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "ang tanga mo",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "ang bobo nila",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "si ana ay bobo",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "inutil ka",
+   "why": "filipino insult or bad-mouthing"
+  },
+  {
+   "text": "coon",
+   "why": "slur"
+  },
+  {
+   "text": "spic",
+   "why": "slur"
+  },
+  {
+   "text": "kike",
+   "why": "slur"
+  },
+  {
+   "text": "wetback",
+   "why": "slur"
+  },
+  {
+   "text": "raghead",
+   "why": "slur"
+  },
+  {
+   "text": "towelhead",
+   "why": "slur"
+  },
+  {
+   "text": "beaner",
+   "why": "slur"
+  },
+  {
+   "text": "shemale",
+   "why": "slur"
+  },
+  {
+   "text": "trannies",
+   "why": "slur"
+  },
+  {
+   "text": "lesbo",
+   "why": "slur"
+  },
+  {
+   "text": "cripple",
+   "why": "slur"
+  },
+  {
+   "text": "midget",
+   "why": "slur"
+  },
+  {
+   "text": "psycho ka",
+   "why": "slur"
+  },
+  {
+   "text": "schizo",
+   "why": "slur"
+  },
+  {
+   "text": "bakla ka",
+   "why": "slur"
+  },
+  {
+   "text": "bading ka",
+   "why": "slur"
+  },
+  {
+   "text": "tomboy ka",
+   "why": "slur"
+  },
+  {
+   "text": "kepyas",
+   "why": "filipino sexual or vulgar"
+  },
+  {
+   "text": "hindot",
+   "why": "filipino sexual or vulgar"
+  },
+  {
+   "text": "jutay",
+   "why": "filipino sexual or vulgar"
+  },
+  {
+   "text": "malibog",
+   "why": "filipino sexual or vulgar"
+  },
+  {
+   "text": "iyot",
+   "why": "filipino sexual or vulgar"
+  },
+  {
+   "text": "tsupa",
+   "why": "filipino sexual or vulgar"
+  },
+  {
+   "text": "salsal",
+   "why": "filipino sexual or vulgar"
+  },
+  {
+   "text": "itlog mo",
+   "why": "filipino sexual or vulgar"
+  },
+  {
+   "text": "libog",
+   "why": "filipino sexual or vulgar"
+  },
+  {
+   "text": "He was dumb as a rock about it",
+   "why": "insult about someone else"
   }
  ],
  "notBlocked": [
@@ -525,10 +813,6 @@
    "why": "join false positive"
   },
   {
-   "text": "He was dumb as a rock about it",
-   "why": "join false positive"
-  },
-  {
    "text": "I love boba milk tea",
    "why": "boba is a drink"
   },
@@ -571,6 +855,46 @@
   {
    "text": "katangahan ko talaga",
    "why": "self-critical distress"
+  },
+  {
+   "text": "I feel so stupid for failing the quiz.",
+   "why": "self-directed"
+  },
+  {
+   "text": "I'm such an idiot sometimes, I forgot my notes.",
+   "why": "self-directed"
+  },
+  {
+   "text": "Pakiramdam ko ang pangit ko today.",
+   "why": "self-directed"
+  },
+  {
+   "text": "Wala akong kwenta minsan, pero lumalaban ako.",
+   "why": "self-directed"
+  },
+  {
+   "text": "I feel useless and worthless lately.",
+   "why": "self-directed disclosure"
+  },
+  {
+   "text": "Sometimes I think I'm a loser, but I'm trying.",
+   "why": "self-directed"
+  },
+  {
+   "text": "Yung kapatid kong bakla ay supportive sa akin.",
+   "why": "identity, not a slur"
+  },
+  {
+   "text": "My friend is gay and he helps me a lot.",
+   "why": "identity"
+  },
+  {
+   "text": "I gained weight and I feel fat and anxious.",
+   "why": "self-directed"
+  },
+  {
+   "text": "Freaking out about exams, need support.",
+   "why": "freaking is not freak"
   }
  ]
 }

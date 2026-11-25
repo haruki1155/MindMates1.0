@@ -20,7 +20,7 @@ const CATEGORIES = new Set([
 const LABEL_PATTERN = /^[a-z_]{1,32}$/;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const RATE_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMITS = {post: 5, comment: 20} as const;
+const RATE_LIMITS = {post: 5, comment: 20, check: 300} as const;
 /** Refusals per window, so the filter cannot be probed or the audit flooded. */
 const REJECTION_LIMIT = 20;
 
@@ -130,7 +130,7 @@ function categories(value: unknown): string[] {
 async function consumeRate(
   transaction: FirebaseFirestore.Transaction,
   userId: string,
-  kind: "post" | "comment",
+  kind: keyof typeof RATE_LIMITS,
 ): Promise<() => void> {
   const ref = getFirestore().collection("_secret_chat_rate_limits").doc(`${userId}_${kind}`);
   const snapshot = await transaction.get(ref);
@@ -246,3 +246,34 @@ export const createSecretChatPost = onCall((request) => createSecretChatPostHand
 
 /** The only way to publish a Forum comment. */
 export const addSecretChatComment = onCall((request) => addSecretChatCommentHandler(request));
+
+/**
+ * Live check while typing: the app disables Post and Send as soon as the full
+ * server dictionary refuses the draft. Records nothing; the publish callables
+ * stay authoritative.
+ */
+export async function checkSecretChatTextHandler(
+  request: CallableRequest,
+  deps: Partial<PublishDeps> = {},
+): Promise<{allowed: boolean; reason?: string; message?: string}> {
+  const userId = requireUid(request);
+  const raw = request.data?.text;
+  if (typeof raw !== "string" || raw.length > 2000) {
+    throw new HttpsError("invalid-argument", "The text to check is invalid.");
+  }
+  const db = getFirestore();
+  await db.runTransaction(async (transaction) => (await consumeRate(transaction, userId, "check"))());
+  const {moderate, crisis} = {...defaultDeps, ...deps};
+  try {
+    if (crisis(raw)) return {allowed: false, reason: "crisis_support", message: CRISIS_REDIRECT};
+    return moderate(raw).allowed ? {allowed: true} :
+      {allowed: false, reason: "inappropriate_language", message: FORUM_LANGUAGE_WARNING};
+  } catch {
+    throw new HttpsError("unavailable", "We could not check your message right now.",
+      {reason: "moderation_unavailable"});
+  }
+}
+
+/** Checks a Forum draft against the full server dictionary while typing. */
+export const checkSecretChatText = onCall((request) => checkSecretChatTextHandler(request));
+

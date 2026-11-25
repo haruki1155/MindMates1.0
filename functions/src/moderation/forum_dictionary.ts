@@ -7,7 +7,7 @@
  * never be entries: they are disclosures, handled by the crisis path.
  */
 
-export const FORUM_DICTIONARY_VERSION = "2026-11-26.2";
+export const FORUM_DICTIONARY_VERSION = "2026-11-27.1";
 
 export type ModerationCategory =
   | "profanity" | "vulgar" | "sexual" | "discriminatory" | "harassment";
@@ -22,7 +22,10 @@ export interface TermEntry {
   severity: ModerationSeverity;
   /** Also match affix forms: Filipino (kagaguhan) or English (fuckers). */
   affixes?: "tl" | "en";
-  /** An insult the speaker may use about themselves ("ang tanga ko"). */
+  /**
+   * An insult the speaker may use about themselves ("ang tanga ko", "I feel
+   * stupid"): allowed only when a self-reference is nearby and nobody else is.
+   */
   selfAllowed?: boolean;
   /** Next words that make this an innocent phrase ("leche flan"). */
   exceptNext?: string[];
@@ -39,7 +42,16 @@ export const FILIPINO_PREFIXES = ["", "ka", "pinaka", "naka", "nakaka", "mag", "
 export const FILIPINO_SUFFIXES = ["", "mo", "ka", "ng", "han", "an", "in", "ito", "yan", "nyo", "ako", "kayo"];
 export const ENGLISH_SUFFIXES = ["", "s", "es", "er", "ers", "in", "ing", "ed", "y"];
 /** Self-description, not an insult: "tanga ko", "inutil ako", "nakakatanga". */
-export const SELF_REFERENCE_NEXT = ["ko", "ako"];
+export const SELF_REFERENCE_WORDS = [
+  "i", "im", "ive", "id", "me", "my", "myself", "mine", "ako", "ko", "kong", "akin", "sarili", "akong",
+];
+/** Words that aim a remark at someone else; they override a self-reference. */
+export const ADDRESSEE_WORDS = [
+  "you", "u", "ur", "your", "youre", "yourself", "ya", "ka", "mo", "kayo", "nyo", "niyo", "kang",
+  "ikaw", "nila", "siya", "sya", "sila", "he", "she", "they", "him", "her", "them",
+];
+/** How many words either side count as "nearby". */
+export const SELF_REFERENCE_WINDOW = 5;
 export const SELF_REFERENCE_PREFIXES = ["nakaka"];
 
 const en = (category: ModerationCategory, severity: ModerationSeverity, ...stems: string[]): TermEntry =>
@@ -74,7 +86,7 @@ export const TERM_ENTRIES: TermEntry[] = [
     "pakshet", "pakingshet", "pakyu", "pakyo", "lintik", "hinayupak",
     "tarantado", "tarantada"),
   tl("profanity", "high", "gago", "gagu", "ulol", "ulul", "olol", "kupal", "ungas", "siraulo"),
-  {...tl("harassment", "high", "tanga", "tangatanga", "bobo", "bubu", "inutil", "engot"), selfAllowed: true},
+  {...tl("harassment", "high", "tangatanga", "bubu"), selfAllowed: true},
   {stems: ["leche", "letse"], language: "tl", category: "profanity", severity: "low",
     affixes: "tl", exceptNext: ["flan", "plan"]},
   // Filipino vulgar and sexual.
@@ -83,6 +95,20 @@ export const TERM_ENTRIES: TermEntry[] = [
   tl("sexual", "high", "pokpok", "malandi"),
   // Filipino discriminatory.
   tl("discriminatory", "high", "abnoy", "mongoloyd"),
+  // More slurs (always blocked).
+  en("discriminatory", "high", "coon", "spic", "kike", "wetback", "raghead", "towelhead", "beaner",
+    "shemale", "trannies", "lesbo", "cripple", "midget", "schizo"),
+  // Insults: blocked unless the speaker clearly means themselves.
+  {stems: ["stupid", "idiot", "idiots", "moron", "morons", "dumb", "dumbo", "loser", "losers", "ugly",
+    "pathetic", "worthless", "useless", "disgusting", "trash", "garbage", "freak", "freaks", "weirdo",
+    "jerk", "jerks", "clown", "psycho", "lunatic"],
+  language: "en", category: "harassment", severity: "high", selfAllowed: true},
+  {...tl("harassment", "high", "pangit", "epal", "gunggong", "timang", "ugok", "tangek", "tanga",
+    "shunga", "tange", "bopols", "buang", "salot", "engot", "inutil", "bobo"), selfAllowed: true},
+  // Visayan curses.
+  tl("profanity", "high", "yawa", "piste", "pisti", "pastilan"),
+  // Filipino sexual and vulgar.
+  tl("vulgar", "high", "kepyas", "hindot", "jutay", "iyot", "tsupa", "salsal", "libog", "malibog"),
 ];
 
 export const PHRASE_ENTRIES: PhraseEntry[] = [
@@ -114,4 +140,20 @@ export const PHRASE_ENTRIES: PhraseEntry[] = [
   {words: ["shut", "the", "fuck", "up"], language: "en", category: "profanity", severity: "high"},
   {words: ["go", "to", "hell"], language: "en", category: "profanity", severity: "low"},
   {words: ["kalapating", "mababa", "ang", "lipad"], language: "tl", category: "sexual", severity: "high"},
+  {words: ["shut", "up"], language: "en", category: "harassment", severity: "high"},
+  {words: ["i", "hate", "you"], language: "en", category: "harassment", severity: "high"},
+  {words: ["nobody", "likes", "you"], language: "en", category: "harassment", severity: "high"},
+  {words: ["no", "one", "likes", "you"], language: "en", category: "harassment", severity: "high"},
+  {words: ["you", "suck"], language: "en", category: "harassment", severity: "high"},
+  {words: ["go", "away"], language: "en", category: "harassment", severity: "high"},
+  {words: ["fat", "pig"], language: "en", category: "harassment", severity: "high"},
+  {words: ["baboy", "ka"], language: "tl", category: "harassment", severity: "high"},
+  {words: ["walang", "kwenta", "ka"], language: "tl", category: "harassment", severity: "high"},
+  {words: ["wala", "kang", "kwenta"], language: "tl", category: "harassment", severity: "high"},
+  {words: ["demonyo", "ka"], language: "tl", category: "harassment", severity: "high"},
+  {words: ["unggoy", "ka"], language: "tl", category: "harassment", severity: "high"},
+  {words: ["itlog", "mo"], language: "tl", category: "vulgar", severity: "high"},
+  {words: ["bakla", "ka"], language: "tl", category: "discriminatory", severity: "high"},
+  {words: ["bading", "ka"], language: "tl", category: "discriminatory", severity: "high"},
+  {words: ["tomboy", "ka"], language: "tl", category: "discriminatory", severity: "high"},
 ];
