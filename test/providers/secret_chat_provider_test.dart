@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/secret_chat/domain/secret_chat_safety_validator.dart';
 import 'package:mind_mates/models/secret_chat_model.dart';
 import 'package:mind_mates/models/secret_chat_profile.dart';
 import 'package:mind_mates/providers/secret_chat_provider.dart';
@@ -236,6 +237,46 @@ void main() {
     expect(provider.posts.single.id, 'post_1');
     expect(provider.errorMessage, isNotNull);
   });
+
+  test('a post the server refuses is removed, not left as failed', () async {
+    final repository = _FakeSecretChatRepository(
+      createError: const SecretChatValidationException(
+        SecretChatValidationResult(
+          code: SecretChatValidationCode.inappropriateLanguage,
+          message: 'refused',
+        ),
+      ),
+    );
+    final provider = SecretChatProvider(repository);
+    await expectLater(
+      provider.createPost(
+        message: 'I feel stressed about exams and need support.',
+        categories: ['Stress'],
+      ),
+      throwsA(isA<SecretChatValidationException>()),
+    );
+    expect(provider.posts, isEmpty);
+  });
+
+  test(
+    'posting again after a lost response reuses the failed post ID',
+    () async {
+      final repository = _FakeSecretChatRepository(
+        createError: StateError('timeout'),
+      );
+      final provider = SecretChatProvider(repository);
+      const message = 'I feel stressed about exams and need support.';
+      await expectLater(
+        provider.createPost(message: message, categories: ['Stress']),
+        throwsA(isA<StateError>()),
+      );
+      repository.createError = null;
+      await provider.createPost(message: message, categories: ['Stress']);
+      expect(repository.createdPostIds.toSet(), hasLength(1));
+      expect(provider.posts, hasLength(1));
+      expect(provider.posts.single.hasFailed, isFalse);
+    },
+  );
 }
 
 SecretChatProfile _profile(String alias) => SecretChatProfile(
@@ -258,6 +299,7 @@ SecretChatModel _recentPost() => SecretChatModel(
 class _FakeSecretChatRepository extends SecretChatRepository {
   _FakeSecretChatRepository({
     this.commentError,
+    this.createError,
     this.createGate,
     this.profile,
     this.activityError,
@@ -269,6 +311,7 @@ class _FakeSecretChatRepository extends SecretChatRepository {
   }) : recentPosts = recentPosts ?? [];
 
   final Object? commentError;
+  Object? createError;
   final Completer<void>? createGate;
   SecretChatProfile? profile;
   final Object? activityError;
@@ -280,6 +323,7 @@ class _FakeSecretChatRepository extends SecretChatRepository {
   int activityLoads = 0;
   final deletedPostIds = <String>[];
   final createdMessages = <String>[];
+  final createdPostIds = <String?>[];
   final comments = <SecretChatComment>[];
 
   @override
@@ -349,6 +393,8 @@ class _FakeSecretChatRepository extends SecretChatRepository {
     List<String> safetyLabels = const [],
   }) async {
     await createGate?.future;
+    createdPostIds.add(postId);
+    if (createError != null) throw createError!;
     createdMessages.add(message);
     return SecretChatModel(
       id: 'post_created',

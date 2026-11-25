@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/secret_chat/domain/secret_chat_safety_validator.dart';
 import 'package:mind_mates/features/secret_chat/screens/secret_chat_screen.dart';
 import 'package:mind_mates/models/secret_chat_model.dart';
 import 'package:mind_mates/providers/secret_chat_provider.dart';
+
+const forumWarning =
+    'MindMate is a safe and supportive community. Please revise your message using respectful language before publishing.';
 
 void main() {
   testWidgets('empty Secret Chat shows real empty state', (tester) async {
@@ -146,11 +150,160 @@ void main() {
     expect(find.byTooltip('Post options'), findsNothing);
     expect(find.text('Delete post'), findsNothing);
   });
+
+  testWidgets('a reply the server refuses stays in the box for editing', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        posts: [_post()],
+        onAddComment: ({required postId, required message}) async {
+          throw const SecretChatValidationException(
+            SecretChatValidationResult(
+              code: SecretChatValidationCode.inappropriateLanguage,
+              message: forumWarning,
+            ),
+          );
+        },
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.mode_comment_outlined));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    const draft = 'I feel this too, kaya natin to.';
+    await tester.enterText(find.byType(TextField).last, draft);
+    await tester.tap(find.byIcon(Icons.send_rounded));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(forumWarning), findsWidgets);
+    expect(
+      tester.widget<TextField>(find.byType(TextField).last).controller!.text,
+      draft,
+    );
+    expect(
+      find.text(draft),
+      findsOneWidget,
+      reason: 'no failed copy left behind',
+    );
+  });
+
+  testWidgets(
+    'a post the server refuses keeps the composer open with the draft',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        _app(
+          posts: const [],
+          onCreatePost: ({required message, required categories}) async {
+            throw const SecretChatValidationException(
+              SecretChatValidationResult(
+                code: SecretChatValidationCode.inappropriateLanguage,
+                message: forumWarning,
+              ),
+            );
+          },
+        ),
+      );
+      await tester.tap(find.byIcon(Icons.edit_rounded));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      const draft = 'Exams are stressful but I am grateful for support.';
+      await tester.enterText(find.byType(TextField).last, draft);
+      await tester.tap(find.text('Stress').last);
+      await tester.pump();
+      await tester.ensureVisible(find.text('Post anonymously'));
+      await tester.tap(find.text('Post anonymously'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.text('Post anonymously'),
+        findsOneWidget,
+        reason: 'sheet stays open',
+      );
+      expect(find.text(forumWarning), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).last).controller!.text,
+        draft,
+      );
+    },
+  );
+
+  testWidgets('the composer explains the community language guideline', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_app(posts: const []));
+    await tester.tap(find.byIcon(Icons.edit_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byTooltip('Community language guidelines'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.textContaining('respectful language'), findsWidgets);
+  });
+
+  testWidgets('a prohibited word disables posting before it is sent', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    var created = 0;
+    await tester.pumpWidget(
+      _app(
+        posts: const [],
+        onCreatePost: ({required message, required categories}) async =>
+            created++,
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.edit_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.enterText(
+      find.byType(TextField).last,
+      'Putangina ng stress sa school',
+    );
+    await tester.pump();
+    expect(find.text(forumWarning), findsOneWidget);
+    final button = tester.widget<ButtonStyleButton>(
+      find.ancestor(
+        of: find.text('Post anonymously'),
+        matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+      ),
+    );
+    expect(button.onPressed, isNull);
+    expect(created, 0);
+  });
+
+  testWidgets('a reply that fails to send stays in the box', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        posts: [_post()],
+        onAddComment: ({required postId, required message}) async {
+          throw StateError('offline');
+        },
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.mode_comment_outlined));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    const draft = 'Sending this while offline.';
+    await tester.enterText(find.byType(TextField).last, draft);
+    await tester.tap(find.byIcon(Icons.send_rounded));
+    await tester.pump();
+    await tester.pump();
+    expect(
+      tester.widget<TextField>(find.byType(TextField).last).controller!.text,
+      draft,
+    );
+  });
 }
 
 Widget _app({
   required List<SecretChatModel> posts,
   AddSecretComment? onAddComment,
+  CreateSecretPost? onCreatePost,
   VoidCallback? onProfile,
   Future<void> Function(String postId)? onDeletePost,
 }) {
@@ -170,7 +323,8 @@ Widget _app({
       canCreate: true,
       onFilterChanged: (_) {},
       onSearchChanged: (_) {},
-      onCreatePost: ({required message, required categories}) async {},
+      onCreatePost:
+          onCreatePost ?? ({required message, required categories}) async {},
       onToggleLike: (_) {},
       onToggleSave: (_) {},
       onFetchComments: (_) async => [

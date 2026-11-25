@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/secret_chat_model.dart';
-import '../../../providers/secret_chat_provider.dart';
 import '../domain/secret_chat_safety_validator.dart';
 import '../screens/secret_chat_screen.dart';
 import 'secret_chat_background.dart';
@@ -61,13 +60,36 @@ class _SecretChatComposeSheetState extends State<SecretChatComposeSheet> {
               ),
             ),
             const SizedBox(height: 18),
-            const Text(
-              'Share anonymously',
-              style: TextStyle(
-                color: SecretChatPalette.text,
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-              ),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Share anonymously',
+                    style: TextStyle(
+                      color: SecretChatPalette.text,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Community language guidelines',
+                  icon: const Icon(Icons.info_outline),
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (dialogContext) => AlertDialog(
+                      title: const Text('Community language'),
+                      content: const Text(forumLanguageGuideline),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogContext),
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 6),
             const Text(
@@ -151,7 +173,12 @@ class _SecretChatComposeSheetState extends State<SecretChatComposeSheet> {
               width: double.infinity,
               height: 48,
               child: FilledButton.icon(
-                onPressed: _isSubmitting ? null : _submit,
+                onPressed:
+                    _isSubmitting ||
+                        _validation?.code ==
+                            SecretChatValidationCode.inappropriateLanguage
+                    ? null
+                    : _submit,
                 icon: _isSubmitting
                     ? const SizedBox(
                         width: 18,
@@ -193,14 +220,12 @@ class _SecretChatComposeSheetState extends State<SecretChatComposeSheet> {
 
     setState(() => _isSubmitting = true);
     try {
-      final submission = widget.onSubmit(
+      // Wait for the server so a moderation refusal keeps the draft here.
+      await widget.onSubmit(
         message: message,
         categories: List.unmodifiable(_selectedCategories),
       );
-      if (mounted) {
-        Navigator.of(context).pop();
-      }
-      await submission;
+      if (mounted) Navigator.of(context).pop();
     } on SecretChatValidationException catch (error) {
       if (mounted) setState(() => _validation = error.result);
     } catch (_) {

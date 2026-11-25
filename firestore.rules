@@ -240,18 +240,6 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    function validSecretChatCategories(data) {
-      return data.categories is list
-        && data.categories.size() >= 1
-        && data.categories.size() <= 3
-        && data.categories.toSet().size() == data.categories.size()
-        && data.categories.toSet().hasOnly([
-          'Mental Health', 'Anxiety', 'Stress', 'Gratitude', 'Self-care',
-          'School Pressure', 'Support'
-        ])
-        && data.category == data.categories[0];
-    }
-
     match /moods/{moodId} {
       allow create: if isOwner(request.resource.data.userId)
         && moodId.matches('^daily_' + request.auth.uid + '_[0-9]{8}$')
@@ -695,52 +683,29 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Forum text is published only by the moderated createSecretChatPost and
+    // addSecretChatComment callables. Staff may change moderation status, but no
+    // role may rewrite published text.
+    function forumModerationUpdate() {
+      return isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['moderationStatus', 'safetyLabels', 'updatedAt'])
+        && request.resource.data.moderationStatus is string;
+    }
+
     match /secret_chats/{postId} {
       allow read: if signedIn()
         && (resource.data.moderationStatus == 'active' || isAdmin());
-      allow create: if signedIn()
-        && request.resource.data.authorId == request.auth.uid
-        && request.resource.data.isAnonymous == true
-        && request.resource.data.moderationStatus == 'active'
-        && request.resource.data.keys().hasOnly([
-          'authorId', 'message', 'category', 'categories', 'createdAt',
-          'updatedAt', 'likeCount', 'commentCount', 'readCount',
-          'moderationStatus', 'safetyLabels', 'isAnonymous'
-        ])
-        && request.resource.data.message is string
-        && request.resource.data.message.size() >= 8
-        && request.resource.data.message.size() <= 500
-        && request.resource.data.safetyLabels is list
-        && validSecretChatCategories(request.resource.data)
-        && request.resource.data.likeCount == 0
-        && request.resource.data.commentCount == 0
-        && request.resource.data.readCount == 0
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time;
-      allow update: if isAdmin();
+      allow create: if false;
+      allow update: if forumModerationUpdate();
       allow delete: if isAdmin();
     }
 
     match /secret_chat_comments/{commentId} {
       allow read: if signedIn()
         && (resource.data.moderationStatus == 'active' || isAdmin());
-      allow create: if signedIn()
-        && request.resource.data.authorId == request.auth.uid
-        && request.resource.data.isAnonymous == true
-        && request.resource.data.moderationStatus == 'active'
-        && request.resource.data.keys().hasOnly([
-          'postId', 'authorId', 'message', 'createdAt', 'updatedAt',
-          'moderationStatus', 'safetyLabels', 'isAnonymous'
-        ])
-        && request.resource.data.message is string
-        && request.resource.data.message.size() >= 3
-        && request.resource.data.message.size() <= 400
-        && request.resource.data.safetyLabels is list
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time
-        && exists(/databases/$(database)/documents/secret_chats/$(request.resource.data.postId))
-        && get(/databases/$(database)/documents/secret_chats/$(request.resource.data.postId)).data.moderationStatus == 'active';
-      allow update: if isAdmin();
+      allow create: if false;
+      allow update: if forumModerationUpdate();
       allow delete: if isAdmin()
         || (signedIn() && resource.data.authorId == request.auth.uid);
     }
