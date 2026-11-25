@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mind_mates/features/secret_chat/domain/secret_chat_safety_validator.dart';
 import 'package:mind_mates/models/secret_chat_model.dart';
 import 'package:mind_mates/models/secret_chat_profile.dart';
 import 'package:mind_mates/providers/secret_chat_provider.dart';
@@ -236,6 +237,26 @@ void main() {
     expect(provider.posts.single.id, 'post_1');
     expect(provider.errorMessage, isNotNull);
   });
+
+  test('a post the server refuses is removed, not left as failed', () async {
+    final repository = _FakeSecretChatRepository(
+      createError: const SecretChatValidationException(
+        SecretChatValidationResult(
+          code: SecretChatValidationCode.inappropriateLanguage,
+          message: 'refused',
+        ),
+      ),
+    );
+    final provider = SecretChatProvider(repository);
+    await expectLater(
+      provider.createPost(
+        message: 'I feel stressed about exams and need support.',
+        categories: ['Stress'],
+      ),
+      throwsA(isA<SecretChatValidationException>()),
+    );
+    expect(provider.posts, isEmpty);
+  });
 }
 
 SecretChatProfile _profile(String alias) => SecretChatProfile(
@@ -258,6 +279,7 @@ SecretChatModel _recentPost() => SecretChatModel(
 class _FakeSecretChatRepository extends SecretChatRepository {
   _FakeSecretChatRepository({
     this.commentError,
+    this.createError,
     this.createGate,
     this.profile,
     this.activityError,
@@ -269,6 +291,7 @@ class _FakeSecretChatRepository extends SecretChatRepository {
   }) : recentPosts = recentPosts ?? [];
 
   final Object? commentError;
+  final Object? createError;
   final Completer<void>? createGate;
   SecretChatProfile? profile;
   final Object? activityError;
@@ -349,6 +372,7 @@ class _FakeSecretChatRepository extends SecretChatRepository {
     List<String> safetyLabels = const [],
   }) async {
     await createGate?.future;
+    if (createError != null) throw createError!;
     createdMessages.add(message);
     return SecretChatModel(
       id: 'post_created',

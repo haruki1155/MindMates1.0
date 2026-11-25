@@ -258,8 +258,22 @@ class _SecretChatThreadScreenState extends State<SecretChatThreadScreen> {
       });
       _showReplyMessage('Reply posted anonymously.');
     } on SecretChatValidationException catch (error) {
-      _markCommentFailed(optimistic.id);
-      setState(() => _validation = error.result);
+      // Refused by moderation: remove it and give the text back to edit.
+      if (mounted) {
+        setState(() {
+          _comments = [
+            for (final comment in _comments)
+              if (comment.id != optimistic.id) comment,
+          ];
+          if (_controller.text.isEmpty) {
+            _controller.text = message;
+            _controller.selection = TextSelection.collapsed(
+              offset: message.length,
+            );
+          }
+          _validation = error.result;
+        });
+      }
       _showReplyMessage(error.result.message);
     } on SecretChatActionException catch (error) {
       _markCommentFailed(optimistic.id);
@@ -458,7 +472,12 @@ class _ReplyComposer extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               IconButton.filled(
-                onPressed: isSending ? null : onSend,
+                onPressed:
+                    isSending ||
+                        validation?.code ==
+                            SecretChatValidationCode.inappropriateLanguage
+                    ? null
+                    : onSend,
                 icon: isSending
                     ? const SizedBox(
                         width: 18,

@@ -1,3 +1,8 @@
+import 'forum_language_guard.dart';
+
+export 'forum_language_guard.dart'
+    show forumLanguageGuideline, forumLanguageWarning;
+
 enum SecretChatValidationCode {
   allowed,
   offTopic,
@@ -6,6 +11,7 @@ enum SecretChatValidationCode {
   tooLong,
   containsPersonalInfo,
   crisisSupport,
+  inappropriateLanguage,
 }
 
 class SecretChatValidationResult {
@@ -78,6 +84,12 @@ class SecretChatSafetyValidator {
         labels: ['crisis_support'],
         message:
             'This sounds urgent. Please use MindAid or contact PACC/crisis support instead of posting publicly.',
+      );
+    }
+    if (containsInappropriateLanguage(text)) {
+      return const SecretChatValidationResult(
+        code: SecretChatValidationCode.inappropriateLanguage,
+        message: forumLanguageWarning,
       );
     }
     if (_containsUnsafeLanguage(normalized)) {
@@ -214,4 +226,14 @@ class SecretChatSafetyValidator {
     addIf('self_care', ['self care', 'self-care', 'rest', 'sleep', 'breathe']);
     return labels.isEmpty ? const ['wellbeing'] : labels.toSet().toList();
   }
+}
+
+/// A post or comment refused on the device or by the server's moderation.
+class SecretChatValidationException implements Exception {
+  const SecretChatValidationException(this.result);
+
+  final SecretChatValidationResult result;
+
+  @override
+  String toString() => result.message;
 }

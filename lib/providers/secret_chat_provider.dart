@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../features/secret_chat/domain/secret_chat_safety_validator.dart';
+export '../features/secret_chat/domain/secret_chat_safety_validator.dart'
+    show SecretChatValidationException;
 import '../models/secret_chat_model.dart';
 import '../models/secret_chat_profile.dart';
 import '../repositories/secret_chat_repository.dart';
@@ -164,6 +166,15 @@ class SecretChatProvider extends ChangeNotifier {
         safetyLabels: validation.labels,
       );
       _replacePost(optimistic.copyWith(isPending: false, hasFailed: false));
+    } on SecretChatValidationException catch (error) {
+      // Refused by moderation: drop it so the author can fix the draft.
+      _posts = [
+        for (final post in _posts)
+          if (post.id != id) post,
+      ];
+      _errorMessage = error.result.message;
+      notifyListeners();
+      rethrow;
     } catch (error) {
       _replacePost(optimistic.copyWith(isPending: false, hasFailed: true));
       rethrow;
@@ -436,15 +447,6 @@ class SecretChatProvider extends ChangeNotifier {
     if (error is SecretChatAliasTakenException) return error.toString();
     return 'Secret Chat is unavailable right now. Please try again.';
   }
-}
-
-class SecretChatValidationException implements Exception {
-  const SecretChatValidationException(this.result);
-
-  final SecretChatValidationResult result;
-
-  @override
-  String toString() => result.message;
 }
 
 class SecretChatActionException implements Exception {

@@ -28,6 +28,30 @@ class SecretChatThreadUnavailableException implements Exception {
   String toString() => 'This thread is no longer available for replies.';
 }
 
+/// Turns a refusal from the moderated publishing callables into the errors the
+/// Forum screens already handle; anything else is passed through.
+Object secretChatPublishError(FirebaseFunctionsException error) {
+  final details = error.details;
+  final reason = details is Map ? details['reason'] : null;
+  return switch (reason) {
+    'inappropriate_language' => SecretChatValidationException(
+      SecretChatValidationResult(
+        code: SecretChatValidationCode.inappropriateLanguage,
+        message: error.message ?? forumLanguageWarning,
+      ),
+    ),
+    'crisis_support' => SecretChatValidationException(
+      SecretChatValidationResult(
+        code: SecretChatValidationCode.crisisSupport,
+        labels: const ['crisis_support'],
+        message: error.message ?? 'Please use MindAid or contact PACC.',
+      ),
+    ),
+    'thread_unavailable' => const SecretChatThreadUnavailableException(),
+    _ => error,
+  };
+}
+
 class SecretChatRepository {
   SecretChatRepository({
     FirestoreService? firestoreService,
@@ -115,23 +139,15 @@ class SecretChatRepository {
   }) async {
     final uid = _requireUserId();
     final createdAt = DateTime.now();
+    final result = await _publish('createSecretChatPost', {
+      'postId': ?postId,
+      'message': message.trim(),
+      'categories': categories,
+      'safetyLabels': safetyLabels,
+    });
     final reference = _firestoreService.firestore
         .collection(FirestoreCollections.secretChats)
-        .doc(postId);
-    await reference.set({
-      'authorId': uid,
-      'message': message.trim(),
-      'category': categories.first,
-      'categories': categories,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'likeCount': 0,
-      'commentCount': 0,
-      'readCount': 0,
-      'moderationStatus': 'active',
-      'safetyLabels': safetyLabels,
-      'isAnonymous': true,
-    });
+        .doc(result['postId'] as String? ?? postId);
     unawaited(_tryRecordActivity(uid, UserActivityType.secretChatPost));
     final profile = _profileCache[uid];
     return SecretChatModel(
@@ -150,6 +166,19 @@ class SecretChatRepository {
       authorAlias: profile?.alias ?? 'Anonymous',
       authorPhotoUrl: profile?.photoUrl,
     );
+  }
+
+  Future<Map<String, dynamic>> _publish(
+    String name,
+    Map<String, Object?> data,
+  ) async {
+    try {
+      final result = await functions.httpsCallable(name).call<Object?>(data);
+      final value = result.data;
+      return value is Map ? Map<String, dynamic>.from(value) : const {};
+    } on FirebaseFunctionsException catch (error) {
+      throw secretChatPublishError(error);
+    }
   }
 
   Future<void> deletePost(SecretChatModel post) async {
@@ -231,28 +260,15 @@ class SecretChatRepository {
   }) async {
     final uid = _requireUserId();
     final createdAt = DateTime.now();
-    final postRef = _firestoreService.firestore
-        .collection(FirestoreCollections.secretChats)
-        .doc(postId);
+    final result = await _publish('addSecretChatComment', {
+      'postId': postId,
+      'commentId': ?commentId,
+      'message': message.trim(),
+      'safetyLabels': safetyLabels,
+    });
     final commentRef = _firestoreService.firestore
         .collection(FirestoreCollections.secretChatComments)
-        .doc(commentId);
-
-    final postSnapshot = await postRef.get();
-    if (!postSnapshot.exists ||
-        postSnapshot.data()?['moderationStatus'] != 'active') {
-      throw const SecretChatThreadUnavailableException();
-    }
-    await commentRef.set({
-      'postId': postId,
-      'authorId': uid,
-      'message': message.trim(),
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'moderationStatus': 'active',
-      'safetyLabels': safetyLabels,
-      'isAnonymous': true,
-    });
+        .doc(result['commentId'] as String? ?? commentId);
     unawaited(_tryRecordActivity(uid, UserActivityType.secretChatComment));
 
     return SecretChatComment(

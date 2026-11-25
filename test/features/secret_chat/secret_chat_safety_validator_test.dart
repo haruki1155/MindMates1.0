@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/secret_chat/domain/secret_chat_safety_validator.dart';
 
+const forumLanguageWarning =
+    'MindMate is a safe and supportive community. Please revise your message using respectful language before publishing.';
+
 void main() {
   const validator = SecretChatSafetyValidator();
 
@@ -78,6 +81,48 @@ void main() {
     expect(
       validator.validateComment(List.filled(401, 'a').join()).code,
       SecretChatValidationCode.tooLong,
+    );
+  });
+
+  test('common and disguised profanity get the community warning', () {
+    for (final text in [
+      'putangina mo talaga',
+      'f*ck this exam stress',
+      'g@go ka ba',
+      'p u t a n g i n a',
+      'tang ina mo',
+      'fuuuuuck this school',
+      'katangahan ko na naman',
+      'Gago​ka',
+      'ANG BOBO MO',
+    ]) {
+      final result = validator.validateComment(text);
+      expect(
+        result.code,
+        SecretChatValidationCode.inappropriateLanguage,
+        reason: text,
+      );
+      expect(result.message, forumLanguageWarning, reason: text);
+    }
+  });
+
+  test('ordinary words and honest disclosures are not profanity', () {
+    for (final text in [
+      'I feel anxious about my class assessment.',
+      'Napatitig ako sa notes ko at umiyak.',
+      'Leche flan made my stressful day better.',
+      'I was abused and therapy is helping slowly.',
+      'Tangan ko pa rin ang pag-asa.',
+    ]) {
+      expect(
+        validator.validateComment(text).code,
+        isNot(SecretChatValidationCode.inappropriateLanguage),
+        reason: text,
+      );
+    }
+    expect(
+      validator.validatePost('I want to kill myself, school is too much').code,
+      SecretChatValidationCode.crisisSupport,
     );
   });
 }
