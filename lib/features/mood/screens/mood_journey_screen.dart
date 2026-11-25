@@ -667,6 +667,7 @@ class _MoodJourneyScreenState extends State<MoodJourneyScreen> {
                     errorMessage: calendarError,
                     permittedRange: filterRange,
                     expanded: _calendarExpanded,
+                    collapsedToWeek: !_calendarExpanded,
                     onExpand: _calendarExpanded ? null : _expandCalendar,
                     filters: _academicYears.isEmpty
                         ? null

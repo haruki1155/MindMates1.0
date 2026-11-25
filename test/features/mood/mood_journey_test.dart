@@ -103,7 +103,7 @@ void main() {
       await tester.tap(find.text('Got it'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byTooltip('Expand mood calendar'));
+      await tester.tap(find.byTooltip('Open full calendar'));
       await tester.pumpAndSettle();
       expect(find.text('Mood Calendar'), findsOneWidget);
       expect(weekCard, findsNothing);
@@ -142,6 +142,9 @@ void main() {
         findsOneWidget,
       );
       // Selecting an empty historical day does not open any mood logger.
+      // The journey shows one week; other weeks are in the full calendar.
+      await tester.tap(find.byTooltip('Open full calendar'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('mood-calendar-day-2026-11-05')));
       await tester.pumpAndSettle();
       expect(find.text('No mood check-ins on this date.'), findsOneWidget);
@@ -407,8 +410,12 @@ void main() {
       'selecting a week with no good-enough check-in hides Best day',
       (tester) async {
         await pumpJourney(tester);
-        // Select Nov 2 (earlier week with no entries).
+        // Select Nov 2 (earlier week with no entries) in the full calendar.
+        await tester.tap(find.byTooltip('Open full calendar'));
+        await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('mood-calendar-day-2026-11-02')));
+        await tester.pumpAndSettle();
+        await tester.pageBack();
         await tester.pumpAndSettle();
         expect(find.text('Best day'), findsNothing);
         expect(find.text('A gentle tip'), findsOneWidget);

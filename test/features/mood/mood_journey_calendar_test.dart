@@ -281,6 +281,168 @@ void main() {
       },
     );
   }
+
+  testWidgets(
+    'collapsed to a week, it shows only the selected day row and a calendar button',
+    (tester) async {
+      var expandTaps = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: MoodJourneyCalendar(
+                displayedMonth: DateTime.utc(2026, 11, 1),
+                selectedDateKey: '2026-11-18',
+                todayDateKey: '2026-11-18',
+                history: const MoodHistoryWindow(
+                  events: [],
+                  coverage: MoodHistoryCoverage.complete,
+                ),
+                collapsedToWeek: true,
+                onExpand: () => expandTaps++,
+                onMonthChanged: (_) {},
+                onDaySelected: (_) {},
+                onTodayPressed: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Week of Wed Nov 18: Mon Nov 16 to Sun Nov 22, nothing else.
+      for (var day = 16; day <= 22; day++) {
+        expect(
+          find.byKey(Key('mood-calendar-day-2026-11-$day')),
+          findsOneWidget,
+          reason: 'Nov $day',
+        );
+      }
+      for (final key in [
+        '2026-10-26',
+        '2026-11-15',
+        '2026-11-23',
+        '2026-12-06',
+      ]) {
+        expect(
+          find.byKey(Key('mood-calendar-day-$key')),
+          findsNothing,
+          reason: key,
+        );
+      }
+      expect(find.byTooltip('Expand mood calendar'), findsNothing);
+      await tester.tap(find.byTooltip('Open full calendar'));
+      expect(expandTaps, 1);
+      expect(
+        find.descendant(
+          of: find.byTooltip('Open full calendar'),
+          matching: find.byIcon(Icons.calendar_month),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'collapsed to a week outside the selected month, it shows the first week',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: MoodJourneyCalendar(
+                displayedMonth: DateTime.utc(2026, 12, 1),
+                selectedDateKey: '2026-11-18',
+                todayDateKey: '2026-11-18',
+                history: const MoodHistoryWindow(
+                  events: [],
+                  coverage: MoodHistoryCoverage.complete,
+                ),
+                collapsedToWeek: true,
+                onMonthChanged: (_) {},
+                onDaySelected: (_) {},
+                onTodayPressed: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+      // December 2026 grid starts Mon Nov 30.
+      expect(
+        find.byKey(const Key('mood-calendar-day-2026-11-30')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('mood-calendar-day-2026-12-06')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('mood-calendar-day-2026-12-07')),
+        findsNothing,
+      );
+    },
+  );
+
+  Future<List<String>> pumpWeek(
+    WidgetTester tester, {
+    required String selected,
+    required String today,
+  }) async {
+    final picked = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: MoodJourneyCalendar(
+              displayedMonth: DateTime.utc(2026, 11, 1),
+              selectedDateKey: selected,
+              todayDateKey: today,
+              history: const MoodHistoryWindow(
+                events: [],
+                coverage: MoodHistoryCoverage.complete,
+              ),
+              collapsedToWeek: true,
+              onMonthChanged: (_) => fail('week arrows must not change month'),
+              onDaySelected: picked.add,
+              onTodayPressed: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    return picked;
+  }
+
+  testWidgets('in week view the arrows step one week at a time', (
+    tester,
+  ) async {
+    final picked = await pumpWeek(
+      tester,
+      selected: '2026-11-18',
+      today: '2026-11-30',
+    );
+    expect(find.byTooltip('Previous week'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('mood-calendar-prev-month')));
+    await tester.tap(find.byKey(const Key('mood-calendar-next-month')));
+    expect(picked, ['2026-11-11', '2026-11-25']);
+  });
+
+  testWidgets('in week view next stops at the current week', (tester) async {
+    var picked = await pumpWeek(
+      tester,
+      selected: '2026-11-18',
+      today: '2026-11-23',
+    );
+    await tester.tap(find.byKey(const Key('mood-calendar-next-month')));
+    expect(picked, ['2026-11-23'], reason: 'lands on today, never the future');
+
+    picked = await pumpWeek(
+      tester,
+      selected: '2026-11-18',
+      today: '2026-11-20',
+    );
+    await tester.tap(find.byKey(const Key('mood-calendar-next-month')));
+    expect(picked, isEmpty, reason: 'already in the current week');
+  });
 }
 
 NormalizedMoodEvent _event(

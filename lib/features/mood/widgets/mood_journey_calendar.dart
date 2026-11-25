@@ -22,6 +22,7 @@ class MoodJourneyCalendar extends StatefulWidget {
     this.filters,
     this.expanded = false,
     this.onExpand,
+    this.collapsedToWeek = false,
   });
 
   final DateTime displayedMonth;
@@ -38,6 +39,10 @@ class MoodJourneyCalendar extends StatefulWidget {
   final Widget? filters;
   final bool expanded;
   final VoidCallback? onExpand;
+
+  /// Shows only the week row holding the selected day (or the month's first
+  /// week when that day is outside the displayed month).
+  final bool collapsedToWeek;
 
   @override
   State<MoodJourneyCalendar> createState() => _MoodJourneyCalendarState();
@@ -115,6 +120,15 @@ class _MoodJourneyCalendarState extends State<MoodJourneyCalendar> {
     );
     final totalDays = endExclusive.difference(start).inDays;
     final rowCount = totalDays ~/ 7;
+    final selectedOffset = MoodManilaCalendar.dateForKey(
+      widget.selectedDateKey,
+    ).difference(start).inDays;
+    final weekRow = selectedOffset >= 0 && selectedOffset < totalDays
+        ? selectedOffset ~/ 7
+        : 0;
+    final visibleRows = widget.collapsedToWeek
+        ? [weekRow]
+        : [for (var row = 0; row < rowCount; row++) row];
 
     final aggregatesByDay = <String, MoodDailyAggregate>{};
     if (widget.history != null) {
@@ -190,7 +204,7 @@ class _MoodJourneyCalendarState extends State<MoodJourneyCalendar> {
                 ],
               ),
               const SizedBox(height: 2),
-              for (var row = 0; row < rowCount; row++)
+              for (final row in visibleRows)
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -314,15 +328,51 @@ class _MoodJourneyCalendarState extends State<MoodJourneyCalendar> {
     );
   }
 
+  /// Week view: the same weekday one week earlier, if allowed.
+  String? get _previousWeekKey {
+    final key = MoodManilaCalendar.dateKeyForDate(
+      MoodManilaCalendar.dateForKey(
+        widget.selectedDateKey,
+      ).subtract(const Duration(days: 7)),
+    );
+    final range = widget.permittedRange;
+    return range == null || key.compareTo(range.startDateKey) >= 0 ? key : null;
+  }
+
+  /// Week view: one week later, or today when that week is the current one;
+  /// null once the current week is shown.
+  String? get _nextWeekKey {
+    final selected = MoodManilaCalendar.dateForKey(widget.selectedDateKey);
+    final today = MoodManilaCalendar.dateForKey(widget.todayDateKey);
+    DateTime weekStart(DateTime d) =>
+        d.subtract(Duration(days: d.weekday - DateTime.monday));
+    if (!weekStart(today).isAfter(weekStart(selected))) return null;
+    final next = selected.add(const Duration(days: 7));
+    final key = MoodManilaCalendar.dateKeyForDate(
+      next.isAfter(today) ? today : next,
+    );
+    final range = widget.permittedRange;
+    return range == null || key.compareTo(range.endExclusiveDateKey) < 0
+        ? key
+        : null;
+  }
+
   Widget _buildHeader(String monthTitle) {
+    final weekView = widget.collapsedToWeek;
+    final previousWeek = weekView ? _previousWeekKey : null;
+    final nextWeek = weekView ? _nextWeekKey : null;
     final prevButton = IconButton(
       key: const Key('mood-calendar-prev-month'),
-      tooltip: 'Previous month',
+      tooltip: weekView ? 'Previous week' : 'Previous month',
       constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
       padding: EdgeInsets.zero,
       icon: const Icon(Icons.chevron_left),
       color: HomePalette.text,
-      onPressed: _canGoPrevious
+      onPressed: weekView
+          ? (previousWeek == null
+                ? null
+                : () => widget.onDaySelected(previousWeek))
+          : _canGoPrevious
           ? () => widget.onMonthChanged(
               DateTime.utc(
                 widget.displayedMonth.year,
@@ -335,12 +385,14 @@ class _MoodJourneyCalendarState extends State<MoodJourneyCalendar> {
 
     final nextButton = IconButton(
       key: const Key('mood-calendar-next-month'),
-      tooltip: 'Next month',
+      tooltip: weekView ? 'Next week' : 'Next month',
       constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
       padding: EdgeInsets.zero,
       icon: const Icon(Icons.chevron_right),
       color: HomePalette.text,
-      onPressed: _canGoNext
+      onPressed: weekView
+          ? (nextWeek == null ? null : () => widget.onDaySelected(nextWeek))
+          : _canGoNext
           ? () => widget.onMonthChanged(
               DateTime.utc(
                 widget.displayedMonth.year,
@@ -408,8 +460,8 @@ class _MoodJourneyCalendarState extends State<MoodJourneyCalendar> {
               ),
               if (widget.onExpand != null)
                 IconButton(
-                  tooltip: 'Expand mood calendar',
-                  icon: const Icon(Icons.open_in_full, size: 18),
+                  tooltip: 'Open full calendar',
+                  icon: const Icon(Icons.calendar_month, size: 20),
                   onPressed: widget.onExpand,
                 ),
               todayButton,
