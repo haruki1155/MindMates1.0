@@ -70,7 +70,11 @@ Map<AppointmentQueue, int> appointmentQueueCounts(
 ) {
   final counts = {for (final queue in AppointmentQueue.values) queue: 0};
   for (final appointment in appointments) {
-    counts.update(classifyAppointment(appointment, now), (value) => value + 1);
+    final queue = classifyAppointment(appointment, now);
+    if (appointment.isArchived && queue != AppointmentQueue.completed) {
+      continue;
+    }
+    counts.update(queue, (value) => value + 1);
   }
   return counts;
 }

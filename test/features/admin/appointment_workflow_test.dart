@@ -156,4 +156,20 @@ void main() {
       [archived],
     );
   });
+
+  test('archived non-completed records do not inflate active queue counts', () {
+    final records = [
+      appointment('requested', now, archived: true),
+      appointment('declined', now, archived: true),
+      appointment('cancelled', now, archived: true),
+      appointment('confirmed', now, archived: true),
+      appointment('confirmed', now.add(const Duration(days: 1)), archived: true),
+      appointment('completed', now, archived: true),
+    ];
+    final counts = appointmentQueueCounts(records, now);
+    expect(counts[AppointmentQueue.needsAction], 0);
+    expect(counts[AppointmentQueue.today], 0);
+    expect(counts[AppointmentQueue.upcoming], 0);
+    expect(counts[AppointmentQueue.completed], 1);
+  });
 }
