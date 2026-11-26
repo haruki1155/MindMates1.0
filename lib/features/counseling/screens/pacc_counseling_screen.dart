@@ -79,6 +79,10 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final user = _readProviderOrNull<UserProvider>()?.user;
+    final assignedCourse = user?.course?.trim() ?? '';
+    if (assignedCourse.isNotEmpty && _course != assignedCourse) {
+      _course = assignedCourse;
+    }
     if (user != null && _prefilledUserId != user.id) {
       _prefilledUserId = user.id;
       _lastNameController.text = user.lastName ?? '';
@@ -357,7 +361,11 @@ class _PaccCounselingScreenState extends State<PaccCounselingScreen> {
         _concernController.text = priorAppointment.concern;
         _bestTimeController.text = priorAppointment.bestTime ?? '';
         _sex = priorAppointment.sex;
-        _course = priorAppointment.course;
+        final assignedCourse =
+            _readProviderOrNull<UserProvider>()?.user?.course?.trim() ?? '';
+        _course = assignedCourse.isNotEmpty
+            ? assignedCourse
+            : priorAppointment.course;
         _yearLevel = priorAppointment.yearLevel;
         _preferredContactMethod = priorAppointment.preferredContactMethod;
         _therapyBefore = priorAppointment.therapyBefore;
@@ -1424,20 +1432,7 @@ class _IntakeFormView extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 const _FieldLabel('Course*'),
-                _PaccDropdown(
-                  value: course,
-                  hint: 'Select course',
-                  options: const [
-                    'BS Information Technology',
-                    'BS Computer Science',
-                    'BS Business Administration',
-                    'BS Hospitality Management',
-                    'BS Tourism Management',
-                    'BS Education',
-                    'Other',
-                  ],
-                  onChanged: onCourseChanged,
-                ),
+                _AutomatedCourseField(course: course),
                 const SizedBox(height: 14),
                 _RadioGroup(
                   label: 'Year Level*',
@@ -1881,38 +1876,56 @@ class _PaccTextField extends StatelessWidget {
   }
 }
 
-class _PaccDropdown extends StatelessWidget {
-  const _PaccDropdown({
-    required this.value,
-    required this.hint,
-    required this.options,
-    required this.onChanged,
-  });
+class _AutomatedCourseField extends StatelessWidget {
+  const _AutomatedCourseField({required this.course});
 
-  final String? value;
-  final String hint;
-  final List<String> options;
-  final ValueChanged<String?> onChanged;
+  final String? course;
 
   @override
   Widget build(BuildContext context) {
-    return DropdownButtonFormField<String>(
-      initialValue: options.contains(value) ? value : null,
-      isExpanded: true,
-      hint: Text(hint, style: _PaccText.inputHint),
-      items: [
-        for (final option in options)
-          DropdownMenuItem(
-            value: option,
-            child: Text(option, overflow: TextOverflow.ellipsis),
+    final resolvedCourse = course?.trim() ?? '';
+    final hasCourse = resolvedCourse.isNotEmpty;
+    return Container(
+      key: const ValueKey('automated-course-field'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: hasCourse
+              ? const Color(0xFFD1D5DB)
+              : const Color(0xFFDC2626),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              hasCourse ? resolvedCourse : 'No assigned course in profile',
+              style: _PaccText.body.copyWith(
+                color: hasCourse
+                    ? const Color(0xFF111827)
+                    : const Color(0xFFDC2626),
+                fontWeight: hasCourse ? FontWeight.w500 : FontWeight.w400,
+              ),
+            ),
           ),
-      ],
-      onChanged: onChanged,
-      validator: (value) => value == null ? 'Required' : null,
-      decoration: _PaccDecor.input(''),
+          const SizedBox(width: 8),
+          const Tooltip(
+            message: 'Automatically filled from your student profile',
+            child: Icon(
+              Icons.lock_outline_rounded,
+              size: 18,
+              color: Color(0xFF6B7280),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
+
 
 class _RadioGroup extends StatelessWidget {
   const _RadioGroup({
