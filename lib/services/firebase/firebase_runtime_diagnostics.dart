@@ -34,6 +34,9 @@ class FirebaseRuntimeDiagnostics {
     required Object error,
   }) {
     log(event: 'startup_${stage}_failed', error: error);
+    if (kDebugMode) {
+      debugPrint('MindMate startup failure [$stage]: $error');
+    }
   }
 
   static String? firebaseErrorCode(Object? error) {

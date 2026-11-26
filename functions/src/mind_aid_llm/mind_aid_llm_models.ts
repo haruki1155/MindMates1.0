@@ -1,3 +1,5 @@
+export const GEMINI_MINDAID_MODEL = "gemini-3.8-flash" as const;
+
 export type MindAidConversationMode = "supportive" | "listening" | "reflective" | "coaching" | "casual" | "navigation";
 
 export interface MindAidRecentTurn {
@@ -12,10 +14,12 @@ export interface MindAidLlmRequest {
   conversationMode: MindAidConversationMode;
   explicitListening: boolean;
   recentTurns: MindAidRecentTurn[];
+  // Server-derived routing state; never copied from callable input.
+  hasWellnessContext?: boolean;
 }
 
 export interface MindAidLlmResponse {
   text: string;
   provider: "gemini";
-  model: "gemini-3.8-flash";
+  model: typeof GEMINI_MINDAID_MODEL;
 }

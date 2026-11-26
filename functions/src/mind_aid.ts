@@ -1,3 +1,4 @@
+import {isMindAidTopic, mindAidWelcome} from "./mind_aid_topic_policy";
 import {createHash} from "node:crypto";
 
 import type {protos} from "@google-cloud/dialogflow-cx";
@@ -24,7 +25,7 @@ const CONVERSATION_ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 type SafetyLevel = "safeSupport" | "needsClarification" | "highDistress" | "crisisOrImmediateRisk";
 type ConversationMode = "supportive" | "listening" | "reflective" | "coaching" | "casual" | "navigation";
-type MindAidSource = "dialogflow" | "gemini" | "controlled_safety";
+type MindAidSource = "dialogflow" | "gemini" | "controlled_safety" | "controlled_topic";
 
 interface MindAidAction {
   type: string;
@@ -39,7 +40,7 @@ interface MindAidResponse {
   confidence: number;
   safetyLevel: SafetyLevel;
   source: MindAidSource;
-  model?: "gemini-3.8-flash";
+  model?: MindAidLlmResponse["model"] | "gemini-2.5-flash";
   suggestions: string[];
   actions: MindAidAction[];
   requiresEscalation: boolean;
@@ -544,7 +545,7 @@ async function persistTurn(uid: string, requestId: string, conversationId: strin
       source: response.source, confidence: response.confidence, fallbackReason: response.fallbackReason,
       effectiveConversationMode: response.effectiveConversationMode,
       ...(response.model ? {model: response.model} : {}),
-      actions: response.actions, createdAt: FieldValue.serverTimestamp(),
+      actions: response.actions, suggestions: response.suggestions, createdAt: FieldValue.serverTimestamp(),
     });
     transaction.set(day, {
       dateKey: manilaDateKey(new Date()), turnCount: FieldValue.increment(1),
@@ -553,6 +554,11 @@ async function persistTurn(uid: string, requestId: string, conversationId: strin
       [`safetyCounts.${safeMetricKey(response.safetyLevel)}`]: FieldValue.increment(1),
       fallbackCount: FieldValue.increment(response.fallbackReason ? 1 : 0),
       latencyTotalMs: FieldValue.increment(latencyMs), updatedAt: FieldValue.serverTimestamp(),
+    }, {merge: true});
+    // Store only routing metadata in a server-only document, not raw history.
+    transaction.set(db.collection("_mind_aid_rate_limits").doc(uid), {
+      topicConversationId: conversationId,
+      topicActive: response.fallbackReason !== "topic_redirect",
     }, {merge: true});
     transaction.create(marker, {userId: uid, requestId, processedAt: FieldValue.serverTimestamp()});
   });
@@ -580,10 +586,11 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
     return {
       messageId: existing.id, text: data.text, intent: data.primaryIntent ?? "general_support",
       confidence: data.confidence ?? 0, safetyLevel: data.safetyLevel ?? "safeSupport",
-      source: data.source ?? "dialogflow", suggestions: [], actions: data.actions ?? [],
+      source: data.source ?? "dialogflow", suggestions: data.suggestions ?? [], actions: data.actions ?? [],
       requiresEscalation: data.requiresEscalation === true, fallbackReason: data.fallbackReason ?? "",
-      effectiveConversationMode: conversationMode,
-      model: data.model === "gemini-3.8-flash" ? data.model : undefined,
+      effectiveConversationMode: data.effectiveConversationMode ?? conversationMode,
+      // Retain attribution on historical turns while validating current responses.
+      model: data.model === GEMINI_MINDAID_MODEL || data.model === "gemini-2.5-flash" ? data.model : undefined,
     } satisfies MindAidResponse;
   }
 
@@ -623,6 +630,15 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
       effectiveConversationMode: "supportive",
     };
   } else {
+    const topicContext = (await db.collection("_mind_aid_rate_limits").doc(uid).get()).data();
+    const hasWellnessContext = topicContext?.topicConversationId === conversationId && topicContext?.topicActive === true;
+    if (!isMindAidTopic(text, hasWellnessContext)) {
+      response = {
+        messageId: `${uid}_${requestId}_assistant`, text: mindAidWelcome, intent: "general_support",
+        confidence: 1, safetyLevel, source: "controlled_topic", suggestions: [], actions: [],
+        requiresEscalation: false, fallbackReason: "topic_redirect", effectiveConversationMode: conversationMode,
+      };
+    } else {
     const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || "";
     const configuredProvider = aiProvider();
     const rawProvider = String(process.env.MINDAID_AI_PROVIDER ?? "").trim().toLowerCase();
@@ -635,7 +651,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
     let fallbackReason = providerConfigured ? "" : "provider_not_configured";
     const geminiAttempt = await attemptGemini(projectId, configuredProvider, async () => {
       const gemini = await new GeminiMindAidProvider(projectId).generate({
-          message: text, conversationMode, explicitListening, recentTurns,
+          message: text, conversationMode, explicitListening, recentTurns, hasWellnessContext,
       });
       if (!isSafeMindAidOutput(gemini.text)) throw new Error("gemini_unsafe_response");
       return gemini;
@@ -708,6 +724,7 @@ async function sendMindAidMessageHandler(request: CallableRequest) {
       actions: parsed.actions, requiresEscalation: false, fallbackReason,
       effectiveConversationMode: conversationMode,
     };
+    }
     }
   }
   await persistTurn(uid, requestId, conversationId, text, response, Date.now() - startedAt);

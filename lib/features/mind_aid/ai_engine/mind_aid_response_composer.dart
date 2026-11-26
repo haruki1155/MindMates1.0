@@ -9,8 +9,7 @@ import 'response_builder.dart';
 
 class MindAidResponseComposer {
   MindAidResponseComposer({MindAidModelProvider? modelProvider})
-    : modelProvider =
-          modelProvider ?? HybridMindAidModelProvider.fromEnvironment();
+    : modelProvider = modelProvider ?? const LocalMindAidModelProvider();
 
   final MindAidModelProvider modelProvider;
 
@@ -40,6 +39,7 @@ class MindAidResponseComposer {
         normalizedInput: normalizedInput,
         matches: matches,
         context: context,
+        state: state,
         includeQuestion: false,
       );
     }
@@ -64,6 +64,7 @@ class MindAidResponseComposer {
           normalizedInput: normalizedInput,
           matches: matches,
           context: context,
+          state: state,
           includeQuestion: false,
         );
       case MindAidDialogueAction.followUp:
@@ -72,6 +73,7 @@ class MindAidResponseComposer {
           normalizedInput: normalizedInput,
           matches: matches,
           context: context,
+          state: state,
         );
       case MindAidDialogueAction.escalate:
         return ResponseBuilder.build(
@@ -85,6 +87,7 @@ class MindAidResponseComposer {
           normalizedInput: normalizedInput,
           matches: matches,
           context: context,
+          state: state,
         );
     }
   }
@@ -267,32 +270,48 @@ class MindAidResponseComposer {
     final topic = _readable(record.intent);
     final buffer = StringBuffer();
 
+    if (_isNo(normalizedInput)) {
+      return 'That is okay. We can change direction. '
+          'What would you like to focus on instead?';
+    }
+
     if (_isYes(normalizedInput)) {
-      buffer.write('Okay. Let us stay with $topic and keep it manageable.');
-    } else if (_isNo(normalizedInput)) {
-      buffer.write(
-        'That is okay. We can change direction and focus on what feels more useful now.',
-      );
+      buffer.write('Okay. We can continue exploring $topic together.');
     } else {
       buffer.write(
-        'Thanks for telling me. I will connect that back to $topic so we can make the next step clearer.',
+        'Thank you for sharing more about $topic. '
+        'Let us focus on one helpful next step.',
       );
     }
 
-    MindAidCopingExercise? exercise;
-    for (final id in record.copingSteps) {
-      exercise = dataset.copingById(id);
-      if (exercise != null) break;
-    }
-    if (exercise != null) {
-      buffer.write('\n\nA small next step: ${exercise.description}');
+    final response = ResponseBuilder.build(
+      record: record,
+      dataset: dataset,
+      normalizedInput: normalizedInput,
+      recentResponses: state.recentResponses,
+      includeExercise: true,
+      includeFollowUp: false,
+    );
+
+    if (response.trim().isNotEmpty &&
+        response != ResponseBuilder.fallbackResponse) {
+      buffer.write('\n\n$response');
     }
 
-    final question = record.followUpQuestions.isNotEmpty
-        ? record.followUpQuestions.first
-        : state.lastQuestion;
-    if (question != null && question.trim().isNotEmpty) {
-      buffer.write('\n\n$question');
+    final questions = record.followUpQuestions;
+
+    if (questions.isNotEmpty) {
+      final previous = state.lastQuestion;
+      final nextQuestion = questions.firstWhere(
+        (question) => question != previous,
+        orElse: () => questions.first,
+      );
+
+      if (!buffer.toString().contains(nextQuestion)) {
+        buffer.write('\n\n$nextQuestion');
+      }
+    } else if (state.lastQuestion != null) {
+      buffer.write('\n\n${state.lastQuestion}');
     }
 
     return buffer.toString();
@@ -310,6 +329,7 @@ class MindAidResponseComposer {
     required String normalizedInput,
     required List<MindAidIntentMatch> matches,
     required MindAidContext context,
+    required MindAidConversationState state,
     bool includeQuestion = true,
   }) {
     final trimmed = base.trim();
@@ -331,7 +351,14 @@ class MindAidResponseComposer {
 
     final parts = <String>[];
     final empathy = _empathyLine(context, matches);
-    if (!_startsWithAny(trimmed, ['i hear', 'i can', 'thanks', 'okay'])) {
+    final alreadyUsedEmpathy =
+        state.turnCount > 0 ||
+        state.recentResponses.any(
+          (response) => response.toLowerCase().contains('i hear you'),
+        );
+
+    if (!alreadyUsedEmpathy &&
+        !_startsWithAny(trimmed, ['i hear', 'i can', 'thanks', 'okay'])) {
       parts.add(empathy);
     }
 

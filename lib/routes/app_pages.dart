@@ -25,6 +25,8 @@ import '../features/splash/screens/splash_screen.dart';
 import '../features/student_assessment/screens/student_assessment_complete_screen.dart';
 import '../features/student_assessment/screens/student_assessment_screen.dart';
 import '../features/page/mind_aid_page.dart';
+import '../features/counseling/screens/messages_hub_screen.dart';
+import '../features/counseling/screens/counselor_chat_screen.dart';
 import 'route_names.dart';
 
 class AppPages {
@@ -52,6 +54,8 @@ class AppPages {
         const HomeAppointmentCalendarScreen(),
     RouteNames.services: (_) => const ServicesScreen(),
     RouteNames.mindAid: (_) => const MindAidPage(),
+    RouteNames.messages: (_) => const MessagesHubScreen(),
+    RouteNames.counselorChat: (_) => const CounselorChatScreen(),
     RouteNames.secretChat: (_) => const SecretChatPage(),
     RouteNames.secretChatProfile: (_) => const SecretChatProfileScreen(),
     RouteNames.insights: (_) => const MentalHealthInsightsScreen(),

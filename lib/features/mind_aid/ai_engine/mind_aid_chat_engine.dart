@@ -26,6 +26,239 @@ class MindAidChatEngine {
   final MindAidSafetyClassifier _safetyClassifier;
   MindAidConversationState _state = const MindAidConversationState();
 
+  static const String defaultGreeting =
+      "Hi! I'm MindAid, your mental wellness companion. 💙\n\n"
+      "I'm here to support your emotional well-being and help you "
+      "with PACC services, counseling, and MindMate wellness features.\n\n"
+      "How can I help you today?";
+
+  static const String _mindAidDefaultGreeting = defaultGreeting;
+
+  static bool _hasTerm(String input, String term) {
+    final pattern = RegExp(r'(^|\s)' + RegExp.escape(term) + r'($|\s)');
+    return pattern.hasMatch(input);
+  }
+
+  static bool _hasAny(String input, List<String> terms) {
+    return terms.any((term) => _hasTerm(input, term));
+  }
+
+  // Reject the requested task, rather than a stressor mentioned in a disclosure.
+  static bool _isUnrelatedRequest(String input) {
+    return RegExp(
+      r'\b(?:write|generate|debug|fix|explain|teach|show|give|create|build|implement|solve|calculate|translate|summarize|ignore)\b.*\b(?:code|python|javascript|program|app|website|recipe|essay|equation|exam answers|instructions)\b|'
+      r'\b(?:how (?:do i|to|can i)|paano|pano)\b.*\b(?:code|cook|program|magluto|magcode|mag code)\b|'
+      r'\b(?:what is|what are|ano ang|ano yung|sino)\b.*\b(?:javascript|python|code|capital|president)\b|'
+      r'\b(?:who won|capital of|capital ng|weather|nba|recipe|exam answers)\b|'
+      r'\d+\s*(?:x|\*|\+|/)\s*\d+',
+    ).hasMatch(input);
+  }
+
+  static bool _isRelatedTopic(String input) {
+    if (_isUnrelatedRequest(input)) return false;
+
+    const wellnessTerms = [
+      'mental health',
+      'mental wellness',
+      'emotional health',
+      'wellbeing',
+      'well being',
+      'wellness',
+      'stress',
+      'stressed',
+      'stressful',
+      'anxiety',
+      'anxious',
+      'panic',
+      'panicking',
+      'depression',
+      'depressed',
+      'sad',
+      'sadness',
+      'lonely',
+      'loneliness',
+      'alone',
+      'burnout',
+      'burned out',
+      'exhausted',
+      'overwhelmed',
+      'worried',
+      'worry',
+      'fear',
+      'afraid',
+      'scared',
+      'crying',
+      'upset',
+      'hopeless',
+      'helpless',
+      'mood',
+      'emotion',
+      'emotions',
+      'feelings',
+      'feeling down',
+      'sleep problem',
+      'insomnia',
+      'cant sleep',
+      'cannot sleep',
+      'self esteem',
+      'self confidence',
+      'insecure',
+      'coping',
+      'cope',
+      'grounding',
+      'breathing exercise',
+      'mindfulness',
+      'meditation',
+      'relaxation',
+      'grief',
+      'trauma',
+      'bullying',
+      'bullied',
+      'relationship problems',
+      'family problems',
+      'academic stress',
+      'school pressure',
+      'exam pressure',
+      'exam deadline',
+      'pagod',
+      'malungkot',
+      'nalulungkot',
+      'lungkot',
+      'kinakabahan',
+      'kabado',
+      'takot',
+      'naiiyak',
+      'umiiyak',
+      'nahihirapan',
+      'pag aalala',
+      'pagkabalisa',
+      'sobrang stress',
+      'emotional support',
+      'hindi makatulog',
+      'hindi ako makatulog',
+      'di ako makatulog',
+      'di makatulog',
+      'masaya',
+      'galit',
+      'naiinis',
+      'sama ng loob',
+    ];
+
+    const paccTerms = [
+      'pacc',
+      'guidance',
+      'guidance counselor',
+      'guidance assistant',
+      'counselor',
+      'counseling',
+      'counselling',
+      'therapy',
+      'appointment',
+      'book counseling',
+      'book appointment',
+      'schedule counseling',
+      'mental health assessment',
+      'self assessment',
+      'assessment result',
+      'assessment score',
+      'phq 9',
+      'gad 7',
+      'mindmate',
+      'mindaid',
+      'mood tracker',
+      'mood tracking',
+      'secret posting',
+      'breathing exercises',
+      'facial tracking',
+      'facial recognition',
+      'insights',
+      'journal',
+      'wellness resources',
+      'daily streak',
+      'daily quest',
+      'psychological assessment',
+    ];
+
+    return _hasAny(input, wellnessTerms) || _hasAny(input, paccTerms);
+  }
+
+  static bool _isSimpleGreeting(String input) {
+    const greetings = [
+      'hi',
+      'hello',
+      'hey',
+      'hello mindaid',
+      'hi mindaid',
+      'hey mindaid',
+      'good morning',
+      'good afternoon',
+      'good evening',
+      'kumusta',
+      'kamusta',
+      'musta',
+      'yo',
+    ];
+    return greetings.contains(input);
+  }
+
+  static bool _isShortFollowUp(String input) {
+    const replies = [
+      'yes',
+      'no',
+      'yeah',
+      'yep',
+      'nope',
+      'okay',
+      'ok',
+      'sure',
+      'please',
+      'continue',
+      'tell me more',
+      'go on',
+      'oo',
+      'opo',
+      'hindi',
+      'sige',
+      'salamat',
+      'thanks',
+    ];
+    if (replies.contains(input)) return true;
+
+    // Recognize natural replies about an existing wellness topic.
+    // Only the active conversation can authorize these follow-ups.
+    const contextualReplies = [
+      'my grades',
+      'my exam',
+      'my exams',
+      'my family',
+      'my parents',
+      'my work',
+      'my job',
+      'because of my family',
+      'because of my grades',
+      'because of my exams',
+      'what should i do',
+      'what can i do',
+      'how can i cope',
+      'how do i cope',
+      'can you help me',
+      'give me advice',
+      'any advice',
+      'tell me more about it',
+      'what do you suggest',
+      'help me with that',
+      'why',
+      'how',
+      'bakit',
+      'paano',
+      'ano ang gagawin ko',
+      'ano dapat kong gawin',
+      'paano ko gagawin yun',
+    ];
+
+    return contextualReplies.contains(input);
+  }
+
   void resetSession() {
     _state = const MindAidConversationState();
   }
@@ -62,6 +295,69 @@ class MindAidChatEngine {
       normalizedInput: normalizedInput,
       matches: matches,
     );
+
+    // Crisis and high-distress handling must run before topic filtering.
+    final isSafetyConcern =
+        safety.level.blocksCloud ||
+        matches.any(
+          (match) =>
+              match.requiresEscalation ||
+              match.record.severity == MindAidSeverity.high ||
+              match.record.severity == MindAidSeverity.crisis,
+        );
+
+    final isContextualFollowUp =
+        (state.awaitingFollowUp || state.activeIntent != null) &&
+        _isShortFollowUp(normalizedInput);
+
+    // Assessment questions are legitimate MindMate wellness requests.
+    // Keep the existing assessment response logic available.
+    final isAssessmentReview =
+        (context.hasAssessment ||
+            request.quickAssessment != null ||
+            request.wellnessSnapshot != null) &&
+        (_hasAny(normalizedInput, const [
+          'assessment',
+          'result',
+          'results',
+          'score',
+          'scores',
+          'review',
+          'progress',
+          'status',
+          'how am i doing',
+          'what should i do next',
+          'wellness signal',
+          'how severe',
+          'what does it mean',
+        ]));
+
+    final isAllowedTopic =
+        !_isUnrelatedRequest(normalizedInput) &&
+        (_isRelatedTopic(normalizedInput) ||
+            isContextualFollowUp ||
+            isAssessmentReview);
+
+    if (!isSafetyConcern &&
+        (_isSimpleGreeting(normalizedInput) || !isAllowedTopic)) {
+      final nextState = const MindAidConversationState();
+      _state = nextState;
+
+      return MindAidChatResponse(
+        text: _mindAidDefaultGreeting,
+        fallbackReason: 'topic_redirect',
+        intentMatches: const [],
+        severity: MindAidSeverity.low,
+        suggestions: const [],
+        followUpQuestions: const [],
+        recommendations: const [],
+        requiresEscalation: false,
+        conversationState: nextState,
+        status: 'sent',
+        safetyLevel: MindAidSafetyLevel.safeSupport,
+      );
+    }
+
     final safetyIntercept = safety.level.blocksCloud;
     final activeFollowUpMatch = state.activeIntent == null
         ? null

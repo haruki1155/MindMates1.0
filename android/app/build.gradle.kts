@@ -132,3 +132,11 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+
+// MindMate photo expression engine
+dependencies {
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+}

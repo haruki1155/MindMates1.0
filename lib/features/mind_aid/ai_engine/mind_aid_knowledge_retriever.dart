@@ -43,7 +43,29 @@ class MindAidKnowledgeRetriever {
       );
     }
 
-    matches.sort((left, right) => right.score.compareTo(left.score));
+    // General stress should not automatically become academic stress.
+    final hasSpecificStressContext = RegExp(
+      r'\b(exam|exams|academic|school|class|classes|'
+      r'grade|grades|assignment|assignments|deadline|deadlines|'
+      r'financial|money|family|work|workplace)\b',
+    ).hasMatch(normalizedInput);
+
+    if (!hasSpecificStressContext &&
+        RegExp(r'\b(stress|stressed|stressful)\b').hasMatch(normalizedInput)) {
+      matches.sort((left, right) {
+        if (left.record.intent == 'general_stress' &&
+            right.record.intent != 'general_stress') {
+          return -1;
+        }
+        if (right.record.intent == 'general_stress' &&
+            left.record.intent != 'general_stress') {
+          return 1;
+        }
+        return right.score.compareTo(left.score);
+      });
+    } else {
+      matches.sort((left, right) => right.score.compareTo(left.score));
+    }
     return matches.take(maxMatches).toList(growable: false);
   }
 

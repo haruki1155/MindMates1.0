@@ -18,6 +18,8 @@ class RouteNames {
   static const appointmentCalendar = '/home/appointment-calendar';
   static const services = '/services';
   static const mindAid = '/mind-aid';
+  static const messages = '/messages';
+  static const counselorChat = '/messages/counselor';
   static const secretChat = '/secret-chat';
   static const secretChatProfile = '/secret-chat/profile';
   static const insights = '/insights';

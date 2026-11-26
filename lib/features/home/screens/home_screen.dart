@@ -604,7 +604,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case _HomeNavDestination.services:
         _openServices();
       case _HomeNavDestination.messages:
-        Navigator.of(context).pushNamed(RouteNames.mindAid);
+        Navigator.of(context).pushNamed(RouteNames.messages);
       case _HomeNavDestination.appointments:
         setState(() {
           _activeDestination = _HomeNavDestination.appointments;

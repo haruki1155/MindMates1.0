@@ -267,6 +267,150 @@ export const cancelPendingRegistrationDev = onCall(
   cancelPendingRegistrationHandler,
 );
 
+
+function collegeDocumentId(name: string): string {
+  return `college-${name.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")}`;
+}
+
+async function resolveRegisteredCollege(
+  department: string,
+): Promise<string> {
+  if (!department.trim()) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Your registered college is missing.",
+    );
+  }
+
+  const id = collegeDocumentId(department.trim());
+  const snapshot = await db.collection("colleges").doc(id).get();
+
+  if (!snapshot.exists ||
+      snapshot.data()?.active !== true ||
+      snapshot.data()?.name !== department.trim()) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Your registered college is not configured in the active academic directory. Contact the administrator.",
+    );
+  }
+
+  return id;
+}
+
+export const repairMyStudentCollege = onCall(
+  {enforceAppCheck: true},
+  async (request) => {
+    const uid = requireUid(request);
+    const ref = db.collection("users").doc(uid);
+    const profile = await ref.get();
+
+    if (!profile.exists) {
+      throw new HttpsError("not-found", "Student profile not found.");
+    }
+
+    const data = profile.data() ?? {};
+    if (data.populationRole !== "student" ||
+        data.verificationStatus !== "verified") {
+      throw new HttpsError(
+        "permission-denied",
+        "Only verified student profiles can use this repair.",
+      );
+    }
+
+    const collegeId = await resolveRegisteredCollege(
+      String(data.department ?? ""),
+    );
+
+    await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(ref);
+      const currentData = current.data() ?? {};
+
+      if (!current.exists ||
+          currentData.populationRole !== "student" ||
+          currentData.verificationStatus !== "verified" ||
+          currentData.department !== data.department) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Student profile changed. Please try again.",
+        );
+      }
+
+      const existing = String(currentData.collegeId ?? "").trim();
+      if (existing && existing !== collegeId) {
+        throw new HttpsError(
+          "failed-precondition",
+          "An administrator must review the existing college assignment.",
+        );
+      }
+
+      if (!existing) {
+        transaction.update(ref, {
+          collegeId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    });
+
+    return {ok: true};
+  },
+);
+
+export const repairMyStudentCollegeDev = onCall(
+  {enforceAppCheck: false},
+  async (request) => {
+    const uid = requireUid(request);
+    const ref = db.collection("users").doc(uid);
+    const profile = await ref.get();
+    const data = profile.data() ?? {};
+
+    if (!profile.exists ||
+        data.populationRole !== "student" ||
+        data.verificationStatus !== "verified") {
+      throw new HttpsError(
+        "permission-denied",
+        "A verified student profile is required.",
+      );
+    }
+
+    const collegeId = await resolveRegisteredCollege(
+      String(data.department ?? ""),
+    );
+
+    await db.runTransaction(async (transaction) => {
+      const current = await transaction.get(ref);
+      const currentData = current.data() ?? {};
+      if (!current.exists ||
+          currentData.populationRole !== "student" ||
+          currentData.verificationStatus !== "verified" ||
+          currentData.department !== data.department) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Student profile changed.",
+        );
+      }
+
+      const existing = String(currentData.collegeId ?? "").trim();
+      if (existing && existing !== collegeId) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Administrator review is required.",
+        );
+      }
+
+      if (!existing) {
+        transaction.update(ref, {
+          collegeId,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+    });
+
+    return {ok: true};
+  },
+);
+
 async function provisionAppUserProfileHandler(request: CallableRequest) {
   const correlationId = randomUUID();
   const uid = requireUid(request);
@@ -290,6 +434,10 @@ async function provisionAppUserProfileHandler(request: CallableRequest) {
     const reservationRef = assignedRole === "student"
       ? db.collection("student_id_reservations").doc(canonicalStudentId(schoolId))
       : db.collection("employee_id_reservations").doc(canonicalEmployeeId(input.employeeId));
+    const collegeId = assignedRole === "student"
+      ? await resolveRegisteredCollege(input.department)
+      : "";
+
     let created = false;
     await db.runTransaction(async (transaction) => {
       const existing = await transaction.get(profileRef);
@@ -324,6 +472,7 @@ async function provisionAppUserProfileHandler(request: CallableRequest) {
       transaction.create(profileRef, {
         id: uid, email: authUser.email ?? "", emailVerified: authUser.emailVerified === true, schoolId,
         ...input,
+        ...(assignedRole === "student" ? {collegeId} : {}),
         dateOfBirth: Timestamp.fromDate(new Date(input.dateOfBirth)),
         name: [input.firstName, input.middleName, input.lastName].filter(Boolean).join(" "),
         role: legacyRole(input.populationRole as PopulationRole),

@@ -18,6 +18,8 @@ export {createMoodEntry, createMoodEntryDev} from "./mood_entries";
 export {
   provisionAppUserProfile,
   provisionAppUserProfileDev,
+  repairMyStudentCollege,
+  repairMyStudentCollegeDev,
   cancelPendingRegistration,
   cancelPendingRegistrationDev,
   getAssessmentStatus,

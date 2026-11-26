@@ -1,5 +1,6 @@
 import '../../core/ml/paacc/intent_prediction.dart';
-import '../../core/ml/paacc/paacc_intent_classifier.dart';
+import '../../core/ml/paacc/paacc_intent_classifier.dart'
+    if (dart.library.js_interop) '../../core/ml/paacc/paacc_intent_classifier_web.dart';
 
 class PaaccMlService {
   PaaccIntentClassifier? _classifier;

@@ -298,6 +298,7 @@ void main() {
       final pending = Completer<Map<String, Object>>();
       var submitCalls = 0;
       final repository = AssessmentRepository(
+        firestoreService: _FakeFirestoreService(),
         stagingQuickAssessmentSubmitter: ({
           required userId,
           required result,
@@ -334,6 +335,7 @@ void main() {
       final pending = Completer<Map<String, Object>>();
       var completionChecks = 0;
       final repository = AssessmentRepository(
+        firestoreService: _FakeFirestoreService(),
         stagingQuickAssessmentSubmitter: ({
           required userId,
           required result,
@@ -365,6 +367,7 @@ void main() {
         () async {
       final pending = Completer<Map<String, Object>>();
       final repository = AssessmentRepository(
+        firestoreService: _FakeFirestoreService(),
         stagingQuickAssessmentSubmitter: ({
           required userId,
           required result,
