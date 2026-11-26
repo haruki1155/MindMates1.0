@@ -1,3 +1,4 @@
+import '../domain/forum_live_check.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/secret_chat_model.dart';
@@ -16,6 +17,7 @@ class SecretChatThreadScreen extends StatefulWidget {
     required this.addComment,
     required this.onToggleLike,
     required this.onToggleSave,
+    this.onCheckText,
     this.onDeletePost,
   });
 
@@ -28,6 +30,9 @@ class SecretChatThreadScreen extends StatefulWidget {
   final ValueChanged<String> onToggleSave;
   final Future<void> Function(String postId)? onDeletePost;
 
+  /// Server check of a reply draft while typing.
+  final CheckForumText? onCheckText;
+
   @override
   State<SecretChatThreadScreen> createState() => _SecretChatThreadScreenState();
 }
@@ -35,6 +40,9 @@ class SecretChatThreadScreen extends StatefulWidget {
 class _SecretChatThreadScreenState extends State<SecretChatThreadScreen> {
   final _controller = TextEditingController();
   final _validator = const SecretChatSafetyValidator();
+  late final _liveCheck = ForumLiveCheck(widget.onCheckText, (result) {
+    if (mounted) setState(() => _validation = result);
+  });
   List<SecretChatComment> _comments = [];
   bool _isLoadingComments = true;
   bool _commentsFailed = false;
@@ -49,6 +57,7 @@ class _SecretChatThreadScreenState extends State<SecretChatThreadScreen> {
 
   @override
   void dispose() {
+    _liveCheck.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -219,7 +228,9 @@ class _SecretChatThreadScreenState extends State<SecretChatThreadScreen> {
       setState(() => _validation = null);
       return;
     }
-    setState(() => _validation = _validator.validateComment(value));
+    final local = _validator.validateComment(value);
+    setState(() => _validation = local);
+    if (local.isAllowed) _liveCheck.schedule(value);
   }
 
   Future<void> _sendReply() async {
@@ -466,10 +477,7 @@ class _ReplyComposer extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               IconButton.filled(
-                onPressed:
-                    isSending ||
-                        validation?.code ==
-                            SecretChatValidationCode.inappropriateLanguage
+                onPressed: isSending || blocksPublishing(validation)
                     ? null
                     : onSend,
                 icon: isSending

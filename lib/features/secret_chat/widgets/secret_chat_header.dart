@@ -60,27 +60,31 @@ class SecretChatHeaderDelegate extends SliverPersistentHeaderDelegate {
               ],
             ),
             const SizedBox(height: 18),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _FilterChipButton(
-                  label: 'Popular',
-                  isSelected: selectedFilter == SecretChatFilter.popular,
-                  onTap: () => onFilterChanged(SecretChatFilter.popular),
-                ),
-                const SizedBox(width: 10),
-                _FilterChipButton(
-                  label: 'My post',
-                  isSelected: selectedFilter == SecretChatFilter.mine,
-                  onTap: () => onFilterChanged(SecretChatFilter.mine),
-                ),
-                const SizedBox(width: 10),
-                _FilterChipButton(
-                  label: 'Saved ($savedCount)',
-                  isSelected: selectedFilter == SecretChatFilter.saved,
-                  onTap: () => onFilterChanged(SecretChatFilter.saved),
-                ),
-              ],
+            // Scrolls sideways on narrow phones instead of overflowing.
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _FilterChipButton(
+                    label: 'Popular',
+                    isSelected: selectedFilter == SecretChatFilter.popular,
+                    onTap: () => onFilterChanged(SecretChatFilter.popular),
+                  ),
+                  const SizedBox(width: 10),
+                  _FilterChipButton(
+                    label: 'My post',
+                    isSelected: selectedFilter == SecretChatFilter.mine,
+                    onTap: () => onFilterChanged(SecretChatFilter.mine),
+                  ),
+                  const SizedBox(width: 10),
+                  _FilterChipButton(
+                    label: 'Saved ($savedCount)',
+                    isSelected: selectedFilter == SecretChatFilter.saved,
+                    onTap: () => onFilterChanged(SecretChatFilter.saved),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

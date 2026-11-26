@@ -181,6 +181,28 @@ class SecretChatRepository {
     }
   }
 
+  /// Checks a draft against the full server dictionary; null when allowed or
+  /// when the check cannot run (publishing is still moderated).
+  Future<SecretChatValidationResult?> checkText(String text) async {
+    try {
+      final result = await functions
+          .httpsCallable('checkSecretChatText')
+          .call<Object?>({'text': text});
+      final data = result.data;
+      if (data is! Map || data['allowed'] == true) return null;
+      final crisis = data['reason'] == 'crisis_support';
+      return SecretChatValidationResult(
+        code: crisis
+            ? SecretChatValidationCode.crisisSupport
+            : SecretChatValidationCode.inappropriateLanguage,
+        labels: crisis ? const ['crisis_support'] : const [],
+        message: data['message'] as String? ?? forumLanguageWarning,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> deletePost(SecretChatModel post) async {
     final uid = _requireUserId();
     if (!post.isMine || (post.authorId != null && post.authorId != uid)) {

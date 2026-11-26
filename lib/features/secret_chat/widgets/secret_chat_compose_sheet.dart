@@ -1,3 +1,4 @@
+import '../domain/forum_live_check.dart';
 import 'package:flutter/material.dart';
 
 import '../../../models/secret_chat_model.dart';
@@ -10,10 +11,12 @@ class SecretChatComposeSheet extends StatefulWidget {
     super.key,
     required this.categories,
     required this.onSubmit,
+    this.onCheckText,
   });
 
   final List<SecretChatCategory> categories;
   final CreateSecretPost onSubmit;
+  final CheckForumText? onCheckText;
 
   @override
   State<SecretChatComposeSheet> createState() => _SecretChatComposeSheetState();
@@ -25,9 +28,13 @@ class _SecretChatComposeSheetState extends State<SecretChatComposeSheet> {
   final List<String> _selectedCategories = [];
   bool _isSubmitting = false;
   SecretChatValidationResult? _validation;
+  late final _liveCheck = ForumLiveCheck(widget.onCheckText, (result) {
+    if (mounted) setState(() => _validation = result);
+  });
 
   @override
   void dispose() {
+    _liveCheck.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -45,156 +52,160 @@ class _SecretChatComposeSheetState extends State<SecretChatComposeSheet> {
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 44,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE4D9B8),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-              ),
-            ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Share anonymously',
-                    style: TextStyle(
-                      color: SecretChatPalette.text,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
-                    ),
+        // Scrolls when the keyboard leaves too little room for the whole form.
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE4D9B8),
+                    borderRadius: BorderRadius.circular(99),
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Community language guidelines',
-                  icon: const Icon(Icons.info_outline),
-                  onPressed: () => showDialog<void>(
-                    context: context,
-                    builder: (dialogContext) => AlertDialog(
-                      title: const Text('Community language'),
-                      content: const Text(forumLanguageGuideline),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(dialogContext),
-                          child: const Text('OK'),
-                        ),
-                      ],
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Share anonymously',
+                      style: TextStyle(
+                        color: SecretChatPalette.text,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Your post appears without your name and is filtered for mental health and wellbeing only.',
-              style: TextStyle(
-                color: SecretChatPalette.muted,
-                fontSize: 12,
-                height: 1.3,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final category in widget.categories)
-                  FilterChip(
-                    label: Text(category.label),
-                    selected: _selectedCategories.contains(category.label),
-                    selectedColor: category.color.withAlpha(115),
-                    onSelected: (selected) {
-                      if (selected && _selectedCategories.length == 3) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('You can choose up to 3 categories.'),
+                  IconButton(
+                    tooltip: 'Community language guidelines',
+                    icon: const Icon(Icons.info_outline),
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Community language'),
+                        content: const Text(forumLanguageGuideline),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('OK'),
                           ),
-                        );
-                        return;
-                      }
-                      setState(() {
-                        if (selected) {
-                          _selectedCategories.add(category.label);
-                        } else {
-                          _selectedCategories.remove(category.label);
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Your post appears without your name and is filtered for mental health and wellbeing only.',
+                style: TextStyle(
+                  color: SecretChatPalette.muted,
+                  fontSize: 12,
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final category in widget.categories)
+                    FilterChip(
+                      label: Text(category.label),
+                      selected: _selectedCategories.contains(category.label),
+                      selectedColor: category.color.withAlpha(115),
+                      onSelected: (selected) {
+                        if (selected && _selectedCategories.length == 3) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'You can choose up to 3 categories.',
+                              ),
+                            ),
+                          );
+                          return;
                         }
-                      });
-                    },
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: _controller,
-              minLines: 4,
-              maxLines: 7,
-              maxLength: SecretChatSafetyValidator.postMaxLength,
-              onChanged: (value) {
-                if (value.trim().isEmpty) {
-                  setState(() => _validation = null);
-                  return;
-                }
-                setState(() => _validation = _validator.validatePost(value));
-              },
-              decoration: InputDecoration(
-                hintText: 'What would you like to share?',
-                filled: true,
-                fillColor: SecretChatPalette.background,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(18),
-                  borderSide: BorderSide.none,
-                ),
+                        setState(() {
+                          if (selected) {
+                            _selectedCategories.add(category.label);
+                          } else {
+                            _selectedCategories.remove(category.label);
+                          }
+                        });
+                      },
+                    ),
+                ],
               ),
-            ),
-            if (_validation != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  _validation!.message,
-                  style: TextStyle(
-                    color: _validation!.isAllowed
-                        ? const Color(0xFF167A56)
-                        : const Color(0xFFB45309),
-                    fontSize: 12,
-                    height: 1.25,
-                    fontWeight: FontWeight.w700,
+              const SizedBox(height: 14),
+              TextField(
+                controller: _controller,
+                minLines: 4,
+                maxLines: 7,
+                maxLength: SecretChatSafetyValidator.postMaxLength,
+                onChanged: (value) {
+                  if (value.trim().isEmpty) {
+                    setState(() => _validation = null);
+                    return;
+                  }
+                  final local = _validator.validatePost(value);
+                  setState(() => _validation = local);
+                  if (local.isAllowed) _liveCheck.schedule(value);
+                },
+                decoration: InputDecoration(
+                  hintText: 'What would you like to share?',
+                  filled: true,
+                  fillColor: SecretChatPalette.background,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: BorderSide.none,
                   ),
                 ),
               ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: FilledButton.icon(
-                onPressed:
-                    _isSubmitting ||
-                        _validation?.code ==
-                            SecretChatValidationCode.inappropriateLanguage
-                    ? null
-                    : _submit,
-                icon: _isSubmitting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.send_rounded),
-                label: const Text('Post anonymously'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: SecretChatPalette.sun,
-                  foregroundColor: SecretChatPalette.text,
-                  textStyle: const TextStyle(fontWeight: FontWeight.w900),
+              if (_validation != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    _validation!.message,
+                    style: TextStyle(
+                      color: _validation!.isAllowed
+                          ? const Color(0xFF167A56)
+                          : const Color(0xFFB45309),
+                      fontSize: 12,
+                      height: 1.25,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: _isSubmitting || blocksPublishing(_validation)
+                      ? null
+                      : _submit,
+                  icon: _isSubmitting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send_rounded),
+                  label: const Text('Post anonymously'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: SecretChatPalette.sun,
+                    foregroundColor: SecretChatPalette.text,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

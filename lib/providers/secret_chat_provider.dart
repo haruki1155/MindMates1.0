@@ -386,6 +386,9 @@ class SecretChatProvider extends ChangeNotifier {
     }
   }
 
+  Future<SecretChatValidationResult?> checkText(String text) =>
+      repository.checkText(text);
+
   Future<List<SecretChatComment>> fetchComments(String postId) {
     return repository.fetchComments(postId);
   }

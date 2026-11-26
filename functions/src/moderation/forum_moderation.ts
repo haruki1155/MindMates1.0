@@ -7,8 +7,10 @@ import {
   ModerationSeverity,
   PHRASE_ENTRIES,
   PhraseEntry,
-  SELF_REFERENCE_NEXT,
+  ADDRESSEE_WORDS,
   SELF_REFERENCE_PREFIXES,
+  SELF_REFERENCE_WINDOW,
+  SELF_REFERENCE_WORDS,
   TERM_ENTRIES,
   TermEntry,
 } from "./forum_dictionary";
@@ -61,10 +63,13 @@ for (const entry of PHRASE_ENTRIES) {
 }
 
 /** True when this match is innocent in context ("leche flan", "ang tanga ko"). */
-function excused(match: IndexedTerm, next: string): boolean {
-  if (match.entry.exceptNext?.includes(next)) return true;
-  return Boolean(match.entry.selfAllowed) &&
-    (SELF_REFERENCE_NEXT.includes(next) || SELF_REFERENCE_PREFIXES.includes(match.prefix));
+function excused(match: IndexedTerm, tokens: string[], at: number): boolean {
+  if (match.entry.exceptNext?.includes(tokens[at + 1] ?? "")) return true;
+  if (!match.entry.selfAllowed) return false;
+  if (SELF_REFERENCE_PREFIXES.includes(match.prefix)) return true;
+  const nearby = tokens.slice(Math.max(0, at - SELF_REFERENCE_WINDOW), at + SELF_REFERENCE_WINDOW + 1);
+  return nearby.some((word) => SELF_REFERENCE_WORDS.includes(word)) &&
+    !nearby.some((word) => ADDRESSEE_WORDS.includes(word));
 }
 
 /**
@@ -78,22 +83,22 @@ export function moderateForumText(text: string): ForumModerationResult {
   };
   const normalized = normalizeForModeration(text);
 
-  const check = (candidates: string[], next: string) => {
+  const check = (candidates: string[], tokens: string[], at: number) => {
     for (const candidate of candidates) {
       const match = TERMS.get(candidate);
-      if (match && !excused(match, next)) record(match.entry.category, match.entry.severity);
+      if (match && !excused(match, tokens, at)) record(match.entry.category, match.entry.severity);
     }
   };
   const {spaced, forms, split, joined} = normalized;
   for (let i = 0; i < spaced.length; i++) {
-    check(forms[i], spaced[i + 1] ?? "");
+    check(forms[i], spaced, i);
     for (const phrase of PHRASES_BY_FIRST.get(spaced[i]) ?? []) {
       if (phrase.words.every((word, offset) => spaced[i + offset] === word)) {
         record(phrase.entry.category, phrase.entry.severity);
       }
     }
   }
-  for (let i = 0; i < split.length; i++) check([split[i]], split[i + 1] ?? "");
+  for (let i = 0; i < split.length; i++) check([split[i]], split, i);
   for (const token of joined) {
     const match = TERMS.get(token);
     if (match) record(match.entry.category, match.entry.severity);

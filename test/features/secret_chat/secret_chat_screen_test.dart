@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/secret_chat/domain/secret_chat_safety_validator.dart';
+import 'package:mind_mates/features/secret_chat/domain/forum_live_check.dart';
 import 'package:mind_mates/features/secret_chat/screens/secret_chat_screen.dart';
 import 'package:mind_mates/models/secret_chat_model.dart';
 import 'package:mind_mates/providers/secret_chat_provider.dart';
@@ -298,12 +299,99 @@ void main() {
       draft,
     );
   });
+
+  Future<SecretChatValidationResult?> serverRefuses(String text) async =>
+      text.contains('tarantado')
+      ? const SecretChatValidationResult(
+          code: SecretChatValidationCode.inappropriateLanguage,
+          message: forumWarning,
+        )
+      : null;
+
+  testWidgets('the server check warns and disables Post while typing', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(_app(posts: const [], onCheckText: serverRefuses));
+    await tester.tap(find.byIcon(Icons.edit_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.enterText(
+      find.byType(TextField).last,
+      'Stress sa school, tarantado yung group mate ko',
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    expect(find.text(forumWarning), findsOneWidget);
+    final button = tester.widget<ButtonStyleButton>(
+      find.ancestor(
+        of: find.text('Post anonymously'),
+        matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
+      ),
+    );
+    expect(button.onPressed, isNull);
+  });
+
+  testWidgets('the server check also guards comments', (tester) async {
+    await tester.pumpWidget(_app(posts: [_post()], onCheckText: serverRefuses));
+    await tester.tap(find.byIcon(Icons.mode_comment_outlined));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.enterText(find.byType(TextField).last, 'tarantado ka');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    expect(find.text(forumWarning), findsWidgets);
+    final send = tester.widget<IconButton>(
+      find.ancestor(
+        of: find.byIcon(Icons.send_rounded),
+        matching: find.byType(IconButton),
+      ),
+    );
+    expect(send.onPressed, isNull);
+  });
+
+  testWidgets(
+    'with the keyboard open the composer scrolls instead of overflowing',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(_app(posts: const []));
+      await tester.tap(find.byIcon(Icons.edit_rounded));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.text('Post anonymously'));
+      await tester.pump();
+      expect(find.text('Post anonymously').hitTestable(), findsOneWidget);
+    },
+  );
+
+  testWidgets('the Forum screen fits a TECNO CN5 without overflow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2364);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(_app(posts: [_post()]));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Saved (0)'), findsOneWidget);
+  });
 }
 
 Widget _app({
   required List<SecretChatModel> posts,
   AddSecretComment? onAddComment,
   CreateSecretPost? onCreatePost,
+  CheckForumText? onCheckText,
   VoidCallback? onProfile,
   Future<void> Function(String postId)? onDeletePost,
 }) {
@@ -340,6 +428,7 @@ Widget _app({
       onRetry: () {},
       onProfile: onProfile,
       onDeletePost: onDeletePost,
+      onCheckText: onCheckText,
     ),
   );
 }

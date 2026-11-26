@@ -8,6 +8,7 @@ import type {CallableRequest} from "firebase-functions/v2/https";
 import {
   addSecretChatCommentHandler,
   assertForumTextAllowed,
+  checkSecretChatTextHandler,
   createSecretChatPostHandler,
   FORUM_LANGUAGE_WARNING,
 } from "./secret_chat_publish";
@@ -191,3 +192,37 @@ test("a post ID that still has comments cannot be reused", {skip: !emulated}, as
   await db.doc(`secret_chat_comments/leftover-${postId}`).set({postId, authorId: "someone", message: "old"});
   await rejectsWith(createSecretChatPostHandler(request(uid(), post({postId}))), "already-exists");
 });
+
+test("the live check answers while typing and records nothing", {skip: !emulated}, async () => {
+  const author = uid();
+  assert.deepEqual(
+    await checkSecretChatTextHandler(request(author, {text: "Kaya natin to, salamat sa support."})),
+    {allowed: true},
+  );
+  assert.deepEqual(await checkSecretChatTextHandler(request(author, {text: "ang pangit mo"})), {
+    allowed: false,
+    reason: "inappropriate_language",
+    message: FORUM_LANGUAGE_WARNING,
+  });
+  const crisis = await checkSecretChatTextHandler(request(author, {text: "I want to kill myself"}));
+  assert.equal(crisis.allowed, false);
+  assert.equal(crisis.reason, "crisis_support");
+  const audit = await db.collection("_secret_chat_moderation_events").where("userId", "==", author).get();
+  assert.equal(audit.size, 0);
+  assert.equal((await db.doc(`_secret_chat_rate_limits/${author}_rejected`).get()).exists, false);
+});
+
+test("the live check needs a signed-in user, bounds its input and fails closed", {skip: !emulated}, async () => {
+  await rejectsWith(checkSecretChatTextHandler(request(uid(), {text: "ok"}, {firstLoginPending: true})),
+    "permission-denied");
+  await rejectsWith(checkSecretChatTextHandler(request(uid(), {text: "x".repeat(2001)})), "invalid-argument");
+  await rejectsWith(
+    checkSecretChatTextHandler(request(uid(), {text: "Kaya natin to."}), {
+      moderate: () => {
+        throw new Error("down");
+      },
+    }),
+    "unavailable",
+  );
+});
+

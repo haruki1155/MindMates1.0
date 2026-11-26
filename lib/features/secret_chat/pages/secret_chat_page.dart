@@ -50,6 +50,7 @@ class _SecretChatPageState extends State<SecretChatPage> {
       onPostOpened: provider.recordUniqueRead,
       onRetryPost: provider.retryPost,
       onDeletePost: provider.deletePost,
+      onCheckText: provider.checkText,
     );
   }
 
