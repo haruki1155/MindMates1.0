@@ -1,6 +1,11 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
+import '../../../models/student_inquiry_model.dart';
+import '../../../repositories/inquiry_repository.dart';
 import '../screens/services_screen.dart';
+import '../screens/testing_service_inquiry_screen.dart';
 
 /// Inquiry topics describe questions, never official availability or promises.
 const serviceInquiryTopics = <String, List<String>>{
@@ -64,8 +69,15 @@ String serviceInquiryDraft(String service, String topic) {
 Future<String?> showServiceInquiryPicker(
   BuildContext context, {
   String? initialService,
+  Stream<List<StudentInquiryRecord>>? myInquiriesStream,
 }) async {
   String? selectedService = initialService;
+  final resolvedInquiriesStream = myInquiriesStream ??
+      (Firebase.apps.isNotEmpty && FirebaseAuth.instance.currentUser != null
+          ? InquiryRepository().watchMyInquiries(
+              FirebaseAuth.instance.currentUser!.uid,
+            )
+          : null);
   return showModalBottomSheet<String>(
     context: context,
     isScrollControlled: true,
@@ -110,6 +122,46 @@ Future<String?> showServiceInquiryPicker(
                                 sheetContext,
                                 serviceInquiryDraft(service, topic),
                               ),
+                            ),
+                          if (service == 'Testing Service')
+                            StreamBuilder<List<StudentInquiryRecord>>(
+                              stream: resolvedInquiriesStream,
+                              builder: (context, snapshot) {
+                                final hasActive = (snapshot.data ?? const [])
+                                    .any((inq) => inq.isActiveTestingService);
+                                return ListTile(
+                                  key: const ValueKey(
+                                    'composer-testing-schedule-tile',
+                                  ),
+                                  enabled: !hasActive,
+                                  leading: Icon(
+                                    hasActive
+                                        ? Icons.lock_clock_outlined
+                                        : Icons.fact_check_outlined,
+                                  ),
+                                  title: Text(
+                                    hasActive
+                                        ? 'Testing Service Request Ongoing'
+                                        : 'Request Testing Service Schedule',
+                                  ),
+                                  subtitle: Text(
+                                    hasActive
+                                        ? 'Wait until PACC marks your active schedule Completed before requesting again'
+                                        : 'Students for OJT, Teaching & Non-Teaching employees',
+                                  ),
+                                  onTap: hasActive
+                                      ? null
+                                      : () {
+                                          Navigator.pop(sheetContext);
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute<void>(
+                                              builder: (_) =>
+                                                  const TestingServiceInquiryScreen(),
+                                            ),
+                                          );
+                                        },
+                                );
+                              },
                             ),
                         ],
                 ),

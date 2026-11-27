@@ -872,7 +872,9 @@ service cloud.firestore {
         && request.resource.data.message.size() >= 1
         && request.resource.data.message.size() <= 4000
         && request.resource.data.status == 'pending'
-        && request.resource.data.createdAt == request.time;
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.get('formType', '') != 'testing_service'
+        && request.resource.data.get('category', '') != 'Testing Service';
       // Raw inquiry documents carry student PII, messages and form responses.
       // Read access is restricted strictly by `canReadInquiry`:
       // 1) the owning student,

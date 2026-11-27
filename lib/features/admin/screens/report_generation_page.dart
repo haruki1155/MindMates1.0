@@ -10,6 +10,7 @@ import '../../../repositories/admin_portal_repository.dart';
 import '../../../services/firebase/firebase_error_message.dart';
 import '../../authentication/data/registration_organization_catalog.dart';
 import '../../../services/admin_report_pdf_service.dart';
+import '../domain/admin_status_presentation.dart';
 import '../domain/report_generation_models.dart';
 import '../theme/admin_theme.dart';
 import '../services/admin_import_file_picker.dart';
@@ -1502,6 +1503,13 @@ class _ReportToggle extends StatelessWidget {
   );
 }
 
+InputDecoration _reportFilterDecoration({required IconData icon}) =>
+    InputDecoration(
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      prefixIcon: Icon(icon, size: 18),
+    );
+
 class _AcademicYearField extends StatelessWidget {
   const _AcademicYearField({
     this.dropdownKey,
@@ -1553,9 +1561,7 @@ class _AcademicYearField extends StatelessWidget {
         key: dropdownKey ?? ValueKey('yr-$activeYear'),
         initialValue: activeYear,
         isExpanded: true,
-        decoration: const InputDecoration(
-          prefixIcon: Icon(Icons.school_outlined),
-        ),
+        decoration: _reportFilterDecoration(icon: Icons.school_outlined),
         items: options
             .map(
               (item) => DropdownMenuItem(
@@ -1610,9 +1616,7 @@ class _ReportingPeriodField extends StatelessWidget {
       key: dropdownKey ?? ValueKey('period-${period.name}'),
       initialValue: period,
       isExpanded: true,
-      decoration: const InputDecoration(
-        prefixIcon: Icon(Icons.date_range_outlined),
-      ),
+      decoration: _reportFilterDecoration(icon: Icons.date_range_outlined),
       items: const [
         DropdownMenuItem(
           value: _ReportPeriod.wholeYear,
@@ -1675,8 +1679,8 @@ class _CollegeDropdownField extends StatelessWidget {
           key: ValueKey('dept-field-$activeDept-$optionsSignature'),
           initialValue: activeDept,
           isExpanded: true,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.account_balance_outlined),
+          decoration: _reportFilterDecoration(
+            icon: Icons.account_balance_outlined,
           ),
           items: [
             DropdownMenuItem(
@@ -1726,9 +1730,7 @@ class _ProgramDropdownField extends StatelessWidget {
           key: ValueKey('program-field-$activeProgram-$optionsSignature'),
           initialValue: activeProgram,
           isExpanded: true,
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.menu_book_outlined),
-          ),
+          decoration: _reportFilterDecoration(icon: Icons.menu_book_outlined),
           items: [
             const DropdownMenuItem(
               value: 'all',
@@ -1836,7 +1838,7 @@ class _AdminReportControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
-    padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+    padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
     decoration: _panelDecoration,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1850,16 +1852,17 @@ class _AdminReportControls extends StatelessWidget {
             letterSpacing: 1,
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 10),
         LayoutBuilder(
           builder: (context, constraints) {
-            final twoColumns = constraints.maxWidth >= 700;
+            final twoColumns = constraints.maxWidth >= 640;
             final width = twoColumns
-                ? (constraints.maxWidth - 14) / 2
+                ? (constraints.maxWidth - 12) / 2
                 : constraints.maxWidth;
             return Wrap(
-              spacing: 14,
-              runSpacing: 14,
+              spacing: 12,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.end,
               children: [
                 SizedBox(
                   width: width,
@@ -1897,26 +1900,28 @@ class _AdminReportControls extends StatelessWidget {
                     onChanged: onProgramChanged,
                   ),
                 ),
+                SizedBox(
+                  width: width,
+                  child: _CategoryChipsField(
+                    label: 'Population category',
+                    allLabel: 'All',
+                    userCategory: userCategory,
+                    userCategories: userCategories,
+                    onChanged: onUserCategoryChanged,
+                  ),
+                ),
+                SizedBox(
+                  width: width,
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 10,
+                    crossAxisAlignment: WrapCrossAlignment.end,
+                    children: [_groupControl(), _visualControl()],
+                  ),
+                ),
               ],
             );
           },
-        ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 14,
-          runSpacing: 14,
-          crossAxisAlignment: WrapCrossAlignment.end,
-          children: [
-            _CategoryChipsField(
-              label: 'Population category',
-              allLabel: 'All',
-              userCategory: userCategory,
-              userCategories: userCategories,
-              onChanged: onUserCategoryChanged,
-            ),
-            _groupControl(),
-            _visualControl(),
-          ],
         ),
         const SizedBox(height: 10),
         Row(
@@ -2031,28 +2036,28 @@ class _AcademicYearStateBadge extends StatelessWidget {
     final (label, bg, fg) = switch (state) {
       AcademicYearPeriodState.planned => (
         'Planned',
-        const Color(0xFFE0F2FE),
-        const Color(0xFF075985),
+        AdminColors.blueBg,
+        AdminColors.blueFg,
       ),
       AcademicYearPeriodState.upcoming => (
         'Upcoming',
-        const Color(0xFFFEF3C7),
-        const Color(0xFF92400E),
+        AdminColors.amberBg,
+        AdminColors.amberFg,
       ),
       AcademicYearPeriodState.closed => (
         'Closed',
-        const Color(0xFFF1F5F9),
+        AdminColors.neutralBg,
         AdminColors.muted,
       ),
       AcademicYearPeriodState.voided => (
         'Voided',
-        const Color(0xFFFEE2E2),
-        AdminColors.danger,
+        AdminColors.redBg,
+        AdminColors.redFg,
       ),
       AcademicYearPeriodState.unknown || AcademicYearPeriodState.current => (
         'Unknown',
-        const Color(0xFFFEE2E2),
-        AdminColors.danger,
+        AdminColors.redBg,
+        AdminColors.redFg,
       ),
     };
     return Container(
@@ -2117,20 +2122,31 @@ class _ControlPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
-    padding: const EdgeInsets.all(18),
+    padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
     decoration: _panelDecoration,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const Text(
+          'REPORT CONTROLS',
+          style: TextStyle(
+            color: AdminColors.muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1,
+          ),
+        ),
+        const SizedBox(height: 10),
         LayoutBuilder(
           builder: (context, constraints) {
-            final twoColumns = constraints.maxWidth >= 700;
+            final twoColumns = constraints.maxWidth >= 640;
             final width = twoColumns
-                ? (constraints.maxWidth - 14) / 2
+                ? (constraints.maxWidth - 12) / 2
                 : constraints.maxWidth;
             return Wrap(
-              spacing: 14,
-              runSpacing: 14,
+              spacing: 12,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.end,
               children: [
                 SizedBox(
                   width: width,
@@ -2170,44 +2186,43 @@ class _ControlPanel extends StatelessWidget {
                     onChanged: onProgramChanged,
                   ),
                 ),
+                SizedBox(
+                  width: width,
+                  child: _CategoryChipsField(
+                    label: 'USER CATEGORY',
+                    allLabel: 'Overall',
+                    userCategory: userCategory,
+                    userCategories: userCategories,
+                    onChanged: onUserCategoryChanged,
+                  ),
+                ),
+                SizedBox(
+                  width: width,
+                  child: _LabeledControl(
+                    label: 'CHART TYPE',
+                    child: SegmentedButton<ReportChartType>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: ReportChartType.pie,
+                          icon: Icon(Icons.pie_chart_outline, size: 18),
+                          label: Text('Pie'),
+                        ),
+                        ButtonSegment(
+                          value: ReportChartType.bar,
+                          icon: Icon(Icons.bar_chart, size: 18),
+                          label: Text('Bar'),
+                        ),
+                      ],
+                      selected: {chartType},
+                      onSelectionChanged: (values) =>
+                          onChartChanged(values.first),
+                    ),
+                  ),
+                ),
               ],
             );
           },
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 30,
-          runSpacing: 18,
-          crossAxisAlignment: WrapCrossAlignment.end,
-          children: [
-            _CategoryChipsField(
-              label: 'USER CATEGORY',
-              allLabel: 'Overall',
-              userCategory: userCategory,
-              userCategories: userCategories,
-              onChanged: onUserCategoryChanged,
-            ),
-            _LabeledControl(
-              label: 'CHART TYPE',
-              child: SegmentedButton<ReportChartType>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(
-                    value: ReportChartType.pie,
-                    icon: Icon(Icons.pie_chart_outline, size: 18),
-                    label: Text('Pie'),
-                  ),
-                  ButtonSegment(
-                    value: ReportChartType.bar,
-                    icon: Icon(Icons.bar_chart, size: 18),
-                    label: Text('Bar'),
-                  ),
-                ],
-                selected: {chartType},
-                onSelectionChanged: (values) => onChartChanged(values.first),
-              ),
-            ),
-          ],
         ),
       ],
     ),
@@ -2231,7 +2246,7 @@ class _LabeledControl extends StatelessWidget {
           letterSpacing: .9,
         ),
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: 5),
       child,
     ],
   );
@@ -2297,6 +2312,8 @@ class _UserReport extends StatelessWidget {
                   ? '${report.dateRange.label} · ${report.activeWindowDays}-day window'
                   : '${report.activeWindowDays}-day window',
               icon: Icons.bolt_outlined,
+              tone: AdminSemanticTone.green,
+              badgeLabel: 'Engagement',
             ),
             _SummaryValue(
               label: 'Selected population',
@@ -2305,6 +2322,8 @@ class _UserReport extends StatelessWidget {
                   : _formatPercent(selected.populationPercentage),
               note: report.userScopeLabel,
               icon: Icons.people_outline,
+              tone: AdminSemanticTone.blue,
+              badgeLabel: 'Population',
             ),
           ],
         ),
@@ -2388,12 +2407,16 @@ class _AppointmentReport extends StatelessWidget {
               value: '${report.totalAppointments}',
               note: 'Academic year ${report.population.schoolYear}',
               icon: Icons.calendar_month_outlined,
+              tone: AdminSemanticTone.blue,
+              badgeLabel: 'Volume',
             ),
             _SummaryValue(
               label: 'Unique students served',
               value: '${report.uniqueStudentsServed}',
               note: 'Students with at least one appointment',
               icon: Icons.people_outline,
+              tone: AdminSemanticTone.violet,
+              badgeLabel: 'Reach',
             ),
             _SummaryValue(
               label: 'Counseling reach',
@@ -2402,12 +2425,16 @@ class _AppointmentReport extends StatelessWidget {
                   : 'Not available',
               note: 'Unique students / population',
               icon: Icons.groups_outlined,
+              tone: AdminSemanticTone.green,
+              badgeLabel: 'Population',
             ),
             _SummaryValue(
               label: 'Completion rate',
               value: _formatPercent(report.completionRate),
               note: 'Completed / scheduled',
               icon: Icons.task_alt_outlined,
+              tone: AdminSemanticTone.green,
+              badgeLabel: 'Outcome',
             ),
           ],
         ),
@@ -2423,6 +2450,8 @@ class _AppointmentReport extends StatelessWidget {
                   : 'Not available',
               note: 'Appointments / population',
               icon: Icons.percent_outlined,
+              tone: AdminSemanticTone.blue,
+              badgeLabel: 'Rate',
             ),
             _SummaryValue(
               label: 'Waiting time',
@@ -2431,12 +2460,16 @@ class _AppointmentReport extends StatelessWidget {
                   : '${report.waitingTimeDays!.toStringAsFixed(1)} days',
               note: 'Request to scheduled appointment',
               icon: Icons.hourglass_bottom_outlined,
+              tone: AdminSemanticTone.amber,
+              badgeLabel: 'Turnaround',
             ),
             _SummaryValue(
               label: 'Rescheduled',
               value: '${report.rescheduledAppointments}',
               note: 'Schedule adjustments',
               icon: Icons.event_repeat_outlined,
+              tone: AdminSemanticTone.amber,
+              badgeLabel: 'Adjustments',
             ),
           ],
         ),
@@ -2597,27 +2630,44 @@ class _TrendPanel extends StatelessWidget {
         const SizedBox(height: 12),
         ...report.trends.map(
           (item) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: 10),
             child: Row(
               children: [
-                SizedBox(width: 95, child: Text(item.schoolYear)),
+                SizedBox(
+                  width: 95,
+                  child: Text(
+                    item.schoolYear,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
                 Expanded(
-                  child: LinearProgressIndicator(
-                    value:
-                        report.trends
-                                .map((e) => e.totalAppointments)
-                                .reduce(math.max) ==
-                            0
-                        ? 0
-                        : item.totalAppointments /
-                              report.trends
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: LinearProgressIndicator(
+                      value:
+                          report.trends
                                   .map((e) => e.totalAppointments)
-                                  .reduce(math.max),
-                    minHeight: 10,
+                                  .reduce(math.max) ==
+                              0
+                          ? 0
+                          : item.totalAppointments /
+                                report.trends
+                                    .map((e) => e.totalAppointments)
+                                    .reduce(math.max),
+                      minHeight: 11,
+                      color: AdminColors.blueFg,
+                      backgroundColor: AdminColors.surfaceMuted,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
-                Text('${item.totalAppointments}'),
+                Text(
+                  '${item.totalAppointments}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
               ],
             ),
           ),
@@ -2966,17 +3016,55 @@ void _showReportSnackBar(
     );
 }
 
+(Color bg, Color fg, Color border) _reportToneColors(AdminSemanticTone tone) =>
+    switch (tone) {
+      AdminSemanticTone.amber => (
+        AdminColors.amberBg,
+        AdminColors.amberFg,
+        AdminColors.amberBorder,
+      ),
+      AdminSemanticTone.blue => (
+        AdminColors.blueBg,
+        AdminColors.blueFg,
+        AdminColors.blueBorder,
+      ),
+      AdminSemanticTone.green => (
+        AdminColors.greenBg,
+        AdminColors.greenFg,
+        AdminColors.greenBorder,
+      ),
+      AdminSemanticTone.violet => (
+        AdminColors.violetBg,
+        AdminColors.violetFg,
+        AdminColors.violetBorder,
+      ),
+      AdminSemanticTone.red => (
+        AdminColors.redBg,
+        AdminColors.redFg,
+        AdminColors.redBorder,
+      ),
+      AdminSemanticTone.neutral => (
+        AdminColors.neutralBg,
+        AdminColors.neutralFg,
+        AdminColors.neutralBorder,
+      ),
+    };
+
 class _SummaryValue {
   const _SummaryValue({
     required this.label,
     required this.value,
     required this.note,
     required this.icon,
+    this.tone = AdminSemanticTone.blue,
+    this.badgeLabel,
   });
   final String label;
   final String value;
   final String note;
   final IconData icon;
+  final AdminSemanticTone tone;
+  final String? badgeLabel;
 }
 
 class _SummaryCards extends StatelessWidget {
@@ -2985,63 +3073,106 @@ class _SummaryCards extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final width = constraints.maxWidth >= 660
-          ? (constraints.maxWidth - 14) / 2
-          : constraints.maxWidth;
+      final columns = constraints.maxWidth >= 1040 && cards.length >= 4
+          ? 4
+          : constraints.maxWidth >= 640
+          ? 2
+          : 1;
+      final width = (constraints.maxWidth - (columns - 1) * 14) / columns;
       return Wrap(
         spacing: 14,
         runSpacing: 14,
         children: [
           for (final card in cards)
-            Container(
-              width: width,
-              padding: const EdgeInsets.all(20),
-              decoration: _panelDecoration,
-              child: Row(
-                children: [
-                  Container(
-                    width: 46,
-                    height: 46,
-                    decoration: BoxDecoration(
-                      color: AdminColors.accentFaint,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(card.icon, color: AdminColors.accentStrong),
+            Builder(
+              builder: (context) {
+                final (bg, fg, border) = _reportToneColors(card.tone);
+                return Container(
+                  width: width,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AdminColors.surface,
+                    border: Border.all(color: border.withValues(alpha: 0.55)),
+                    borderRadius: const BorderRadius.all(Radius.circular(12)),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          card.label,
-                          style: const TextStyle(
-                            color: AdminColors.muted,
-                            fontSize: 12,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: bg,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(card.icon, color: fg, size: 18),
                           ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          card.value,
-                          style: const TextStyle(
-                            fontSize: 25,
-                            fontWeight: FontWeight.w900,
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              card.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: AdminColors.ink,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
                           ),
+                          if (card.badgeLabel != null) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: bg,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: border.withValues(alpha: 0.7),
+                                ),
+                              ),
+                              child: Text(
+                                card.badgeLabel!,
+                                style: TextStyle(
+                                  color: fg,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        card.value,
+                        style: TextStyle(
+                          fontSize: card.value.length > 14 ? 20 : 28,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.4,
+                          color: AdminColors.ink,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
-                        Text(
-                          card.note,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AdminColors.muted,
-                            fontSize: 11,
-                          ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        card.note,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AdminColors.muted,
+                          fontSize: 11.5,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
         ],
       );
@@ -3112,14 +3243,14 @@ class _ChartPanel extends StatelessWidget {
 }
 
 const _chartColors = <Color>[
+  AdminColors.blueFg,
   AdminColors.accentStrong,
-  AdminColors.success,
-  Color(0xFF6D5E9C),
-  Color(0xFF4F7799),
-  Color(0xFFB7654D),
-  Color(0xFF7D7D75),
-  Color(0xFF527D7A),
-  Color(0xFF967345),
+  AdminColors.greenFg,
+  AdminColors.violetFg,
+  AdminColors.amberFg,
+  AdminColors.redFg,
+  AdminColors.blueBorder,
+  AdminColors.neutralFg,
 ];
 
 class _PieChart extends StatelessWidget {
@@ -3198,7 +3329,10 @@ class _ChartLegend extends StatelessWidget {
               const SizedBox(width: 10),
               Text(
                 _formatPercent(data[index].percentage),
-                style: const TextStyle(fontWeight: FontWeight.w900),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
               ),
             ],
           ),
@@ -3230,7 +3364,10 @@ class _BarChart extends StatelessWidget {
                   ),
                   Text(
                     _formatPercent(data[index].percentage),
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ],
               ),
@@ -3382,7 +3519,7 @@ class _EmotionalReportControls extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       decoration: _panelDecoration,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3396,16 +3533,17 @@ class _EmotionalReportControls extends StatelessWidget {
               letterSpacing: 1,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           LayoutBuilder(
             builder: (context, constraints) {
-              final twoColumns = constraints.maxWidth >= 700;
+              final twoColumns = constraints.maxWidth >= 640;
               final fieldWidth = twoColumns
-                  ? (constraints.maxWidth - 14) / 2
+                  ? (constraints.maxWidth - 12) / 2
                   : constraints.maxWidth;
               return Wrap(
-                spacing: 14,
-                runSpacing: 14,
+                spacing: 12,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.end,
                 children: [
                   SizedBox(
                     width: fieldWidth,
@@ -3445,60 +3583,62 @@ class _EmotionalReportControls extends StatelessWidget {
                       onChanged: onProgramChanged,
                     ),
                   ),
+                  SizedBox(
+                    width: fieldWidth,
+                    child: _LabeledControl(
+                      label: 'Approved data source',
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: SegmentedButton<EmotionalActivitySource>(
+                          showSelectedIcon: false,
+                          segments: [
+                            for (final option in EmotionalActivitySource.values)
+                              ButtonSegment(
+                                value: option,
+                                label: Text(option.label),
+                              ),
+                          ],
+                          selected: {source},
+                          onSelectionChanged: (values) =>
+                              onSourceChanged(values.first),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: fieldWidth,
+                    child: _CategoryChipsField(
+                      label: 'Population category',
+                      allLabel: 'All',
+                      userCategory: userCategory,
+                      userCategories: userCategories,
+                      onChanged: onUserCategoryChanged,
+                    ),
+                  ),
+                  _LabeledControl(
+                    label: 'Visualization',
+                    child: SegmentedButton<ReportChartType>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: ReportChartType.bar,
+                          icon: Icon(Icons.bar_chart, size: 18),
+                          label: Text('Bar'),
+                        ),
+                        ButtonSegment(
+                          value: ReportChartType.pie,
+                          icon: Icon(Icons.pie_chart_outline, size: 18),
+                          label: Text('Pie'),
+                        ),
+                      ],
+                      selected: {chartType},
+                      onSelectionChanged: (values) =>
+                          onChartChanged(values.first),
+                    ),
+                  ),
                 ],
               );
             },
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 24,
-            runSpacing: 14,
-            crossAxisAlignment: WrapCrossAlignment.end,
-            children: [
-              _LabeledControl(
-                label: 'Approved data source',
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SegmentedButton<EmotionalActivitySource>(
-                    showSelectedIcon: false,
-                    segments: [
-                      for (final option in EmotionalActivitySource.values)
-                        ButtonSegment(value: option, label: Text(option.label)),
-                    ],
-                    selected: {source},
-                    onSelectionChanged: (values) =>
-                        onSourceChanged(values.first),
-                  ),
-                ),
-              ),
-              _CategoryChipsField(
-                label: 'Population category',
-                allLabel: 'All',
-                userCategory: userCategory,
-                userCategories: userCategories,
-                onChanged: onUserCategoryChanged,
-              ),
-              _LabeledControl(
-                label: 'Visualization',
-                child: SegmentedButton<ReportChartType>(
-                  showSelectedIcon: false,
-                  segments: const [
-                    ButtonSegment(
-                      value: ReportChartType.bar,
-                      icon: Icon(Icons.bar_chart, size: 18),
-                      label: Text('Bar'),
-                    ),
-                    ButtonSegment(
-                      value: ReportChartType.pie,
-                      icon: Icon(Icons.pie_chart_outline, size: 18),
-                      label: Text('Pie'),
-                    ),
-                  ],
-                  selected: {chartType},
-                  onSelectionChanged: (values) => onChartChanged(values.first),
-                ),
-              ),
-            ],
           ),
           const SizedBox(height: 10),
           Row(
@@ -3663,6 +3803,8 @@ class _EmotionalActivityReportView extends StatelessWidget {
                   ? 'Unique participants / ${report.population.schoolYear} population'
                   : 'Unique participants / active cohort',
               icon: Icons.groups_outlined,
+              tone: AdminSemanticTone.blue,
+              badgeLabel: 'Participation',
             ),
             _SummaryValue(
               label: 'Primary emotional pattern',
@@ -3673,6 +3815,8 @@ class _EmotionalActivityReportView extends StatelessWidget {
                   ? 'Includes mixed user categories'
                   : report.userScopeLabel,
               icon: Icons.favorite_outline,
+              tone: AdminSemanticTone.violet,
+              badgeLabel: 'Valence',
             ),
             _SummaryValue(
               label: 'Mood vs assessments mix',
@@ -3687,12 +3831,16 @@ class _EmotionalActivityReportView extends StatelessWidget {
                   ? 'Mood check-ins / verified assessments'
                   : 'Source breakdown gated at n >= ${emotional.suppressionThreshold}',
               icon: Icons.pie_chart_outline,
+              tone: AdminSemanticTone.green,
+              badgeLabel: 'Sources',
             ),
             _SummaryValue(
               label: 'Privacy guard',
               value: 'n >= ${emotional.suppressionThreshold}',
               note: 'Small groups & raw text/images omitted',
               icon: Icons.shield_outlined,
+              tone: AdminSemanticTone.neutral,
+              badgeLabel: 'Threshold',
             ),
           ],
         ),

@@ -36,6 +36,7 @@ class CounselorDashboardAnalytics {
     required this.myStatusBreakdown,
     required this.todaySchedule,
     required this.assignedAppointmentIds,
+    this.myCaseloadRows = const [],
   });
 
   final PortalAppointmentMetrics paccMetrics;
@@ -52,6 +53,7 @@ class CounselorDashboardAnalytics {
   final List<DashboardStatusBreakdownItem> myStatusBreakdown;
   final List<AppointmentModel> todaySchedule;
   final Set<String> assignedAppointmentIds;
+  final List<DashboardCaseRow> myCaseloadRows;
 
   factory CounselorDashboardAnalytics.fromAppointments({
     required List<AppointmentModel> appointments,
@@ -175,6 +177,13 @@ class CounselorDashboardAnalytics {
         .where((a) => !a.isArchived && a.hasAvailableFollowUpOffer)
         .length;
 
+    final myCaseloadRows = buildDashboardCaseRows(
+      sourceAppointments: myAppointments,
+      allAppointments: [...appointments, ...myAppointments],
+      now: now,
+      assignedIds: assignedIds,
+    );
+
     return CounselorDashboardAnalytics(
       paccMetrics: paccMetrics,
       myMetrics: myMetrics,
@@ -190,6 +199,7 @@ class CounselorDashboardAnalytics {
       myStatusBreakdown: buildAppointmentStatusBreakdown(myAppointments),
       todaySchedule: todaySchedule,
       assignedAppointmentIds: assignedIds,
+      myCaseloadRows: myCaseloadRows,
     );
   }
 

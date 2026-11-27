@@ -7,7 +7,8 @@ import '../../../models/profile_roles.dart';
 bool isAdminVisibleInquiry(AdminInquiryModel inquiry) =>
     inquiry.status == InquiryStatus.resolved ||
     inquiry.isEscalated ||
-    inquiry.isTakenOver;
+    inquiry.isTakenOver ||
+    inquiry.isTestingService;
 
 /// Defensive client-side mirror of the Firestore inquiry and operational
 /// status projection rules.

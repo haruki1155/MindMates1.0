@@ -93,5 +93,9 @@ service firebase.storage {
         && request.resource.contentType.matches('^image/(jpeg|png)$');
       allow delete: if isOwner(userId);
     }
+
+    match /testing_service_files/{userId}/{allPaths=**} {
+      allow read, write: if false;
+    }
   }
 }

@@ -4,6 +4,16 @@ export {acknowledgeInquiry, escalateInquiry, reassignInquiry, resolveInquiry, ro
 import {routeInquiry, syncInquiryStatusProjection} from "./inquiry_routing_service";
 export {replyToInquiry, setInquirySla, takeOverInquiry} from "./inquiry_sla_service";
 export {
+  submitTestingServiceInquiry,
+  proposeTestingServiceSchedule,
+  cancelTestingServiceSchedule,
+  completeTestingServiceSchedule,
+  acceptTestingServiceSchedule,
+  requestTestingServiceReschedule,
+  uploadTestingServiceDocument,
+  downloadTestingServiceDocument,
+} from "./testing_service";
+export {
   backfillAppointmentCollegeScope,
   getAppointmentForApproval,
   listAppointmentApprovals,

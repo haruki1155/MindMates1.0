@@ -160,18 +160,32 @@ void main() {
           ),
           findsOneWidget,
         );
+        expect(find.text('Needs action'), findsOneWidget);
         expect(find.text('PACC Today'), findsOneWidget);
         expect(find.text('My Assigned Active'), findsOneWidget);
-        expect(find.text('My Caseload'), findsOneWidget);
-        expect(find.text('Assigned 2'), findsOneWidget);
-        expect(find.text('Follow-up offered 1'), findsOneWidget);
+        expect(find.text('Follow-ups Offered'), findsOneWidget);
+        expect(find.text('Upcoming'), findsNothing);
+        expect(find.text('Schedule overview'), findsOneWidget);
         expect(find.text('7-day appointment schedule'), findsOneWidget);
+        expect(find.text('My Caseload'), findsOneWidget);
+        expect(find.text('Student appt-today-1'), findsOneWidget);
+        expect(find.text('Student appt-completed-3'), findsOneWidget);
+        expect(find.text('Follow-up offered'), findsOneWidget);
         expect(find.text('Appointment status breakdown'), findsOneWidget);
         expect(find.text('Student ••••4321'), findsOneWidget);
         expect(find.text('Assigned to you'), findsOneWidget);
         // Cancelled today appointment must not appear in Today's schedule.
         expect(find.text('Student ••••9999'), findsNothing);
       }
+
+      // Open compact Quick actions dropdown and navigate to Follow-ups.
+      await tester.tap(
+        find.byKey(const ValueKey('counselor-quick-actions-menu')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Follow-ups').last);
+      await tester.pumpAndSettle();
+      expect(navigated, contains(AdminPortalPage.followUps));
 
       // Tap 7-day chart day bar ("Nov 21") to inspect day breakdown.
       await tester.tap(find.text('Nov 21'));
@@ -202,4 +216,35 @@ void main() {
       tester.view.reset();
     },
   );
+
+  testWidgets('hides empty zero-count metric cards when all actions are 0', (
+    tester,
+  ) async {
+    final repo = _FakeCounselorDashboardRepository(
+      appointments: Stream.value(const []),
+      myAssignedAppointments: Stream.value(const []),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AdminTheme.data,
+        home: Scaffold(
+          body: CounselorOperationsDashboardPage(
+            repository: repo,
+            onNavigate: (_) {},
+            clock: () => fixedNow,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('counselor-all-caught-up')),
+      findsOneWidget,
+    );
+    expect(find.text('Needs action'), findsNothing);
+    expect(find.text('PACC Today'), findsNothing);
+    expect(find.text('My Assigned Active'), findsNothing);
+  });
 }

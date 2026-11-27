@@ -214,6 +214,10 @@ class _InquiryReplyThreadState extends State<InquiryReplyThread> {
     if (_isOperationalOnly) return false;
     final inquiry = widget.inquiry;
     if (inquiry.status == InquiryStatus.resolved) return false;
+    final isAdmin =
+        widget.repository.isSuperAdmin ||
+        widget.repository.currentAccessRole == AccessRole.admin;
+    if (inquiry.isTestingService && isAdmin) return false;
     if (widget.repository.isSuperAdmin) return true;
     final role = widget.repository.currentAccessRole;
     final uid = widget.repository.currentUserId;

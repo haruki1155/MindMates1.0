@@ -720,6 +720,42 @@ void main() {
       expect(find.text('20%'), findsNothing);
     },
   );
+
+  testWidgets(
+    'renders compact two-column filters and color-coded metric badges cleanly across widths',
+    (tester) async {
+      final repo = _FiltersPreviewFakeRepository();
+      for (final width in [360.0, 1440.0]) {
+        tester.view.physicalSize = Size(width, 1200);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AdminTheme.data,
+            home: Scaffold(
+              body: ReportGenerationPage(
+                key: ValueKey('layout-$width'),
+                repository: repo,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Engagement'), findsOneWidget);
+        expect(find.text('Population'), findsOneWidget);
+
+        await tester.tap(find.text('Counseling appointments'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Volume'), findsOneWidget);
+        expect(find.text('Outcome'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
 }
 
 class _CustomReportRepository extends AdminPortalRepository {
