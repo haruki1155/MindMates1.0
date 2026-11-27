@@ -15,10 +15,13 @@ import 'package:mind_mates/models/student_roster_models.dart';
 import 'package:mind_mates/repositories/student_roster_repository.dart';
 
 const _header =
-    'Student No.,Surname,First Name,Middle Name,Date of Birth (MM/DD/YYYY),College,Course,Year Level';
+    'Student No.,Surname,First Name,Middle Name,Date of Birth (MM/DD/YYYY),College,Course,Year Level,Email';
 
-String _csvRow(String no, {String dob = '02/03/2005'}) =>
-    '$no,Santos,Ana,,$dob,CITE,BSIT,1';
+String _csvRow(
+  String no, {
+  String dob = '02/03/2005',
+  String email = 'ana@example.edu',
+}) => '$no,Santos,Ana,Reyes,$dob,CITE,BSIT,1,$email';
 
 AdminImportFile _csvFile(List<String> rows, {String name = 'roster.csv'}) =>
     AdminImportFile(
@@ -215,10 +218,16 @@ class _Repo extends StudentRosterRepository {
         ];
   }
 
+  List<StudentCredentialRequestLog> credentialLogs = [];
+
   @override
-  Future<List<LegacyStudent>> listLegacyNotInRoster() async => const [
-    LegacyStudent(userId: 'u9', schoolId: '2019-777', name: 'Old Timer'),
-  ];
+  Future<List<StudentCredentialRequestLog>> listCredentialRequestLogs() async {
+    calls.add('credentialLogs');
+    return List.of(credentialLogs);
+  }
+
+  @override
+  Future<List<LegacyStudent>> listLegacyNotInRoster() async => const [];
 }
 
 class _Downloads {
@@ -306,7 +315,8 @@ void main() {
     await _pump(tester, repo, file: _csvFile([_csvRow('LNK-001')]));
     await _chooseAndPreview(tester);
 
-    expect(find.text('LNK-001 · Links account'), findsOneWidget);
+    expect(find.text('LNK-001'), findsOneWidget);
+    expect(find.text('Links account'), findsOneWidget);
     expect(
       find.text('The existing account has a different name.'),
       findsOneWidget,
@@ -337,27 +347,42 @@ void main() {
     );
   });
 
-  testWidgets('preview shows counts, spelled dates and per-row changes', (
-    tester,
-  ) async {
-    final repo = _Repo();
-    await _pump(
-      tester,
-      repo,
-      file: _csvFile([_csvRow('2021-001'), _csvRow('UPD-1')]),
-    );
-    await _chooseAndPreview(tester);
-    expect(find.text('New 1'), findsOneWidget);
-    expect(find.text('Update 1'), findsOneWidget);
-    expect(find.text('Links account 0'), findsOneWidget);
-    expect(find.text('Error 0'), findsOneWidget);
-    expect(find.textContaining('Born Feb 3, 2005'), findsWidgets);
-    expect(
-      find.textContaining('dateOfBirth: Feb 3, 2005 → Feb 4, 2005'),
-      findsOneWidget,
-    );
-    expect(_button(tester, 'Import').onPressed, isNotNull);
-  });
+  testWidgets(
+    'preview shows counts, full template columns, per-row details, spelled dates, changes, and filter chips',
+    (tester) async {
+      final repo = _Repo();
+      await _pump(
+        tester,
+        repo,
+        file: _csvFile([
+          _csvRow('2021-001', email: 'ana.one@example.edu'),
+          _csvRow('UPD-1', email: 'upd.one@example.edu'),
+        ]),
+      );
+      await _chooseAndPreview(tester);
+      expect(find.text('New 1'), findsOneWidget);
+      expect(find.text('Update 1'), findsOneWidget);
+      expect(find.text('Links account 0'), findsOneWidget);
+      expect(find.text('Error 0'), findsOneWidget);
+      for (final header in rosterTemplateHeaders) {
+        expect(find.text(header), findsOneWidget);
+      }
+      expect(find.text('Santos'), findsNWidgets(2));
+      expect(find.text('Ana'), findsNWidgets(2));
+      expect(find.text('Reyes'), findsNWidgets(2));
+      expect(find.text('Feb 3, 2005'), findsNWidgets(2));
+      expect(find.text('ana.one@example.edu'), findsOneWidget);
+      expect(find.text('upd.one@example.edu'), findsOneWidget);
+      expect(
+        find.textContaining('dateOfBirth: Feb 3, 2005 → Feb 4, 2005'),
+        findsOneWidget,
+      );
+      expect(find.text('All (2)'), findsOneWidget);
+      expect(find.text('Errors (0)'), findsOneWidget);
+      expect(find.text('Ready (2)'), findsOneWidget);
+      expect(_button(tester, 'Import').onPressed, isNotNull);
+    },
+  );
 
   testWidgets('any error row disables Import', (tester) async {
     final repo = _Repo();
@@ -567,59 +592,39 @@ void main() {
     expect(find.textContaining('activation slips'), findsNothing);
   });
 
-  testWidgets('account requests: an administrator approves or rejects each one', (
+  testWidgets('Legacy and Account requests tabs are removed and Credential Request Log is view-only and last', (
     tester,
   ) async {
-    StudentAccountClaim claim(String uid, String no) => StudentAccountClaim(
-      uid: uid,
-      studentNo: no,
-      name: 'Ana Cruz',
-      college: 'CITE',
-      course: 'BSIT',
-      yearLevel: '1st Year',
-      email: '$uid@example.com',
-      submittedAt: DateTime.utc(2026, 11, 20),
-      rosterAlreadyClaimed: false,
-    );
     final repo = _Repo()
-      ..claims = [claim('u1', '2021-001'), claim('u2', '2021-002')];
+      ..credentialLogs = [
+        StudentCredentialRequestLog(
+          studentKey: '2021001',
+          studentNo: '2021-001',
+          name: 'Santos, Ana Reyes',
+          college: 'CITE',
+          course: 'BSIT',
+          yearLevel: '1st Year',
+          email: 'ana@example.edu',
+          state: 'issued',
+          issuedCount: 1,
+          requestedAt: DateTime.utc(2026, 11, 20, 9, 30),
+        ),
+      ];
     await _pump(tester, repo);
-    await tester.tap(find.text('Account requests'));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Personal email: u1@example.com'),
-      findsOneWidget,
-    );
-    expect(find.textContaining('does not prove it'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Approve').first);
-    await tester.pumpAndSettle();
-    expect(
-      repo.calls.where((c) => c.startsWith('approve')),
-      isEmpty,
-      reason: 'asks first',
-    );
-    // Approve stays disabled until the administrator attests they verified the student.
-    expect(
-      tester
-          .widget<FilledButton>(
-            find.widgetWithText(FilledButton, 'Approve').last,
-          )
-          .onPressed,
-      isNull,
-    );
-    await tester.tap(find.byKey(const Key('claim-identity-verified')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Approve').last);
-    await tester.pumpAndSettle();
-    expect(repo.calls, contains('approve:u1'));
+    expect(find.text('Legacy – not in roster'), findsNothing);
+    expect(find.text('Account requests'), findsNothing);
 
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Reject').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Reject').last);
-    await tester.pumpAndSettle();
-    expect(repo.calls, contains('reject:u2'));
-    expect(find.text('No account requests are waiting.'), findsOneWidget);
+    final chips = tester.widgetList<ChoiceChip>(find.byType(ChoiceChip)).toList();
+    expect(chips.length, 5);
+    await _openTab(tester, 'Credential Request Log');
+    expect(repo.calls, contains('credentialLogs'));
+    expect(find.textContaining('View-only activity log'), findsOneWidget);
+    expect(find.text('Santos, Ana Reyes · 2021-001'), findsOneWidget);
+    expect(find.text('Credentials Sent'), findsOneWidget);
+    expect(find.text('Email: ana@example.edu'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Approve'), findsNothing);
+    expect(find.widgetWithText(OutlinedButton, 'Reject'), findsNothing);
   });
 
   testWidgets('corrections: reject needs a reason, approve works', (
@@ -702,14 +707,11 @@ void main() {
     },
   );
 
-  testWidgets('import history and legacy tabs list their data', (tester) async {
+  testWidgets('import history tab lists its data', (tester) async {
     await _pump(tester, _Repo());
     await _openTab(tester, 'Import history');
     expect(find.text('registrar_2026.xlsx'), findsOneWidget);
     expect(find.textContaining('5 new · 2 updated · 1 linked'), findsOneWidget);
-    await _openTab(tester, 'Legacy – not in roster');
-    expect(find.text('Old Timer'), findsOneWidget);
-    expect(find.text('2019-777'), findsOneWidget);
   });
 
   testWidgets(

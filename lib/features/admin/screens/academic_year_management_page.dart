@@ -464,28 +464,13 @@ class _AcademicYearManagementPageState
   }
 
   Widget _buildHeader({required bool compact}) {
-    const titleBlock = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Academic Year Management',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            color: AdminColors.ink,
-            letterSpacing: -0.3,
-          ),
-        ),
-        SizedBox(height: 4),
-        Text(
-          'Configure counseling academic periods, enforce single-active-year boundaries, and lock completed years for historical reporting.',
-          style: TextStyle(
-            fontSize: 13.5,
-            color: AdminColors.muted,
-            height: 1.4,
-          ),
-        ),
-      ],
+    const titleBlock = Text(
+      'Configure counseling academic periods, enforce single-active-year boundaries, and lock completed years for historical reporting.',
+      style: TextStyle(
+        fontSize: 13.5,
+        color: AdminColors.muted,
+        height: 1.4,
+      ),
     );
 
     final createButton = FilledButton.icon(

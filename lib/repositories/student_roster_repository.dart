@@ -154,6 +154,14 @@ class StudentRosterRepository {
         : 'awaiting-approval';
   }
 
+  Future<List<StudentCredentialRequestLog>> listCredentialRequestLogs() async {
+    final result = await _callMap('listStudentCredentialRequests');
+    return [
+      for (final item in asList(result['requests']))
+        StudentCredentialRequestLog.fromJson(asStringMap(item)),
+    ];
+  }
+
   // ---------------------------------------------- administrator review
 
   Future<List<StudentAccountClaim>> listAccountClaims() async {

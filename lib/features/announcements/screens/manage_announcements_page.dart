@@ -125,16 +125,7 @@ class _ManageAnnouncementsPageState extends State<ManageAnnouncementsPage> {
             spacing: 20,
             runSpacing: 16,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Announcements',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const Text('Career guidance and placement updates'),
-                ],
-              ),
+              const Text('Career guidance and placement updates'),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: AdminColors.accentSoft,

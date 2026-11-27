@@ -75,21 +75,13 @@ class CounselorWorkflowPage extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'My Cases',
-                      style: TextStyle(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
                     Text(
                       mode == CounselorWorkflowMode.cases
                           ? 'Continue assigned counseling work with privacy-safe student identifiers.'
                           : 'Review actual post-session follow-up offers and bookings.',
                       style: const TextStyle(color: AdminColors.muted),
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 16),
                     Wrap(
                       spacing: 10,
                       runSpacing: 8,

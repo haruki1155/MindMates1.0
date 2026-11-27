@@ -16,6 +16,7 @@ import {
   InquiryRoutingError,
   parseEscalationInput,
   planReassignment,
+  resolvedAdminNotificationId,
   shouldWriteInquiryProjection,
   triageNotificationId,
 } from "./inquiry_routing";
@@ -350,7 +351,7 @@ export const acknowledgeInquiry = onCall(async (request) => {
     // operational monitors acknowledge receipt without gaining counselor ownership.
     const nextOwnerId = who.role === "portalStaff" ? (data.ownerId ?? null) : (data.ownerId ?? who.actor.uid);
     tx.update(ref, {
-      status: "in_progress",
+      status: "pending",
       acknowledgedAt: FieldValue.serverTimestamp(),
       acknowledgedBy: who.actor.uid,
       ownerId: nextOwnerId,
@@ -359,7 +360,7 @@ export const acknowledgeInquiry = onCall(async (request) => {
     });
     const projection = buildInquiryStatusProjection(inquiryId, {
       ...data,
-      status: "in_progress",
+      status: "pending",
       acknowledgedAt: nowTs,
       ownerId: nextOwnerId,
       routingRevision: revision + 1,
@@ -377,7 +378,7 @@ export const acknowledgeInquiry = onCall(async (request) => {
       actorId: who.actor.uid, actorNameSnapshot: who.actor.name, actorRoleSnapshot: who.role,
       action: "INQUIRY_ACKNOWLEDGED", category: AUDIT_CATEGORIES.inquiries, targetType: "inquiry", targetId: inquiryId,
       metadata: {
-        before: String(data.status ?? "pending"), after: "in_progress", ownerId: nextOwnerId,
+        before: String(data.status ?? "pending"), after: "pending", ownerId: nextOwnerId,
         revision: revision + 1, revisionChecked,
       },
     });
@@ -454,8 +455,8 @@ function assertCanResolveInquiryStatus(
   }
   const isAcknowledgedOrResponded =
     hasTimestampValue(data.acknowledgedAt) || hasTimestampValue(data.firstResponseAt);
-  if (before !== "in_progress" || !isAcknowledgedOrResponded) {
-    throw new HttpsError("failed-precondition", "Acknowledge receipt before marking this inquiry as resolved.");
+  if ((before !== "pending" && before !== "in_progress") || !isAcknowledgedOrResponded) {
+    throw new HttpsError("failed-precondition", "Confirm receipt before marking this inquiry as resolved.");
   }
   return true;
 }
@@ -468,7 +469,7 @@ export const setInquiryStatus = onCall(async (request) => {
   const ref = db().collection("inquiries").doc(inquiryId);
   const statusRef = statusCollection().doc(inquiryId);
   const nowTs = Timestamp.now();
-  return db().runTransaction(async (tx) => {
+  const result = await db().runTransaction(async (tx) => {
     const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
@@ -515,6 +516,23 @@ export const setInquiryStatus = onCall(async (request) => {
     });
     return {ok: true, changed: true, revision: revision + 1};
   });
+  if (status === "resolved" && !who.isSuperAdmin && result.changed) {
+    const admin = superAdminUid();
+    if (admin) {
+      await createOnce(
+        resolvedAdminNotificationId(inquiryId, result.revision),
+        notification(
+          admin,
+          inquiryId,
+          "Inquiry resolved by counselor",
+          "A counselor marked an inquiry as resolved and directed it to the Administrator for review.",
+        ),
+      ).catch((error) => {
+        console.warn("Admin resolution notification failed.", error);
+      });
+    }
+  }
+  return result;
 });
 
 export const resolveInquiry = onCall(async (request) => {
@@ -523,7 +541,7 @@ export const resolveInquiry = onCall(async (request) => {
   const ref = db().collection("inquiries").doc(inquiryId);
   const statusRef = statusCollection().doc(inquiryId);
   const nowTs = Timestamp.now();
-  return db().runTransaction(async (tx) => {
+  const result = await db().runTransaction(async (tx) => {
     const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
@@ -564,6 +582,23 @@ export const resolveInquiry = onCall(async (request) => {
     });
     return {ok: true, changed: true, revision: revision + 1};
   });
+  if (!who.isSuperAdmin && result.changed) {
+    const admin = superAdminUid();
+    if (admin) {
+      await createOnce(
+        resolvedAdminNotificationId(inquiryId, result.revision),
+        notification(
+          admin,
+          inquiryId,
+          "Inquiry resolved by counselor",
+          "A counselor marked an inquiry as resolved and directed it to the Administrator for review.",
+        ),
+      ).catch((error) => {
+        console.warn("Admin resolution notification failed.", error);
+      });
+    }
+  }
+  return result;
 });
 
 export const escalateInquiry = onCall(async (request) => {
@@ -582,14 +617,16 @@ export const escalateInquiry = onCall(async (request) => {
     const [current, currentProjection] = await Promise.all([tx.get(ref), tx.get(statusRef)]);
     if (!current.exists) throw new HttpsError("not-found", "Inquiry not found.");
     const data = current.data()!;
-    // Escalation is an assigned handler's or monitoring staff member's request for administrator review.
+    // Forwarding is an assigned counselor's turnover (once resolved) or an operational monitor's request for administrator review.
     if (who.isSuperAdmin || !canOperateOnInquiry(who, data)) {
-      throw new HttpsError("permission-denied", "Only staff assigned to this inquiry can escalate it.");
+      throw new HttpsError("permission-denied", "Only staff assigned to this inquiry can forward it.");
     }
-    if (data.status === "resolved") throw new HttpsError("failed-precondition", "Resolved inquiries cannot be escalated.");
+    if (who.role === "counselor" && String(data.status ?? "pending").toLowerCase() !== "resolved") {
+      throw new HttpsError("failed-precondition", "Mark this inquiry as resolved before forwarding it to the Administrator.");
+    }
     const revision = revisionOf(data);
     const {revisionChecked} = checkExpectedRevision((request.data as {expectedRevision?: unknown})?.expectedRevision, revision);
-    if (data.escalation?.status === "requested") throw new HttpsError("failed-precondition", "This inquiry is already escalated.");
+    if (data.escalation?.status === "requested") throw new HttpsError("failed-precondition", "This inquiry has already been forwarded to the Administrator.");
     const nextEscalation = {
       status: "requested",
       type: escalationType,
@@ -626,7 +663,7 @@ export const escalateInquiry = onCall(async (request) => {
     return revision;
   });
   await createOnce(escalationNotificationId(inquiryId, revision),
-    notification(admin, inquiryId, "Inquiry escalated", "An assigned inquiry was escalated for administrator review."));
+    notification(admin, inquiryId, "Inquiry forwarded to Administrator", "A processed inquiry was forwarded for administrator review."));
   return {ok: true};
 });
 

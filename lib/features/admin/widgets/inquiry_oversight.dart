@@ -14,8 +14,7 @@ String _lastAction(AdminInquiryModel inquiry) {
   if (inquiry.lastResponseByName != null) {
     return 'Last reply by ${inquiry.lastResponseByName}';
   }
-  if (inquiry.isEscalated) return 'Escalated, no reply';
-  if (inquiry.isAcknowledged) return 'Acknowledged, no reply';
+  if (inquiry.isAcknowledged) return 'Receipt confirmed, no reply';
   return 'No action yet';
 }
 

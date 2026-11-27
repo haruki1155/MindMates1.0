@@ -14,6 +14,7 @@ import '../../../models/user_model.dart';
 import '../../../models/profile_roles.dart';
 import '../domain/admin_management_models.dart';
 import '../domain/admin_status_presentation.dart';
+import '../domain/inquiry_scope.dart';
 import '../services/admin_unload_guard.dart';
 import '../domain/appointment_workflow.dart';
 import '../widgets/admin_status_badge.dart';
@@ -21,7 +22,7 @@ import '../../../repositories/admin_portal_repository.dart';
 import '../../../repositories/appointment_repository.dart';
 import '../../../repositories/pacc_availability_repository.dart';
 import 'admin_assessment_results_page.dart';
-import 'staff_registration_screen.dart';
+import 'create_staff_account_page.dart';
 import 'user_management_page.dart';
 import 'profile_management_page.dart';
 import 'academic_year_management_page.dart';
@@ -68,6 +69,7 @@ enum AdminPortalPage {
   announcements,
   dashboard,
   users,
+  createAccount,
   studentRoster,
   academicStructure,
   collegeAssignments,
@@ -91,6 +93,7 @@ extension on AdminPortalPage {
     AdminPortalPage.announcements => 'Announcements',
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
+    AdminPortalPage.createAccount => 'Create Account',
     AdminPortalPage.studentRoster => 'Student Directory',
     AdminPortalPage.academicStructure => 'Academic Structure',
     AdminPortalPage.collegeAssignments => 'College Assignments',
@@ -120,6 +123,7 @@ extension on AdminPortalPage {
     AdminPortalPage.announcements => Icons.campaign_outlined,
     AdminPortalPage.dashboard => Icons.home_outlined,
     AdminPortalPage.users => Icons.group_outlined,
+    AdminPortalPage.createAccount => Icons.person_add_alt_1_outlined,
     AdminPortalPage.studentRoster => Icons.school_outlined,
     AdminPortalPage.academicStructure => Icons.account_tree_outlined,
     AdminPortalPage.collegeAssignments => Icons.assignment_ind_outlined,
@@ -360,19 +364,14 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                         onPressed: _submitting ? null : _resetPassword,
                         child: const Text('Forgot password?'),
                       ),
-                      TextButton(
-                        onPressed: _submitting
-                            ? null
-                            : () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => StaffRegistrationScreen(
-                                    repository:
-                                        widget.repository ??
-                                        AdminPortalRepository(),
-                                  ),
-                                ),
-                              ),
-                        child: const Text('Request PACC Portal Access'),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Need a Counselor or Staff account? Contact your PACC Administrator.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AdminColors.muted,
+                        ),
                       ),
                     ],
                   ),
@@ -689,6 +688,11 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
       repository: _repository,
       onOpenAcademicStructure: () =>
           _setPage(AdminPortalPage.academicStructure),
+      onOpenCreateAccount: () => _setPage(AdminPortalPage.createAccount),
+    ),
+    AdminPortalPage.createAccount => CreateStaffAccountPage(
+      repository: _repository,
+      onOpenUserManagement: () => _setPage(AdminPortalPage.users),
     ),
     AdminPortalPage.studentRoster => StudentRosterPage(
       leaveGuard: _rosterLeaveGuard,
@@ -798,6 +802,7 @@ class PortalWorkspaceNavigation extends StatelessWidget {
     AdminPortalPage.announcements =>
       accessRole == AccessRole.portalStaff || accessRole == AccessRole.admin,
     AdminPortalPage.users => isSuperAdmin,
+    AdminPortalPage.createAccount => isSuperAdmin,
     AdminPortalPage.studentRoster => isSuperAdmin,
     AdminPortalPage.academicStructure => isSuperAdmin,
     AdminPortalPage.collegeAssignments =>
@@ -832,6 +837,7 @@ class PortalWorkspaceNavigation extends StatelessWidget {
       const _NavSection('Publishing', [AdminPortalPage.announcements]),
       const _NavSection('People', [
         AdminPortalPage.users,
+        AdminPortalPage.createAccount,
         AdminPortalPage.studentRoster,
         AdminPortalPage.profiling,
         AdminPortalPage.academicStructure,
@@ -1421,10 +1427,8 @@ class _Page extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.headlineLarge),
-            const SizedBox(height: 6),
             Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
             child,
           ],
         ),
@@ -2264,6 +2268,16 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
       stream: widget.repository.watchAppointments(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const _AccessPanel();
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return Semantics(
+            label: 'Loading appointments',
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 48),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          );
+        }
         final now = DateTime.now();
         final records = snapshot.data ?? const <AppointmentModel>[];
         final counts = appointmentQueueCounts(records, now);
@@ -2277,6 +2291,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
           'Today' => AppointmentQueue.today,
           'Upcoming' => AppointmentQueue.upcoming,
           'Completed' => AppointmentQueue.completed,
+          'Cancelled' => AppointmentQueue.cancelled,
           _ => null,
         };
         final categoryRecords = appointmentRecordsForView(
@@ -2285,6 +2300,18 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
           showHistory: showHistory,
           queue: selectedQueue,
         );
+        final departments =
+            (showHistory ? all : records)
+                .map((a) => a.department ?? '')
+                .where((a) => a.isNotEmpty)
+                .toSet()
+                .toList()
+              ..sort();
+        final effectiveDepartment =
+            departmentFilter == 'All departments' ||
+                    departments.contains(departmentFilter)
+                ? departmentFilter
+                : 'All departments';
         final query = _search.text.trim().toLowerCase();
         final items = categoryRecords.where((a) {
           final isFollowUp = (a.parentAppointmentId ?? '').trim().isNotEmpty;
@@ -2297,22 +2324,21 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
               (query.isEmpty ||
                   a.fullName.toLowerCase().contains(query) ||
                   a.userId.toLowerCase().contains(query)) &&
-              (departmentFilter == 'All departments' ||
-                  a.department == departmentFilter);
+              (effectiveDepartment == 'All departments' ||
+                  a.department == effectiveDepartment);
         }).toList();
         if (filter == 'Upcoming') {
           items.sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt));
         }
         final needsAction = counts[AppointmentQueue.needsAction] ?? 0;
+        final todayCount = counts[AppointmentQueue.today] ?? 0;
         final upcoming = counts[AppointmentQueue.upcoming] ?? 0;
         final completed = counts[AppointmentQueue.completed] ?? 0;
-        final departments =
-            (showHistory ? all : records)
-                .map((a) => a.department ?? '')
-                .where((a) => a.isNotEmpty)
-                .toSet()
-                .toList()
-              ..sort();
+        final cancelled = counts[AppointmentQueue.cancelled] ?? 0;
+        final hasActiveFilters =
+            query.isNotEmpty ||
+            effectiveDepartment != 'All departments' ||
+            appointmentTypeFilter != 'All appointments';
         selectedIds.removeWhere(
           (id) => !items.any((appointment) => appointment.id == id),
         );
@@ -2345,7 +2371,7 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                 now: DateTime.now(),
               )._showReviewDialog(context),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             SegmentedButton<bool>(
               segments: const [
                 ButtonSegment(
@@ -2368,178 +2394,332 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                 selectedIds.clear();
               }),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 16),
             if (!showHistory)
               LayoutBuilder(
                 builder: (context, constraints) {
+                  final columns = constraints.maxWidth >= 1200
+                      ? 6
+                      : constraints.maxWidth >= 720
+                      ? 3
+                      : constraints.maxWidth >= 460
+                      ? 2
+                      : 1;
+                  final width =
+                      (constraints.maxWidth - (columns - 1) * 12) / columns;
                   final cards = <Widget>[
-                    _AppointmentSummaryCard(
-                      label: 'Needs action',
-                      value: needsAction,
-                      subtitle: 'Awaiting review',
-                      icon: Icons.priority_high_rounded,
-                      onTap: () => setState(() => filter = 'Needs action'),
+                    SizedBox(
+                      width: width,
+                      child: _AppointmentSummaryCard(
+                        label: 'All active',
+                        value: all.length,
+                        subtitle: 'All non-archived records',
+                        icon: Icons.inbox_outlined,
+                        selected: filter == 'All',
+                        accentColor: AdminColors.ink,
+                        accentBg: AdminColors.surfaceMuted,
+                        onTap: () => setState(() => filter = 'All'),
+                      ),
                     ),
-                    _AppointmentSummaryCard(
-                      label: 'Today',
-                      value: counts[AppointmentQueue.today] ?? 0,
-                      subtitle: 'Scheduled for today',
-                      icon: Icons.today_outlined,
-                      onTap: () => setState(() => filter = 'Today'),
+                    SizedBox(
+                      width: width,
+                      child: _AppointmentSummaryCard(
+                        label: 'Needs action',
+                        value: needsAction,
+                        subtitle: 'Awaiting review',
+                        icon: Icons.priority_high_rounded,
+                        selected: filter == 'Needs action',
+                        accentColor: AdminColors.amberFg,
+                        accentBg: AdminColors.amberBg,
+                        onTap: () => setState(() => filter = 'Needs action'),
+                      ),
                     ),
-                    _AppointmentSummaryCard(
-                      label: 'Upcoming',
-                      value: upcoming,
-                      subtitle: 'Confirmed future dates',
-                      icon: Icons.event_available_outlined,
-                      onTap: () => setState(() => filter = 'Upcoming'),
+                    SizedBox(
+                      width: width,
+                      child: _AppointmentSummaryCard(
+                        label: 'Today',
+                        value: todayCount,
+                        subtitle: 'Scheduled for today',
+                        icon: Icons.today_outlined,
+                        selected: filter == 'Today',
+                        accentColor: AdminColors.blueFg,
+                        accentBg: AdminColors.blueBg,
+                        onTap: () => setState(() => filter = 'Today'),
+                      ),
                     ),
-                    _AppointmentSummaryCard(
-                      label: 'Completed',
-                      value: completed,
-                      subtitle: 'Finished, including archived',
-                      icon: Icons.task_alt_outlined,
-                      onTap: () => setState(() => filter = 'Completed'),
+                    SizedBox(
+                      width: width,
+                      child: _AppointmentSummaryCard(
+                        label: 'Upcoming',
+                        value: upcoming,
+                        subtitle: 'Confirmed future dates',
+                        icon: Icons.event_available_outlined,
+                        selected: filter == 'Upcoming',
+                        accentColor: AdminColors.violetFg,
+                        accentBg: AdminColors.violetBg,
+                        onTap: () => setState(() => filter = 'Upcoming'),
+                      ),
+                    ),
+                    SizedBox(
+                      width: width,
+                      child: _AppointmentSummaryCard(
+                        label: 'Completed',
+                        value: completed,
+                        subtitle: 'Finished, including archived',
+                        icon: Icons.task_alt_outlined,
+                        selected: filter == 'Completed',
+                        accentColor: AdminColors.greenFg,
+                        accentBg: AdminColors.greenBg,
+                        onTap: () => setState(() => filter = 'Completed'),
+                      ),
+                    ),
+                    SizedBox(
+                      width: width,
+                      child: _AppointmentSummaryCard(
+                        label: 'Cancelled',
+                        value: cancelled,
+                        subtitle: 'Cancelled appointments',
+                        icon: Icons.cancel_outlined,
+                        selected: filter == 'Cancelled',
+                        accentColor: AdminColors.redFg,
+                        accentBg: AdminColors.redBg,
+                        onTap: () => setState(() => filter = 'Cancelled'),
+                      ),
                     ),
                   ];
-                  if (constraints.maxWidth >= 900) {
-                    return Row(
-                      children: [
-                        for (final card in cards) ...[
-                          Expanded(child: card),
-                          if (card != cards.last) const SizedBox(width: 12),
-                        ],
-                      ],
-                    );
-                  }
                   return Wrap(spacing: 12, runSpacing: 12, children: cards);
                 },
               ),
-            const SizedBox(height: 18),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                SizedBox(
-                  width: 300,
-                  child: TextField(
-                    controller: _search,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.search),
-                      hintText: 'Search student name',
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 230,
-                  child: DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    key: ValueKey('$showHistory-$filter-$departmentFilter'),
-                    initialValue: departmentFilter,
-                    decoration: const InputDecoration(labelText: 'Department'),
-                    items: ['All departments', ...departments]
-                        .map(
-                          (d) => DropdownMenuItem(
-                            value: d,
-                            child: Text(d, overflow: TextOverflow.ellipsis),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) => setState(
-                      () => departmentFilter = v ?? 'All departments',
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 210,
-                  child: DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    key: ValueKey('type-$appointmentTypeFilter'),
-                    initialValue: appointmentTypeFilter,
-                    decoration: const InputDecoration(
-                      labelText: 'Appointment type',
-                    ),
-                    items: const ['All appointments', 'Initial', 'Follow-up']
-                        .map(
-                          (t) => DropdownMenuItem(
-                            value: t,
-                            child: Text(t, overflow: TextOverflow.ellipsis),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) => setState(
-                      () => appointmentTypeFilter = v ?? 'All appointments',
-                    ),
-                  ),
-                ),
-                if (query.isNotEmpty ||
-                    departmentFilter != 'All departments' ||
-                    appointmentTypeFilter != 'All appointments')
-                  TextButton(
-                    onPressed: () {
-                      _search.clear();
-                      setState(() {
-                        departmentFilter = 'All departments';
-                        appointmentTypeFilter = 'All appointments';
-                      });
-                    },
-                    child: const Text('Clear filters'),
-                  ),
-              ],
-            ),
             const SizedBox(height: 16),
-            if (!showHistory)
-              const Text(
-                'Appointment category',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-            if (!showHistory) const SizedBox(height: 8),
-            if (!showHistory)
-              Wrap(
-                spacing: 8,
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: _box,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final tab in const [
-                    'All',
-                    'Needs action',
-                    'Today',
-                    'Upcoming',
-                    'Completed',
-                  ])
-                    ChoiceChip(
-                      label: Text(
-                        '${tab == 'All' ? 'All active' : tab} ${tab == 'All'
-                            ? all.length
-                            : tab == 'Needs action'
-                            ? needsAction
-                            : tab == 'Today'
-                            ? counts[AppointmentQueue.today] ?? 0
-                            : tab == 'Upcoming'
-                            ? upcoming
-                            : completed}',
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 300),
+                        child: TextField(
+                          controller: _search,
+                          onChanged: (_) => setState(() {}),
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w500,
+                            color: AdminColors.ink,
+                          ),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: true,
+                            fillColor: AdminColors.canvas,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.search,
+                              size: 18,
+                              color: AdminColors.muted,
+                            ),
+                            suffixIcon: _search.text.isEmpty
+                                ? null
+                                : IconButton(
+                                    tooltip: 'Clear search',
+                                    icon: const Icon(
+                                      Icons.close_rounded,
+                                      size: 16,
+                                    ),
+                                    onPressed: () {
+                                      _search.clear();
+                                      setState(() {});
+                                    },
+                                  ),
+                            hintText: 'Search student name',
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: const BorderSide(
+                                color: AdminColors.border,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: const BorderSide(
+                                color: AdminColors.accentStrong,
+                                width: 1.5,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                      selected: filter == tab,
-                      onSelected: (_) => setState(() => filter = tab),
-                    ),
+                      for (final dropdown in [
+                        (
+                          key: ValueKey(
+                            '$showHistory-$filter-$effectiveDepartment',
+                          ),
+                          maxWidth: 290.0,
+                          label: 'Department',
+                          icon: Icons.apartment_outlined,
+                          value: effectiveDepartment,
+                          defaultValue: 'All departments',
+                          options: ['All departments', ...departments],
+                          onChanged: (String? v) => setState(
+                            () => departmentFilter = v ?? 'All departments',
+                          ),
+                        ),
+                        (
+                          key: ValueKey('type-$appointmentTypeFilter'),
+                          maxWidth: 220.0,
+                          label: 'Appointment type',
+                          icon: Icons.event_note_outlined,
+                          value: appointmentTypeFilter,
+                          defaultValue: 'All appointments',
+                          options: const [
+                            'All appointments',
+                            'Initial',
+                            'Follow-up',
+                          ],
+                          onChanged: (String? v) => setState(
+                            () =>
+                                appointmentTypeFilter = v ?? 'All appointments',
+                          ),
+                        ),
+                      ])
+                        () {
+                          final isFiltered =
+                              dropdown.value != dropdown.defaultValue;
+                          return ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: dropdown.maxWidth,
+                            ),
+                            child: DropdownButtonFormField<String>(
+                              key: dropdown.key,
+                              isExpanded: true,
+                              initialValue: dropdown.value,
+                              icon: Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                size: 20,
+                                color: isFiltered
+                                    ? AdminColors.ink
+                                    : AdminColors.muted,
+                              ),
+                              dropdownColor: AdminColors.surface,
+                              borderRadius: BorderRadius.circular(12),
+                              elevation: 4,
+                              menuMaxHeight: 320,
+                              style: const TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
+                                color: AdminColors.ink,
+                              ),
+                              selectedItemBuilder: (context) => [
+                                for (final option in dropdown.options)
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Tooltip(
+                                      message: option,
+                                      child: Text(
+                                        option,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                              decoration: InputDecoration(
+                                isDense: true,
+                                filled: true,
+                                fillColor: isFiltered
+                                    ? AdminColors.accentSoft.withValues(
+                                        alpha: 0.45,
+                                      )
+                                    : AdminColors.canvas,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 12,
+                                ),
+                                labelText: dropdown.label,
+                                labelStyle: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isFiltered
+                                      ? AdminColors.ink
+                                      : AdminColors.muted,
+                                ),
+                                prefixIcon: Icon(
+                                  dropdown.icon,
+                                  size: 18,
+                                  color: isFiltered
+                                      ? AdminColors.accentStrong
+                                      : AdminColors.muted,
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide(
+                                    color: isFiltered
+                                        ? AdminColors.accentStrong
+                                        : AdminColors.border,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: const BorderSide(
+                                    color: AdminColors.accentStrong,
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                              items: [
+                                for (final option in dropdown.options)
+                                  DropdownMenuItem(
+                                    value: option,
+                                    child: Text(
+                                      option,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              onChanged: dropdown.onChanged,
+                            ),
+                          );
+                        }(),
+                    ],
+                  ),
                 ],
               ),
-            const SizedBox(height: 12),
-            Text(
-              'Showing ${items.length} of ${!showHistory && selectedQueue == AppointmentQueue.completed ? completed : all.length} ${showHistory ? 'archived ' : ''}appointments${!showHistory && selectedQueue == AppointmentQueue.completed ? ' · includes archived records' : ''}',
-              style: const TextStyle(color: AdminColors.muted, fontSize: 12),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Showing ${items.length} of ${categoryRecords.length} ${showHistory ? 'archived ' : ''}appointments${!showHistory && (selectedQueue == AppointmentQueue.completed || selectedQueue == AppointmentQueue.cancelled) ? ' · includes archived records' : ''}',
+                    style: const TextStyle(
+                      color: AdminColors.muted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
             if (!showHistory &&
                 !widget.repository.isSuperAdmin &&
                 widget.repository.currentAccessRole != AccessRole.admin &&
                 widget.repository.currentAccessRole != AccessRole.portalStaff &&
                 selectable.isNotEmpty)
               Card(
-                margin: const EdgeInsets.only(bottom: 8),
+                margin: const EdgeInsets.only(bottom: 10),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
+                    horizontal: 12,
+                    vertical: 6,
                   ),
                   child: Wrap(
                     spacing: 8,
@@ -2598,51 +2778,77 @@ class _AppointmentsPageState extends State<AdminAppointmentsPage> {
                   ),
                 ),
               ),
-            if (items.isNotEmpty && MediaQuery.sizeOf(context).width >= 760)
-              const _AppointmentListHeader(),
-            for (var index = 0; index < items.length; index++) ...[
-              if (filter == 'Upcoming' &&
-                  (index == 0 ||
-                      !_sameDay(
-                        items[index - 1].scheduledAt,
-                        items[index].scheduledAt,
-                      )))
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                    _date(items[index].scheduledAt),
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
+            if (items.isEmpty)
+              _AppointmentEmptyState(
+                showHistory: showHistory,
+                filter: filter,
+                hasActiveFilters: hasActiveFilters,
+                onClearFilters: hasActiveFilters
+                    ? () {
+                        _search.clear();
+                        setState(() {
+                          departmentFilter = 'All departments';
+                          appointmentTypeFilter = 'All appointments';
+                        });
+                      }
+                    : null,
+              )
+            else ...[
+              if (MediaQuery.sizeOf(context).width >= 760)
+                _AppointmentListHeader(
+                  hasCheckboxColumn:
+                      !showHistory &&
+                      !widget.repository.isSuperAdmin &&
+                      widget.repository.currentAccessRole != AccessRole.admin &&
+                      widget.repository.currentAccessRole !=
+                          AccessRole.portalStaff &&
+                      selectable.isNotEmpty,
+                ),
+              for (var index = 0; index < items.length; index++) ...[
+                if (filter == 'Upcoming' &&
+                    (index == 0 ||
+                        !_sameDay(
+                          items[index - 1].scheduledAt,
+                          items[index].scheduledAt,
+                        )))
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text(
+                      _date(items[index].scheduledAt),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: AdminColors.ink,
+                      ),
                     ),
                   ),
+                _AppointmentCard(
+                  item: items[index],
+                  repository: widget.repository,
+                  now: now,
+                  selected: selectedIds.contains(items[index].id),
+                  archiving: _archivingIds.contains(items[index].id),
+                  onSelected:
+                      !showHistory &&
+                          items[index].isFinalized &&
+                          !items[index].isArchived
+                      ? (archiving
+                            ? null
+                            : (value) => setState(() {
+                                if (value) {
+                                  selectedIds.add(items[index].id);
+                                } else {
+                                  selectedIds.remove(items[index].id);
+                                }
+                              }))
+                      : null,
+                  onArchive: !showHistory && !items[index].isArchived
+                      ? (_archivingIds.contains(items[index].id) || archiving
+                            ? null
+                            : () => _archiveOne(items[index]))
+                      : null,
                 ),
-              _AppointmentCard(
-                item: items[index],
-                repository: widget.repository,
-                now: now,
-                selected: selectedIds.contains(items[index].id),
-                archiving: _archivingIds.contains(items[index].id),
-                onSelected:
-                    !showHistory &&
-                        items[index].isFinalized &&
-                        !items[index].isArchived
-                    ? (archiving
-                          ? null
-                          : (value) => setState(() {
-                              if (value) {
-                                selectedIds.add(items[index].id);
-                              } else {
-                                selectedIds.remove(items[index].id);
-                              }
-                            }))
-                    : null,
-                onArchive: !showHistory && !items[index].isArchived
-                    ? (_archivingIds.contains(items[index].id) || archiving
-                          ? null
-                          : () => _archiveOne(items[index]))
-                    : null,
-              ),
+              ],
             ],
           ],
         );
@@ -3117,52 +3323,177 @@ class _AppointmentSummaryCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     required this.onTap,
+    this.selected = false,
+    this.accentColor = AdminColors.accentStrong,
+    this.accentBg = AdminColors.accentFaint,
   });
   final String label;
   final int value;
   final String subtitle;
   final IconData icon;
   final VoidCallback onTap;
+  final bool selected;
+  final Color accentColor;
+  final Color accentBg;
 
   @override
-  Widget build(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Icon(icon, color: AdminColors.accentStrong, size: 25),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: const TextStyle(color: AdminColors.muted)),
-                  Text(
-                    '$value',
-                    style: const TextStyle(
-                      fontSize: 25,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: AdminColors.muted,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    selected: selected,
+    label: '$label: $value. $subtitle',
+    child: Material(
+      color: selected ? accentBg.withValues(alpha: 0.45) : AdminColors.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? accentColor : AdminColors.border,
+              width: selected ? 1.5 : 1,
             ),
-          ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: accentBg,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: accentColor, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$value',
+                      style: const TextStyle(
+                        fontSize: 26,
+                        height: 1.15,
+                        fontWeight: FontWeight.w800,
+                        color: AdminColors.ink,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AdminColors.muted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     ),
   );
+}
+
+class _AppointmentEmptyState extends StatelessWidget {
+  const _AppointmentEmptyState({
+    required this.showHistory,
+    required this.filter,
+    required this.hasActiveFilters,
+    this.onClearFilters,
+  });
+
+  final bool showHistory;
+  final String filter;
+  final bool hasActiveFilters;
+  final VoidCallback? onClearFilters;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = hasActiveFilters
+        ? 'No matching appointments'
+        : showHistory
+        ? 'No archived appointments'
+        : filter == 'Cancelled'
+        ? 'No cancelled appointments'
+        : filter == 'Completed'
+        ? 'No completed appointments'
+        : 'No appointments in $filter';
+    final message = hasActiveFilters
+        ? 'Try clearing or adjusting your search, department, or appointment type filters.'
+        : showHistory
+        ? 'Archived counseling appointments will appear here for reference.'
+        : 'Appointments matching this category will appear here automatically.';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+      decoration: _box,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            hasActiveFilters
+                ? Icons.filter_list_off_outlined
+                : filter == 'Cancelled'
+                ? Icons.cancel_outlined
+                : Icons.event_note_outlined,
+            size: 36,
+            color: AdminColors.muted,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: AdminColors.ink,
+            ),
+          ),
+          const SizedBox(height: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AdminColors.muted,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ),
+          if (onClearFilters != null) ...[
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: onClearFilters,
+              icon: const Icon(Icons.clear, size: 16),
+              label: const Text('Clear filters'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _AppointmentCard extends StatelessWidget {
@@ -3185,8 +3516,15 @@ class _AppointmentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: 8),
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-    decoration: _box,
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    decoration: BoxDecoration(
+      color: selected ? AdminColors.accentFaint : AdminColors.surface,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(
+        color: selected ? AdminColors.accentStrong : AdminColors.border,
+        width: selected ? 1.5 : 1,
+      ),
+    ),
     child: LayoutBuilder(
       builder: (context, box) {
         final student = Expanded(
@@ -3198,7 +3536,11 @@ class _AppointmentCard extends StatelessWidget {
                 item.fullName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AdminColors.ink,
+                ),
               ),
               const SizedBox(height: 8),
               if (item.userId.trim().isNotEmpty &&
@@ -3228,18 +3570,56 @@ class _AppointmentCard extends StatelessWidget {
         );
         final schedule = Expanded(
           flex: 2,
-          child: Text(
-            '${_date(item.scheduledAt)}\n${item.scheduledTime.isEmpty ? 'Awaiting scheduling' : item.scheduledTime}',
-            style: const TextStyle(fontSize: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _date(item.scheduledAt),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AdminColors.ink,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                item.scheduledTime.isEmpty
+                    ? 'Awaiting scheduling'
+                    : item.scheduledTime,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AdminColors.muted,
+                ),
+              ),
+            ],
           ),
         );
         final department = Expanded(
           flex: 3,
-          child: Text(
-            '${item.department ?? 'Department not provided'}\n${item.course ?? 'Course not provided'}',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.department ?? 'Department not provided',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AdminColors.ink,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                item.course ?? 'Course not provided',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AdminColors.muted,
+                ),
+              ),
+            ],
           ),
         );
         final isAdminRole =
@@ -3269,13 +3649,17 @@ class _AppointmentCard extends StatelessWidget {
             ),
           ],
         );
-        final action = TextButton.icon(
+        final action = OutlinedButton.icon(
           onPressed: () => _showReviewDialog(context),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 38),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          ),
           icon: Icon(
             isAdminRole || canReview
                 ? Icons.rate_review_outlined
                 : Icons.visibility_outlined,
-            size: 17,
+            size: 16,
           ),
           label: Text(isAdminRole || canReview ? 'Review' : 'View'),
         );
@@ -4081,23 +4465,33 @@ class _AppointmentCard extends StatelessWidget {
 }
 
 class _AppointmentListHeader extends StatelessWidget {
-  const _AppointmentListHeader();
+  const _AppointmentListHeader({this.hasCheckboxColumn = false});
+
+  final bool hasCheckboxColumn;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(18, 4, 112, 8),
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 8),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    decoration: BoxDecoration(
+      color: AdminColors.surfaceMuted,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: AdminColors.border),
+    ),
     child: Row(
-      children: const [
-        Expanded(flex: 3, child: Text('STUDENT', style: _listHeaderStyle)),
-        SizedBox(width: 16),
-        Expanded(flex: 2, child: Text('SCHEDULE', style: _listHeaderStyle)),
-        SizedBox(width: 16),
-        Expanded(
+      children: [
+        if (hasCheckboxColumn) const SizedBox(width: 48),
+        const Expanded(flex: 3, child: Text('STUDENT', style: _listHeaderStyle)),
+        const SizedBox(width: 16),
+        const Expanded(flex: 2, child: Text('SCHEDULE', style: _listHeaderStyle)),
+        const SizedBox(width: 16),
+        const Expanded(
           flex: 3,
           child: Text('DEPARTMENT / COURSE', style: _listHeaderStyle),
         ),
-        SizedBox(width: 12),
-        SizedBox(width: 108, child: Text('STATUS', style: _listHeaderStyle)),
+        const SizedBox(width: 12),
+        const SizedBox(width: 140, child: Text('STATUS', style: _listHeaderStyle)),
+        const SizedBox(width: 96, child: Text('ACTION', style: _listHeaderStyle)),
       ],
     ),
   );
@@ -4105,9 +4499,9 @@ class _AppointmentListHeader extends StatelessWidget {
 
 const _listHeaderStyle = TextStyle(
   color: AdminColors.muted,
-  fontSize: 10,
-  fontWeight: FontWeight.w900,
-  letterSpacing: .8,
+  fontSize: 11,
+  fontWeight: FontWeight.w700,
+  letterSpacing: 0.7,
 );
 
 class _AppointmentSectionHeader extends StatelessWidget {
@@ -5734,11 +6128,43 @@ class AdminInquiriesPage extends StatefulWidget {
   State<AdminInquiriesPage> createState() => _AdminInquiriesPageState();
 }
 
-int _inquiryStatusOrder(InquiryStatus status) => switch (status) {
-  InquiryStatus.pending => 0,
-  InquiryStatus.inProgress => 1,
-  InquiryStatus.resolved => 2,
-};
+int _inquiryStatusOrder(AdminInquiryModel item) {
+  if (item.status == InquiryStatus.resolved) return 2;
+  if (item.isAcknowledged ||
+      item.firstResponseAt != null ||
+      item.status == InquiryStatus.inProgress) {
+    return 1;
+  }
+  return 0;
+}
+
+String _inquiryDisplayStatusLabel(
+  AdminInquiryModel item, {
+  InquiryStatus? overrideStatus,
+}) {
+  final status = overrideStatus ?? item.status;
+  if (status == InquiryStatus.resolved) return 'Resolved';
+  if (status == InquiryStatus.pending &&
+      !item.isAcknowledged &&
+      item.firstResponseAt == null) {
+    return 'New';
+  }
+  return 'Pending';
+}
+
+String _inquiryDisplayStatusKey(
+  AdminInquiryModel item, {
+  InquiryStatus? overrideStatus,
+}) {
+  final status = overrideStatus ?? item.status;
+  if (status == InquiryStatus.resolved) return 'resolved';
+  if (status == InquiryStatus.pending &&
+      !item.isAcknowledged &&
+      item.firstResponseAt == null) {
+    return 'pending';
+  }
+  return 'in_progress';
+}
 
 class _AdminInquiriesPageState extends State<AdminInquiriesPage> {
   int _streamEpoch = 0;
@@ -5787,8 +6213,8 @@ class _AdminInquiriesPageState extends State<AdminInquiriesPage> {
         )
         ? 'Student messages and other PACC service inquiries.'
         : _isOperationalStaff
-        ? 'Monitor assigned operational inquiry status and escalate items when needed.'
-        : 'Review and acknowledge submitted inquiries.',
+        ? 'Monitor assigned operational inquiry status.'
+        : 'Review inquiries resolved by counselors.',
     child:
         canShowCounselorMessagingInInquiries(
           widget.repository.currentAccessRole,
@@ -5831,14 +6257,17 @@ class _AdminInquiriesPageState extends State<AdminInquiriesPage> {
             ),
           );
         }
-        final all = snapshot.data ?? const <AdminInquiryModel>[];
-        // Deterministic queue order: Pending first, In progress second,
-        // Resolved last, newest within each status.
+        final rawAll = snapshot.data ?? const <AdminInquiryModel>[];
+        final all = widget.repository.isSuperAdmin
+            ? rawAll.where(isAdminVisibleInquiry).toList()
+            : rawAll;
+        // Deterministic queue order: New first, Pending second,
+        // Resolved last, newest within each group.
         final items = List<AdminInquiryModel>.of(all)
           ..sort((a, b) {
             final orderCompare = _inquiryStatusOrder(
-              a.status,
-            ).compareTo(_inquiryStatusOrder(b.status));
+              a,
+            ).compareTo(_inquiryStatusOrder(b));
             if (orderCompare != 0) return orderCompare;
             return b.createdAt.compareTo(a.createdAt);
           });
@@ -5854,18 +6283,36 @@ class _AdminInquiriesPageState extends State<AdminInquiriesPage> {
             ),
             const SizedBox(height: 10),
             _CompactSummaryStrip(
-              values: {
-                'Total': all.length,
-                'Pending': all
-                    .where((item) => item.status == InquiryStatus.pending)
-                    .length,
-                'In progress': all
-                    .where((item) => item.status == InquiryStatus.inProgress)
-                    .length,
-                'Resolved': all
-                    .where((item) => item.status == InquiryStatus.resolved)
-                    .length,
-              },
+              values: widget.repository.isSuperAdmin
+                  ? {
+                      'Total': all.length,
+                      'Resolved': all
+                          .where((item) => item.status == InquiryStatus.resolved)
+                          .length,
+                    }
+                  : {
+                      'Total': all.length,
+                      'New': all
+                          .where(
+                            (item) =>
+                                item.status == InquiryStatus.pending &&
+                                !item.isAcknowledged &&
+                                item.firstResponseAt == null,
+                          )
+                          .length,
+                      'Pending': all
+                          .where(
+                            (item) =>
+                                (item.status == InquiryStatus.pending &&
+                                    (item.isAcknowledged ||
+                                        item.firstResponseAt != null)) ||
+                                item.status == InquiryStatus.inProgress,
+                          )
+                          .length,
+                      'Resolved': all
+                          .where((item) => item.status == InquiryStatus.resolved)
+                          .length,
+                    },
             ),
             const SizedBox(height: 14),
             _InquiryList(
@@ -5873,6 +6320,7 @@ class _AdminInquiriesPageState extends State<AdminInquiriesPage> {
               selected: null,
               onSelect: _openInquiry,
               operationalEmpty: _isOperationalStaff && all.isEmpty,
+              adminEmpty: widget.repository.isSuperAdmin && all.isEmpty,
             ),
           ],
         );
@@ -5887,11 +6335,13 @@ class _InquiryList extends StatelessWidget {
     required this.selected,
     required this.onSelect,
     this.operationalEmpty = false,
+    this.adminEmpty = false,
   });
   final List<AdminInquiryModel> items;
   final AdminInquiryModel? selected;
   final ValueChanged<AdminInquiryModel> onSelect;
   final bool operationalEmpty;
+  final bool adminEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -5899,6 +6349,8 @@ class _InquiryList extends StatelessWidget {
       return _EmptyPanel(
         message: operationalEmpty
             ? 'No inquiry status items are currently assigned to you for monitoring.'
+            : adminEmpty
+            ? 'No counselor-processed inquiries are ready for administrator review yet.'
             : 'No inquiries have been submitted yet.',
       );
     }
@@ -5957,7 +6409,7 @@ class _InquiryQueueRow extends StatelessWidget {
                 height: 8,
                 margin: const EdgeInsets.only(top: 6),
                 decoration: BoxDecoration(
-                  color: _statusColor(item.status.storedValue),
+                  color: _statusColor(_inquiryDisplayStatusKey(item)),
                   shape: BoxShape.circle,
                   border: Border.all(color: AdminColors.border),
                 ),
@@ -6026,8 +6478,8 @@ class _InquiryQueueRow extends StatelessWidget {
                       runSpacing: 6,
                       children: [
                         _Tag(
-                          label: item.status.label,
-                          color: _statusColor(item.status.storedValue),
+                          label: _inquiryDisplayStatusLabel(item),
+                          color: _statusColor(_inquiryDisplayStatusKey(item)),
                         ),
                         _Tag(
                           label: item.category,
@@ -6125,7 +6577,7 @@ class _InquiryDetailScreenState extends State<InquiryDetailScreen> {
           const SizedBox(height: 2),
           Text(
             _isOperationalStaff
-                ? 'Review sanitized operational status, acknowledgment, and escalation actions.'
+                ? 'Review sanitized operational inquiry status and receipt confirmation.'
                 : 'Review the submitted message, form responses, and case status.',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -6393,8 +6845,14 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
             children: [
               AdminStatusBadge.fromStatus(
                 domain: AdminStatusDomain.inquiry,
-                status: effectiveStatus.storedValue,
-                labelOverride: effectiveStatus.label,
+                status: _inquiryDisplayStatusKey(
+                  effectiveItem,
+                  overrideStatus: effectiveStatus,
+                ),
+                labelOverride: _inquiryDisplayStatusLabel(
+                  effectiveItem,
+                  overrideStatus: effectiveStatus,
+                ),
               ),
               _Tag(label: item.category, color: AdminColors.surfaceMuted),
               Text(
@@ -6439,7 +6897,7 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                   SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Sanitized operational view. Student identity, submitted message, form responses, escalation notes, and PDF export are restricted to assigned counselors and the super-administrator.',
+                      'Sanitized operational view. Student identity, submitted message, form responses, forwarding notes, and PDF export are restricted to assigned counselors and the super-administrator.',
                       style: TextStyle(
                         color: AdminColors.muted,
                         fontSize: 12,
@@ -6553,19 +7011,20 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
                 icon: Icon(
                   item.isAcknowledged
                       ? Icons.check_circle_outline
-                      : Icons.notifications_active_outlined,
+                      : Icons.mark_email_read_outlined,
                 ),
                 label: Text(
                   item.isAcknowledged
-                      ? 'Receipt acknowledged'
+                      ? 'Receipt confirmed'
                       : effectiveStatus == InquiryStatus.resolved
                       ? 'Resolved'
                       : _acknowledging
-                      ? 'Acknowledging…'
-                      : 'Acknowledge receipt',
+                      ? 'Confirming…'
+                      : 'Confirm Receipt',
                 ),
               ),
-              if (effectiveStatus == InquiryStatus.inProgress &&
+              if (effectiveStatus != InquiryStatus.resolved &&
+                  (item.isAcknowledged || item.firstResponseAt != null) &&
                   _canResolveInquiry(item))
                 FilledButton.icon(
                   onPressed: _resolving || _acknowledging
@@ -6602,7 +7061,9 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
       );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Receipt notification sent.')),
+          const SnackBar(
+            content: Text('Receipt confirmed. Inquiry status is now Pending.'),
+          ),
         );
       }
     } catch (error, stackTrace) {
@@ -6614,7 +7075,7 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_inquiryActionError(error, 'acknowledge inquiry')),
+            content: Text(_inquiryActionError(error, 'confirm receipt')),
           ),
         );
       }
@@ -6629,7 +7090,8 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
         _resolving ||
         _acknowledging ||
         _resolvedInquiryId == item.id ||
-        item.status != InquiryStatus.inProgress ||
+        item.status == InquiryStatus.resolved ||
+        !(item.isAcknowledged || item.firstResponseAt != null) ||
         !_canResolveInquiry(item)) {
       return;
     }
@@ -6657,7 +7119,8 @@ class _InquiryDetailsState extends State<_InquiryDetails> {
     if (current == null ||
         current.id != item.id ||
         _resolvedInquiryId == current.id ||
-        current.status != InquiryStatus.inProgress ||
+        current.status == InquiryStatus.resolved ||
+        !(current.isAcknowledged || current.firstResponseAt != null) ||
         _resolving) {
       return;
     }

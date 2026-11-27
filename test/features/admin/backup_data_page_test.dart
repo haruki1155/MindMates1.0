@@ -987,7 +987,12 @@ void main() {
           isNull,
           reason: 'Unexpected exception at width $width',
         );
-        expect(find.text('Back-up Data'), findsOneWidget);
+        expect(
+          find.textContaining(
+            'Create a full system backup covering all academic years',
+          ),
+          findsOneWidget,
+        );
         expect(find.text('Backup history'), findsOneWidget);
         if (width < 680) {
           expect(find.byType(DataTable), findsNothing);

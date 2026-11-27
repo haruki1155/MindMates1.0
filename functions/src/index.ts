@@ -773,15 +773,16 @@ export const confirmSuperAdmin = onCall(async (request) => {
 
 export const completeAdminPasswordChange = onCall(async (request) => {
   const actorId = requireAuthenticatedUser(request);
-  const actor = await requireSuperAdmin(actorId);
+  const actor = await requireStaff(actorId);
   const target = db.collection("users").doc(actorId);
   const audit = db.collection("admin_audit_logs").doc();
   await db.runTransaction(async (transaction) => {
     const profile = await transaction.get(target);
-    if (!profile.exists) throw new HttpsError("not-found", "Administrator profile not found.");
+    if (!profile.exists) throw new HttpsError("not-found", "Portal account profile not found.");
     transaction.update(target, {mustChangePassword: false, passwordChangedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()});
     transaction.create(audit, {actorId, actorAccessRole: actor.accessRole, targetUserId: actorId,
-      action: "initialAdminPasswordChanged", reason: "Mandatory initial password change completed",
+      action: actor.accessRole === "admin" ? "initialAdminPasswordChanged" : "initialStaffPasswordChanged",
+      reason: "Mandatory initial password change completed",
       before: {mustChangePassword: profile.data()?.mustChangePassword === true},
       after: {mustChangePassword: false}, createdAt: FieldValue.serverTimestamp()});
   });
@@ -1983,7 +1984,13 @@ async function archiveResolvedPortalNotifications(
   let updates = 0;
   for (const notification of notifications.docs) {
     const data = notification.data();
-    if (data.audience !== "portal" || data.archivedAt) continue;
+    if (
+      data.audience !== "portal" ||
+      data.archivedAt ||
+      notification.id.startsWith("inquiry_resolved_admin_")
+    ) {
+      continue;
+    }
     batch.update(notification.ref, {
       resolvedAt: archivedAt,
       archivedAt,
@@ -3070,8 +3077,14 @@ export {
   confirmStudentRecoveryEmailCode, confirmStudentRecoveryEmailCodeDev,
   requestStudentPasswordReset, requestStudentPasswordResetDev,
 } from "./student_account_recovery";
-export {requestStudentLogin, requestStudentLoginDev, completeStudentPasswordChange} from "./student_login";
+export {
+  requestStudentLogin,
+  requestStudentLoginDev,
+  completeStudentPasswordChange,
+  listStudentCredentialRequests,
+} from "./student_login";
 export {
   getMyStudentInformation, getStudentPersonalInfo, listStudentCorrectionRequests, requestStudentCorrection,
   reviewStudentCorrection, saveStudentPersonalInfo,
 } from "./student_personal_info";
+export {createStaffAccountByAdmin} from "./staff_account_provisioning";

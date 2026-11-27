@@ -175,7 +175,7 @@ void main() {
       expect(find.textContaining('cite'), findsNothing);
       expect(find.textContaining('Counselor One, Staff One'), findsOneWidget);
       expect(find.textContaining('60 h'), findsOneWidget);
-      expect(find.textContaining('Acknowledged, no reply'), findsOneWidget);
+      expect(find.textContaining('Receipt confirmed, no reply'), findsOneWidget);
       await tester.tap(find.text('Subject late'));
       expect(opened?.id, 'late');
     },
@@ -404,7 +404,7 @@ void main() {
         InquiryRoutingPanel(inquiry: taken, repository: _Repo()),
       );
       expect(find.textContaining('Super Admin'), findsOneWidget);
-      expect(find.text('Escalate to administrator'), findsNothing);
+      expect(find.text('Forward to Administrator'), findsNothing);
       await _pump(
         tester,
         InquiryRoutingPanel(inquiry: taken, repository: repo),

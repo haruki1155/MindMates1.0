@@ -69,16 +69,11 @@ class _AdminNotificationsPageState extends State<AdminNotificationsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Notifications',
-              style: Theme.of(context).textTheme.headlineLarge,
-            ),
-            const SizedBox(height: 6),
             const Text(
               'New counseling appointments and inquiries requiring attention.',
               style: TextStyle(color: AdminColors.muted),
             ),
-            const SizedBox(height: 22),
+            const SizedBox(height: 18),
             StreamBuilder<List<AppNotificationModel>>(
               stream: _notifications,
               initialData: const <AppNotificationModel>[],

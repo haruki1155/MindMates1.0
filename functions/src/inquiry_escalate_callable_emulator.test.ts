@@ -288,7 +288,7 @@ test(
       message: "Confidential student concern",
       category: "General",
       collegeId,
-      status: "in_progress",
+      status: "resolved",
       routingStatus: "routed",
       routingRevision: 2,
       assigneeIds: [c1.uid, staffSeeds.pendingStaff.uid, staffSeeds.disabledCounselor.uid],
@@ -368,11 +368,11 @@ test(
       assert.equal(rejected.length, 1);
       assert.equal((rejected[0] as PromiseRejectedResult & {reason: {code?: string}}).reason.code, "functions/failed-precondition");
 
-      // Duplicate escalation rejected
+      // Duplicate forwarding rejected
       await expectCallableRejects(
         call("escalateInquiry", {inquiryId: id, escalationType: "counselor_confirmation", expectedRevision: 3}),
         "functions/failed-precondition",
-        "already escalated",
+        "already been forwarded",
       );
     });
 
@@ -403,7 +403,7 @@ test(
     assert.equal(noteSnap.exists, true);
     assert.equal(noteSnap.data()?.userId, emulatorSuperAdminUid);
 
-    // Admin takeover & reassign still enforce 3-500 char reason and preserve escalation.type
+    // Admin reassign still enforces 3-500 char reason and preserves escalation.type
     await withClientCallable(emulatorSuperAdminUid, `${emulatorSuperAdminUid}@example.invalid`, async (call) => {
       await expectCallableRejects(
         call("takeOverInquiry", {inquiryId: id, expectedRevision: 3, reason: "no"}),
@@ -413,10 +413,11 @@ test(
         call("reassignInquiry", {inquiryId: id, assigneeIds: [c2.uid], expectedRevision: 3, reason: "no"}),
         "functions/invalid-argument",
       );
-      await call("takeOverInquiry", {
+      await call("reassignInquiry", {
         inquiryId: id,
+        assigneeIds: [c2.uid],
         expectedRevision: 3,
-        reason: "Administrator reviewing escalated inquiry",
+        reason: "Administrator reviewing forwarded inquiry",
       });
     });
 
@@ -425,14 +426,14 @@ test(
     assert.equal(takenDoc.escalation.type, "counselor_confirmation");
     assert.equal(takenDoc.routingRevision, 4);
 
-    // Post-takeover escalation is rejected with permission-denied
+    // Post-takeover forwarding is rejected with permission-denied
     const postTakeoverId = await seedInquiry({
       userId: staffSeeds.student.uid,
       subject: "Taken over before escalation",
       message: "Body",
       category: "General",
       collegeId,
-      status: "in_progress",
+      status: "resolved",
       routingStatus: "routed",
       routingRevision: 2,
       assigneeIds: [c1.uid],
@@ -446,7 +447,7 @@ test(
       );
     });
 
-    // portalStaff reasoned escalation succeeds via HTTP callable
+    // portalStaff reasoned forwarding succeeds via HTTP callable (and admin takeover marks it handled)
     const staffInqId = await seedInquiry({
       userId: staffSeeds.student.uid,
       subject: "Monitor escalation",
@@ -472,15 +473,22 @@ test(
     const staffDoc = (await db.doc(`inquiries/${staffInqId}`).get()).data()!;
     assert.equal(staffDoc.escalation.type, "staff_reasoned");
     assert.equal(staffDoc.escalation.reason, "Operational SLA escalation");
+    await withClientCallable(emulatorSuperAdminUid, `${emulatorSuperAdminUid}@example.invalid`, async (call) => {
+      await call("takeOverInquiry", {
+        inquiryId: staffInqId,
+        expectedRevision: 2,
+        reason: "Administrator reviewing operational SLA",
+      });
+    });
 
-    // Resolved inquiry cannot be escalated
-    const resolvedId = await seedInquiry({
+    // Unresolved inquiry cannot be forwarded by counselor until marked resolved
+    const unresolvedId = await seedInquiry({
       userId: staffSeeds.student.uid,
-      subject: "Resolved",
+      subject: "Unresolved",
       message: "Body",
       category: "General",
       collegeId,
-      status: "resolved",
+      status: "pending",
       routingStatus: "routed",
       routingRevision: 2,
       assigneeIds: [c1.uid],
@@ -488,8 +496,9 @@ test(
     });
     await withClientCallable(c1.uid, c1.email, async (call) => {
       await expectCallableRejects(
-        call("escalateInquiry", {inquiryId: resolvedId, escalationType: "counselor_confirmation", expectedRevision: 2}),
+        call("escalateInquiry", {inquiryId: unresolvedId, escalationType: "counselor_confirmation", expectedRevision: 2}),
         "functions/failed-precondition",
+        "Mark this inquiry as resolved",
       );
     });
   },
@@ -503,7 +512,7 @@ test(
       userId: staffSeeds.student.uid,
       subject: "Strict revision escalation",
       message: "Body",
-      status: "in_progress",
+      status: "resolved",
       routingRevision: 1,
       assigneeIds: [staffSeeds.c1.uid],
       createdAt: Timestamp.now(),

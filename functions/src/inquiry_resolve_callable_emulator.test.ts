@@ -445,7 +445,7 @@ test(
       await expectCallableRejects(
         call("resolveInquiry", {inquiryId: pendingId, expectedRevision: 1}),
         "functions/failed-precondition",
-        "Acknowledge receipt before marking this inquiry as resolved.",
+        "Confirm receipt before marking this inquiry as resolved.",
       );
       // Two-step bypass: setInquiryStatus("in_progress") without acknowledgment -> resolveInquiry still rejected
       const step1 = await call("setInquiryStatus", {
@@ -457,12 +457,12 @@ test(
       await expectCallableRejects(
         call("resolveInquiry", {inquiryId: pendingId, expectedRevision: 2}),
         "functions/failed-precondition",
-        "Acknowledge receipt before marking this inquiry as resolved.",
+        "Confirm receipt before marking this inquiry as resolved.",
       );
       await expectCallableRejects(
         call("setInquiryStatus", {inquiryId: pendingId, status: "resolved", expectedRevision: 2}),
         "functions/failed-precondition",
-        "Acknowledge receipt before marking this inquiry as resolved.",
+        "Confirm receipt before marking this inquiry as resolved.",
       );
     });
 
@@ -499,12 +499,12 @@ test(
         await expectCallableRejects(
           call("resolveInquiry", {inquiryId: badId, expectedRevision: 1}),
           "functions/failed-precondition",
-          "Acknowledge receipt before marking this inquiry as resolved.",
+          "Confirm receipt before marking this inquiry as resolved.",
         );
         await expectCallableRejects(
           call("setInquiryStatus", {inquiryId: badId, status: "resolved", expectedRevision: 1}),
           "functions/failed-precondition",
-          "Acknowledge receipt before marking this inquiry as resolved.",
+          "Confirm receipt before marking this inquiry as resolved.",
         );
       });
       assert.equal((await db.doc(`inquiries/${badId}`).get()).data()!.status, "in_progress");

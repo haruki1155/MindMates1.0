@@ -712,19 +712,9 @@ class _Header extends StatelessWidget {
           ),
         ],
       );
-      final title = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Report Generation',
-            style: Theme.of(context).textTheme.headlineLarge,
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Privacy-preserving insights for app users and counseling appointments.',
-            style: TextStyle(color: AdminColors.muted),
-          ),
-        ],
+      const title = Text(
+        'Privacy-preserving insights for app users and counseling appointments.',
+        style: TextStyle(color: AdminColors.muted),
       );
       if (constraints.maxWidth < 1000) {
         return Column(

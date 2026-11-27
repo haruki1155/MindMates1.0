@@ -206,19 +206,9 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
                 alignment: WrapAlignment.spaceBetween,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Activity Logs',
-                        style: Theme.of(context).textTheme.headlineLarge,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Read-only audit trail of Administrator, Counselor, and PAACC Staff actions.',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ],
+                  Text(
+                    'Read-only audit trail of Administrator, Counselor, and PAACC Staff actions.',
+                    style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   Wrap(
                     spacing: 8,

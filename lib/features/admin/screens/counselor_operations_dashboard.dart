@@ -150,15 +150,10 @@ class _Content extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Counselor Dashboard',
-          style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 6),
-        const Text(
           'PACC-wide clinical operations and your assigned caseload.',
           style: TextStyle(color: AdminColors.muted),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         LayoutBuilder(
           builder: (context, box) {
             final columns = box.maxWidth >= 1040

@@ -334,3 +334,52 @@ class StudentAccountClaim {
   final DateTime? submittedAt;
   final bool rosterAlreadyClaimed;
 }
+
+/// View-only entry tracking a student's mobile app login credential request.
+class StudentCredentialRequestLog {
+  const StudentCredentialRequestLog({
+    required this.studentKey,
+    required this.studentNo,
+    required this.name,
+    required this.college,
+    required this.course,
+    required this.yearLevel,
+    required this.email,
+    required this.state,
+    required this.issuedCount,
+    this.requestedAt,
+    this.completedAt,
+    this.expiresAt,
+  });
+
+  factory StudentCredentialRequestLog.fromJson(Map<String, Object?> json) =>
+      StudentCredentialRequestLog(
+        studentKey: asText(json['studentKey']),
+        studentNo: asText(json['studentNo']),
+        name: asText(json['name']),
+        college: asText(json['college']),
+        course: asText(json['course']),
+        yearLevel: asText(json['yearLevel']),
+        email: asText(json['email']),
+        state: asText(json['state']).isEmpty ? 'issued' : asText(json['state']),
+        issuedCount: json['issuedCount'] is num
+            ? (json['issuedCount'] as num).toInt()
+            : 1,
+        requestedAt: DateTime.tryParse(asText(json['requestedAt'])),
+        completedAt: DateTime.tryParse(asText(json['completedAt'])),
+        expiresAt: DateTime.tryParse(asText(json['expiresAt'])),
+      );
+
+  final String studentKey;
+  final String studentNo;
+  final String name;
+  final String college;
+  final String course;
+  final String yearLevel;
+  final String email;
+  final String state;
+  final int issuedCount;
+  final DateTime? requestedAt;
+  final DateTime? completedAt;
+  final DateTime? expiresAt;
+}

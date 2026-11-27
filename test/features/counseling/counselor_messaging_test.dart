@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/counseling/data/guidance_quick_replies.dart';
 import 'package:mind_mates/features/counseling/repositories/counselor_chat_repository.dart';
@@ -832,6 +833,98 @@ void main() {
         find.text('What do you want to know about Testing Service?'),
         findsOneWidget,
       );
+      await tester.pumpWidget(const SizedBox());
+      await repo.messages.close();
+    },
+  );
+
+  testWidgets(
+    'predictive back after scrolling up while new messages arrive returns to Messages cleanly',
+    (tester) async {
+      final repo = FakeChat();
+      final history = List.generate(
+        25,
+        (index) => CounselorMessage(
+          id: 'm-$index',
+          text: 'Support message $index with enough lines to scroll nicely.',
+          senderId: index.isEven ? 'student' : 'counselor',
+          createdAt: DateTime(2026, 11, 26, 9, index),
+        ),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light.copyWith(platform: TargetPlatform.android),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => CounselorChatScreen(
+                        userId: 'student',
+                        repository: repo,
+                        outbox: MemoryOutbox(),
+                      ),
+                    ),
+                  ),
+                  child: const Text('Messages'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Messages'));
+      await tester.pump();
+      repo.messages.add(List.of(history));
+      await tester.pumpAndSettle();
+
+      await tester.fling(
+        find.byKey(const Key('counselor_message_list')),
+        const Offset(0, 600),
+        1200,
+      );
+      await tester.pumpAndSettle();
+
+      Future<void> sendNav(String method, [Object? arguments]) =>
+          tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+            SystemChannels.backGesture.name,
+            SystemChannels.backGesture.codec.encodeMethodCall(
+              MethodCall(method, arguments),
+            ),
+            (_) {},
+          );
+
+      await sendNav('startBackGesture', <String, Object?>{
+        'touchOffset': <double>[10, 200],
+        'progress': 0.05,
+        'swipeEdge': 0,
+      });
+      await tester.pump();
+
+      await sendNav('updateBackGestureProgress', <String, Object?>{
+        'touchOffset': <double>[120, 200],
+        'progress': 0.35,
+        'swipeEdge': 0,
+      });
+      repo.messages.add([
+        ...history,
+        CounselorMessage(
+          id: 'm-new',
+          text: 'Incoming counselor reply during predictive back',
+          senderId: 'counselor',
+          createdAt: DateTime(2026, 11, 26, 10, 0),
+        ),
+      ]);
+      await tester.pump();
+
+      await sendNav('commitBackGesture');
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Messages'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       await repo.messages.close();
     },

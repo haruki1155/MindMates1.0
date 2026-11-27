@@ -113,7 +113,9 @@ class StudentRosterPage extends StatefulWidget {
   State<StudentRosterPage> createState() => _StudentRosterPageState();
 }
 
-enum _Tab { roster, claims, import, corrections, history, legacy }
+enum _Tab { roster, import, corrections, history, credentialRequests }
+
+enum _PreviewFilter { all, errors, warnings, ready }
 
 class _StudentRosterPageState extends State<StudentRosterPage> {
   late final StudentRosterRepository _repo =
@@ -145,6 +147,8 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   bool _academicLoading = false;
   List<RosterPreviewRow>? _previewRows;
   Map<String, int> _previewCounts = const {};
+  _PreviewFilter _previewFilter = _PreviewFilter.all;
+  final ScrollController _previewHorizontalScroll = ScrollController();
   bool _previewing = false;
   bool _importing = false;
   String _progress = '';
@@ -160,11 +164,8 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   final Set<String> _busyCorrections = {};
   List<RosterImportRecord>? _imports;
   String? _importsError;
-  List<LegacyStudent>? _legacy;
-  String? _legacyError;
-  List<StudentAccountClaim>? _claims;
-  String? _claimsError;
-  final Set<String> _busyClaims = {};
+  List<StudentCredentialRequestLog>? _credentialLogs;
+  String? _credentialLogsError;
 
   @override
   void initState() {
@@ -175,6 +176,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   @override
   void dispose() {
     _search.dispose();
+    _previewHorizontalScroll.dispose();
     for (final row in _manualRows) {
       row.dispose();
     }
@@ -199,17 +201,11 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Student Directory',
-            style: Theme.of(context).textTheme.headlineLarge,
-          ),
-          const SizedBox(height: 6),
           const Text(
-            'Import the registrar roster and manage student records. Students '
-            'set up their own accounts with their Student No., name and date '
-            'of birth.',
+            'Import the registrar roster, review student records, and monitor '
+            'student login credential requests.',
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
           _tabBar(),
           const SizedBox(height: 20),
           AnimatedSwitcher(
@@ -220,11 +216,10 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
               key: ValueKey(_tab),
               child: switch (_tab) {
                 _Tab.roster => _rosterTab(),
-                _Tab.claims => _claimsTab(),
                 _Tab.import => _importTab(),
                 _Tab.corrections => _correctionsTab(),
                 _Tab.history => _historyTab(),
-                _Tab.legacy => _legacyTab(),
+                _Tab.credentialRequests => _credentialRequestLogTab(),
               },
             ),
           ),
@@ -236,16 +231,15 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   Widget _tabBar() {
     const items = {
       _Tab.roster: (label: 'Roster', icon: Icons.people_outline),
-      _Tab.claims: (label: 'Account requests', icon: Icons.how_to_reg_outlined),
       _Tab.import: (label: 'Import', icon: Icons.upload_file_outlined),
       _Tab.corrections: (
         label: 'Corrections',
         icon: Icons.rule_folder_outlined,
       ),
       _Tab.history: (label: 'Import history', icon: Icons.history_outlined),
-      _Tab.legacy: (
-        label: 'Legacy – not in roster',
-        icon: Icons.person_search_outlined,
+      _Tab.credentialRequests: (
+        label: 'Credential Request Log',
+        icon: Icons.mark_email_read_outlined,
       ),
     };
     final duration = rosterAnimDuration(
@@ -297,16 +291,14 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   void _openTab(_Tab tab) {
     setState(() => _tab = tab);
     switch (tab) {
-      case _Tab.claims:
-        _loadClaims();
       case _Tab.import:
         if (_importMode == RosterImportMode.manual) _ensureAcademicOptions();
       case _Tab.corrections:
         if (_corrections == null) _loadCorrections();
       case _Tab.history:
         if (_imports == null) _loadImports();
-      case _Tab.legacy:
-        if (_legacy == null) _loadLegacy();
+      case _Tab.credentialRequests:
+        if (_credentialLogs == null) _loadCredentialLogs();
       case _Tab.roster:
         break;
     }
@@ -745,6 +737,7 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
     if (file == null || parsed == null || _hasBlockingFileProblems) return;
     setState(() {
       _previewing = true;
+      _previewFilter = _PreviewFilter.all;
       _importError = null;
     });
     try {
@@ -1220,12 +1213,171 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   Widget _previewCard() {
     final rows = _previewRows!;
     final parsed = _parsed;
-    String dobOf(int index) {
-      final raw = parsed != null && index < parsed.rows.length
-          ? parsed.rows[index]['dateOfBirth'] ?? ''
-          : '';
-      return _spellIfDate(raw);
+    final errorCount = rows.where((r) => r.errors.isNotEmpty).length;
+    final warningCount = rows.where((r) => r.warnings.isNotEmpty).length;
+    final readyCount = rows.where((r) => r.errors.isEmpty).length;
+    final filteredRows = switch (_previewFilter) {
+      _PreviewFilter.all => rows,
+      _PreviewFilter.errors => rows.where((r) => r.errors.isNotEmpty).toList(),
+      _PreviewFilter.warnings =>
+        rows.where((r) => r.warnings.isNotEmpty).toList(),
+      _PreviewFilter.ready => rows.where((r) => r.errors.isEmpty).toList(),
+    };
+
+    String rawValue(int rowIndex, String key) {
+      if (parsed == null || rowIndex < 0 || rowIndex >= parsed.rows.length) {
+        return '';
+      }
+      return (parsed.rows[rowIndex][key] ?? '').trim();
     }
+
+    Widget cellText(String value, {bool bold = false, Color? color}) => Text(
+      value.isEmpty ? '—' : value,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+        color: value.isEmpty ? AdminColors.muted : (color ?? AdminColors.ink),
+      ),
+    );
+
+    Widget reviewNotesCell(RosterPreviewRow r) {
+      final hasNotes =
+          r.changes.isNotEmpty || r.warnings.isNotEmpty || r.errors.isNotEmpty;
+      if (!hasNotes) {
+        return const Text(
+          'Ready',
+          style: TextStyle(
+            fontSize: 12,
+            color: AdminColors.greenFg,
+            fontWeight: FontWeight.w600,
+          ),
+        );
+      }
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 280),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final c in r.changes.entries)
+                Text(
+                  '${c.key}: ${_spellIfDate(c.value.from)} → '
+                  '${_spellIfDate(c.value.to)}',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              for (final w in r.warnings)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      size: 15,
+                      color: AdminColors.accentStrong,
+                    ),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        w,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AdminColors.accentStrong,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              for (final e in r.errors)
+                Text(
+                  e,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AdminColors.danger,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final table = Scrollbar(
+      controller: _previewHorizontalScroll,
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        controller: _previewHorizontalScroll,
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          columnSpacing: 18,
+          horizontalMargin: 12,
+          dataRowMinHeight: 46,
+          dataRowMaxHeight: double.infinity,
+          headingRowColor: WidgetStateProperty.all(AdminColors.surfaceMuted),
+          columns: [
+            const DataColumn(label: Text('Row')),
+            const DataColumn(label: Text('Status')),
+            for (final header in rosterTemplateHeaders)
+              DataColumn(label: Text(header)),
+            const DataColumn(label: Text('Review notes')),
+          ],
+          rows: [
+            for (final r in filteredRows)
+              () {
+                final (label, rowTone) = switch (r.kind) {
+                  RosterPreviewKind.newRow => ('New', RosterBadgeTone.green),
+                  RosterPreviewKind.update => ('Update', RosterBadgeTone.blue),
+                  RosterPreviewKind.link => (
+                    'Links account',
+                    RosterBadgeTone.amber,
+                  ),
+                  RosterPreviewKind.error => ('Error', RosterBadgeTone.red),
+                };
+                final displayRow = _importMode == RosterImportMode.manual
+                    ? r.index + 1
+                    : r.index + 2;
+                final studentNo = rawValue(r.index, 'studentNo').isNotEmpty
+                    ? rawValue(r.index, 'studentNo')
+                    : r.studentNo;
+                final rawDob = rawValue(r.index, 'dateOfBirth');
+                final rowColor = r.errors.isNotEmpty
+                    ? AdminColors.danger.withValues(alpha: 0.05)
+                    : r.warnings.isNotEmpty
+                    ? AdminColors.accentSoft.withValues(alpha: 0.35)
+                    : null;
+                return DataRow(
+                  color: rowColor == null
+                      ? null
+                      : WidgetStateProperty.all(rowColor),
+                  cells: [
+                    DataCell(cellText('$displayRow', bold: true)),
+                    DataCell(
+                      RosterSemanticPill(
+                        label: label,
+                        tone: rowTone,
+                        compact: true,
+                      ),
+                    ),
+                    DataCell(cellText(studentNo, bold: true)),
+                    DataCell(cellText(rawValue(r.index, 'surname'))),
+                    DataCell(cellText(rawValue(r.index, 'firstName'))),
+                    DataCell(cellText(rawValue(r.index, 'middleName'))),
+                    DataCell(cellText(_spellIfDate(rawDob))),
+                    DataCell(cellText(rawValue(r.index, 'college'))),
+                    DataCell(cellText(rawValue(r.index, 'course'))),
+                    DataCell(cellText(rawValue(r.index, 'yearLevel'))),
+                    DataCell(cellText(rawValue(r.index, 'email'))),
+                    DataCell(reviewNotesCell(r)),
+                  ],
+                );
+              }(),
+          ],
+        ),
+      ),
+    );
 
     return Card(
       child: Padding(
@@ -1261,91 +1413,50 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: rows.length > 6 ? 360 : null,
-              child: ListView.separated(
-                shrinkWrap: rows.length <= 6,
-                physics: rows.length > 6
-                    ? null
-                    : const NeverScrollableScrollPhysics(),
-                itemCount: rows.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (_, i) {
-                  final r = rows[i];
-                  final (label, rowTone) = switch (r.kind) {
-                    RosterPreviewKind.newRow => ('New', RosterBadgeTone.green),
-                    RosterPreviewKind.update => (
-                      'Update',
-                      RosterBadgeTone.blue,
-                    ),
-                    RosterPreviewKind.link => (
-                      'Links account',
-                      RosterBadgeTone.amber,
-                    ),
-                    RosterPreviewKind.error => ('Error', RosterBadgeTone.red),
-                  };
-                  final displayRow = _importMode == RosterImportMode.manual
-                      ? r.index + 1
-                      : r.index + 2;
-                  return ListTile(
-                    dense: true,
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            '${r.studentNo} · $label',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        RosterSemanticPill(
-                          label: label,
-                          tone: rowTone,
-                          compact: true,
-                        ),
-                      ],
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Row $displayRow · Born ${dobOf(r.index)}'),
-                        for (final c in r.changes.entries)
-                          Text(
-                            '${c.key}: ${_spellIfDate(c.value.from)} → '
-                            '${_spellIfDate(c.value.to)}',
-                          ),
-                        for (final w in r.warnings)
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(
-                                Icons.warning_amber_rounded,
-                                size: 16,
-                                color: AdminColors.accentStrong,
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  w,
-                                  style: const TextStyle(
-                                    color: AdminColors.accentStrong,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        for (final e in r.errors)
-                          Text(
-                            e,
-                            style: const TextStyle(color: AdminColors.danger),
-                          ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+            const SizedBox(height: 10),
+            const Text(
+              'Review every row below against the roster template before importing.',
+              style: TextStyle(color: AdminColors.muted, fontSize: 13),
             ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in [
+                  (filter: _PreviewFilter.all, label: 'All (${rows.length})'),
+                  (
+                    filter: _PreviewFilter.errors,
+                    label: 'Errors ($errorCount)',
+                  ),
+                  (
+                    filter: _PreviewFilter.warnings,
+                    label: 'Warnings ($warningCount)',
+                  ),
+                  (filter: _PreviewFilter.ready, label: 'Ready ($readyCount)'),
+                ])
+                  ChoiceChip(
+                    showCheckmark: false,
+                    label: Text(option.label),
+                    selected: _previewFilter == option.filter,
+                    onSelected: (_) =>
+                        setState(() => _previewFilter = option.filter),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (filteredRows.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text('No preview rows match the selected filter.'),
+              )
+            else if (filteredRows.length > 8)
+              SizedBox(
+                height: 420,
+                child: SingleChildScrollView(child: table),
+              )
+            else
+              table,
             const SizedBox(height: 12),
             if (_previewHasErrors)
               Text(
@@ -1695,171 +1806,109 @@ class _StudentRosterPageState extends State<StudentRosterPage> {
   }
 
   // ===================================================================
-  // Account requests tab
+  // Credential Request Log tab (view-only activity log)
   // ===================================================================
 
-  Future<void> _loadClaims() async {
-    setState(() => _claimsError = null);
+  Future<void> _loadCredentialLogs() async {
+    setState(() => _credentialLogsError = null);
     try {
-      final list = await _repo.listAccountClaims();
-      if (mounted) setState(() => _claims = list);
+      final list = await _repo.listCredentialRequestLogs();
+      if (mounted) setState(() => _credentialLogs = list);
     } catch (e) {
       if (mounted) {
         setState(() {
-          _claims ??= const [];
-          _claimsError = _errorText(e);
+          _credentialLogs ??= const [];
+          _credentialLogsError = _errorText(e);
         });
       }
     }
   }
 
-  Widget _claimsTab() {
-    final list = _claims;
+  ({String label, RosterBadgeTone tone}) _credentialLogStatus(String state) =>
+      switch (state) {
+        'completed' => (label: 'Password Set', tone: RosterBadgeTone.green),
+        'issued' => (label: 'Credentials Sent', tone: RosterBadgeTone.blue),
+        'send-failed' => (label: 'Email Failed', tone: RosterBadgeTone.red),
+        _ => (label: 'In Progress', tone: RosterBadgeTone.amber),
+      };
+
+  Widget _credentialRequestLogTab() {
+    final list = _credentialLogs;
     if (list == null) return _loading();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Students who matched a roster record and verified a personal '
-          'email. Approve a request only when you have confirmed the student '
-          'is the person on the record; the email alone does not prove it.',
+          'View-only activity log monitoring students who requested their '
+          'login credentials on the mobile app.',
         ),
         const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerLeft,
           child: OutlinedButton.icon(
-            onPressed: _loadClaims,
+            onPressed: _loadCredentialLogs,
             icon: const Icon(Icons.refresh),
             label: const Text('Refresh'),
           ),
         ),
-        if (_claimsError != null) _error(_claimsError!),
-        if (list.isEmpty && _claimsError == null)
+        if (_credentialLogsError != null) _error(_credentialLogsError!),
+        if (list.isEmpty && _credentialLogsError == null)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
-            child: Text('No account requests are waiting.'),
+            child: Text('No student login credential requests have been recorded yet.'),
           ),
-        for (final c in list) _claimTile(c),
+        for (final log in list) _credentialLogCard(log),
       ],
     );
   }
 
-  Widget _claimTile(StudentAccountClaim c) {
-    final busy = _busyClaims.contains(c.uid);
+  Widget _credentialLogCard(StudentCredentialRequestLog log) {
+    final status = _credentialLogStatus(log.state);
+    final programParts = [
+      if (log.college.isNotEmpty) log.college,
+      if (log.course.isNotEmpty) log.course,
+      if (log.yearLevel.isNotEmpty) log.yearLevel,
+    ];
     return Card(
       margin: const EdgeInsets.only(top: 8),
-      child: ListTile(
-        isThreeLine: true,
-        title: Text(
-          '${c.name} · ${c.studentNo}',
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: Text(
-          '${c.college} · ${c.course} · ${c.yearLevel}\n'
-          'Personal email: ${c.email}'
-          '${c.rosterAlreadyClaimed ? '\nThis record is already claimed: reject the request.' : ''}',
-        ),
-        trailing: busy
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Wrap(
-                spacing: 8,
-                children: [
-                  OutlinedButton(
-                    onPressed: () => _reviewClaim(c, approve: false),
-                    child: const Text('Reject'),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${log.name} · ${log.studentNo}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  FilledButton(
-                    onPressed: c.rosterAlreadyClaimed
-                        ? null
-                        : () => _reviewClaim(c, approve: true),
-                    child: const Text('Approve'),
-                  ),
-                ],
-              ),
-      ),
-    );
-  }
-
-  Future<void> _reviewClaim(
-    StudentAccountClaim c, {
-    required bool approve,
-  }) async {
-    final ok = approve
-        ? await showDialog<bool>(
-                context: context,
-                builder: (_) => _ApproveClaimDialog(claim: c),
-              ) ??
-              false
-        : await _confirm(
-            title: 'Reject this request?',
-            body:
-                'The request is deleted and the Student ID is free for the '
-                'real student to set up. Nothing else changes.',
-            confirmLabel: 'Reject',
-          );
-    if (!ok || !mounted) return;
-    setState(() => _busyClaims.add(c.uid));
-    try {
-      if (approve) {
-        await _repo.approveAccountClaim(c.uid);
-        _toast('Approved ${c.studentNo}.');
-      } else {
-        await _repo.rejectAccountClaim(c.uid);
-        _toast('Rejected the request for ${c.studentNo}.');
-      }
-      if (mounted) setState(() => _claims?.removeWhere((x) => x.uid == c.uid));
-    } catch (e) {
-      _toast(_errorText(e));
-    } finally {
-      if (mounted) setState(() => _busyClaims.remove(c.uid));
-    }
-    if (mounted) await _loadClaims();
-  }
-
-  Future<void> _loadLegacy() async {
-    setState(() => _legacyError = null);
-    try {
-      final list = await _repo.listLegacyNotInRoster();
-      if (mounted) setState(() => _legacy = list);
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _legacy = const [];
-          _legacyError = _errorText(e);
-        });
-      }
-    }
-  }
-
-  Widget _legacyTab() {
-    final list = _legacy;
-    if (list == null) return _loading();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Existing student accounts whose School ID is not in the roster.',
-        ),
-        const SizedBox(height: 8),
-        if (_legacyError != null) _error(_legacyError!),
-        if (list.isEmpty && _legacyError == null)
-          const Text('Every existing student account is in the roster.'),
-        for (final s in list)
-          Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              title: Text(
-                s.name.isEmpty ? s.userId : s.name,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: Text(s.schoolId),
+                ),
+                const SizedBox(width: 8),
+                RosterSemanticPill(
+                  label: status.label,
+                  tone: status.tone,
+                  compact: true,
+                ),
+              ],
             ),
-          ),
-      ],
+            const SizedBox(height: 6),
+            if (programParts.isNotEmpty) Text(programParts.join(' · ')),
+            if (log.email.isNotEmpty) Text('Email: ${log.email}'),
+            const SizedBox(height: 4),
+            Text(
+              [
+                if (log.requestedAt != null)
+                  'Requested: ${_shortDate(log.requestedAt!)}',
+                if (log.completedAt != null)
+                  'Password set: ${_shortDate(log.completedAt!)}',
+                if (log.issuedCount > 1) 'Requests in 24h: ${log.issuedCount}',
+              ].join(' · '),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1922,62 +1971,6 @@ class _ReasonDialogState extends State<_ReasonDialog> {
       ),
     ],
   );
-}
-
-/// Approval needs the administrator's explicit statement that they verified
-/// the student's identity themselves; the server refuses without it.
-class _ApproveClaimDialog extends StatefulWidget {
-  const _ApproveClaimDialog({required this.claim});
-  final StudentAccountClaim claim;
-
-  @override
-  State<_ApproveClaimDialog> createState() => _ApproveClaimDialogState();
-}
-
-class _ApproveClaimDialogState extends State<_ApproveClaimDialog> {
-  bool _verified = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = widget.claim;
-    return AlertDialog(
-      title: const Text('Approve this account?'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${c.name} (${c.studentNo}) will own this roster record and can '
-            'sign in with the password they chose. ${c.email} becomes their '
-            'recovery email.',
-          ),
-          const SizedBox(height: 12),
-          CheckboxListTile(
-            key: const Key('claim-identity-verified'),
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-            value: _verified,
-            onChanged: (v) => setState(() => _verified = v == true),
-            title: const Text(
-              'I confirmed this person is the student on this record, '
-              'independently of what they typed (in person or against '
-              'school records).',
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _verified ? () => Navigator.pop(context, true) : null,
-          child: const Text('Approve'),
-        ),
-      ],
-    );
-  }
 }
 
 class _EditRecordDialog extends StatefulWidget {

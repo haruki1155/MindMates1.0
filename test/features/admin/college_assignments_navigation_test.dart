@@ -164,7 +164,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(CounselorAssignedCollegesPage), findsOneWidget);
-      expect(find.text('My Assigned Colleges'), findsOneWidget);
+      expect(
+        find.text(
+          'Read-only overview of the colleges assigned to your counselor caseload.',
+        ),
+        findsOneWidget,
+      );
       expect(find.text('College of Information Technology'), findsOneWidget);
       expect(repo.watchUsersCalls, 0);
     },

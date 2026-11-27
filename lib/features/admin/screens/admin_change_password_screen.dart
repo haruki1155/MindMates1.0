@@ -55,7 +55,7 @@ class _AdminChangePasswordScreenState extends State<AdminChangePasswordScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'You must choose a private password before accessing the administrator portal.',
+                        'You must choose a private password before accessing the MindMate portal.',
                         textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 20),

@@ -56,7 +56,8 @@ enum InquiryEscalationType {
   String get label => switch (this) {
     InquiryEscalationType.counselorConfirmation =>
       'Counselor requested administrator review',
-    InquiryEscalationType.staffReasoned => 'Staff escalation',
+    InquiryEscalationType.staffReasoned =>
+      'Staff referral for administrator review',
   };
 
   static InquiryEscalationType? fromValue(Object? value) =>

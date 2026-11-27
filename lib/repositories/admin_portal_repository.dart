@@ -211,6 +211,20 @@ String newInquiryRequestId() {
       .join();
 }
 
+class CreatedStaffAccount {
+  const CreatedStaffAccount({
+    required this.uid,
+    required this.email,
+    required this.role,
+    required this.roleLabel,
+  });
+
+  final String uid;
+  final String email;
+  final AccessRole role;
+  final String roleLabel;
+}
+
 typedef AdminCallableInvoker =
     Future<Object?> Function(String name, Map<String, Object?> data);
 
@@ -639,9 +653,35 @@ class AdminPortalRepository {
     }
   }
 
+  Future<CreatedStaffAccount> createStaffAccountByAdmin({
+    required String email,
+    required AccessRole role,
+    String firstName = '',
+    String lastName = '',
+  }) async {
+    final result = await _callCallable('createStaffAccountByAdmin', {
+      'email': email.trim(),
+      'role': role.storedValue,
+      if (firstName.trim().isNotEmpty) 'firstName': firstName.trim(),
+      if (lastName.trim().isNotEmpty) 'lastName': lastName.trim(),
+    });
+    final data = result is Map
+        ? Map<String, dynamic>.from(result)
+        : const <String, dynamic>{};
+    final createdRole = AccessRole.parse(data['role'] ?? role.storedValue);
+    return CreatedStaffAccount(
+      uid: data['uid']?.toString() ?? '',
+      email: data['email']?.toString() ?? email.trim().toLowerCase(),
+      role: createdRole,
+      roleLabel:
+          data['roleLabel']?.toString() ??
+          (createdRole == AccessRole.counselor ? 'Counselor' : 'Portal Staff'),
+    );
+  }
+
   Future<void> completeMandatoryPasswordChange(String password) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) throw StateError('Administrator session is missing.');
+    if (user == null) throw StateError('Portal session is missing.');
     await user.updatePassword(password);
     await FirebaseFunctions.instance
         .httpsCallable('completeAdminPasswordChange')

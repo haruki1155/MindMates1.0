@@ -204,7 +204,7 @@ export function directEmailActionLink(
   return destination.toString();
 }
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -225,7 +225,7 @@ export function accountEmailTransporter() {
   });
 }
 
-function brandedEmailShell({
+export function brandedEmailShell({
   heading,
   body,
   actionLabel,

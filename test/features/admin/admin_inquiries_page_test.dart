@@ -7,6 +7,7 @@ import 'package:mind_mates/features/admin/domain/inquiry_sla.dart';
 import 'package:mind_mates/features/admin/screens/admin_portal.dart';
 import 'package:mind_mates/features/admin/theme/admin_theme.dart';
 import 'package:mind_mates/features/admin/widgets/admin_status_badge.dart';
+import 'package:mind_mates/features/admin/widgets/counselor_inquiry_workspace.dart';
 import 'package:mind_mates/models/admin_inquiry_model.dart';
 import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/user_model.dart';
@@ -123,43 +124,54 @@ AdminInquiryModel _inquiry(
 
 void main() {
   testWidgets(
-    'Inquiries page removes Status/Category filters and sorts Pending -> In progress -> Resolved newest first',
+    'Inquiries page removes Status/Category filters and sorts New -> Pending -> Resolved newest first',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 1200);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
 
-      final repo = _FakeInquiriesRepo([
-        _inquiry(
-          'i_res',
-          subject: 'Resolved Old',
-          status: InquiryStatus.resolved,
-          createdAt: DateTime.utc(2026, 11, 20, 10),
-        ),
-        _inquiry(
-          'i_prog',
-          subject: 'In Progress Mid',
-          status: InquiryStatus.inProgress,
-          createdAt: DateTime.utc(2026, 11, 21, 9),
-        ),
-        _inquiry(
-          'i_pend_old',
-          subject: 'Pending Older',
-          status: InquiryStatus.pending,
-          createdAt: DateTime.utc(2026, 11, 19, 8),
-        ),
-        _inquiry(
-          'i_pend_new',
-          subject: 'Pending Newer',
-          status: InquiryStatus.pending,
-          createdAt: DateTime.utc(2026, 11, 21, 10),
-        ),
-      ]);
+      final repo = _FakeInquiriesRepo(
+        [
+          _inquiry(
+            'i_res',
+            subject: 'Resolved Old',
+            status: InquiryStatus.resolved,
+            createdAt: DateTime.utc(2026, 11, 20, 10),
+          ),
+          _inquiry(
+            'i_prog',
+            subject: 'Legacy In Progress',
+            status: InquiryStatus.inProgress,
+            createdAt: DateTime.utc(2026, 11, 21, 9),
+          ),
+          _inquiry(
+            'i_pend_ack',
+            subject: 'Confirmed Pending Older',
+            status: InquiryStatus.pending,
+            acknowledgedAt: DateTime.utc(2026, 11, 19, 9),
+            createdAt: DateTime.utc(2026, 11, 19, 8),
+          ),
+          _inquiry(
+            'i_new',
+            subject: 'New Unconfirmed',
+            status: InquiryStatus.pending,
+            createdAt: DateTime.utc(2026, 11, 21, 10),
+          ),
+        ],
+        role: AccessRole.counselor,
+        superAdmin: false,
+        uid: 'c1',
+      );
 
       await tester.pumpWidget(
         MaterialApp(
           theme: AdminTheme.data,
-          home: Scaffold(body: AdminInquiriesPage(repository: repo)),
+          home: Scaffold(
+            body: AdminInquiriesPage(
+              repository: repo,
+              initialSection: CounselorInquirySection.otherServices,
+            ),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -169,25 +181,25 @@ void main() {
       expect(find.text('All Status'), findsNothing);
       expect(find.text('All Categories'), findsNothing);
 
-      // Compact summary strip remains visible.
+      // Compact summary strip remains visible with counselor lifecycle buckets.
       expect(find.text('Total'), findsOneWidget);
+      expect(find.text('New'), findsWidgets);
       expect(find.text('Pending'), findsWidgets);
-      expect(find.text('In progress'), findsWidgets);
       expect(find.text('Resolved'), findsWidgets);
 
-      // Deterministic vertical ordering: Pending Newer < Pending Older < In Progress Mid < Resolved Old.
-      final yPendNew = tester.getTopLeft(find.text('Pending Newer')).dy;
-      final yPendOld = tester.getTopLeft(find.text('Pending Older')).dy;
-      final yProg = tester.getTopLeft(find.text('In Progress Mid')).dy;
+      // Deterministic vertical ordering: New < Confirmed/Legacy Pending < Resolved.
+      final yNew = tester.getTopLeft(find.text('New Unconfirmed')).dy;
+      final yProg = tester.getTopLeft(find.text('Legacy In Progress')).dy;
+      final yAck = tester.getTopLeft(find.text('Confirmed Pending Older')).dy;
       final yRes = tester.getTopLeft(find.text('Resolved Old')).dy;
-      expect(yPendNew, lessThan(yPendOld));
-      expect(yPendOld, lessThan(yProg));
-      expect(yProg, lessThan(yRes));
+      expect(yNew, lessThan(yProg));
+      expect(yProg, lessThan(yAck));
+      expect(yAck, lessThan(yRes));
     },
   );
 
   testWidgets(
-    'Inquiry detail hides Change status menu while preserving Acknowledge receipt and read-only badge',
+    'Inquiry detail hides Change status menu while preserving Confirm Receipt and read-only badge',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 1400);
       tester.view.devicePixelRatio = 1;
@@ -210,11 +222,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Change status'), findsNothing);
-      expect(find.text('Pending'), findsOneWidget);
-      expect(find.text('Acknowledge receipt'), findsOneWidget);
+      expect(find.text('New'), findsOneWidget);
+      expect(find.text('Confirm Receipt'), findsOneWidget);
 
-      await tester.ensureVisible(find.text('Acknowledge receipt'));
-      await tester.tap(find.text('Acknowledge receipt'));
+      await tester.ensureVisible(find.text('Confirm Receipt'));
+      await tester.tap(find.text('Confirm Receipt'));
       await tester.pumpAndSettle();
       expect(repo.acknowledgedIds, ['i1']);
     },
@@ -289,9 +301,11 @@ void main() {
           isNull,
           reason: 'list overflow at $width',
         );
-        expect(find.text('Pending'), findsWidgets);
-        expect(find.text('In progress'), findsWidgets);
         expect(find.text('Resolved'), findsWidgets);
+        expect(find.text('Forwarded to Admin'), findsNothing);
+        expect(find.text('Pending inquiry subject for responsive check'), findsNothing);
+        expect(find.text('In progress inquiry subject'), findsNothing);
+        expect(find.text('Resolved inquiry subject'), findsOneWidget);
         expect(find.text('All Status'), findsNothing);
         expect(find.text('All Categories'), findsNothing);
 
@@ -313,8 +327,8 @@ void main() {
           reason: 'detail overflow at $width',
         );
         expect(find.byType(AdminStatusBadge), findsOneWidget);
-        expect(find.text('Pending'), findsOneWidget);
-        expect(find.text('Acknowledge receipt'), findsOneWidget);
+        expect(find.text('New'), findsOneWidget);
+        expect(find.text('Confirm Receipt'), findsOneWidget);
         expect(find.text('Change status'), findsNothing);
 
         // PAACC Staff operational projection: sanitized list + detail, no overflow.
@@ -337,7 +351,7 @@ void main() {
           reason: 'staff inquiries list overflow at $width',
         );
         expect(find.text('General inquiry #op1'), findsOneWidget);
-        expect(find.text('Pending'), findsWidgets);
+        expect(find.text('New'), findsWidgets);
         expect(find.text('Inquiry body i1'), findsNothing);
 
         await tester.pumpWidget(
@@ -395,7 +409,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Acknowledge receipt'), findsOneWidget);
+      expect(find.text('Confirm Receipt'), findsOneWidget);
       expect(find.text('Mark as Resolved'), findsNothing);
       expect(find.text('Change status'), findsNothing);
 
@@ -537,7 +551,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(failingRepo.resolvedCalls, [('i_fail', 2)]);
-      expect(find.text(InquiryStatus.inProgress.label), findsOneWidget);
+      expect(find.text('Pending'), findsOneWidget);
       expect(find.text('Mark as Resolved'), findsOneWidget);
       expect(find.text('Unable to mark inquiry as resolved.'), findsOneWidget);
 
@@ -694,7 +708,7 @@ void main() {
       expect(find.textContaining('Internal'), findsNothing);
       expect(find.textContaining('projects/'), findsNothing);
       expect(find.textContaining('token='), findsNothing);
-      expect(find.text(InquiryStatus.inProgress.label), findsOneWidget);
+      expect(find.text('Pending'), findsOneWidget);
       expect(find.text('Mark as Resolved'), findsOneWidget);
 
       // 2. Actionable failed-precondition message is shown directly.
@@ -706,7 +720,7 @@ void main() {
         resolveError: FirebaseFunctionsException(
           code: 'failed-precondition',
           message:
-              'Acknowledge receipt before marking this inquiry as resolved.',
+              'Confirm receipt before marking this inquiry as resolved.',
         ),
       );
       addTearDown(preconditionRepo.dispose);
@@ -736,11 +750,11 @@ void main() {
 
       expect(
         find.text(
-          'Acknowledge receipt before marking this inquiry as resolved.',
+          'Confirm receipt before marking this inquiry as resolved.',
         ),
         findsOneWidget,
       );
-      expect(find.text(InquiryStatus.inProgress.label), findsOneWidget);
+      expect(find.text('Pending'), findsOneWidget);
     },
   );
 
@@ -868,7 +882,7 @@ void main() {
       ]);
       await tester.pumpAndSettle();
 
-      expect(find.text('In Progress'), findsOneWidget);
+      expect(find.text('Pending'), findsOneWidget);
       expect(find.text('Mark as Resolved'), findsOneWidget);
 
       // Direct jump: optimistic resolve at rev 4, then stream emits in_progress at rev 5 without intermediate resolved.
@@ -897,8 +911,63 @@ void main() {
       ]);
       await tester.pumpAndSettle();
 
-      expect(find.text('In Progress'), findsOneWidget);
+      expect(find.text('Pending'), findsOneWidget);
       expect(find.text('Mark as Resolved'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Admin Inquiries page shows and counts only counselor-resolved or taken-over inquiries without Forwarded to Admin tile',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      final repo = _FakeInquiriesRepo([
+        _inquiry(
+          'i_unprocessed_new',
+          subject: 'Hidden Unprocessed New',
+          status: InquiryStatus.pending,
+          createdAt: DateTime.utc(2026, 11, 22, 10),
+        ),
+        _inquiry(
+          'i_unprocessed_pending',
+          subject: 'Hidden Unprocessed Pending',
+          status: InquiryStatus.pending,
+          acknowledgedAt: DateTime.utc(2026, 11, 22, 11),
+          createdAt: DateTime.utc(2026, 11, 22, 9),
+        ),
+        _inquiry(
+          'i_resolved',
+          subject: 'Visible Resolved Inquiry',
+          status: InquiryStatus.resolved,
+          createdAt: DateTime.utc(2026, 11, 20, 10),
+        ),
+        _inquiry(
+          'i_resolved_second',
+          subject: 'Second Resolved Inquiry',
+          status: InquiryStatus.resolved,
+          createdAt: DateTime.utc(2026, 11, 21, 10),
+        ),
+      ]);
+      addTearDown(repo.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.data,
+          home: Scaffold(body: AdminInquiriesPage(repository: repo)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Hidden Unprocessed New'), findsNothing);
+      expect(find.text('Hidden Unprocessed Pending'), findsNothing);
+      expect(find.text('Visible Resolved Inquiry'), findsOneWidget);
+      expect(find.text('Second Resolved Inquiry'), findsOneWidget);
+      expect(find.text('Total'), findsOneWidget);
+      expect(find.text('Resolved'), findsWidgets);
+      expect(find.text('2'), findsWidgets);
+      expect(find.text('Forwarded to Admin'), findsNothing);
     },
   );
 }

@@ -151,7 +151,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Needs action 1'), findsWidgets);
+      expect(find.text('Needs action'), findsWidgets);
+      expect(find.byType(ChoiceChip), findsNothing);
       await tester.tap(find.text('Review'));
       await tester.pumpAndSettle();
       expect(find.text('Session summary (internal)'), findsOneWidget);
@@ -280,25 +281,22 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Appointment category'), findsOneWidget);
-    expect(find.text('All active 5'), findsOneWidget);
-    expect(find.text('Needs action 2'), findsOneWidget);
-    expect(find.text('Today 0'), findsOneWidget);
-    expect(find.text('Upcoming 2'), findsOneWidget);
-    expect(find.text('Completed 90'), findsOneWidget);
+    expect(find.text('Appointment category'), findsNothing);
+    expect(find.text('Clear filters'), findsNothing);
+    expect(find.byType(ChoiceChip), findsNothing);
+    expect(find.text('All active'), findsOneWidget);
+    expect(find.text('Needs action'), findsOneWidget);
+    expect(find.text('Today'), findsOneWidget);
+    expect(find.text('Upcoming'), findsOneWidget);
+    expect(find.text('Completed'), findsOneWidget);
+    expect(find.text('Cancelled'), findsOneWidget);
+    expect(find.text('5'), findsWidgets);
+    expect(find.text('90'), findsWidgets);
     expect(find.text('Finished, including archived'), findsOneWidget);
-    expect(find.byType(ChoiceChip), findsNWidgets(5));
-    expect(
-      find.descendant(
-        of: find.byType(ChoiceChip),
-        matching: find.textContaining('Closed'),
-      ),
-      findsNothing,
-    );
     expect(find.text('Archived 0'), findsNothing);
 
-    await tester.ensureVisible(find.text('Completed 90'));
-    await tester.tap(find.text('Completed 90'));
+    await tester.ensureVisible(find.text('Completed'));
+    await tester.tap(find.text('Completed'));
     await tester.pumpAndSettle();
     expect(find.text('Archived 0'), findsWidgets);
     expect(find.text('Finished one'), findsWidgets);
@@ -309,12 +307,21 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Move to history (1)'), findsOneWidget);
 
+    // Filter bar stays free of Clear filters even when a dropdown filter is active.
+    await tester.ensureVisible(find.text('All appointments'));
+    await tester.tap(find.text('All appointments'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Initial').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Clear filters'), findsNothing);
+
     await tester.ensureVisible(find.text('History'));
     await tester.tap(find.text('History'));
     await tester.pumpAndSettle();
     expect(find.text('Archived 0'), findsWidgets);
     expect(find.text('Finished one'), findsNothing);
     expect(find.text('Appointment category'), findsNothing);
+    expect(find.text('Clear filters'), findsNothing);
     expect(find.byTooltip('Restore from history'), findsNothing);
     expect(find.textContaining('Restore selected'), findsNothing);
     expect(find.byIcon(Icons.unarchive_outlined), findsNothing);
@@ -402,8 +409,8 @@ void main() {
       await tester.tap(find.text('Close'));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('Completed 1'));
-      await tester.tap(find.text('Completed 1'));
+      await tester.ensureVisible(find.text('Completed'));
+      await tester.tap(find.text('Completed'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Review'));
       await tester.pumpAndSettle();
@@ -561,6 +568,59 @@ void main() {
       expect(adminRepo.isSuperAdmin, isFalse);
     },
   );
+
+  testWidgets('Cancelled container and sub-tab display all cancelled records cleanly without ghost counts', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final records = [
+      _appointment('requested', DateTime.now(), 'Active Student'),
+      _appointment(
+        'requested',
+        DateTime.now(),
+        'Ghost Archived Student',
+        archived: true,
+      ),
+      _appointment('cancelled', DateTime.now(), 'Cancelled Active'),
+      _appointment(
+        'cancelled',
+        DateTime.now(),
+        'Cancelled Archived',
+        archived: true,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AdminAppointmentsPage(
+            repository: _Repository(records, role: AccessRole.counselor),
+            onOpenAssessments: null,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ChoiceChip), findsNothing);
+    expect(find.text('Needs action'), findsOneWidget);
+    expect(find.text('Cancelled'), findsOneWidget);
+    expect(find.text('Cancelled appointments'), findsOneWidget);
+    expect(find.text('Ghost Archived Student'), findsNothing);
+    expect(find.text('Showing 1 of 1 appointments'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Cancelled'));
+    await tester.tap(find.text('Cancelled'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cancelled Active'), findsOneWidget);
+    expect(find.text('Cancelled Archived'), findsOneWidget);
+    expect(
+      find.text('Showing 2 of 2 appointments · includes archived records'),
+      findsOneWidget,
+    );
+  });
 }
 
 AppointmentModel _appointment(

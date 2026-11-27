@@ -147,6 +147,7 @@ class _StaffAppointmentsPageState extends State<StaffAppointmentsPage> {
                       ('Today', metrics.today),
                       ('Upcoming', metrics.upcoming),
                       ('Completed', metrics.completed),
+                      ('Cancelled', metrics.cancelled),
                     ])
                       ChoiceChip(
                         label: Text('${option.$1} ${option.$2}'),
@@ -247,12 +248,16 @@ bool _matches(AppointmentQueueItem item, DateTime now, String filter) {
   return switch (filter) {
     'All' => !item.isArchived,
     'Completed' => status == 'completed' || status == 'complete',
+    'Cancelled' => status == 'cancelled' || status == 'canceled',
     'Today' => !item.isArchived && status == 'confirmed' && day == today,
     'Upcoming' =>
       !item.isArchived && status == 'confirmed' && day.isAfter(today),
     _ =>
       !item.isArchived &&
           status != 'completed' &&
+          status != 'complete' &&
+          status != 'cancelled' &&
+          status != 'canceled' &&
           !(status == 'confirmed' && (day == today || day.isAfter(today))),
   };
 }
@@ -349,13 +354,8 @@ class _PageFrame extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 6),
             Text(subtitle, style: const TextStyle(color: AdminColors.muted)),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
             child,
           ],
         ),

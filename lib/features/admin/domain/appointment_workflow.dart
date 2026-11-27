@@ -1,14 +1,19 @@
 import '../../../models/appointment_model.dart';
 
-enum AppointmentQueue { needsAction, today, upcoming, completed }
+enum AppointmentQueue { needsAction, today, upcoming, completed, cancelled }
 
 AppointmentQueue classifyAppointment(
   AppointmentModel appointment,
   DateTime now,
 ) {
-  if (appointment.hasPendingScheduleChange && appointment.proposedBy == 'student') return AppointmentQueue.needsAction;
   if (appointment.status.trim().toLowerCase() == 'completed') {
     return AppointmentQueue.completed;
+  }
+  if (appointment.lifecycleStatus == AppointmentStatus.cancelled) {
+    return AppointmentQueue.cancelled;
+  }
+  if (appointment.hasPendingScheduleChange && appointment.proposedBy == 'student') {
+    return AppointmentQueue.needsAction;
   }
   switch (appointment.lifecycleStatus) {
     case AppointmentStatus.requested:
@@ -25,8 +30,9 @@ AppointmentQueue classifyAppointment(
       if (day.isAfter(today)) return AppointmentQueue.upcoming;
       if (day.isBefore(today)) return AppointmentQueue.needsAction;
       return AppointmentQueue.today;
-    case AppointmentStatus.completed:
     case AppointmentStatus.cancelled:
+      return AppointmentQueue.cancelled;
+    case AppointmentStatus.completed:
     case AppointmentStatus.noShow:
     case AppointmentStatus.declined:
     case AppointmentStatus.expired:
@@ -38,7 +44,7 @@ AppointmentQueue classifyAppointment(
   }
 }
 
-/// Completed includes archived records whose stored status is exactly completed;
+/// Completed and Cancelled include archived records matching their queue;
 /// History remains archive-only.
 List<AppointmentModel> appointmentRecordsForView(
   Iterable<AppointmentModel> appointments,
@@ -47,8 +53,8 @@ List<AppointmentModel> appointmentRecordsForView(
   AppointmentQueue? queue,
 }) => appointments.where((appointment) {
   if (showHistory) return appointment.isArchived;
-  if (queue == AppointmentQueue.completed) {
-    return classifyAppointment(appointment, now) == AppointmentQueue.completed;
+  if (queue == AppointmentQueue.completed || queue == AppointmentQueue.cancelled) {
+    return classifyAppointment(appointment, now) == queue;
   }
   return !appointment.isArchived &&
       (queue == null || classifyAppointment(appointment, now) == queue);
@@ -70,7 +76,13 @@ Map<AppointmentQueue, int> appointmentQueueCounts(
 ) {
   final counts = {for (final queue in AppointmentQueue.values) queue: 0};
   for (final appointment in appointments) {
-    counts.update(classifyAppointment(appointment, now), (value) => value + 1);
+    final queue = classifyAppointment(appointment, now);
+    if (appointment.isArchived &&
+        queue != AppointmentQueue.completed &&
+        queue != AppointmentQueue.cancelled) {
+      continue;
+    }
+    counts.update(queue, (value) => value + 1);
   }
   return counts;
 }

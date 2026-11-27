@@ -154,7 +154,12 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(find.text('Counselor Dashboard'), findsOneWidget);
+        expect(
+          find.text(
+            'PACC-wide clinical operations and your assigned caseload.',
+          ),
+          findsOneWidget,
+        );
         expect(find.text('PACC Today'), findsOneWidget);
         expect(find.text('My Assigned Active'), findsOneWidget);
         expect(find.text('My Caseload'), findsOneWidget);

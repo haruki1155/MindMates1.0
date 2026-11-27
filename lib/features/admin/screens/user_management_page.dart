@@ -16,9 +16,11 @@ class UserManagementPage extends StatefulWidget {
     super.key,
     required this.repository,
     this.onOpenAcademicStructure,
+    this.onOpenCreateAccount,
   });
   final AdminPortalRepository repository;
   final VoidCallback? onOpenAcademicStructure;
+  final VoidCallback? onOpenCreateAccount;
 
   @override
   State<UserManagementPage> createState() => _UserManagementPageState();
@@ -94,26 +96,28 @@ class _UserManagementPageState extends State<UserManagementPage> {
               children: [
                 LayoutBuilder(
                   builder: (context, box) {
-                    final heading = Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    final heading = Text(
+                      'Manage application accounts, staff access, and system roles.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    );
+                    final actions = Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
                       children: [
-                        Text(
-                          'User Management',
-                          style: Theme.of(context).textTheme.headlineLarge,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Manage application accounts, staff access, and system roles.',
-                          style: Theme.of(context).textTheme.bodyMedium,
+                        if (widget.onOpenCreateAccount != null)
+                          FilledButton.icon(
+                            onPressed: widget.onOpenCreateAccount,
+                            icon: const Icon(Icons.person_add_alt_1_outlined),
+                            label: const Text('Create Account'),
+                          ),
+                        OutlinedButton.icon(
+                          onPressed:
+                              widget.onOpenAcademicStructure ??
+                              _showOrganizationDirectory,
+                          icon: const Icon(Icons.account_tree_outlined),
+                          label: const Text('Academic structure'),
                         ),
                       ],
-                    );
-                    final directory = OutlinedButton.icon(
-                      onPressed:
-                          widget.onOpenAcademicStructure ??
-                          _showOrganizationDirectory,
-                      icon: const Icon(Icons.account_tree_outlined),
-                      label: const Text('Academic structure'),
                     );
                     if (box.maxWidth < 620) {
                       return Column(
@@ -121,7 +125,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         children: [
                           heading,
                           const SizedBox(height: 16),
-                          directory,
+                          actions,
                         ],
                       );
                     }
@@ -130,7 +134,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                       children: [
                         Expanded(child: heading),
                         const SizedBox(width: 20),
-                        directory,
+                        actions,
                       ],
                     );
                   },

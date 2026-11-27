@@ -32,14 +32,16 @@ void main() {
       now,
     );
 
-    expect(canonical.needsAction, 2);
+    expect(canonical.needsAction, 1);
     expect(canonical.today, 1);
     expect(canonical.upcoming, 1);
     expect(canonical.completed, 2);
+    expect(canonical.cancelled, 1);
     expect(projection.needsAction, canonical.needsAction);
     expect(projection.today, canonical.today);
     expect(projection.upcoming, canonical.upcoming);
     expect(projection.completed, canonical.completed);
+    expect(projection.cancelled, canonical.cancelled);
   });
 }
 

@@ -117,19 +117,9 @@ class _AcademicStructurePageState extends State<AcademicStructurePage> {
       children: [
         Row(
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Academic Structure',
-                    style: Theme.of(context).textTheme.headlineLarge,
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Manage the colleges, departments, and courses used throughout MindMate.',
-                  ),
-                ],
+            const Expanded(
+              child: Text(
+                'Manage the colleges, departments, and courses used throughout MindMate.',
               ),
             ),
             if (box.maxWidth > 560)

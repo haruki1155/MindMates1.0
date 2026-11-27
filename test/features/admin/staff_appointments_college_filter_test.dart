@@ -78,6 +78,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(DataTable), findsOneWidget);
+    expect(find.text('Cancelled 0'), findsOneWidget);
     expect(find.text('3 appointments shown'), findsOneWidget);
     expect(find.text('Student Alpha'), findsOneWidget);
     expect(find.text('Student Beta'), findsOneWidget);

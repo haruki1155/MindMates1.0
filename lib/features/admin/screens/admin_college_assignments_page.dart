@@ -164,18 +164,10 @@ class _AdminCollegeAssignmentsPageState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'College Assignments',
-                        style: TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
                         'Manage counselor ownership across colleges. Changes use the authorized assignment and transfer workflow.',
                         style: TextStyle(color: AdminColors.muted),
                       ),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 16),
                       Wrap(
                         spacing: 10,
                         runSpacing: 8,

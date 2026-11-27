@@ -88,15 +88,10 @@ class _ProfileManagementPageState extends State<ProfileManagementPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Profiling Management',
-                    style: Theme.of(context).textTheme.headlineLarge,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
                     'Find and organize registered users by academic or employment information.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 18),
                   _SummaryRow(profiles: allProfiles),
                   const SizedBox(height: 18),
                   _DirectoryCard(

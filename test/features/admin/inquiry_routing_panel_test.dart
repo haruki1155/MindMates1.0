@@ -76,7 +76,6 @@ class _Repo extends AdminPortalRepository {
     this.inquiriesStream,
     this.statusStream,
     this.actionError,
-    this.escalateCompleter,
   });
   final bool superAdmin;
   final AccessRole role;
@@ -85,7 +84,6 @@ class _Repo extends AdminPortalRepository {
   final Stream<List<AdminInquiryModel>>? inquiriesStream;
   final Stream<List<AdminInquiryModel>>? statusStream;
   final Object? actionError;
-  final Completer<void>? escalateCompleter;
   final escalations = <Map<String, Object?>>[];
   final reassignments = <Map<String, Object?>>[];
   final acknowledgedIds = <String>[];
@@ -163,9 +161,6 @@ class _Repo extends AdminPortalRepository {
       'reason': reason,
       'expectedRevision': expectedRevision,
     });
-    if (escalateCompleter != null) {
-      await escalateCompleter!.future;
-    }
     if (error != null) throw error!;
   }
 
@@ -225,7 +220,7 @@ Future<void> _pump(WidgetTester tester, Widget child) async {
 }
 
 void main() {
-  testWidgets('badge distinguishes routed, triage, unrouted and escalated', (
+  testWidgets('badge distinguishes routed, triage, and unrouted states without Forwarded to Admin', (
     tester,
   ) async {
     await _pump(
@@ -259,23 +254,21 @@ void main() {
         ],
       ),
     );
-    expect(find.text('Routed'), findsOneWidget);
+    expect(find.text('Routed'), findsNWidgets(2));
     expect(find.text('Needs triage'), findsOneWidget);
     expect(find.text('Not yet routed'), findsOneWidget);
-    expect(find.text('Escalated'), findsOneWidget);
+    expect(find.text('Forwarded to Admin'), findsNothing);
   });
 
   testWidgets(
-    'panel shows college, assignees and triage reason; counselors confirm escalation without free-text reason',
+    'panel shows college and assignees without manual forwarding action or hint',
     (tester) async {
       final repo = _Repo();
-      var changedCount = 0;
       await _pump(
         tester,
         InquiryRoutingPanel(
-          inquiry: _inquiry(),
+          inquiry: _inquiry(extra: {'status': 'resolved'}),
           repository: repo,
-          onChanged: () => changedCount++,
         ),
       );
       expect(find.textContaining('College assigned'), findsOneWidget);
@@ -283,64 +276,43 @@ void main() {
       expect(find.textContaining('Counselor One'), findsOneWidget);
       expect(find.textContaining('Staff One'), findsOneWidget);
       expect(find.text('Reassign'), findsNothing);
-
-      // Tapping No cancels without submitting.
-      await tester.tap(find.text('Escalate to administrator'));
-      await tester.pumpAndSettle();
+      expect(find.text('Forward to Administrator'), findsNothing);
       expect(
-        find.text('Escalate this inquiry to the Administrator?'),
-        findsOneWidget,
+        find.text(
+          'Mark this inquiry as resolved to forward it to the Administrator.',
+        ),
+        findsNothing,
       );
-      expect(find.byType(TextField), findsNothing);
-      expect(find.widgetWithText(TextButton, 'No'), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'Yes'), findsOneWidget);
-      await tester.tap(find.widgetWithText(TextButton, 'No'));
-      await tester.pumpAndSettle();
-      expect(repo.escalations, isEmpty);
-      expect(changedCount, 0);
-
-      // Tapping Yes submits counselorConfirmation with expectedRevision and no reason.
-      await tester.tap(find.text('Escalate to administrator'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
-      await tester.pumpAndSettle();
-      expect(repo.escalations, [
-        {
-          'id': 'inq-1',
-          'escalationType': InquiryEscalationType.counselorConfirmation,
-          'reason': null,
-          'expectedRevision': 2,
-        },
-      ]);
-      expect(changedCount, 1);
     },
   );
 
   testWidgets(
-    'escalation is hidden when already escalated, resolved, or for non-assignees',
+    'manual forwarding controls remain hidden across counselor and portalStaff states',
     (tester) async {
       for (final inquiry in [
         _inquiry(
           extra: {
+            'status': 'resolved',
             'escalation': {'status': 'requested', 'reason': 'x'},
           },
         ),
-        _inquiry(extra: {'status': 'resolved'}),
+        _inquiry(),
       ]) {
         await _pump(
           tester,
           InquiryRoutingPanel(inquiry: inquiry, repository: _Repo()),
         );
-        expect(find.text('Escalate to administrator'), findsNothing);
+        expect(find.text('Forward to Administrator'), findsNothing);
+        expect(find.textContaining('Forwarded to Admin'), findsNothing);
       }
       await _pump(
         tester,
         InquiryRoutingPanel(
-          inquiry: _inquiry(),
-          repository: _Repo(uid: 'c2'),
+          inquiry: _operationalInquiry(),
+          repository: _Repo(role: AccessRole.portalStaff, uid: 's1'),
         ),
       );
-      expect(find.text('Escalate to administrator'), findsNothing);
+      expect(find.text('Forward to Administrator'), findsNothing);
     },
   );
 
@@ -366,7 +338,7 @@ void main() {
         ),
       );
       expect(find.textContaining('No eligible staff'), findsOneWidget);
-      expect(find.text('Escalate to administrator'), findsNothing);
+      expect(find.text('Forward to Administrator'), findsNothing);
       await tester.tap(find.text('Reassign'));
       await tester.pumpAndSettle();
       expect(find.text('Other Test'), findsOneWidget);
@@ -535,9 +507,13 @@ void main() {
 
       expect(find.text('Feedback'), findsOneWidget);
       expect(find.text('Student inquiry body'), findsOneWidget);
-      expect(find.text('Acknowledge receipt'), findsOneWidget);
+      expect(find.text('Confirm Receipt'), findsOneWidget);
       expect(find.byTooltip('Change inquiry status'), findsNothing);
-      expect(find.text('Escalate to administrator'), findsOneWidget);
+      expect(find.text('Routing'), findsOneWidget);
+      expect(
+        find.text('Mark this inquiry as resolved to forward it to the Administrator.'),
+        findsNothing,
+      );
 
       controller.add(const []);
       await tester.pumpAndSettle();
@@ -546,9 +522,10 @@ void main() {
       expect(find.text('Back to inquiries'), findsOneWidget);
       expect(find.text('Feedback'), findsNothing);
       expect(find.text('Student inquiry body'), findsNothing);
-      expect(find.text('Acknowledge receipt'), findsNothing);
+      expect(find.text('Confirm Receipt'), findsNothing);
       expect(find.byTooltip('Change inquiry status'), findsNothing);
-      expect(find.text('Escalate to administrator'), findsNothing);
+      expect(find.text('Routing'), findsNothing);
+      expect(find.text('Forward to Administrator'), findsNothing);
     },
   );
 
@@ -582,7 +559,7 @@ void main() {
       expect(find.text('Back to inquiries'), findsOneWidget);
       expect(find.text('Feedback'), findsNothing);
       expect(find.text('Message'), findsNothing);
-      expect(find.text('Acknowledge receipt'), findsNothing);
+      expect(find.text('Confirm Receipt'), findsNothing);
     },
   );
 
@@ -612,7 +589,7 @@ void main() {
       expect(find.text('Inquiry access restricted'), findsOneWidget);
       expect(find.text('Back to inquiries'), findsOneWidget);
       expect(find.text('Feedback'), findsNothing);
-      expect(find.text('Acknowledge receipt'), findsNothing);
+      expect(find.text('Confirm Receipt'), findsNothing);
     },
   );
 
@@ -647,7 +624,7 @@ void main() {
       );
       expect(resolvedButton, findsOneWidget);
       expect(tester.widget<OutlinedButton>(resolvedButton).onPressed, isNull);
-      expect(find.text('Acknowledge receipt'), findsNothing);
+      expect(find.text('Confirm Receipt'), findsNothing);
       expect(find.byTooltip('Change inquiry status'), findsNothing);
       expect(repo.statusUpdates, isEmpty);
     },
@@ -677,7 +654,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Feedback'), findsOneWidget);
-      await tester.tap(find.text('Acknowledge receipt'));
+      await tester.tap(find.text('Confirm Receipt'));
       await tester.pumpAndSettle();
 
       expect(repo.acknowledgedIds, ['inq-1']);
@@ -737,7 +714,7 @@ void main() {
       expect(find.textContaining('s@example.edu'), findsNothing);
       expect(find.textContaining('Sanitized operational view'), findsOneWidget);
 
-      await tester.tap(find.text('Acknowledge receipt'));
+      await tester.tap(find.text('Confirm Receipt'));
       await tester.pumpAndSettle();
       expect(repo.acknowledgedIds, ['inq-1']);
     },
@@ -769,7 +746,7 @@ void main() {
         find.textContaining('Confidential takeover justification'),
         findsNothing,
       );
-      expect(find.text('Escalate to administrator'), findsNothing);
+      expect(find.text('Forward to Administrator'), findsNothing);
       expect(find.text('Take over'), findsNothing);
     },
   );
@@ -823,6 +800,9 @@ void main() {
     'InquiryRoutingPanel does not display raw INTERNAL or internal error text on callable internal failure',
     (tester) async {
       final repo = _Repo(
+        superAdmin: true,
+        role: AccessRole.admin,
+        uid: 'admin',
         error: FirebaseFunctionsException(
           code: 'internal',
           message: 'Internal error',
@@ -830,11 +810,16 @@ void main() {
       );
       await _pump(
         tester,
-        InquiryRoutingPanel(inquiry: _inquiry(), repository: repo),
+        InquiryRoutingPanel(
+          inquiry: _inquiry(),
+          repository: repo,
+        ),
       );
-      await tester.tap(find.text('Escalate to administrator'));
+      await tester.tap(find.text('Take over'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
+      await tester.enterText(find.byType(TextField), 'Needs admin check');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Take over'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Internal'), findsNothing);
@@ -849,6 +834,9 @@ void main() {
     (tester) async {
       for (final code in const ['unavailable', 'failed-precondition']) {
         final repo = _Repo(
+          superAdmin: true,
+          role: AccessRole.admin,
+          uid: 'admin',
           error: FirebaseFunctionsException(
             code: code,
             message: 'Internal error',
@@ -856,11 +844,16 @@ void main() {
         );
         await _pump(
           tester,
-          InquiryRoutingPanel(inquiry: _inquiry(), repository: repo),
+          InquiryRoutingPanel(
+            inquiry: _inquiry(),
+            repository: repo,
+          ),
         );
-        await tester.tap(find.text('Escalate to administrator'));
+        await tester.tap(find.text('Take over'));
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
+        await tester.enterText(find.byType(TextField), 'Needs admin check');
+        await tester.pump();
+        await tester.tap(find.widgetWithText(FilledButton, 'Take over'));
         await tester.pumpAndSettle();
 
         expect(
@@ -868,272 +861,9 @@ void main() {
           findsNothing,
           reason: 'Leaked Internal for code=$code',
         );
-        await tester.tap(find.widgetWithText(TextButton, 'No'));
+        await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
         await tester.pumpAndSettle();
       }
-    },
-  );
-
-  testWidgets(
-    'counselor escalation guards against duplicate submissions while in flight',
-    (tester) async {
-      final completer = Completer<void>();
-      final repo = _Repo(escalateCompleter: completer);
-      var changedCount = 0;
-      await _pump(
-        tester,
-        InquiryRoutingPanel(
-          inquiry: _inquiry(),
-          repository: repo,
-          onChanged: () => changedCount++,
-        ),
-      );
-      await tester.tap(find.text('Escalate to administrator'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
-      await tester.pump();
-
-      expect(find.text('Escalating…'), findsOneWidget);
-      expect(
-        tester
-            .widget<FilledButton>(
-              find.widgetWithText(FilledButton, 'Escalating…'),
-            )
-            .onPressed,
-        isNull,
-      );
-      expect(
-        tester
-            .widget<TextButton>(find.widgetWithText(TextButton, 'No'))
-            .onPressed,
-        isNull,
-      );
-
-      // Repeated tap while in flight cannot trigger a second callable invocation.
-      await tester.tap(find.widgetWithText(FilledButton, 'Escalating…'));
-      await tester.pump();
-      expect(repo.escalations.length, 1);
-
-      completer.complete();
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(changedCount, 1);
-    },
-  );
-
-  testWidgets(
-    'counselor escalation shows stale revision conflict message and keeps dialog open',
-    (tester) async {
-      final repo = _Repo(
-        error: FirebaseFunctionsException(
-          code: 'failed-precondition',
-          message:
-              'This inquiry was updated by someone else. Reload and try again.',
-        ),
-      );
-      await _pump(
-        tester,
-        InquiryRoutingPanel(inquiry: _inquiry(), repository: repo),
-      );
-      await tester.tap(find.text('Escalate to administrator'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.textContaining('updated by someone else'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'counselor escalation cannot be dismissed via barrier tap or pop while busy',
-    (tester) async {
-      final completer = Completer<void>();
-      final repo = _Repo(escalateCompleter: completer);
-      var changedCount = 0;
-      await _pump(
-        tester,
-        InquiryRoutingPanel(
-          inquiry: _inquiry(),
-          repository: repo,
-          onChanged: () => changedCount++,
-        ),
-      );
-      await tester.tap(find.text('Escalate to administrator'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
-      await tester.pump();
-      expect(find.text('Escalating…'), findsOneWidget);
-
-      // Tapping outside the dialog barrier while busy does not dismiss it.
-      await tester.tapAt(const Offset(10, 10));
-      await tester.pump();
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('Escalating…'), findsOneWidget);
-      expect(changedCount, 0);
-
-      // Attempting route dismissal (PopScope canPop: !_busy) does not pop while busy.
-      final dialogContext = tester.element(find.byType(AlertDialog));
-      await Navigator.of(dialogContext).maybePop();
-      await tester.pump();
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('Escalating…'), findsOneWidget);
-      expect(changedCount, 0);
-
-      completer.complete();
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(changedCount, 1);
-    },
-  );
-
-  testWidgets(
-    'counselor escalation error allows retrying Yes and closes dialog on success',
-    (tester) async {
-      var attempt = 0;
-      final repo = _CallbackEscalateRepo(
-        onEscalate: () async {
-          attempt++;
-          if (attempt == 1) {
-            throw FirebaseFunctionsException(
-              code: 'unavailable',
-              message: 'Service temporarily unavailable. Please retry.',
-            );
-          }
-        },
-      );
-      var changedCount = 0;
-      await _pump(
-        tester,
-        InquiryRoutingPanel(
-          inquiry: _inquiry(),
-          repository: repo,
-          onChanged: () => changedCount++,
-        ),
-      );
-      await tester.tap(find.text('Escalate to administrator'));
-      await tester.pumpAndSettle();
-
-      // First attempt fails and keeps dialog open with error message.
-      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.textContaining('temporarily unavailable'), findsOneWidget);
-      expect(changedCount, 0);
-      expect(repo.escalations.length, 1);
-
-      // Retrying Yes succeeds, invokes onChanged, and closes the dialog.
-      expect(
-        tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Yes'))
-            .onPressed,
-        isNotNull,
-      );
-      await tester.tap(find.widgetWithText(FilledButton, 'Yes'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(repo.escalations.length, 2);
-      expect(changedCount, 1);
-    },
-  );
-
-  testWidgets(
-    'escalation status row formats counselor confirmation, legacy reason, empty reason, and operational view without trailing dash',
-    (tester) async {
-      await _pump(
-        tester,
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            InquiryRoutingPanel(
-              inquiry: _inquiry(
-                extra: {
-                  'escalation': {
-                    'status': 'requested',
-                    'type': 'counselor_confirmation',
-                    'reason': null,
-                  },
-                },
-              ),
-              repository: _Repo(),
-            ),
-            InquiryRoutingPanel(
-              inquiry: _inquiry(
-                extra: {
-                  'escalation': {
-                    'status': 'requested',
-                    'reason': 'Legacy escalation note',
-                  },
-                },
-              ),
-              repository: _Repo(),
-            ),
-            InquiryRoutingPanel(
-              inquiry: _inquiry(
-                extra: {
-                  'escalation': {'status': 'requested'},
-                },
-              ),
-              repository: _Repo(),
-            ),
-            InquiryRoutingPanel(
-              inquiry: _operationalInquiry(
-                extra: {'escalationStatus': 'requested'},
-              ),
-              repository: _Repo(role: AccessRole.portalStaff, uid: 's1'),
-            ),
-          ],
-        ),
-      );
-
-      expect(
-        find.textContaining(
-          'Requested — Counselor requested administrator review',
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.textContaining('Requested — Legacy escalation note'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('Requested — '), findsNWidgets(2));
-      expect(find.textContaining('Escalation: Requested'), findsNWidgets(4));
-    },
-  );
-
-  testWidgets(
-    'portalStaff escalation retains reason dialog and sends staffReasoned with reason',
-    (tester) async {
-      final repo = _Repo(role: AccessRole.portalStaff, uid: 's1');
-      await _pump(
-        tester,
-        InquiryRoutingPanel(inquiry: _operationalInquiry(), repository: repo),
-      );
-      await tester.tap(find.text('Escalate to administrator'));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(TextField), findsOneWidget);
-      expect(
-        tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Escalate'))
-            .onPressed,
-        isNull,
-      );
-      await tester.enterText(find.byType(TextField), 'SLA monitor review');
-      await tester.pump();
-      await tester.tap(find.widgetWithText(FilledButton, 'Escalate'));
-      await tester.pumpAndSettle();
-
-      expect(repo.escalations, [
-        {
-          'id': 'inq-1',
-          'escalationType': InquiryEscalationType.staffReasoned,
-          'reason': 'SLA monitor review',
-          'expectedRevision': 2,
-        },
-      ]);
     },
   );
 
@@ -1199,28 +929,6 @@ void main() {
       await tester.pumpAndSettle();
     },
   );
-}
-
-class _CallbackEscalateRepo extends _Repo {
-  _CallbackEscalateRepo({required this.onEscalate});
-
-  final Future<void> Function() onEscalate;
-
-  @override
-  Future<void> escalateInquiry(
-    String id, {
-    InquiryEscalationType? escalationType,
-    String? reason,
-    int? expectedRevision,
-  }) async {
-    escalations.add({
-      'id': id,
-      'escalationType': escalationType,
-      'reason': reason,
-      'expectedRevision': expectedRevision,
-    });
-    await onEscalate();
-  }
 }
 
 class _RetryRepo extends _Repo {

@@ -126,15 +126,10 @@ class _DashboardContent extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       const Text(
-        'Dashboard',
-        style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
-      ),
-      const SizedBox(height: 6),
-      const Text(
         'Monthly counseling and testing schedule overview.',
         style: TextStyle(color: AdminColors.muted),
       ),
-      const SizedBox(height: 24),
+      const SizedBox(height: 20),
       _Panel(
         title: 'Appointment calendar',
         action: TextButton(

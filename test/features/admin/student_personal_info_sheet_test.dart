@@ -152,14 +152,22 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('My Cases'), findsOneWidget);
+    expect(
+      find.text(
+        'Continue assigned counseling work with privacy-safe student identifiers.',
+      ),
+      findsOneWidget,
+    );
     expect(find.widgetWithText(ChoiceChip, 'Assigned Cases'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(ChoiceChip, 'Follow-ups'));
     await tester.pumpAndSettle();
 
     expect(selectedMode, CounselorWorkflowMode.followUps);
-    expect(find.text('My Cases'), findsOneWidget);
+    expect(
+      find.text('Review actual post-session follow-up offers and bookings.'),
+      findsOneWidget,
+    );
     expect(find.text('No follow-ups due'), findsOneWidget);
   });
 

@@ -3,6 +3,7 @@ import '../../../models/appointment_model.dart';
 import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
 import 'admin_status_presentation.dart';
+import 'inquiry_scope.dart';
 
 /// Manila local time offset (Asia/Manila is fixed UTC+8 with no DST).
 const Duration _manilaOffset = Duration(hours: 8);
@@ -60,6 +61,7 @@ class AdminDashboardAnalytics {
     required this.fullAssessments7d,
     required this.openInquiries,
     required this.overdueOpenInquiries24h,
+    this.processedInquiries = 0,
     required this.latestActivityDayBuckets,
     required this.appointmentStatusBreakdown,
     required this.todaySchedule,
@@ -75,6 +77,7 @@ class AdminDashboardAnalytics {
   final int fullAssessments7d;
   final int openInquiries;
   final int overdueOpenInquiries24h;
+  final int processedInquiries;
   final List<DashboardActivityDayBucket> latestActivityDayBuckets;
   final List<DashboardStatusBreakdownItem> appointmentStatusBreakdown;
   final List<AppointmentModel> todaySchedule;
@@ -273,9 +276,11 @@ class AdminDashboardAnalytics {
         )
         .length;
 
-    // Open inquiries: pending + in_progress (not resolved).
-    final openInquiryList = inquiries
-        .where((i) => i.status != InquiryStatus.resolved)
+    // Admin-visible inquiries: only counselor-processed, forwarded, or taken-over
+    // items are surfaced or counted on the Administrator dashboard.
+    final adminVisibleInquiries = inquiries.where(isAdminVisibleInquiry).toList();
+    final openInquiryList = adminVisibleInquiries
+        .where((i) => i.isEscalated || i.status != InquiryStatus.resolved)
         .toList();
     final overdueOpenInquiries24h = openInquiryList
         .where((i) => now.difference(i.createdAt).inHours >= 24)
@@ -292,6 +297,7 @@ class AdminDashboardAnalytics {
       fullAssessments7d: fullAssessments7d,
       openInquiries: openInquiryList.length,
       overdueOpenInquiries24h: overdueOpenInquiries24h,
+      processedInquiries: adminVisibleInquiries.length,
       latestActivityDayBuckets: latestActivityDayBuckets,
       appointmentStatusBreakdown: breakdown,
       todaySchedule: todaySchedule,

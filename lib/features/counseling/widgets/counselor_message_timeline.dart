@@ -127,27 +127,48 @@ class _CounselorMessageTimelineState extends State<CounselorMessageTimeline>
     }
   }
 
-  // Keep a visible message at its current screen coordinate when newer items
-  // arrive below it. This also handles variable heights and older history pages.
+  // Keep a visible message at its current viewport-local coordinate when newer
+  // items arrive below it, without querying ancestor render objects outside the
+  // viewport (such as predictive-back route transitions).
+  double? _dyInViewport(RenderBox box, RenderBox viewport) {
+    if (!viewport.attached || !viewport.hasSize || !box.attached || !box.hasSize) {
+      return null;
+    }
+    RenderObject? node = box;
+    while (node != null && node != viewport) {
+      if (node is RenderBox && !node.hasSize) return null;
+      node = node.parent;
+    }
+    if (node != viewport) return null;
+    return box.localToGlobal(Offset.zero, ancestor: viewport).dy;
+  }
+
   (GlobalKey, double)? _visibleAnchor() {
     final viewport = context.findRenderObject();
-    if (viewport is! RenderBox || !viewport.hasSize) return null;
-    final top = viewport.localToGlobal(Offset.zero).dy;
-    final bottom = top + viewport.size.height;
+    if (viewport is! RenderBox || !viewport.hasSize || !viewport.attached) {
+      return null;
+    }
+    final height = viewport.size.height;
     for (final key in _keys.values) {
       final box = key.currentContext?.findRenderObject();
-      if (box is! RenderBox || !box.hasSize || !box.attached) continue;
-      final y = box.localToGlobal(Offset.zero).dy;
-      if (y >= top && y < bottom) return (key, y);
+      if (box is! RenderBox) continue;
+      final y = _dyInViewport(box, viewport);
+      if (y != null && y >= 0 && y < height) return (key, y);
     }
     return null;
   }
 
   void _restoreAnchor((GlobalKey, double)? anchor) {
     if (!mounted || anchor == null || !_scroll.hasClients) return;
+    final viewport = context.findRenderObject();
+    if (viewport is! RenderBox || !viewport.hasSize || !viewport.attached) {
+      return;
+    }
     final box = anchor.$1.currentContext?.findRenderObject();
-    if (box is! RenderBox || !box.hasSize || !box.attached) return;
-    final delta = box.localToGlobal(Offset.zero).dy - anchor.$2;
+    if (box is! RenderBox) return;
+    final currentY = _dyInViewport(box, viewport);
+    if (currentY == null) return;
+    final delta = currentY - anchor.$2;
     final position = _scroll.position;
     if (delta.abs() > .5) {
       _scroll.jumpTo(
@@ -181,7 +202,6 @@ class _CounselorMessageTimelineState extends State<CounselorMessageTimeline>
         )
         .toList();
     final near = !_scroll.hasClients || _scroll.position.pixels <= _nearBottom;
-    final anchor = !near ? _visibleAnchor() : null;
     if (ownAttempt ||
         newAtEnd.any((m) => m.senderId == widget.uid) ||
         (newAtEnd.isNotEmpty && near)) {
@@ -192,6 +212,7 @@ class _CounselorMessageTimelineState extends State<CounselorMessageTimeline>
       });
     } else if (!near &&
         (additions.isNotEmpty || widget.pending?.id != oldWidget.pending?.id)) {
+      final anchor = _visibleAnchor();
       if (newAtEnd.isNotEmpty) {
         _newMessages = true;
         _deferred.addAll(newAtEnd.map((m) => m.id));
@@ -222,6 +243,7 @@ class _CounselorMessageTimelineState extends State<CounselorMessageTimeline>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _scroll.removeListener(_onScroll);
     _scroll.dispose();
     super.dispose();
   }

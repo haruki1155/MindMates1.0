@@ -275,19 +275,6 @@ class _BackupDataPageState extends State<BackupDataPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Back-up Data',
-                      style:
-                          theme.textTheme.headlineLarge ??
-                          const TextStyle(
-                            fontSize: 28,
-                            height: 1.15,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.5,
-                            color: AdminColors.ink,
-                          ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
                       'Create a full system backup covering all academic years '
                       'in secure server storage, or download approved '
                       'non-clinical administrative records across all academic '
@@ -299,7 +286,7 @@ class _BackupDataPageState extends State<BackupDataPage> {
                             height: 1.4,
                           ),
                     ),
-                    const SizedBox(height: AdminSpacing.lg - 4),
+                    const SizedBox(height: AdminSpacing.md),
                     const _CoverageCard(),
                     const SizedBox(height: AdminSpacing.md),
                     if (snapshot.hasError)

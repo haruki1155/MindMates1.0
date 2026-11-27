@@ -12,6 +12,7 @@ class PortalAppointmentMetrics {
     required this.today,
     required this.upcoming,
     required this.completed,
+    this.cancelled = 0,
   });
 
   final int total;
@@ -19,6 +20,7 @@ class PortalAppointmentMetrics {
   final int today;
   final int upcoming;
   final int completed;
+  final int cancelled;
 
   factory PortalAppointmentMetrics.fromAppointments(
     Iterable<AppointmentModel> appointments,
@@ -31,6 +33,7 @@ class PortalAppointmentMetrics {
       today: counts[AppointmentQueue.today] ?? 0,
       upcoming: counts[AppointmentQueue.upcoming] ?? 0,
       completed: counts[AppointmentQueue.completed] ?? 0,
+      cancelled: counts[AppointmentQueue.cancelled] ?? 0,
     );
   }
 
@@ -42,10 +45,13 @@ class PortalAppointmentMetrics {
     var today = 0;
     var upcoming = 0;
     var completed = 0;
+    var cancelled = 0;
     for (final appointment in appointments) {
       final status = appointment.status.trim().toLowerCase();
       if (status == 'completed') {
         completed++;
+      } else if (status == 'cancelled' || status == 'canceled') {
+        cancelled++;
       } else if (!appointment.isArchived &&
           status == 'confirmed' &&
           _sameDay(appointment.scheduledAt, now)) {
@@ -64,6 +70,7 @@ class PortalAppointmentMetrics {
       today: today,
       upcoming: upcoming,
       completed: completed,
+      cancelled: cancelled,
     );
   }
 

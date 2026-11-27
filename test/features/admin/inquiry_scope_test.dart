@@ -136,19 +136,31 @@ void main() {
     },
   );
 
-  test('only the super-administrator sees every inquiry', () {
-    final items = [
-      _inquiry('a', assignees: ['c2']),
-      _inquiry('legacy'),
-    ];
+  test('super-administrator sees only counselor-processed or forwarded inquiries', () {
+    final unprocessed = _inquiry('a', assignees: ['c2']);
+    final legacyUnprocessed = _inquiry('legacy');
+    final resolved = _inquiry('resolved', extra: {'status': 'resolved'});
+    final forwarded = _inquiry(
+      'forwarded',
+      extra: {
+        'escalation': {'status': 'requested', 'type': 'counselor_confirmation'},
+      },
+    );
+    final takenOver = _inquiry(
+      'taken',
+      extra: {
+        'takeover': {'by': 'admin', 'byName': 'Admin', 'reason': 'Urgent'},
+      },
+    );
+    final items = [unprocessed, legacyUnprocessed, resolved, forwarded, takenOver];
     expect(
       scopeInquiriesForRole(
         items,
         role: AccessRole.admin,
         uid: 'admin',
         isSuperAdmin: true,
-      ).length,
-      2,
+      ).map((i) => i.id),
+      ['resolved', 'forwarded', 'taken'],
     );
     expect(
       scopeInquiriesForRole(

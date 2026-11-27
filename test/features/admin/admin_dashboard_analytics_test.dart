@@ -142,20 +142,46 @@ void main() {
           status: InquiryStatus.pending,
           createdAt: now.subtract(const Duration(hours: 30)),
         ),
-        _inquiry(
-          'i2',
-          status: InquiryStatus.inProgress,
+        AdminInquiryModel(
+          id: 'i2',
+          userId: 'u-inq-i2',
+          name: 'Student i2',
+          email: 'i2@example.com',
+          category: 'Service Form',
+          subject: 'Subject i2',
+          message: 'Body',
+          status: InquiryStatus.pending,
           createdAt: now.subtract(const Duration(hours: 25)),
+          escalationStatus: 'requested',
         ),
-        _inquiry(
-          'i3',
+        AdminInquiryModel(
+          id: 'i3',
+          userId: 'u-inq-i3',
+          name: 'Student i3',
+          email: 'i3@example.com',
+          category: 'Service Form',
+          subject: 'Subject i3',
+          message: 'Body',
           status: InquiryStatus.inProgress,
           createdAt: now.subtract(const Duration(hours: 5)),
+          isTakenOverFlag: true,
         ),
         _inquiry(
           'i4',
           status: InquiryStatus.resolved,
           createdAt: now.subtract(const Duration(hours: 48)),
+        ),
+        AdminInquiryModel(
+          id: 'i5',
+          userId: 'u-inq-i5',
+          name: 'Student i5',
+          email: 'i5@example.com',
+          category: 'Service Form',
+          subject: 'Subject i5',
+          message: 'Body',
+          status: InquiryStatus.resolved,
+          createdAt: now.subtract(const Duration(hours: 10)),
+          escalationStatus: 'requested',
         ),
       ];
 
@@ -216,8 +242,9 @@ void main() {
         analytics.fullAssessments7d,
         1,
       ); // ONLY as1 (quick as2, old as3, hidden as4 excluded)
-      expect(analytics.openInquiries, 3); // i1, i2, i3
-      expect(analytics.overdueOpenInquiries24h, 2); // i1, i2
+      expect(analytics.openInquiries, 3); // i2 (forwarded), i3 (taken over), i5 (resolved & forwarded); i1 unprocessed excluded
+      expect(analytics.overdueOpenInquiries24h, 1); // i2
+      expect(analytics.processedInquiries, 4); // i2, i3, i4, i5
 
       final keys = analytics.appointmentStatusBreakdown
           .map((e) => e.key)

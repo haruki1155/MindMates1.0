@@ -367,11 +367,19 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(tester.takeException(), isNull);
-          expect(find.text('Activity Logs'), findsOneWidget);
+          expect(
+            find.text(
+              'Read-only audit trail of Administrator, Counselor, and PAACC Staff actions.',
+            ),
+            findsOneWidget,
+          );
           expect(find.text('Timezone: Asia/Manila (UTC+8)'), findsOneWidget);
           // First page of 2 events loaded: ev-admin-1 and ev-counselor-1.
           expect(find.text('Staff role changed'), findsOneWidget);
-          expect(find.text('Inquiry escalated to counselor'), findsOneWidget);
+          expect(
+            find.text('Inquiry forwarded to administrator'),
+            findsOneWidget,
+          );
           expect(
             find.text('Nov 21, 2026 · 2:00 PM (Asia/Manila, UTC+8)'),
             findsOneWidget,

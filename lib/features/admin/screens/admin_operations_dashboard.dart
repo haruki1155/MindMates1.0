@@ -220,7 +220,7 @@ class AdminOperationsDashboardPage extends StatelessWidget {
                               label: 'Open inquiries',
                               value: '${analytics.openInquiries}',
                               note:
-                                  '${analytics.overdueOpenInquiries24h} open ≥ 24h (pending or in progress)',
+                                  '${analytics.overdueOpenInquiries24h} open ≥ 24h · ${analytics.processedInquiries} counselor-processed',
                               icon: Icons.chat_bubble_outline,
                               tone: analytics.overdueOpenInquiries24h > 0
                                   ? AdminSemanticTone.amber
@@ -375,10 +375,8 @@ class _DashboardFrame extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: Theme.of(context).textTheme.headlineLarge),
-              const SizedBox(height: 6),
               Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
-              const SizedBox(height: AdminSpacing.lg),
+              const SizedBox(height: AdminSpacing.md),
               child,
             ],
           ),

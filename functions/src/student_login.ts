@@ -6,6 +6,7 @@ import {error as logError} from "firebase-functions/logger";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 
 import {canonicalLoginId, smtpAppPassword} from "./account_recovery";
+import {requireSuperAdmin, requireUid} from "./access";
 import {AUDIT_CATEGORIES, writeAudit} from "./audit";
 import {
   RecoveryDeps, assertDevEndpointAllowed, callerIp, consumeWindow, currentProjectId, defaultRecoveryDeps,
@@ -313,3 +314,55 @@ export const requestStudentLoginDev = onCall(
     return requestLogin(request);
   });
 export const completeStudentPasswordChange = onCall((request) => completePasswordChange(request));
+
+function isoOrNull(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return new Date(value).toISOString();
+  }
+  if (value && typeof (value as {toDate?: unknown}).toDate === "function") {
+    return ((value as {toDate: () => Date}).toDate()).toISOString();
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+  return null;
+}
+
+/**
+ * View-only activity log of student login credential requests (`student_login_issuance`)
+ * enriched with registrar roster identity. Super-administrator only; never exposes password hashes/salts.
+ */
+export const listStudentCredentialRequests = onCall(async (request) => {
+  const actorId = requireUid(request);
+  await requireSuperAdmin(actorId);
+  const snap = await db().collection(ISSUANCE).orderBy("lastSentAtMs", "desc").limit(200).get();
+  if (snap.empty) return {requests: []};
+  const rosterRefs = snap.docs.map((doc) => db().collection("student_roster").doc(doc.id));
+  const rosterSnaps = await db().getAll(...rosterRefs);
+  const rosterById = new Map(rosterSnaps.filter((s) => s.exists).map((s) => [s.id, s.data() ?? {}]));
+  const requests = snap.docs.map((doc) => {
+    const data = doc.data();
+    const roster = rosterById.get(doc.id);
+    const surname = String(roster?.surname ?? "").trim();
+    const firstName = String(roster?.firstName ?? "").trim();
+    const middleName = String(roster?.middleName ?? "").trim();
+    const given = [firstName, middleName].filter(Boolean).join(" ");
+    const formattedName = surname && given ? `${surname}, ${given}` : String(roster?.name ?? "").trim();
+    const studentNo = String(roster?.studentNo ?? doc.id);
+    return {
+      studentKey: doc.id,
+      studentNo,
+      name: formattedName || studentNo,
+      college: String(roster?.college ?? ""),
+      course: String(roster?.course ?? ""),
+      yearLevel: String(roster?.yearLevel ?? ""),
+      email: String(roster?.contactEmail ?? ""),
+      state: String(data.state ?? "issued"),
+      issuedCount: Number(data.issuedInWindow ?? 1),
+      requestedAt: isoOrNull(data.lastSentAtMs) ?? isoOrNull(data.createdAt),
+      completedAt: isoOrNull(data.completedAt),
+      expiresAt: isoOrNull(data.expiresAtMs),
+    };
+  });
+  return {requests};
+});

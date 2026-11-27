@@ -25,7 +25,7 @@ void main() {
     archivedAt: archived ? now : null,
   );
 
-  test('classifies only exact completed status as Completed', () {
+  test('classifies only exact completed status as Completed and cancelled as Cancelled', () {
     final cases = <String, AppointmentQueue>{
       'requested': AppointmentQueue.needsAction,
       'pending': AppointmentQueue.needsAction,
@@ -33,7 +33,7 @@ void main() {
       'completed': AppointmentQueue.completed,
       'not_attended': AppointmentQueue.needsAction,
       'no_show': AppointmentQueue.needsAction,
-      'cancelled': AppointmentQueue.needsAction,
+      'cancelled': AppointmentQueue.cancelled,
       'declined': AppointmentQueue.needsAction,
       'expired': AppointmentQueue.needsAction,
       'unrecognized': AppointmentQueue.needsAction,
@@ -126,7 +126,7 @@ void main() {
   });
 
   test(
-    'legacy terminal statuses retain their stored values but are not completed',
+    'legacy terminal statuses retain their stored values and route cancelled to Cancelled',
     () {
       for (final status in [
         'completed',
@@ -141,12 +141,42 @@ void main() {
           classifyAppointment(record, now),
           status == 'completed'
               ? AppointmentQueue.completed
+              : status == 'cancelled'
+              ? AppointmentQueue.cancelled
               : AppointmentQueue.needsAction,
         );
         expect(record.status, status);
       }
     },
   );
+
+  test('archived non-completed/non-cancelled records do not create ghost counts', () {
+    final records = [
+      appointment('requested', now),
+      appointment('requested', now, archived: true),
+      appointment('confirmed', now, archived: true),
+      appointment('confirmed', now.add(const Duration(days: 2)), archived: true),
+      appointment('cancelled', now),
+      appointment('cancelled', now, archived: true),
+    ];
+    final counts = appointmentQueueCounts(records, now);
+    expect(counts[AppointmentQueue.needsAction], 1);
+    expect(counts[AppointmentQueue.today], 0);
+    expect(counts[AppointmentQueue.upcoming], 0);
+    expect(counts[AppointmentQueue.cancelled], 2);
+    for (final q in AppointmentQueue.values) {
+      expect(
+        counts[q],
+        appointmentRecordsForView(
+          records,
+          now,
+          showHistory: false,
+          queue: q,
+        ).length,
+        reason: 'count mismatch for $q',
+      );
+    }
+  });
 
   test('History contains archived records only', () {
     final active = appointment('completed', now);

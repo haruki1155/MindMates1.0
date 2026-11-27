@@ -100,7 +100,7 @@ void main() {
     expect(find.text('No cases recorded'), findsOneWidget);
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
-    expect(find.text('My Cases'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'Assigned Cases'), findsOneWidget);
   });
 
   testWidgets('My Cases cards stay usable on a narrow screen', (tester) async {

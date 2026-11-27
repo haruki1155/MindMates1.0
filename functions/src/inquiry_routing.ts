@@ -433,3 +433,5 @@ export const assigneeNotificationId = (inquiryId: string, uid: string): string =
 export const triageNotificationId = (inquiryId: string): string => `portal_inquiry_triage_${inquiryId}`;
 export const escalationNotificationId = (inquiryId: string, revision: number): string =>
   `portal_inquiry_escalation_${inquiryId}_${revision}`;
+export const resolvedAdminNotificationId = (inquiryId: string, revision: number): string =>
+  `inquiry_resolved_admin_${inquiryId}_${revision}`;

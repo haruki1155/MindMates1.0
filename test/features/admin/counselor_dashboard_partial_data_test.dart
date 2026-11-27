@@ -51,7 +51,6 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Counselor Dashboard'), findsOneWidget);
     expect(find.text('Assigned caseload unavailable'), findsOneWidget);
     expect(find.text('PACC-wide clinical operations and your assigned caseload.'),
         findsOneWidget);

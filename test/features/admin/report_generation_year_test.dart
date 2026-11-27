@@ -254,7 +254,7 @@ void main() {
     await tester.pumpAndSettle();
 
     for (final label in [
-      'Report Generation',
+      'Privacy-preserving insights for app users and counseling appointments.',
       'REPORT CONTROLS',
       'Academic year',
       'Reporting period',

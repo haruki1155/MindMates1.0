@@ -113,7 +113,12 @@ void main() {
       });
       await tester.pumpAndSettle();
 
-      expect(find.text('My Assigned Colleges'), findsOneWidget);
+      expect(
+        find.text(
+          'Read-only overview of the colleges assigned to your counselor caseload.',
+        ),
+        findsOneWidget,
+      );
       expect(find.text('College of Arts and Sciences'), findsOneWidget);
       expect(
         find.text('College of Information Technology Education'),

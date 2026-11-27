@@ -16,19 +16,17 @@ class InquiryRoutingBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, color) = inquiry.isEscalated
-        ? ('Escalated', const Color(0xFFFDE2E1))
-        : switch (inquiry.routingStatus) {
-            InquiryRoutingStatus.routed => ('Routed', const Color(0xFFE3F1E6)),
-            InquiryRoutingStatus.needsTriage => (
-              'Needs triage',
-              const Color(0xFFFFF1D6),
-            ),
-            InquiryRoutingStatus.unrouted => (
-              'Not yet routed',
-              AdminColors.surfaceMuted,
-            ),
-          };
+    final (label, color) = switch (inquiry.routingStatus) {
+      InquiryRoutingStatus.routed => ('Routed', const Color(0xFFE3F1E6)),
+      InquiryRoutingStatus.needsTriage => (
+        'Needs triage',
+        const Color(0xFFFFF1D6),
+      ),
+      InquiryRoutingStatus.unrouted => (
+        'Not yet routed',
+        AdminColors.surfaceMuted,
+      ),
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -69,20 +67,6 @@ class InquiryRoutingPanel extends StatelessWidget {
   final AdminPortalRepository repository;
   final VoidCallback? onChanged;
 
-  bool get _isAssignee {
-    final role = repository.currentAccessRole;
-    final uid = repository.currentUserId;
-    if (repository.isSuperAdmin || uid == null) return false;
-    if (role == AccessRole.counselor) {
-      return !inquiry.isOperationalProjection &&
-          inquiry.assigneeIds.contains(uid);
-    }
-    if (role == AccessRole.portalStaff) {
-      return inquiry.monitoringStaffIds.contains(uid);
-    }
-    return false;
-  }
-
   bool get _isOperationalView =>
       inquiry.isOperationalProjection ||
       (repository.currentAccessRole == AccessRole.portalStaff &&
@@ -104,11 +88,6 @@ class InquiryRoutingPanel extends StatelessWidget {
         'Needs triage — ${routingReasonLabel(inquiry.routingReason)}',
       InquiryRoutingStatus.unrouted => 'Not yet routed',
     };
-    final canEscalate =
-        _isAssignee &&
-        !inquiry.isEscalated &&
-        !inquiry.isTakenOver &&
-        inquiry.status != InquiryStatus.resolved;
     final canTakeOver =
         repository.isSuperAdmin &&
         !inquiry.isTakenOver &&
@@ -136,17 +115,6 @@ class InquiryRoutingPanel extends StatelessWidget {
           ),
         if (inquiry.ownerId != null)
           _row('Responsible', _name(inquiry.ownerId!)),
-        if (inquiry.isEscalated)
-          _row(
-            'Escalation',
-            _isOperationalView
-                ? 'Requested'
-                : (inquiry.escalationReason ?? '').trim().isNotEmpty
-                ? 'Requested — ${inquiry.escalationReason!.trim()}'
-                : inquiry.escalationType != null
-                ? 'Requested — ${inquiry.escalationType!.label}'
-                : 'Requested',
-          ),
         if (inquiry.isTakenOver)
           _row(
             'Taken over',
@@ -159,12 +127,6 @@ class InquiryRoutingPanel extends StatelessWidget {
           spacing: 10,
           runSpacing: 10,
           children: [
-            if (canEscalate)
-              OutlinedButton.icon(
-                onPressed: () => _escalate(context),
-                icon: const Icon(Icons.flag_outlined),
-                label: const Text('Escalate to administrator'),
-              ),
             if (canTakeOver)
               OutlinedButton.icon(
                 onPressed: () => _takeOver(context),
@@ -198,35 +160,6 @@ class InquiryRoutingPanel extends StatelessWidget {
     ),
   );
 
-  Future<void> _escalate(BuildContext context) async {
-    final done = _isOperationalView
-        ? await showDialog<bool>(
-            context: context,
-            builder: (_) => _ReasonDialog(
-              title: 'Escalate to administrator',
-              actionLabel: 'Escalate',
-              onSubmit: (reason) => repository.escalateInquiry(
-                inquiry.id,
-                escalationType: InquiryEscalationType.staffReasoned,
-                reason: reason,
-                expectedRevision: inquiry.routingRevision,
-              ),
-            ),
-          )
-        : await showDialog<bool>(
-            context: context,
-            barrierDismissible: false,
-            builder: (_) => _EscalateConfirmDialog(
-              onConfirm: () => repository.escalateInquiry(
-                inquiry.id,
-                escalationType: InquiryEscalationType.counselorConfirmation,
-                expectedRevision: inquiry.routingRevision,
-              ),
-            ),
-          );
-    if (done == true) onChanged?.call();
-  }
-
   Future<void> _takeOver(BuildContext context) async {
     final done = await showDialog<bool>(
       context: context,
@@ -250,62 +183,6 @@ class InquiryRoutingPanel extends StatelessWidget {
     );
     if (done == true) onChanged?.call();
   }
-}
-
-class _EscalateConfirmDialog extends StatefulWidget {
-  const _EscalateConfirmDialog({required this.onConfirm});
-
-  final Future<void> Function() onConfirm;
-
-  @override
-  State<_EscalateConfirmDialog> createState() => _EscalateConfirmDialogState();
-}
-
-class _EscalateConfirmDialogState extends State<_EscalateConfirmDialog> {
-  bool _busy = false;
-  String? _error;
-
-  Future<void> _submit() async {
-    if (_busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await widget.onConfirm();
-      if (mounted) Navigator.of(context).pop(true);
-    } catch (error) {
-      if (mounted) {
-        setState(() => _error = _errorText(error, 'The request failed'));
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !_busy,
-    child: AlertDialog(
-      title: const Text('Escalate this inquiry to the Administrator?'),
-      content: _error == null
-          ? null
-          : Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-      actions: [
-        TextButton(
-          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
-          child: const Text('No'),
-        ),
-        FilledButton(
-          onPressed: _busy ? null : _submit,
-          child: Text(_busy ? 'Escalating…' : 'Yes'),
-        ),
-      ],
-    ),
-  );
 }
 
 class _ReasonDialog extends StatefulWidget {

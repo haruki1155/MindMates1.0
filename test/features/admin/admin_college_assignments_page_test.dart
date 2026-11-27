@@ -153,7 +153,12 @@ void main() {
 
       await _pumpAdminPage(tester, repo);
 
-      expect(find.text('College Assignments'), findsOneWidget);
+      expect(
+        find.text(
+          'Manage counselor ownership across colleges. Changes use the authorized assignment and transfer workflow.',
+        ),
+        findsOneWidget,
+      );
       expect(find.text('College of Information Technology'), findsOneWidget);
       expect(find.textContaining('Elena Reyes'), findsWidgets);
 

@@ -129,18 +129,10 @@ class _CounselorAssignedCollegesPageState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'My Assigned Colleges',
-                        style: TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
                         'Read-only overview of the colleges assigned to your counselor caseload.',
                         style: TextStyle(color: AdminColors.muted),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 16),
                       if (isRestricted)
                         _NoticeCard(
                           title: 'Account access restricted',
