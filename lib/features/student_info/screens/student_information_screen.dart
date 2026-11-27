@@ -6,9 +6,9 @@ import '../../../core/constants/app_colors.dart';
 import '../../../models/student_personal_info.dart';
 import '../../../providers/assessment_provider.dart';
 import '../../../providers/auth_provider.dart';
-import '../../../routes/route_names.dart';
 import '../../../providers/user_provider.dart';
 import '../../../repositories/student_roster_repository.dart';
+import '../../../routes/route_names.dart';
 import '../../authentication/auth_flow_routes.dart';
 import '../student_info_validator.dart';
 import '../widgets/correction_request_sheet.dart';
@@ -346,16 +346,37 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "We couldn't load your student information.",
-                textAlign: TextAlign.center,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFDDE7E3)),
               ),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: _load, child: const Text('Try again')),
-            ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.cloud_off_outlined,
+                    size: 36,
+                    color: AppColors.textMuted,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    "We couldn't load your student information.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 14),
+                  FilledButton(
+                    onPressed: _load,
+                    child: const Text('Try again'),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       );
@@ -363,54 +384,179 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
     final canSave = !_saving && (!_needsConsent || _consent);
     return SingleChildScrollView(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
+          constraints: const BoxConstraints(maxWidth: 560),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_isOnboarding)
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    'Please complete your student information before you continue.',
-                    style: TextStyle(color: AppColors.textSecondary),
-                  ),
-                ),
-              if (_needsConsent)
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  value: _consent,
-                  onChanged: _saving
-                      ? null
-                      : (v) => setState(() => _consent = v ?? false),
-                  title: const Text(_consentCopy),
-                ),
+              if (_isOnboarding) _onboardingBanner(),
+              if (_needsConsent) _consentCard(),
               _officialSection(information),
               if (information.corrections.isNotEmpty)
                 _correctionsSection(information.corrections),
               _personalSection(),
-              if (_saveError != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    _saveError!,
-                    key: const Key('save-error'),
-                    style: const TextStyle(color: AppColors.error),
-                  ),
-                ),
-              const SizedBox(height: 8),
+              if (_saveError != null) _saveErrorBanner(_saveError!),
+              const SizedBox(height: 4),
               FilledButton(
                 onPressed: canSave ? _save : null,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  backgroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 child: _saving
                     ? const SizedBox(
                         height: 18,
                         width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
                       )
                     : const Text('Save'),
+              ),
+              if (_needsConsent && !_consent)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    'Agree to the Data Privacy Consent above to enable Save.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _onboardingBanner() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.assignment_ind_outlined,
+            color: AppColors.primary,
+            size: 22,
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Complete your student profile',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Review your official record and fill in the required details below.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.35,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _consentCard() {
+    final borderColor = _consent ? AppColors.primary : AppColors.secondary;
+    final tint = _consent
+        ? AppColors.primary.withValues(alpha: 0.06)
+        : AppColors.secondary.withValues(alpha: 0.10);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Material(
+        color: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: borderColor, width: 1.5),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: tint,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.verified_user_outlined,
+                      size: 18,
+                      color: _consent
+                          ? AppColors.primary
+                          : const Color(0xFF9A6B00),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Data Privacy Consent',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  _BadgeChip(
+                    label: 'Required',
+                    color: _consent
+                        ? AppColors.primary
+                        : const Color(0xFF9A6B00),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: AppColors.primary,
+                value: _consent,
+                onChanged: _saving
+                    ? null
+                    : (v) => setState(() => _consent = v ?? false),
+                title: const Text(
+                  _consentCopy,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    height: 1.4,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
               ),
             ],
           ),
@@ -419,31 +565,70 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
     );
   }
 
-  Widget _card(String title, List<Widget> children, {String? subtitle}) {
+  Widget _card(
+    String title,
+    List<Widget> children, {
+    String? subtitle,
+    IconData? icon,
+    Widget? trailing,
+  }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: const Color(0xFFDDE7E3)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.textPrimary.withValues(alpha: 0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-              color: AppColors.textPrimary,
-            ),
+          Row(
+            children: [
+              if (icon != null) ...[
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, size: 18, color: AppColors.primary),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+              if (trailing != null) ...[const SizedBox(width: 8), trailing],
+            ],
           ),
           if (subtitle != null) ...[
-            const SizedBox(height: 4),
-            Text(subtitle, style: const TextStyle(color: AppColors.textMuted)),
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              style: const TextStyle(
+                fontSize: 13,
+                height: 1.35,
+                color: AppColors.textMuted,
+              ),
+            ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           ...children,
         ],
       ),
@@ -475,47 +660,91 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
     return _card(
       'Official record',
       [
-        for (final (key, label, value, correctable) in rows)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-                      Text(
-                        value.isEmpty ? '-' : value,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
-                ),
-                if (correctable != null && !pending.contains(correctable))
-                  TextButton(
-                    key: Key('correct-$key'),
-                    onPressed: () => _requestCorrection(
-                      correctable,
-                      label,
-                      _rawOfficial(o, correctable),
-                      currentCollege: o.college,
-                    ),
-                    child: const Text('Request correction'),
-                  ),
-              ],
-            ),
+        for (var i = 0; i < rows.length; i++) ...[
+          _officialRow(
+            fieldKey: rows[i].$1,
+            label: rows[i].$2,
+            value: rows[i].$3,
+            correctableField: rows[i].$4,
+            hasPending: rows[i].$4 != null && pending.contains(rows[i].$4),
+            official: o,
           ),
+          if (i < rows.length - 1)
+            const Divider(height: 16, color: Color(0xFFEAF0EE)),
+        ],
       ],
+      icon: Icons.school_outlined,
       subtitle:
-          'These details come from the PACC records and cannot be edited here.',
+          'Synced from PACC records. Request a correction if anything is inaccurate.',
+    );
+  }
+
+  Widget _officialRow({
+    required String fieldKey,
+    required String label,
+    required String value,
+    required String? correctableField,
+    required bool hasPending,
+    required StudentOfficialInfo official,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textMuted,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value.isEmpty ? '-' : value,
+                style: const TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (correctableField != null && !hasPending) ...[
+          const SizedBox(width: 8),
+          TextButton(
+            key: Key('correct-$fieldKey'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              backgroundColor: AppColors.primary.withValues(alpha: 0.08),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              textStyle: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            onPressed: () => _requestCorrection(
+              correctableField,
+              label,
+              _rawOfficial(official, correctableField),
+              currentCollege: official.college,
+            ),
+            child: const Text('Request correction'),
+          ),
+        ] else if (correctableField == null) ...[
+          const SizedBox(width: 8),
+          const _BadgeChip(label: 'Read-only', color: AppColors.textMuted),
+        ],
+      ],
     );
   }
 
@@ -543,9 +772,15 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
     }
 
     return _card('Correction requests', [
-      for (final c in corrections)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
+      for (var i = 0; i < corrections.length; i++)
+        Container(
+          margin: EdgeInsets.only(bottom: i < corrections.length - 1 ? 10 : 0),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFDDE7E3)),
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -554,77 +789,218 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      labelOf(c.field),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    Text('To: ${c.requestedValue}'),
-                    if (c.status == 'rejected' && c.reviewReason.isNotEmpty)
-                      Text(
-                        c.reviewReason,
-                        style: const TextStyle(color: AppColors.textMuted),
+                      labelOf(corrections[i].field),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary,
                       ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'To: ${corrections[i].requestedValue}',
+                      style: const TextStyle(color: AppColors.textSecondary),
+                    ),
+                    if (corrections[i].status == 'rejected' &&
+                        corrections[i].reviewReason.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        corrections[i].reviewReason,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          color: AppColors.error,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              _StatusChip(status: c.status),
+              const SizedBox(width: 8),
+              _StatusChip(status: corrections[i].status),
             ],
           ),
         ),
-    ]);
+    ], icon: Icons.edit_note_outlined);
   }
 
   Widget _personalSection() {
-    return _card('Personal information', [
-      _dropdown(
-        'sex',
-        'Sex',
-        StudentInfoValidator.sexOptions,
-        _sex,
-        (v) => _sex = v,
-      ),
-      _dropdown(
-        'civilStatus',
-        'Civil status',
-        StudentInfoValidator.civilStatuses,
-        _civilStatus,
-        (v) => _civilStatus = v,
-      ),
-      if (_civilStatus == 'Married') _field('spouse', 'Spouse'),
-      _field('nationality', 'Nationality'),
-      _field('placeOfBirth', 'Place of birth'),
-      _heading('City address (optional)'),
-      for (final (part, label) in _addressParts)
-        _field('cityAddress.$part', label),
-      _heading('Home address'),
-      for (final (part, label) in _addressParts)
-        _field('homeAddress.$part', label),
-      _heading('Family'),
-      _field('father', "Father's name (optional)"),
-      _field('fatherOccupation', "Father's occupation (optional)"),
-      _field('mother', "Mother's name (optional)"),
-      _field('motherOccupation', "Mother's occupation (optional)"),
-      _heading('Guardian'),
-      _field('guardian', 'Guardian'),
-      _field('guardianRelationship', 'Relationship to guardian'),
-      _field('guardianAddress', 'Guardian address'),
-      _heading('Contact'),
-      _field('telephone', 'Telephone (optional)', TextInputType.phone),
-      _field('cellphone', 'Cellphone', TextInputType.phone),
-    ]);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _card(
+          'Basic details',
+          [
+            _pairedFields(
+              _dropdown(
+                'sex',
+                'Sex',
+                StudentInfoValidator.sexOptions,
+                _sex,
+                (v) => _sex = v,
+              ),
+              _dropdown(
+                'civilStatus',
+                'Civil status',
+                StudentInfoValidator.civilStatuses,
+                _civilStatus,
+                (v) => _civilStatus = v,
+              ),
+            ),
+            if (_civilStatus == 'Married') _field('spouse', 'Spouse'),
+            _pairedFields(
+              _field('nationality', 'Nationality'),
+              _field('placeOfBirth', 'Place of birth'),
+            ),
+          ],
+          icon: Icons.person_outline_rounded,
+          trailing: const _BadgeChip(
+            label: 'Required',
+            color: AppColors.primary,
+          ),
+        ),
+        _card(
+          'Home address',
+          [
+            _pairedFields(
+              _field('homeAddress.number', 'Number'),
+              _field('homeAddress.street', 'Street'),
+            ),
+            _pairedFields(
+              _field('homeAddress.barangay', 'Barangay'),
+              _field('homeAddress.cityTown', 'City / Town'),
+            ),
+            _pairedFields(
+              _field('homeAddress.province', 'Province'),
+              _field('homeAddress.zipCode', 'Zip code'),
+            ),
+          ],
+          icon: Icons.home_outlined,
+          trailing: const _BadgeChip(
+            label: 'Required',
+            color: AppColors.primary,
+          ),
+        ),
+        _card(
+          'City address (optional)',
+          [
+            _pairedFields(
+              _field('cityAddress.number', 'Number'),
+              _field('cityAddress.street', 'Street'),
+            ),
+            _pairedFields(
+              _field('cityAddress.barangay', 'Barangay'),
+              _field('cityAddress.cityTown', 'City / Town'),
+            ),
+            _pairedFields(
+              _field('cityAddress.province', 'Province'),
+              _field('cityAddress.zipCode', 'Zip code'),
+            ),
+          ],
+          icon: Icons.location_city_outlined,
+          subtitle:
+              'Only fill this if you stay at a different address during school.',
+          trailing: const _BadgeChip(
+            label: 'Optional',
+            color: AppColors.textMuted,
+          ),
+        ),
+        _card('Guardian & family', [
+          _subLabel('Guardian (Required)'),
+          _field('guardian', 'Guardian'),
+          _field('guardianRelationship', 'Relationship to guardian'),
+          _field('guardianAddress', 'Guardian address'),
+          const Divider(height: 20, color: Color(0xFFEAF0EE)),
+          _subLabel('Parents (Optional)'),
+          _field('father', "Father's name (optional)"),
+          _field('fatherOccupation', "Father's occupation (optional)"),
+          _field('mother', "Mother's name (optional)"),
+          _field('motherOccupation', "Mother's occupation (optional)"),
+        ], icon: Icons.family_restroom_outlined),
+        _card('Contact information', [
+          _field(
+            'cellphone',
+            'Cellphone',
+            keyboard: TextInputType.phone,
+            prefixIcon: Icons.smartphone_outlined,
+          ),
+          _field(
+            'telephone',
+            'Telephone (optional)',
+            keyboard: TextInputType.phone,
+            prefixIcon: Icons.call_outlined,
+          ),
+        ], icon: Icons.phone_outlined),
+      ],
+    );
   }
 
-  Widget _heading(String text) => Padding(
-    padding: const EdgeInsets.only(top: 6, bottom: 8),
+  Widget _pairedFields(Widget first, Widget second) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 340) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [first, second],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: first),
+            const SizedBox(width: 12),
+            Expanded(child: second),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _subLabel(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
     child: Text(
       text,
       style: const TextStyle(
+        fontSize: 12.5,
         fontWeight: FontWeight.w800,
+        letterSpacing: 0.2,
         color: AppColors.textSecondary,
       ),
     ),
   );
 
-  Widget _field(String path, String label, [TextInputType? keyboard]) {
+  InputDecoration _inputDecoration(
+    String label, {
+    String? errorText,
+    IconData? prefixIcon,
+  }) {
+    return InputDecoration(
+      labelText: label,
+      errorText: errorText,
+      errorMaxLines: 3,
+      prefixIcon: prefixIcon == null ? null : Icon(prefixIcon, size: 20),
+      filled: true,
+      fillColor: const Color(0xFFF9FBFA),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFD0DDD8)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFFD0DDD8)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
+      ),
+    );
+  }
+
+  Widget _field(
+    String path,
+    String label, {
+    TextInputType? keyboard,
+    IconData? prefixIcon,
+  }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextFormField(
@@ -632,11 +1008,10 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
         controller: _controller(path),
         keyboardType: keyboard,
         enabled: !_saving,
-        decoration: InputDecoration(
-          labelText: label,
+        decoration: _inputDecoration(
+          label,
           errorText: _errors[path],
-          errorMaxLines: 3,
-          border: const OutlineInputBorder(),
+          prefixIcon: prefixIcon,
         ),
         onChanged: (_) {
           if (_errors.containsKey(path)) {
@@ -659,13 +1034,14 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
       child: DropdownButtonFormField<String>(
         key: Key('field-$path'),
         initialValue: options.contains(current) ? current : null,
-        decoration: InputDecoration(
-          labelText: label,
-          errorText: _errors[path],
-          border: const OutlineInputBorder(),
-        ),
+        isExpanded: true,
+        decoration: _inputDecoration(label, errorText: _errors[path]),
         items: [
-          for (final o in options) DropdownMenuItem(value: o, child: Text(o)),
+          for (final o in options)
+            DropdownMenuItem(
+              value: o,
+              child: Text(o, overflow: TextOverflow.ellipsis),
+            ),
         ],
         onChanged: _saving
             ? null
@@ -673,6 +1049,65 @@ class _StudentInformationScreenState extends State<StudentInformationScreen> {
                 if (v != null) assign(v);
                 _errors = {..._errors}..remove(path);
               }),
+      ),
+    );
+  }
+
+  Widget _saveErrorBanner(String message) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.error),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.error_outline_rounded,
+            color: AppColors.error,
+            size: 18,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              key: const Key('save-error'),
+              style: const TextStyle(
+                color: AppColors.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BadgeChip extends StatelessWidget {
+  const _BadgeChip({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w800,
+          fontSize: 11.5,
+        ),
       ),
     );
   }

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import {test} from "node:test";
 
 import {
-  MAX_ISSUES_PER_DAY, REISSUE_COOLDOWN_MS, TEMP_PASSWORD_TTL_MS, generateTemporaryPassword, hashPassword, mayReissue,
-  passwordMatches, validatePermanentPassword,
+  MAX_ISSUES_PER_DAY, REISSUE_COOLDOWN_MS, TEMP_PASSWORD_TTL_MS, generateTemporaryPassword, hashPassword,
+  isAlreadyActivatedRosterLogin, mayReissue, passwordMatches, validatePermanentPassword,
 } from "./student_login_domain";
 
 const ALPHABET = /^[ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789]{12}$/;
@@ -46,4 +46,39 @@ test("reissue policy: expiry, cooldown and a daily cap", () => {
   assert.ok(!mayReissue(base, now + 30 * MIN));
   assert.ok(mayReissue({...base, issuedInWindow: 2}, now + REISSUE_COOLDOWN_MS + MIN));
   assert.ok(!mayReissue({...base, issuedInWindow: MAX_ISSUES_PER_DAY}, now + REISSUE_COOLDOWN_MS + MIN));
+});
+
+test("already-activated check distinguishes finalized accounts from open temporary issuances", () => {
+  const method = "roster-email-login";
+  assert.equal(
+    isAlreadyActivatedRosterLogin({status: "inactive", activated: true, claimMethod: "other"}, method),
+    false,
+  );
+  assert.equal(
+    isAlreadyActivatedRosterLogin({status: "active", activated: false}, method),
+    false,
+  );
+  assert.equal(
+    isAlreadyActivatedRosterLogin({status: "active", activated: true, claimMethod: "legacy"}, method),
+    true,
+  );
+  assert.equal(
+    isAlreadyActivatedRosterLogin({status: "active", activated: true, claimMethod: method, issuanceState: ""}, method),
+    true,
+  );
+  assert.equal(
+    isAlreadyActivatedRosterLogin({status: "active", activated: true, claimMethod: method, issuanceState: "completed"}, method),
+    true,
+  );
+  assert.equal(
+    isAlreadyActivatedRosterLogin({status: "active", activated: true, claimMethod: method, issuanceState: "completing"}, method),
+    true,
+  );
+  for (const open of ["issued", "send-failed", "creating"]) {
+    assert.equal(
+      isAlreadyActivatedRosterLogin({status: "active", activated: true, claimMethod: method, issuanceState: open}, method),
+      false,
+      open,
+    );
+  }
 });

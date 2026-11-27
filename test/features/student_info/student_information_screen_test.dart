@@ -517,6 +517,28 @@ void main() {
     expect(find.byKey(const Key('correct-surname')), findsNothing);
     expect(find.byKey(const Key('correct-firstName')), findsOneWidget);
   });
+
+  testWidgets('renders sectioned cards cleanly on a 360px phone viewport', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      mode: StudentInfoMode.onboarding,
+      response: _infoResponse(),
+    );
+    await tester.binding.setSurfaceSize(const Size(360, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Complete your student profile'), findsOneWidget);
+    expect(find.text('Data Privacy Consent'), findsOneWidget);
+    expect(find.text('Basic details'), findsOneWidget);
+    expect(find.text('Home address'), findsOneWidget);
+    expect(find.text('City address (optional)'), findsOneWidget);
+    expect(find.text('Guardian & family'), findsOneWidget);
+    expect(find.text('Contact information'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 Finder saveButton() => find.widgetWithText(FilledButton, 'Save');
