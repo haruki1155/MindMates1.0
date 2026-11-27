@@ -177,7 +177,7 @@ test("a student already activated by the old flow is never touched", async () =>
   const s = await seedRow("old", {activated: true, userId: `${run}-uid`});
   emails.push(s.alias);
   mails.length = 0;
-  await ask({studentId: s.studentNo});
+  assert.deepEqual(await ask({studentId: s.studentNo}), {accepted: false, alreadyActivated: true});
   assert.equal(mails.length, 0);
   assert.equal(await userOf(s.alias), null);
 });
@@ -305,7 +305,7 @@ test("completion sets the permanent password, clears the gate and leaves no secr
   // A request for a login never replaces a finished account's password.
   mails.length = 0;
   clock.t += 25 * HOUR;
-  await ask({studentId: s.studentNo});
+  assert.deepEqual(await ask({studentId: s.studentNo}), {accepted: false, alreadyActivated: true});
   assert.equal(mails.length, 0);
   assert.ok(await signIn(s.alias, PERMANENT));
   // The gate cannot be replayed: without the claim nothing runs, and a stale claim only gets cleared, never a new password.

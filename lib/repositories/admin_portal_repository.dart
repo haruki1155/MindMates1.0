@@ -331,7 +331,15 @@ class AdminPortalRepository {
   bool get isSuperAdmin => _isSuperAdmin;
   bool _mustChangePassword = false;
   bool _staffQueueRefreshAttempted = false;
+  String? _recentSignInPassword;
   bool get mustChangePassword => _mustChangePassword;
+  bool get hasRecentSignInPassword =>
+      _recentSignInPassword != null && _recentSignInPassword!.isNotEmpty;
+
+  @visibleForTesting
+  void seedRecentSignInPasswordForTest(String? password) {
+    _recentSignInPassword = password;
+  }
 
   /// Error code from the last best-effort `refreshPortalAppointmentQueue`
   /// catch-up, or `null` when it succeeded or has not run. Staff screens use
@@ -366,6 +374,9 @@ class AdminPortalRepository {
     final user = credential.user;
     if (user == null) throw StateError('Unable to identify staff account.');
     final evaluation = await evaluatePortalAccess(refreshUser: true);
+    _recentSignInPassword = evaluation.isGranted && _mustChangePassword
+        ? password
+        : null;
     if (evaluation.isGranted) await _recordPortalSessionActivity();
     return evaluation;
   }
@@ -434,6 +445,7 @@ class AdminPortalRepository {
     final registrationStatus = resolvedProfile['registrationStatus']
         ?.toString();
     _mustChangePassword = resolvedProfile['mustChangePassword'] == true;
+    if (!_mustChangePassword) _recentSignInPassword = null;
     if (status == StaffAccountStatus.pending) {
       return PortalAccessEvaluation(
         state: registrationStatus == 'more_information_required'
@@ -605,6 +617,7 @@ class AdminPortalRepository {
     _currentAccessRole = AccessRole.appUser;
     _isSuperAdmin = false;
     _mustChangePassword = false;
+    _recentSignInPassword = null;
     await FirebaseAuth.instance.signOut();
   }
 
@@ -615,6 +628,7 @@ class AdminPortalRepository {
     _currentAccessRole = AccessRole.appUser;
     _isSuperAdmin = false;
     _mustChangePassword = false;
+    _recentSignInPassword = null;
     try {
       await FirebaseAuth.instance.signOut();
     } catch (_) {
@@ -679,15 +693,80 @@ class AdminPortalRepository {
     );
   }
 
-  Future<void> completeMandatoryPasswordChange(String password) async {
+  Future<void> completeMandatoryPasswordChange(
+    String password, {
+    String? currentPassword,
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw StateError('Portal session is missing.');
-    await user.updatePassword(password);
-    await FirebaseFunctions.instance
-        .httpsCallable('completeAdminPasswordChange')
-        .call();
+    await completeMandatoryPasswordChangeWith(
+      newPassword: password,
+      currentPassword: currentPassword,
+      userEmail: user.email,
+      updatePassword: user.updatePassword,
+      reauthenticate: (email, current) => user.reauthenticateWithCredential(
+        EmailAuthProvider.credential(email: email, password: current),
+      ),
+      refreshIdToken: () => user.getIdToken(true),
+    );
+  }
+
+  /// Completes mandatory temporary-password replacement, reauthenticating
+  /// transparently (or via [currentPassword]) if Firebase Auth requires a recent
+  /// sign-in, and refreshing the ID token before updating server state.
+  @visibleForTesting
+  Future<void> completeMandatoryPasswordChangeWith({
+    required String newPassword,
+    String? currentPassword,
+    required String? userEmail,
+    required Future<void> Function(String password) updatePassword,
+    required Future<void> Function(String email, String password) reauthenticate,
+    required Future<void> Function() refreshIdToken,
+    Future<void> Function()? completeOnServer,
+  }) async {
+    final explicitCurrent =
+        currentPassword != null && currentPassword.trim().isNotEmpty
+        ? currentPassword
+        : null;
+    final fallbackCurrent = explicitCurrent ?? _recentSignInPassword;
+
+    if (explicitCurrent != null) {
+      if (userEmail == null || userEmail.isEmpty) {
+        throw StateError('Account email is missing for reauthentication.');
+      }
+      await reauthenticate(userEmail, explicitCurrent);
+      await updatePassword(newPassword);
+    } else {
+      try {
+        await updatePassword(newPassword);
+      } on FirebaseAuthException catch (error) {
+        if (error.code != 'requires-recent-login') rethrow;
+        if (fallbackCurrent != null &&
+            fallbackCurrent.isNotEmpty &&
+            userEmail != null &&
+            userEmail.isNotEmpty) {
+          await reauthenticate(userEmail, fallbackCurrent);
+          await updatePassword(newPassword);
+        } else {
+          rethrow;
+        }
+      }
+    }
+
+    await refreshIdToken();
+    await (completeOnServer != null
+        ? completeOnServer()
+        : _callCallable(
+            'completeAdminPasswordChange',
+            const <String, Object?>{},
+          ));
     _mustChangePassword = false;
-    await user.getIdToken(true);
+    _recentSignInPassword = null;
+    try {
+      await refreshIdToken();
+    } catch (_) {
+      // Server state is already updated; token refresh is best effort.
+    }
   }
 
   Stream<List<College>> watchColleges() => _firestoreService

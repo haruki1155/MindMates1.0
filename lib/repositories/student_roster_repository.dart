@@ -31,6 +31,8 @@ typedef AcademicOptions = ({
 
 typedef AcademicOptionsLoader = Future<AcademicOptions> Function();
 
+enum StudentLoginRequestOutcome { sent, alreadyActivated }
+
 class RecoveryCodeRequest {
   const RecoveryCodeRequest({
     this.alreadyVerified = false,
@@ -206,9 +208,17 @@ class StudentRosterRepository {
 
   // ----------------------------------------- student login by roster email
 
-  /// Asks for a login email. The server answers identically for every Student ID.
-  Future<void> requestStudentLogin(String studentId) =>
-      _call('requestStudentLogin', {'studentId': studentId.trim()});
+  /// Asks for a login email. Returns [StudentLoginRequestOutcome.alreadyActivated]
+  /// only when the roster Student ID is already linked to a finished account;
+  /// otherwise returns [StudentLoginRequestOutcome.sent] identically for every ID.
+  Future<StudentLoginRequestOutcome> requestStudentLogin(String studentId) async {
+    final result = await _callMap('requestStudentLogin', {
+      'studentId': studentId.trim(),
+    });
+    return result['alreadyActivated'] == true
+        ? StudentLoginRequestOutcome.alreadyActivated
+        : StudentLoginRequestOutcome.sent;
+  }
 
   /// Sets the permanent password on the server. The session that called it is
   /// revoked, so the caller signs in again with the new password afterwards.

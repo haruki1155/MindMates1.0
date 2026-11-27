@@ -15,8 +15,8 @@ import {authEmailTaken} from "./student_activation";
 import {studentAuthAliasEmail} from "./student_auth_alias";
 import {isAllowedPersonalEmail} from "./student_claim_domain";
 import {
-  FIRST_LOGIN_CLAIM, MAX_ISSUES_PER_DAY, TEMP_PASSWORD_TTL_MS, generateTemporaryPassword, hashPassword, mayReissue,
-  validatePermanentPassword,
+  FIRST_LOGIN_CLAIM, MAX_ISSUES_PER_DAY, TEMP_PASSWORD_TTL_MS, generateTemporaryPassword, hashPassword,
+  isAlreadyActivatedRosterLogin, mayReissue, validatePermanentPassword,
 } from "./student_login_domain";
 import {rosterStudentProfile} from "./student_profile";
 import {RECOVERY_CONTACTS, RECOVERY_EMAILS, normalizeRecoveryContactEmail, recoveryEmailHash} from "./student_recovery_contacts";
@@ -64,8 +64,16 @@ export async function requestLogin(request: Req, deps: LoginDeps = defaultLoginD
   } catch {
     key = null;
   }
+  let alreadyActivated = false;
   try {
-    if (key && await consumeWindow("login_id", key, ID_LIMIT, now, true)) await issueIfEligible(key, deps);
+    if (key) {
+      if (await checkAlreadyActivated(key)) {
+        alreadyActivated = true;
+      } else if (await consumeWindow("login_id", key, ID_LIMIT, now, true)) {
+        const result = await issueIfEligible(key, deps);
+        if (result === "already_activated") alreadyActivated = true;
+      }
+    }
   } catch (error) {
     // A failure must not be distinguishable from "no such student", so it is logged, never returned.
     logError("Student login could not be issued", {
@@ -74,21 +82,41 @@ export async function requestLogin(request: Req, deps: LoginDeps = defaultLoginD
   }
   const wait = deps.minResponseMs - (Date.now() - started);
   if (wait > 0) await sleep(wait);
+  if (alreadyActivated) return {accepted: false as const, alreadyActivated: true as const};
   return {accepted: true as const};
 }
 
-type Plan = {kind: "none"} | {kind: "create"; uid: string} | {kind: "reissue"; uid: string};
+async function checkAlreadyActivated(key: string): Promise<boolean> {
+  const row = (await db().collection("student_roster").doc(key).get()).data();
+  if (!row) return false;
+  let issuanceState: unknown;
+  if (row.activated === true && row.claimMethod === CLAIM_METHOD) {
+    issuanceState = (await db().collection(ISSUANCE).doc(key).get()).data()?.state;
+  }
+  return isAlreadyActivatedRosterLogin(
+    {status: row.status, activated: row.activated, claimMethod: row.claimMethod, issuanceState},
+    CLAIM_METHOD,
+  );
+}
 
-async function issueIfEligible(key: string, deps: LoginDeps): Promise<void> {
+type Plan =
+  | {kind: "none"}
+  | {kind: "already_activated"}
+  | {kind: "create"; uid: string}
+  | {kind: "reissue"; uid: string};
+
+async function issueIfEligible(key: string, deps: LoginDeps): Promise<"done" | "already_activated"> {
   const rosterRef = db().collection("student_roster").doc(key);
   const row = (await rosterRef.get()).data();
   const email = rosterEmail(row);
   // A row this flow already linked may be reissued while its first-login issuance is open; any other activated row
   // (old flow, administrator approval) is a finished account and is never touched.
   const ours = row?.activated === true && row.claimMethod === CLAIM_METHOD;
-  if (!row || row.status !== "active" || (row.activated === true && !ours) || !email) return;
+  if (!row || row.status !== "active" || (row.activated === true && !ours) || !email) {
+    return row?.status === "active" && row.activated === true ? "already_activated" : "done";
+  }
   // An address already used by some other account can never identify this student.
-  if (await authEmailTaken(email)) return;
+  if (await authEmailTaken(email)) return "done";
 
   const issuanceRef = db().collection(ISSUANCE).doc(key);
   const now = deps.now();
@@ -97,6 +125,7 @@ async function issueIfEligible(key: string, deps: LoginDeps): Promise<void> {
     const snap = await transaction.get(issuanceRef);
     const d = snap.data();
     if (!d) {
+      if (row.activated === true) return {kind: "already_activated"};
       const uid = randomUUID();
       transaction.create(issuanceRef, {
         studentKey: key, uid, state: "creating", lockUntilMs: now + LOCK_MS, issuedInWindow: 0, windowStartMs: now,
@@ -105,6 +134,7 @@ async function issueIfEligible(key: string, deps: LoginDeps): Promise<void> {
       return {kind: "create", uid};
     }
     const uid = String(d.uid);
+    if (d.state === "completed" || d.state === "completing") return {kind: "already_activated"};
     if (d.state === "creating") {
       if (Number(d.lockUntilMs ?? 0) > now) return {kind: "none"};
       transaction.update(issuanceRef, {lockUntilMs: now + LOCK_MS});
@@ -122,7 +152,8 @@ async function issueIfEligible(key: string, deps: LoginDeps): Promise<void> {
     });
     return {kind: "reissue", uid};
   });
-  if (plan.kind === "none") return;
+  if (plan.kind === "already_activated") return "already_activated";
+  if (plan.kind === "none") return "done";
 
   const password = generateTemporaryPassword();
   const stored = hashPassword(password);
@@ -145,6 +176,7 @@ async function issueIfEligible(key: string, deps: LoginDeps): Promise<void> {
     await issuanceRef.update({state: "send-failed"}).catch(() => undefined);
     throw error;
   }
+  return "done";
 }
 
 async function createIdentity(

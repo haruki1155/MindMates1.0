@@ -48,3 +48,23 @@ export function mayReissue(issuance: IssuanceTiming, now: number): boolean {
   if (issuance.expiresAtMs <= now) return true;
   return now - issuance.lastSentAtMs >= REISSUE_COOLDOWN_MS && issuance.issuedInWindow < MAX_ISSUES_PER_DAY;
 }
+
+/**
+ * True when a roster Student ID already belongs to an activated, finalized
+ * MindMate account (either via an earlier activation flow or after finishing
+ * permanent password setup) and must not be re-issued a temporary login.
+ */
+export function isAlreadyActivatedRosterLogin(
+  input: {
+    status?: unknown;
+    activated?: unknown;
+    claimMethod?: unknown;
+    issuanceState?: unknown;
+  },
+  claimMethod: string,
+): boolean {
+  if (input.status !== "active" || input.activated !== true) return false;
+  if (input.claimMethod !== claimMethod) return true;
+  const state = typeof input.issuanceState === "string" ? input.issuanceState.trim() : "";
+  return state === "" || state === "completed" || state === "completing";
+}

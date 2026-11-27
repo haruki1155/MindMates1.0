@@ -90,11 +90,81 @@ void main() {
         {'name': 'requestStudentLogin', 'studentId': '2021-00123'},
       ]);
       expect(
+        find.byKey(const Key('login-request-confirmation')),
+        findsOneWidget,
+      );
+      expect(find.text('Login details sent'), findsOneWidget);
+      expect(
         find.textContaining('If your Student ID is on the school roster'),
         findsOneWidget,
       );
       expect(find.textContaining('@'), findsNothing);
     });
+
+    testWidgets('renders highlighted confirmation cleanly on 360px mobile', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StudentLoginRequestScreen(
+            repository: StudentRosterRepository(
+              invoker: (_, _) async => {'accepted': true},
+            ),
+          ),
+        ),
+      );
+      await tester.enterText(find.byType(TextFormField), '2021-00123');
+      await tester.tap(find.text('Email me my login'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('login-request-confirmation')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'already activated Student ID shows red dialogue directing student to PACC office on 360px mobile',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(360, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(
+          MaterialApp(
+            home: StudentLoginRequestScreen(
+              repository: StudentRosterRepository(
+                invoker: (_, _) async => {
+                  'accepted': false,
+                  'alreadyActivated': true,
+                },
+              ),
+            ),
+          ),
+        );
+        await tester.enterText(find.byType(TextFormField), '2021-00123');
+        await tester.tap(find.text('Email me my login'));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const Key('login-request-already-activated')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('login-request-confirmation')),
+          findsNothing,
+        );
+        expect(find.text('Account already activated'), findsOneWidget);
+        expect(
+          find.textContaining('already has an active MindMate account'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('visit the PACC office'), findsOneWidget);
+        expect(find.textContaining('@'), findsNothing);
+        expect(tester.takeException(), isNull);
+      },
+    );
 
     testWidgets('a failure is reported without hinting at the account', (
       tester,
