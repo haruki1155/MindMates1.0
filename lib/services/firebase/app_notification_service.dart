@@ -22,6 +22,7 @@ class AppNotificationService {
   Future<void> initializeForUser(
     String userId, {
     void Function(String appointmentId)? onAppointmentOpened,
+    void Function(String inquiryId)? onInquiryOpened,
     void Function(RemoteMessage message)? onForegroundMessage,
   }) async {
     final settings = await _instance.requestPermission();
@@ -41,16 +42,41 @@ class AppNotificationService {
     _openedSubscription = FirebaseMessaging.onMessageOpenedApp.listen((
       message,
     ) {
-      final appointmentId = message.data['appointmentId']?.toString() ?? '';
-      if (appointmentId.isNotEmpty) onAppointmentOpened?.call(appointmentId);
+      _dispatchOpenedMessage(
+        message,
+        onAppointmentOpened: onAppointmentOpened,
+        onInquiryOpened: onInquiryOpened,
+      );
     });
     final initial = await _instance.getInitialMessage();
-    final appointmentId = initial?.data['appointmentId']?.toString() ?? '';
-    if (appointmentId.isNotEmpty) onAppointmentOpened?.call(appointmentId);
+    if (initial != null) {
+      _dispatchOpenedMessage(
+        initial,
+        onAppointmentOpened: onAppointmentOpened,
+        onInquiryOpened: onInquiryOpened,
+      );
+    }
     await _foregroundSubscription?.cancel();
     _foregroundSubscription = FirebaseMessaging.onMessage.listen(
       onForegroundMessage,
     );
+  }
+
+  static void _dispatchOpenedMessage(
+    RemoteMessage message, {
+    void Function(String appointmentId)? onAppointmentOpened,
+    void Function(String inquiryId)? onInquiryOpened,
+  }) {
+    final inquiryId = message.data['inquiryId']?.toString().trim() ?? '';
+    if (inquiryId.isNotEmpty) {
+      onInquiryOpened?.call(inquiryId);
+      return;
+    }
+    final appointmentId =
+        message.data['appointmentId']?.toString().trim() ?? '';
+    if (appointmentId.isNotEmpty) {
+      onAppointmentOpened?.call(appointmentId);
+    }
   }
 
   Future<void> _saveToken(String userId, String token) {

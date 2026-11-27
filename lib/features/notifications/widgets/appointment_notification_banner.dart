@@ -58,7 +58,7 @@ void showAppointmentNotificationBanner(
               ),
             ),
           ),
-          if (appointmentId != null && onView != null)
+          if (onView != null)
             TextButton(
               onPressed: () {
                 messenger.hideCurrentSnackBar();

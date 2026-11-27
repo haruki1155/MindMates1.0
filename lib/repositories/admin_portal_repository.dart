@@ -2415,6 +2415,95 @@ class AdminPortalRepository {
     return (data['revision'] as num?)?.toInt() ?? expectedRevision;
   }
 
+  /// Downloads an uploaded Testing Service document for authorized clinical
+  /// review.
+  Future<({String name, String contentType, Uint8List bytes})>
+  downloadTestingServiceDocument({
+    required String inquiryId,
+    required String path,
+  }) async {
+    final result = await _callCallable('downloadTestingServiceDocument', {
+      'inquiryId': inquiryId,
+      'path': path,
+    });
+    final data = result is Map ? Map<String, dynamic>.from(result) : const {};
+    final encoded = data['dataBase64']?.toString() ?? '';
+    if (encoded.isEmpty) {
+      throw StateError('Downloaded document was empty.');
+    }
+    return (
+      name: data['name']?.toString() ?? 'document',
+      contentType:
+          data['contentType']?.toString() ?? 'application/octet-stream',
+      bytes: base64Decode(encoded),
+    );
+  }
+
+  /// Assignee or super-administrator proposes (or revises) a Testing Service
+  /// schedule within Mon-Sat 8:00 AM-5:00 PM PHT; returns the new revision.
+  Future<int> proposeTestingServiceSchedule(
+    String id, {
+    required DateTime scheduledAt,
+    required int expectedRevision,
+    required String requestId,
+    String? decisionMode,
+    String? reason,
+    String? note,
+    String? location,
+  }) async {
+    final result = await _callCallable('proposeTestingServiceSchedule', {
+      'inquiryId': id,
+      'scheduledAtMillis': scheduledAt.millisecondsSinceEpoch,
+      'expectedRevision': expectedRevision,
+      'requestId': requestId,
+      if (decisionMode != null && decisionMode.trim().isNotEmpty)
+        'decisionMode': decisionMode.trim(),
+      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      if (location != null && location.trim().isNotEmpty)
+        'location': location.trim(),
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Cancels a Testing Service request schedule on `inquiries/{id}` with a
+  /// required reason without touching the `appointments` collection.
+  Future<int> cancelTestingServiceSchedule(
+    String id, {
+    required String reason,
+    required int expectedRevision,
+    required String requestId,
+  }) async {
+    final result = await _callCallable('cancelTestingServiceSchedule', {
+      'inquiryId': id,
+      'reason': reason.trim(),
+      'expectedRevision': expectedRevision,
+      'requestId': requestId,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
+  /// Marks a Testing Service request schedule as completed and resolves its
+  /// inquiry, releasing the student's one-request lock without touching
+  /// the `appointments` collection.
+  Future<int> completeTestingServiceSchedule(
+    String id, {
+    String? note,
+    required int expectedRevision,
+    required String requestId,
+  }) async {
+    final result = await _callCallable('completeTestingServiceSchedule', {
+      'inquiryId': id,
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      'expectedRevision': expectedRevision,
+      'requestId': requestId,
+    });
+    final data = result is Map ? result : const {};
+    return (data['revision'] as num?)?.toInt() ?? expectedRevision;
+  }
+
   /// Super-administrator takes over an unresolved inquiry.
   Future<int> takeOverInquiry(
     String id, {

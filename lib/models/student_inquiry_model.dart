@@ -1,4 +1,5 @@
 import '../core/utils/firestore_mapper.dart';
+import 'testing_service_schedule.dart';
 
 enum StudentInquiryStatus {
   pending,
@@ -30,10 +31,22 @@ class StudentInquiryRecord {
     required this.status,
     required this.createdAt,
     this.formType,
+    this.formData = const {},
+    this.testingSchedule,
+    this.testingDocuments,
+    this.contactNumber,
+    this.preferredScheduleAt,
+    this.preferredScheduleTime,
     this.acknowledgedAt,
     this.firstResponseAt,
     this.lastResponseAt,
     this.responseCount = 0,
+    this.assigneeIds = const [],
+    this.assigneeLabels = const {},
+    this.ownerId,
+    this.lastResponseByName,
+    this.lastResponseRole,
+    this.takeoverByName,
   });
 
   final String id;
@@ -42,12 +55,68 @@ class StudentInquiryRecord {
   final String message;
   final String category;
   final String? formType;
+  final Map<String, dynamic> formData;
+  final TestingServiceSchedule? testingSchedule;
+  final TestingServiceDocuments? testingDocuments;
+  final String? contactNumber;
+  final DateTime? preferredScheduleAt;
+  final String? preferredScheduleTime;
   final StudentInquiryStatus status;
   final DateTime createdAt;
   final DateTime? acknowledgedAt;
   final DateTime? firstResponseAt;
   final DateTime? lastResponseAt;
   final int responseCount;
+  final List<String> assigneeIds;
+  final Map<String, String> assigneeLabels;
+  final String? ownerId;
+  final String? lastResponseByName;
+  final String? lastResponseRole;
+  final String? takeoverByName;
+
+  bool get isTestingService => formType == testingServiceFormType;
+
+  bool get isActiveTestingService {
+    if (!isTestingService) return false;
+    final sched = testingSchedule;
+    if (sched != null) {
+      return sched.isActive && status != StudentInquiryStatus.resolved;
+    }
+    return status != StudentInquiryStatus.resolved;
+  }
+
+  /// Human-readable name of the counselor/administrator processing this inquiry,
+  /// so the applicant knows who to approach at the PACC office.
+  String? get processingCounselorName {
+    final completed = testingSchedule?.completedByName?.trim() ?? '';
+    if (completed.isNotEmpty) return completed;
+    final proposed = testingSchedule?.proposedByName?.trim() ?? '';
+    if (proposed.isNotEmpty) return proposed;
+    final cancelled = testingSchedule?.cancelledByName?.trim() ?? '';
+    if (cancelled.isNotEmpty) return cancelled;
+    final takeover = takeoverByName?.trim() ?? '';
+    if (takeover.isNotEmpty) return takeover;
+    final ownerKey = ownerId?.trim() ?? '';
+    if (ownerKey.isNotEmpty) {
+      final ownerLabel = assigneeLabels[ownerKey]?.trim() ?? '';
+      if (ownerLabel.isNotEmpty) return ownerLabel;
+    }
+    for (final uid in assigneeIds) {
+      final label = assigneeLabels[uid]?.trim() ?? '';
+      if (label.isNotEmpty) return label;
+    }
+    for (final label in assigneeLabels.values) {
+      final trimmed = label.trim();
+      if (trimmed.isNotEmpty) return trimmed;
+    }
+    final replier = lastResponseByName?.trim() ?? '';
+    return replier.isNotEmpty ? replier : null;
+  }
+
+  String get processingCounselorRoleLabel =>
+      (takeoverByName?.trim().isNotEmpty == true || lastResponseRole == 'admin')
+      ? 'PACC Administrator'
+      : 'PACC Counselor / Psychometrician';
 
   factory StudentInquiryRecord.fromJson(
     Map<String, dynamic> json, {
@@ -56,6 +125,18 @@ class StudentInquiryRecord {
     final rawSubject = json['subject']?.toString().trim() ?? '';
     final rawCategory = json['category']?.toString().trim() ?? '';
     final rawFormType = json['formType']?.toString().trim() ?? '';
+    final rawContact = json['contactNumber']?.toString().trim() ?? '';
+    final rawPreferredTime =
+        json['preferredScheduleTime']?.toString().trim() ?? '';
+    final rawOwnerId = json['ownerId']?.toString().trim() ?? '';
+    final rawLastResponseByName =
+        json['lastResponseByName']?.toString().trim() ?? '';
+    final rawLastResponseRole =
+        json['lastResponseRole']?.toString().trim() ?? '';
+    final rawTakeover = json['takeover'];
+    final rawTakeoverByName = rawTakeover is Map
+        ? (rawTakeover['byName'] ?? rawTakeover['by'])?.toString().trim() ?? ''
+        : '';
     return StudentInquiryRecord(
       id: (json['id'] ?? id ?? '').toString(),
       userId: json['userId']?.toString().trim() ?? '',
@@ -63,6 +144,20 @@ class StudentInquiryRecord {
       message: json['message']?.toString() ?? '',
       category: rawCategory.isNotEmpty ? rawCategory : 'General',
       formType: rawFormType.isEmpty ? null : rawFormType,
+      formData: json['formData'] is Map
+          ? Map<String, dynamic>.from(json['formData'] as Map)
+          : const {},
+      testingSchedule: TestingServiceSchedule.tryFromJson(
+        json['testingSchedule'],
+      ),
+      testingDocuments: TestingServiceDocuments.tryFromJson(
+        json['testingDocuments'],
+      ),
+      contactNumber: rawContact.isEmpty ? null : rawContact,
+      preferredScheduleAt: dateTimeFromFirestore(json['preferredScheduleAt']),
+      preferredScheduleTime: rawPreferredTime.isEmpty
+          ? null
+          : rawPreferredTime,
       status: StudentInquiryStatus.fromValue(json['status']),
       createdAt: dateTimeFromFirestoreOrNow(json['createdAt']),
       acknowledgedAt: dateTimeFromFirestore(json['acknowledgedAt']),
@@ -71,6 +166,25 @@ class StudentInquiryRecord {
       responseCount: json['responseCount'] is num
           ? (json['responseCount'] as num).toInt()
           : 0,
+      assigneeIds: json['assigneeIds'] is List
+          ? (json['assigneeIds'] as List)
+                .map((e) => e?.toString().trim() ?? '')
+                .where((e) => e.isNotEmpty)
+                .toList(growable: false)
+          : const [],
+      assigneeLabels: json['assigneeLabels'] is Map
+          ? {
+              for (final entry in (json['assigneeLabels'] as Map).entries)
+                if ((entry.value?.toString().trim() ?? '').isNotEmpty)
+                  entry.key.toString().trim(): entry.value.toString().trim(),
+            }
+          : const {},
+      ownerId: rawOwnerId.isEmpty ? null : rawOwnerId,
+      lastResponseByName:
+          rawLastResponseByName.isEmpty ? null : rawLastResponseByName,
+      lastResponseRole:
+          rawLastResponseRole.isEmpty ? null : rawLastResponseRole,
+      takeoverByName: rawTakeoverByName.isEmpty ? null : rawTakeoverByName,
     );
   }
 }

@@ -98,6 +98,7 @@ const ALLOWED_CATEGORIES = new Set(["Service Form", "General", "Academic", "Coun
 const ALLOWED_FORM_LABELS: Record<string, string> = {
   client_feedback: "Client Feedback Form",
   guidance_satisfaction_survey: "Student Satisfaction Survey",
+  testing_service: "Testing Service Request",
 };
 const VALID_STATUSES = new Set(["pending", "in_progress", "resolved"]);
 const VALID_ROUTING_STATUSES = new Set(["unrouted", "routed", "needs_triage"]);

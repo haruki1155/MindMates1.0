@@ -21,6 +21,7 @@ import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
 import '../../quick_assessment/models/quick_assessment_models.dart';
 import '../../counseling/screens/pacc_counseling_screen.dart';
+import '../../counseling/screens/student_inquiries_screen.dart';
 import '../../counseling/widgets/counselor_unread_badges.dart';
 import '../../counseling/widgets/appointment_details_sheet.dart';
 import '../../../models/appointment_model.dart';
@@ -176,6 +177,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             .initializeForUser(
               userId,
               onAppointmentOpened: _openAppointmentFromNotification,
+              onInquiryOpened: _openInquiryFromNotification,
               onForegroundMessage: _showForegroundNotification,
             )
             .catchError((_) {});
@@ -221,23 +223,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (userId != null) provider?.loadAppointments(userId);
   }
 
+  void _openInquiryFromNotification(String inquiryId) {
+    if (!mounted) return;
+    final trimmedId = inquiryId.trim();
+    final userId = _currentUserId()?.trim();
+    if (trimmedId.isEmpty || userId == null || userId.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            StudentInquiryDetailScreen(inquiryId: trimmedId, userId: userId),
+      ),
+    );
+  }
+
   void _showForegroundNotification(RemoteMessage message) {
     if (!mounted) return;
     final title = message.notification?.title ?? 'MindMate update';
     final body = message.notification?.body ?? 'You have a new notification.';
+    final inquiryId = message.data['inquiryId']?.toString().trim() ?? '';
+    final appointmentId =
+        message.data['appointmentId']?.toString().trim() ?? '';
     final eventId =
-        message.messageId ??
-        '${message.data['appointmentId'] ?? ''}|$title|$body';
+        message.messageId ?? '$appointmentId|$inquiryId|$title|$body';
     if (!_shownForegroundEvents.add(eventId)) return;
-    final appointmentId = message.data['appointmentId']?.toString();
+    VoidCallback? onView;
+    if (inquiryId.isNotEmpty) {
+      onView = () => _openInquiryFromNotification(inquiryId);
+    } else if (appointmentId.isNotEmpty) {
+      onView = () => _openAppointmentFromNotification(appointmentId);
+    }
     showAppointmentNotificationBanner(
       context,
       title: title,
       message: body,
-      appointmentId: appointmentId,
-      onView: appointmentId == null || appointmentId.isEmpty
-          ? null
-          : () => _openAppointmentFromNotification(appointmentId),
+      appointmentId: appointmentId.isEmpty ? null : appointmentId,
+      onView: onView,
     );
   }
 

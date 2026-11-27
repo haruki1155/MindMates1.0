@@ -192,6 +192,7 @@ void main() {
       for (final width in const [390.0, 768.0, 1280.0]) {
         tester.view.physicalSize = Size(width, 1400);
         tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
 
         await tester.pumpWidget(
           MaterialApp(
@@ -208,17 +209,24 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(find.text('Active users (last 30 days)'), findsOneWidget);
+        // Empty zero-count action cards and passive metrics are omitted.
+        expect(find.text('Active users (last 30 days)'), findsNothing);
+        expect(find.text('Full assessments (last 7 days)'), findsNothing);
+        expect(find.text('Needs action'), findsNothing);
+        // i1 is a raw pending inquiry not yet counselor-processed, so admin openInquiries == 0.
+        expect(find.text('Open inquiries'), findsNothing);
         expect(find.text('Open appointments'), findsOneWidget);
-        expect(find.text('Full assessments (last 7 days)'), findsOneWidget);
-        expect(find.text('Open inquiries'), findsOneWidget);
+        expect(find.text('Incomplete profiles'), findsOneWidget);
+        expect(find.text('Schedule overview'), findsOneWidget);
+        expect(find.text('7-day appointment schedule'), findsOneWidget);
+        expect(find.text('Active Cases'), findsOneWidget);
         expect(find.text('Users by most recent activity day'), findsOneWidget);
         expect(find.text('Appointment status breakdown'), findsOneWidget);
         expect(find.text('Cancelled / declined'), findsOneWidget);
         expect(find.text('Confirmed / upcoming'), findsOneWidget);
-        // Cancelled session is excluded from Today's Counseling Schedule.
+        // Cancelled session is excluded from Today's Counseling Schedule and Active Cases.
         expect(find.text('Cancelled Student'), findsNothing);
-        expect(find.text('Student One'), findsOneWidget);
+        expect(find.text('Student One'), findsWidgets);
         expect(find.text('Follow-up'), findsOneWidget);
         // Grounded wording checks.
         expect(
@@ -226,6 +234,13 @@ void main() {
           findsNothing,
         );
       }
+
+      // Open compact Quick actions dropdown and navigate to Inquiries.
+      await tester.tap(find.byKey(const ValueKey('admin-quick-actions-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Inquiries').last);
+      await tester.pumpAndSettle();
+      expect(navigated, contains(AdminPortalPage.inquiries));
 
       // Tap KPI card to verify click-through navigation.
       await tester.tap(find.text('Open appointments'));
@@ -243,6 +258,36 @@ void main() {
       tester.view.reset();
     },
   );
+
+  testWidgets('hides empty metric cards and shows caught-up banner when zero', (
+    tester,
+  ) async {
+    final repo = _FakeDashboardRepository(
+      users: Stream.value(const []),
+      inquiries: Stream.value(const []),
+      assessments: Stream.value(const []),
+      appointments: Stream.value(const []),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AdminTheme.data,
+        home: Scaffold(
+          body: AdminOperationsDashboardPage(
+            repository: repo,
+            onNavigate: (_) {},
+            clock: () => fixedNow,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('admin-all-caught-up')), findsOneWidget);
+    expect(find.text('Needs action'), findsNothing);
+    expect(find.text('Open appointments'), findsNothing);
+    expect(find.text('Open inquiries'), findsNothing);
+  });
 
   testWidgets('distinguishes general stream error from permission-denied', (
     tester,

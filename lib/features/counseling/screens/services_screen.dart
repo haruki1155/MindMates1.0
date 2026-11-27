@@ -112,10 +112,12 @@ class ServicesScreen extends StatelessWidget {
           'Using psychological tests and non-psychometric devices, this service is designed to secure accurate information about each student\'s abilities, aptitude, interest, and personality in order to assist students in gaining increasing self-knowledge and understanding of their capacity in as many aspects of their life and career as possible.',
       iconData: Icons.fact_check_outlined,
       headerColor: Color(0xFFA9D8B8),
+      hasTestingServiceInquiry: true,
       guides: [
         ServiceGuideData(
           title: 'How to Avail This Service',
-          eligibleClients: 'UCU Employees / Students for OJT',
+          eligibleClients:
+              'Students for OJT, Teaching, and Non-Teaching employees',
           availability: 'Monday-Saturday, 8:00 AM - 5:00 PM',
           personResponsible: 'Psychometrician-in-charge',
           fee: 'PHP 250.00',
@@ -127,16 +129,16 @@ class ServicesScreen extends StatelessWidget {
           ],
           requirements: [
             'Endorsement Letter',
-            'Official receipt of testing fee',
+            'Official receipt for PHP 250',
           ],
           steps: [
             ServiceGuideStep(
               number: 1,
               title: 'Submit Testing Requirements',
               clientAction:
-                  'Submit the Endorsement Letter from the appropriate UCU office and official receipt of the testing fee.',
+                  'Submit the Endorsement Letter from the appropriate UCU office and official receipt for PHP 250.',
               providerAction:
-                  'Verify the documents and provide the testing schedule through SMS.',
+                  'Verify the documents (2-5 minutes) and provide the testing schedule through SMS and in-app notifications.',
               duration: '2-5 minutes',
             ),
           ],

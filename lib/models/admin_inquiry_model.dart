@@ -1,4 +1,6 @@
 import '../core/utils/firestore_mapper.dart';
+import '../core/utils/student_identity_formatter.dart';
+import 'testing_service_schedule.dart';
 
 enum InquiryStatus {
   pending,
@@ -124,9 +126,15 @@ class AdminInquiryModel {
     required this.createdAt,
     required this.status,
     this.name,
+    this.studentNumber,
     this.role,
     this.formType,
     this.formData = const {},
+    this.testingSchedule,
+    this.testingDocuments,
+    this.contactNumber,
+    this.preferredScheduleAt,
+    this.preferredScheduleTime,
     this.acknowledgedAt,
     this.assignedStaffId,
     this.collegeId = '',
@@ -163,9 +171,15 @@ class AdminInquiryModel {
   final DateTime createdAt;
   final InquiryStatus status;
   final String? name;
+  final String? studentNumber;
   final String? role;
   final String? formType;
   final Map<String, dynamic> formData;
+  final TestingServiceSchedule? testingSchedule;
+  final TestingServiceDocuments? testingDocuments;
+  final String? contactNumber;
+  final DateTime? preferredScheduleAt;
+  final String? preferredScheduleTime;
   final DateTime? acknowledgedAt;
 
   /// Portal account that owns this inquiry, when one has been recorded.
@@ -206,6 +220,7 @@ class AdminInquiryModel {
   bool get isEscalated => escalationStatus == 'requested';
 
   bool get isFormSubmission => formType != null && formType!.isNotEmpty;
+  bool get isTestingService => formType == testingServiceFormType;
   bool get isAcknowledged => acknowledgedAt != null;
 
   String get typeLabel {
@@ -217,7 +232,15 @@ class AdminInquiryModel {
   }
 
   String get displayName =>
-      (name ?? '').trim().isNotEmpty ? name!.trim() : email;
+      (name ?? '').trim().isNotEmpty ? name!.trim() : studentIdentityLabel;
+
+  String get studentIdentityLabel => formatStudentIdentifier(
+    studentNumber: studentNumber,
+    email: email,
+    fallback: 'Student',
+  );
+
+  String get visibleEmail => visibleContactEmail(email);
 
   AdminInquiryModel copyWith({InquiryStatus? status}) => AdminInquiryModel(
     id: id,
@@ -229,9 +252,15 @@ class AdminInquiryModel {
     createdAt: createdAt,
     status: status ?? this.status,
     name: name,
+    studentNumber: studentNumber,
     role: role,
     formType: formType,
     formData: formData,
+    testingSchedule: testingSchedule,
+    testingDocuments: testingDocuments,
+    contactNumber: contactNumber,
+    preferredScheduleAt: preferredScheduleAt,
+    preferredScheduleTime: preferredScheduleTime,
     acknowledgedAt: acknowledgedAt,
     assignedStaffId: assignedStaffId,
     collegeId: collegeId,
@@ -275,11 +304,21 @@ class AdminInquiryModel {
       category: parsedCategory,
       email: json['email']?.toString() ?? '',
       name: _optional(json['name']),
+      studentNumber: _optional(json['studentNumber']),
       role: _optional(json['role']),
       formType: parsedFormType,
       formData: json['formData'] is Map
           ? Map<String, dynamic>.from(json['formData'] as Map)
           : const {},
+      testingSchedule: TestingServiceSchedule.tryFromJson(
+        json['testingSchedule'],
+      ),
+      testingDocuments: TestingServiceDocuments.tryFromJson(
+        json['testingDocuments'],
+      ),
+      contactNumber: _optional(json['contactNumber']),
+      preferredScheduleAt: dateTimeFromFirestore(json['preferredScheduleAt']),
+      preferredScheduleTime: _optional(json['preferredScheduleTime']),
       acknowledgedAt: dateTimeFromFirestore(json['acknowledgedAt']),
       assignedStaffId: _optional(json['assignedStaffId']),
       collegeId: json['collegeId']?.toString() ?? '',

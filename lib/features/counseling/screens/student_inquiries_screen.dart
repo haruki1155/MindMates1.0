@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../../models/student_inquiry_model.dart';
 import '../../../repositories/inquiry_repository.dart';
 import '../../../services/firebase/firebase_error_message.dart';
+import '../widgets/testing_service_schedule_card.dart';
 
 class _StudentInquiryPalette {
   const _StudentInquiryPalette._();
@@ -195,7 +196,7 @@ class _MyInquiriesScreenState extends State<MyInquiriesScreen> {
               icon: Icons.lock_outline,
               title: 'Sign in required',
               message:
-                  'Please sign in with your student account to view your submitted inquiries and PACC replies.',
+                  'Please sign in with your MindMate account to view your submitted inquiries and PACC replies.',
             )
           : KeyedSubtree(
               key: ValueKey('my-inquiries-$uid-$_retryEpoch'),
@@ -294,6 +295,27 @@ class _MyInquiriesScreenState extends State<MyInquiriesScreen> {
                                   crossAxisAlignment: WrapCrossAlignment.center,
                                   children: [
                                     _StatusChip(status: item.status),
+                                    if (item.testingSchedule != null)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFEAF2FF),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          item.testingSchedule!.status.label,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF1D4D8F),
+                                          ),
+                                        ),
+                                      ),
                                     Text(
                                       item.responseCount > 0
                                           ? '${item.responseCount} ${item.responseCount == 1 ? 'reply' : 'replies'}'
@@ -314,6 +336,17 @@ class _MyInquiriesScreenState extends State<MyInquiriesScreen> {
                                     color: _StudentInquiryPalette.muted,
                                   ),
                                 ),
+                                if (item.processingCounselorName != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Handled by: ${item.processingCounselorName}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: _StudentInquiryPalette.ink,
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -343,6 +376,7 @@ class StudentInquiryDetailScreen extends StatefulWidget {
     this.repository,
     this.currentUserIdProvider,
     this.authUidChanges,
+    this.showTestingSubmissionBanner = false,
   });
 
   final String inquiryId;
@@ -350,6 +384,7 @@ class StudentInquiryDetailScreen extends StatefulWidget {
   final InquiryRepository? repository;
   final String? Function()? currentUserIdProvider;
   final Stream<String?>? authUidChanges;
+  final bool showTestingSubmissionBanner;
 
   @override
   State<StudentInquiryDetailScreen> createState() =>
@@ -362,6 +397,7 @@ class _StudentInquiryDetailScreenState
   late String? _activeUid;
   StreamSubscription<String?>? _authSubscription;
   int _retryEpoch = 0;
+  bool _updatingSchedule = false;
 
   @override
   void initState() {
@@ -422,6 +458,70 @@ class _StudentInquiryDetailScreenState
   void dispose() {
     _authSubscription?.cancel();
     super.dispose();
+  }
+
+  Future<void> _acceptTestingSchedule(StudentInquiryRecord inquiry) async {
+    if (_updatingSchedule) return;
+    setState(() => _updatingSchedule = true);
+    try {
+      await _repository.acceptTestingServiceSchedule(
+        inquiry.id,
+        expectedScheduleRevision: inquiry.testingSchedule?.revision,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Testing Service schedule confirmed.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            FirebaseErrorMessage.describe(
+              error,
+              fallback: 'Unable to confirm the proposed schedule.',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingSchedule = false);
+    }
+  }
+
+  Future<void> _requestTestingReschedule(
+    StudentInquiryRecord inquiry,
+    String reason,
+  ) async {
+    if (_updatingSchedule) return;
+    setState(() => _updatingSchedule = true);
+    try {
+      await _repository.requestTestingServiceReschedule(
+        inquiry.id,
+        reason: reason,
+        expectedScheduleRevision: inquiry.testingSchedule?.revision,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reschedule request sent to PACC.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            FirebaseErrorMessage.describe(
+              error,
+              fallback: 'Unable to send reschedule request.',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingSchedule = false);
+    }
   }
 
   @override
@@ -565,6 +665,30 @@ class _StudentInquiryDetailScreenState
                                   color: _StudentInquiryPalette.muted,
                                 ),
                               ),
+                              if (!inquiry.isTestingService &&
+                                  inquiry.processingCounselorName != null) ...[
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.badge_outlined,
+                                      size: 16,
+                                      color: _StudentInquiryPalette.ink,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        'Processing Counselor: ${inquiry.processingCounselorName}',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: _StudentInquiryPalette.ink,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                               const Divider(height: 28),
                               const Text(
                                 'Your message',
@@ -589,6 +713,24 @@ class _StudentInquiryDetailScreenState
                           ),
                         ),
                         const SizedBox(height: 16),
+                        if (inquiry.isTestingService ||
+                            inquiry.testingSchedule != null) ...[
+                          TestingServiceScheduleCard(
+                            inquiry: inquiry,
+                            busy: _updatingSchedule,
+                            showSubmissionBanner:
+                                widget.showTestingSubmissionBanner,
+                            onLoadDocument: (path) =>
+                                _repository.downloadTestingServiceDocument(
+                                  inquiryId: inquiry.id,
+                                  path: path,
+                                ),
+                            onAccept: () => _acceptTestingSchedule(inquiry),
+                            onRequestReschedule: (reason) =>
+                                _requestTestingReschedule(inquiry, reason),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
                         _RepliesSection(
                           inquiryId: inquiry.id,
                           repository: _repository,

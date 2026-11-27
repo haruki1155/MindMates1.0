@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
+import '../../../core/utils/student_identity_formatter.dart';
 import '../../../models/profile_roles.dart';
 import '../../../models/user_model.dart';
 import '../../../repositories/admin_portal_repository.dart';
@@ -695,7 +696,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          user.email,
+                          formatStudentIdentifier(
+                            studentNumber: user.schoolId,
+                            email: user.email,
+                            fallback: user.employeeId ?? '',
+                          ),
                           style: const TextStyle(
                             color: AdminColors.muted,
                             fontSize: 12,
@@ -757,7 +762,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '${user.email}\nEmployee ID: ${user.employeeId ?? 'Not provided'}\nPosition: ${user.position ?? 'Not provided'}',
+                  '${formatStudentIdentifier(studentNumber: user.schoolId, email: user.email, fallback: user.employeeId ?? '')}\nEmployee ID: ${user.employeeId ?? 'Not provided'}\nPosition: ${user.position ?? 'Not provided'}',
                   style: const TextStyle(
                     color: AdminColors.muted,
                     height: 1.45,
@@ -976,7 +981,14 @@ class _UserManagementPageState extends State<UserManagementPage> {
         child: ListView(
           shrinkWrap: true,
           children: [
-            _detail('Email', user.email),
+            _detail(
+              'Account ID / Email',
+              formatStudentIdentifier(
+                studentNumber: user.schoolId,
+                email: user.email,
+                fallback: user.employeeId ?? '',
+              ),
+            ),
             _detail('Employee ID', user.employeeId),
             _detail('Position', user.position),
             _detail('Department', user.department),
@@ -1082,7 +1094,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          user.email,
+                          formatStudentIdentifier(
+                            studentNumber: user.schoolId,
+                            email: user.email,
+                            fallback: user.employeeId ?? '',
+                          ),
                           style: const TextStyle(color: AdminColors.muted),
                         ),
                         const SizedBox(height: 9),
@@ -1641,7 +1657,11 @@ class _StaffRecordCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      user.email,
+                      formatStudentIdentifier(
+                        studentNumber: user.schoolId,
+                        email: user.email,
+                        fallback: user.employeeId ?? '',
+                      ),
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: AdminColors.muted,

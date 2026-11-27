@@ -1,11 +1,16 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_assets.dart';
+import '../../../models/student_inquiry_model.dart';
+import '../../../repositories/inquiry_repository.dart';
 import '../../../routes/route_names.dart';
 import 'client_feedback_form_screen.dart';
 import '../widgets/client_feedback_qr_card.dart';
 import 'guidance_satisfaction_survey_screen.dart';
 import 'pacc_counseling_screen.dart';
+import 'testing_service_inquiry_screen.dart';
 
 class ServiceGuideData {
   const ServiceGuideData({
@@ -67,6 +72,7 @@ class ServiceDetailData {
     this.hasSatisfactionSurvey = false,
     this.hasClientFeedbackForm = false,
     this.hasFeedbackQr = false,
+    this.hasTestingServiceInquiry = false,
     this.guides = const [],
   });
 
@@ -82,13 +88,41 @@ class ServiceDetailData {
   final bool hasSatisfactionSurvey;
   final bool hasClientFeedbackForm;
   final bool hasFeedbackQr;
+  final bool hasTestingServiceInquiry;
   final List<ServiceGuideData> guides;
 }
 
 class ServiceDetailScreen extends StatelessWidget {
-  const ServiceDetailScreen({super.key, required this.service});
+  const ServiceDetailScreen({
+    super.key,
+    required this.service,
+    this.inquiryRepository,
+    this.myInquiriesStream,
+    this.currentUserIdProvider,
+  });
 
   final ServiceDetailData service;
+  final InquiryRepository? inquiryRepository;
+  final Stream<List<StudentInquiryRecord>>? myInquiriesStream;
+  final String? Function()? currentUserIdProvider;
+
+  Stream<List<StudentInquiryRecord>>? _resolveInquiriesStream() {
+    if (myInquiriesStream != null) return myInquiriesStream;
+    final repo = inquiryRepository;
+    final uid = currentUserIdProvider?.call()?.trim() ??
+        repo?.currentUserId?.trim() ??
+        (Firebase.apps.isNotEmpty
+            ? FirebaseAuth.instance.currentUser?.uid.trim()
+            : null);
+    if (uid == null || uid.isEmpty) return null;
+    if (repo != null) return repo.watchMyInquiries(uid);
+    if (Firebase.apps.isNotEmpty) {
+      return InquiryRepository(
+        currentUserIdProvider: currentUserIdProvider,
+      ).watchMyInquiries(uid);
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -152,6 +186,40 @@ class ServiceDetailScreen extends StatelessWidget {
                             'Set a preferred date and time to discuss personal, academic, social, or emotional concerns with a PACC counselor.',
                         buttonLabel: 'Set Appointment',
                         onTap: () => _openPaccCounseling(context),
+                      ),
+                    ],
+                    if (service.hasTestingServiceInquiry) ...[
+                      const SizedBox(height: 32),
+                      const _DetailSectionHeading(
+                        title: 'Schedule Request',
+                        subtitle:
+                            'Eligible clients may request a Testing Service schedule online and receive updates in the app.',
+                      ),
+                      const SizedBox(height: 14),
+                      StreamBuilder<List<StudentInquiryRecord>>(
+                        stream: _resolveInquiriesStream(),
+                        builder: (context, snapshot) {
+                          final hasActive = (snapshot.data ?? const [])
+                              .any((inquiry) => inquiry.isActiveTestingService);
+                          return _ServiceActionCard(
+                            buttonKey: const ValueKey(
+                              'service-detail-testing-cta',
+                            ),
+                            icon: Icons.fact_check_outlined,
+                            purpose: 'PSYCHOLOGICAL TESTING',
+                            title: 'Request Testing Service Schedule',
+                            description:
+                                'Available for Students for OJT, Teaching employees, and Non-Teaching employees (Monday–Saturday, 8:00 AM–5:00 PM). Requires an Endorsement Letter and official receipt for PHP 250.',
+                            buttonLabel: hasActive
+                                ? 'Testing Request Ongoing'
+                                : 'Request Testing Schedule',
+                            enabled: !hasActive,
+                            disabledHint: hasActive
+                                ? 'You already have an active Testing Service schedule request. This button unlocks once PACC marks your current session as Completed.'
+                                : null,
+                            onTap: () => _openTestingServiceInquiry(context),
+                          );
+                        },
                       ),
                     ],
                     if (service.hasSatisfactionSurvey ||
@@ -219,6 +287,12 @@ class ServiceDetailScreen extends StatelessWidget {
     Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const ClientFeedbackFormScreen()));
+  }
+
+  static void _openTestingServiceInquiry(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const TestingServiceInquiryScreen()),
+    );
   }
 }
 
@@ -574,20 +648,26 @@ class _GuideBullet extends StatelessWidget {
 
 class _ServiceActionCard extends StatelessWidget {
   const _ServiceActionCard({
+    this.buttonKey,
     required this.icon,
     required this.purpose,
     required this.title,
     required this.description,
     required this.buttonLabel,
     required this.onTap,
+    this.enabled = true,
+    this.disabledHint,
   });
 
+  final Key? buttonKey;
   final IconData icon;
   final String purpose;
   final String title;
   final String description;
   final String buttonLabel;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool enabled;
+  final String? disabledHint;
 
   @override
   Widget build(BuildContext context) {
@@ -637,14 +717,35 @@ class _ServiceActionCard extends StatelessWidget {
           const SizedBox(height: 14),
           Text(description, style: _DetailText.actionDescription),
           const SizedBox(height: 18),
+          if (disabledHint != null && !enabled) ...[
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF5D8),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                disabledHint!,
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF7A5600),
+                ),
+              ),
+            ),
+          ],
           SizedBox(
             width: double.infinity,
             child: Material(
-              color: _DetailColors.sun,
+              key: buttonKey,
+              color: enabled ? _DetailColors.sun : const Color(0xFFE5EAE5),
               borderRadius: BorderRadius.circular(12),
               child: InkWell(
                 borderRadius: BorderRadius.circular(12),
-                onTap: onTap,
+                onTap: enabled ? onTap : null,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -657,14 +758,22 @@ class _ServiceActionCard extends StatelessWidget {
                         child: Text(
                           buttonLabel,
                           textAlign: TextAlign.center,
-                          style: _DetailText.actionButton,
+                          style: _DetailText.actionButton.copyWith(
+                            color: enabled
+                                ? _DetailColors.text
+                                : const Color(0xFF6B7D83),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      const Icon(
-                        Icons.arrow_forward_rounded,
+                      Icon(
+                        enabled
+                            ? Icons.arrow_forward_rounded
+                            : Icons.lock_clock_outlined,
                         size: 18,
-                        color: _DetailColors.text,
+                        color: enabled
+                            ? _DetailColors.text
+                            : const Color(0xFF6B7D83),
                       ),
                     ],
                   ),

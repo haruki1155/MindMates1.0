@@ -4,6 +4,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../core/utils/student_identity_formatter.dart';
 import '../models/admin_inquiry_model.dart';
 
 class InquiryPdfService {
@@ -38,7 +39,14 @@ class InquiryPdfService {
           ),
           pw.SizedBox(height: 16),
           _row('Submitted by', inquiry.displayName),
-          _row('Email', inquiry.email.isEmpty ? 'Not provided' : inquiry.email),
+          _row(
+            isSyntheticStudentEmail(inquiry.email)
+                ? 'Student No.'
+                : 'Email',
+            inquiry.studentIdentityLabel == 'Student'
+                ? 'Not provided'
+                : inquiry.studentIdentityLabel,
+          ),
           _row('Category', inquiry.category),
           _row('Status', inquiry.status.label),
           _row('Submitted', inquiry.createdAt.toLocal().toString()),

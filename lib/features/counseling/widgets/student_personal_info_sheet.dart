@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/student_identity_formatter.dart';
 import '../../../models/student_personal_info.dart';
 import '../../../repositories/student_roster_repository.dart';
 
@@ -157,7 +158,8 @@ class _Body extends StatelessWidget {
           _row('College', official.college),
           _row('Course', official.course),
           _row('Year level', official.yearLevel),
-          _row('Email', official.email),
+          if (visibleContactEmail(official.email).isNotEmpty)
+            _row('Email', visibleContactEmail(official.email)),
           const SizedBox(height: 12),
           if (p == null)
             const Text(studentInfoIncompleteCopy)
