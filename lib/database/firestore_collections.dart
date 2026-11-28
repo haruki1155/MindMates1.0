@@ -18,6 +18,7 @@ class FirestoreCollections {
   static const appointmentQueue = 'appointment_queue';
   static const appointmentHistory = 'history';
   static const notifications = 'notifications';
+  static const reminderPreferences = 'reminder_preferences';
   static const userDevices = 'user_devices';
   static const analyticsDaily = 'analytics_daily';
   static const analyticsEvents = '_analytics_events';

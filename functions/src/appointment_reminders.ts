@@ -12,3 +12,13 @@ const eligibleStatuses = new Set<string>(REMINDER_ELIGIBLE_APPOINTMENT_STATUSES)
 export function isReminderEligibleAppointmentStatus(status: unknown): boolean {
   return eligibleStatuses.has(canonicalAppointmentStatus(status));
 }
+
+export function isAppointmentReminderEnabled(
+  preferences: Record<string, unknown> | null | undefined,
+  stage: "twentyFourHour" | "oneHour",
+): boolean {
+  const field = stage === "twentyFourHour"
+    ? "appointment24HourEnabled"
+    : "appointment1HourEnabled";
+  return preferences?.[field] !== false;
+}

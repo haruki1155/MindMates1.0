@@ -5,6 +5,7 @@ import '../../../models/app_notification_model.dart';
 import '../../../providers/appointment_provider.dart';
 import '../../../repositories/inquiry_repository.dart';
 import '../../../repositories/notification_repository.dart';
+import '../../../routes/route_names.dart';
 import '../../counseling/screens/student_inquiries_screen.dart';
 import '../../counseling/widgets/appointment_details_sheet.dart';
 
@@ -191,6 +192,13 @@ class NotificationsScreen extends StatelessWidget {
                           ),
                         ),
                       );
+                      return;
+                    }
+                    final reminderRoute = RouteNames.selfCareReminderRoute(
+                      item.type,
+                    );
+                    if (reminderRoute != null) {
+                      Navigator.of(context).pushNamed(reminderRoute);
                       return;
                     }
                     final appointmentId = item.appointmentId;

@@ -18,6 +18,7 @@ import 'providers/mental_health_activity_provider.dart';
 import 'providers/mind_aid_provider.dart';
 import 'providers/mood_provider.dart';
 import 'providers/notification_provider.dart';
+import 'providers/reminder_preferences_provider.dart';
 import 'providers/report_provider.dart';
 import 'providers/secret_chat_provider.dart';
 import 'providers/sleep_provider.dart';
@@ -32,6 +33,7 @@ import 'repositories/mind_aid_repository_screen.dart';
 import 'repositories/mood_combined_history_repository.dart';
 import 'repositories/mood_repository.dart';
 import 'repositories/notification_repository.dart';
+import 'repositories/reminder_preferences_repository.dart';
 import 'repositories/report_repository.dart';
 import 'repositories/secret_chat_repository.dart';
 import 'repositories/sleep_repository.dart';
@@ -80,6 +82,11 @@ Widget _mobileApp() => MultiProvider(
     ),
     ChangeNotifierProvider(
       create: (_) => NotificationProvider(NotificationRepository()),
+    ),
+    ChangeNotifierProvider(
+      create: (_) => ReminderPreferencesProvider(
+        ReminderPreferencesRepository(),
+      ),
     ),
     ChangeNotifierProvider(
       create: (_) => ReportProvider(
