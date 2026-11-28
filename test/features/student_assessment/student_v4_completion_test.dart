@@ -1,21 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/counseling/screens/pacc_counseling_screen.dart';
+import 'package:mind_mates/features/student_assessment/models/intervention_models.dart';
+import 'package:mind_mates/features/student_assessment/screens/assessment_domain_review_screen.dart';
+import 'package:mind_mates/features/student_assessment/screens/intervention_breathing_screen.dart';
+import 'package:mind_mates/features/student_assessment/screens/intervention_feedback_screen.dart';
+import 'package:mind_mates/features/student_assessment/screens/intervention_grounding_screen.dart';
+import 'package:mind_mates/features/student_assessment/screens/intervention_walking_screen.dart';
 import 'package:mind_mates/features/student_assessment/screens/student_assessment_complete_screen.dart';
+import 'package:mind_mates/features/student_assessment/screens/student_assessment_screen.dart';
+import 'package:mind_mates/features/student_assessment/screens/student_v4_category_intervention_screen.dart';
 import 'package:mind_mates/features/student_assessment/widgets/assessment_domain_illustration.dart';
+import 'package:mind_mates/features/student_assessment/widgets/assessment_presentation.dart';
 import 'package:mind_mates/features/student_assessment/models/student_assessment_models.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
 import 'package:mind_mates/models/appointment_model.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/assessment_provider.dart';
 import 'package:mind_mates/providers/appointment_provider.dart';
+import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/assessment_repository.dart';
 import 'package:mind_mates/repositories/appointment_repository.dart';
+import 'package:mind_mates/repositories/auth_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:mind_mates/routes/route_names.dart';
+import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
@@ -631,6 +643,319 @@ void main() {
     expect(find.textContaining('responseValue'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'AssessmentDomainReviewScreen renders matched Student V4 titles/descriptions when eligible, hides them when ineligible, and refreshes after retry',
+    (tester) async {
+      const cases = [
+        (
+          InterventionType.academicPlanning,
+          'Academic',
+          'Start with five minutes',
+        ),
+        (
+          InterventionType.financialPlanning,
+          'Financial',
+          'Choose one practical next step',
+        ),
+        (
+          InterventionType.walking,
+          'Social Adjustment',
+          'Take a short walk',
+        ),
+        (
+          InterventionType.breathing,
+          'Sleep & Rest',
+          'Try a breathing wind-down',
+        ),
+        (
+          InterventionType.grounding,
+          'Emotional Well-Being',
+          'Ground and notice',
+        ),
+      ];
+
+      for (final (type, label, title) in cases) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: AssessmentDomainReviewScreen(
+              key: ValueKey(type),
+              isStudentV4: true,
+              preview: {
+                'domainLabel': label,
+                'status': 'supportMayHelp',
+                'interventionEligible': true,
+              },
+              intervention: type,
+              onTryActivity: () {},
+              onContinue: () {},
+              onRetry: () async {},
+              onBack: () {},
+            ),
+          ),
+        );
+
+        expect(find.byType(AssessmentStatusPill), findsOneWidget);
+        expect(find.text('Optional activity · 1–3 min'), findsOneWidget);
+        expect(find.text(title), findsOneWidget);
+        expect(find.text('Try Activity'), findsOneWidget);
+        expect(find.text('Not now, continue assessment'), findsOneWidget);
+      }
+
+      // Ineligible hides the activity card and Try Activity button.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AssessmentDomainReviewScreen(
+            key: const ValueKey('ineligible'),
+            isStudentV4: true,
+            preview: const {
+              'domainLabel': 'Academic',
+              'status': 'mostlySupported',
+              'interventionEligible': false,
+            },
+            onTryActivity: () {},
+            onContinue: () {},
+            onRetry: () async {},
+            onBack: () {},
+          ),
+        ),
+      );
+      expect(find.text('Optional activity · 1–3 min'), findsNothing);
+      expect(find.text('Try Activity'), findsNothing);
+
+      // Failed preview retry refreshes preview, clears stale error, and shows matched card.
+      Map<String, Object>? retriedPreview;
+      Object? retriedError = StateError('temporary');
+      InterventionType? retriedIntervention;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: AssessmentDomainReviewScreen(
+            key: const ValueKey('retry'),
+            isStudentV4: true,
+            preview: null,
+            error: retriedError,
+            onRetry: () async {
+              retriedPreview = {
+                'domainLabel': 'Financial',
+                'status': 'supportMayHelp',
+                'interventionEligible': true,
+              };
+              retriedError = null;
+              retriedIntervention = InterventionType.financialPlanning;
+            },
+            previewAfterRetry: () => retriedPreview,
+            errorAfterRetry: () => retriedError,
+            interventionAfterRetry: () => retriedIntervention,
+            onTryActivity: () {},
+            onContinue: () {},
+            onBack: () {},
+          ),
+        ),
+      );
+
+      expect(find.text('Retry Preview'), findsOneWidget);
+      await tester.tap(find.text('Retry Preview'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Financial'), findsOneWidget);
+      expect(find.text('Choose one practical next step'), findsOneWidget);
+      expect(find.text('Try Activity'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'StudentAssessmentScreen routes all five eligible Student V4 categories, supports skip/back/skip-feedback, and advances to submission',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final assessment = AssessmentProvider(_AllEligiblePreviewRepository())
+        ..bindAuthenticatedUser('student-v4');
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AssessmentProvider>.value(value: assessment),
+            ChangeNotifierProvider<AuthProvider>(
+              create: (_) => _TestAuthProvider('student-v4'),
+            ),
+          ],
+          child: MaterialApp(
+            home: const StudentAssessmentScreen(),
+            routes: {
+              RouteNames.studentAssessmentComplete: (_) =>
+                  const Scaffold(body: Text('Completion destination')),
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('I understand, start assessment'));
+      await tester.pumpAndSettle();
+
+      Future<void> answerToDomainEnd() async {
+        for (var i = 0; i < 9; i += 1) {
+          await assessment.answerCurrentStudentQuestion(LikertAnswer.often);
+        }
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(LikertAnswer.often.label));
+        await tester.pumpAndSettle();
+      }
+
+      // 1. Academic -> Start with five minutes -> back/cancel returns to review -> Finish -> Skip feedback
+      await answerToDomainEnd();
+      expect(find.text('Start with five minutes'), findsOneWidget);
+      await tester.tap(find.text('Try Activity'));
+      await tester.pumpAndSettle();
+      expect(find.byType(StudentV4CategoryInterventionScreen), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Try Activity'), findsOneWidget);
+
+      await tester.tap(find.text('Try Activity'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Finish activity'));
+      await tester.tap(find.text('Finish activity'));
+      await tester.pumpAndSettle();
+      expect(find.byType(InterventionFeedbackScreen), findsOneWidget);
+      await tester.ensureVisible(find.text('Skip feedback'));
+      await tester.tap(find.text('Skip feedback'));
+      await tester.pumpAndSettle();
+      expect(assessment.interventionFeedback, isEmpty);
+      expect(assessment.studentQuestionIndex, 10);
+
+      // 2. Financial -> Choose one practical next step -> Skip activity
+      await answerToDomainEnd();
+      expect(find.text('Choose one practical next step'), findsOneWidget);
+      await tester.tap(find.text('Try Activity'));
+      await tester.pumpAndSettle();
+      expect(find.byType(StudentV4CategoryInterventionScreen), findsOneWidget);
+      await tester.ensureVisible(find.text('Skip activity'));
+      await tester.tap(find.text('Skip activity'));
+      await tester.pumpAndSettle();
+      expect(find.byType(InterventionFeedbackScreen), findsNothing);
+      expect(assessment.studentQuestionIndex, 20);
+
+      // 3. Social Adjustment -> Permission-free Walking -> self-reported completion -> Skip feedback
+      await answerToDomainEnd();
+      expect(find.text('Take a short walk'), findsOneWidget);
+      await tester.tap(find.text('Try Activity'));
+      await tester.pumpAndSettle();
+      expect(find.byType(InterventionWalkingScreen), findsOneWidget);
+      expect(find.text('500-step goal'), findsNothing);
+      await tester.tap(find.text('I took a short walk'));
+      await tester.pumpAndSettle();
+      expect(find.byType(InterventionFeedbackScreen), findsOneWidget);
+      await tester.ensureVisible(find.text('Skip feedback'));
+      await tester.tap(find.text('Skip feedback'));
+      await tester.pumpAndSettle();
+      expect(assessment.studentQuestionIndex, 30);
+
+      // 4. Sleep & Rest -> Breathing (uses periodic timer, so use timed pumps) -> Skip activity
+      await answerToDomainEnd();
+      expect(find.text('Try a breathing wind-down'), findsOneWidget);
+      await tester.tap(find.text('Try Activity'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(find.byType(InterventionBreathingScreen), findsOneWidget);
+      await tester.tap(find.text('Skip activity'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(assessment.studentQuestionIndex, 40);
+
+      // 5. Emotional Well-Being -> Grounding with feeling prompt -> Skip -> submission review
+      await answerToDomainEnd();
+      expect(find.text('Ground and notice'), findsOneWidget);
+      await tester.tap(find.text('Try Activity'));
+      await tester.pumpAndSettle();
+      expect(find.byType(InterventionGroundingScreen), findsOneWidget);
+      expect(find.text('Step 1 of 6'), findsOneWidget);
+      await tester.ensureVisible(find.text('Skip activity'));
+      await tester.tap(find.text('Skip activity'));
+      await tester.pumpAndSettle();
+      expect(find.text('Submit assessment'), findsOneWidget);
+      expect(assessment.studentAnswers, hasLength(50));
+    },
+  );
+
+  testWidgets(
+    'StudentAssessmentScreen pops review when retry returns an ineligible preview and keeps Teaching V4 on generic card',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      // Retry -> ineligible pops cleanly back to answering.
+      final retryAssessment = AssessmentProvider(_FailThenIneligibleRepository())
+        ..bindAuthenticatedUser('student-retry');
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<AssessmentProvider>.value(
+              value: retryAssessment,
+            ),
+            ChangeNotifierProvider<AuthProvider>(
+              create: (_) => _TestAuthProvider('student-retry'),
+            ),
+          ],
+          child: const MaterialApp(
+            key: ValueKey('retry-app'),
+            home: StudentAssessmentScreen(),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('I understand, start assessment'));
+      await tester.pumpAndSettle();
+      for (var i = 0; i < 9; i += 1) {
+        await retryAssessment.answerCurrentStudentQuestion(LikertAnswer.often);
+      }
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(LikertAnswer.often.label));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Retry Preview'), findsOneWidget);
+      await tester.tap(find.text('Retry Preview'));
+      await tester.pumpAndSettle();
+      expect(find.text('Retry Preview'), findsNothing);
+      expect(retryAssessment.studentQuestionIndex, 10);
+
+      // Teaching V4 keeps the generic review prompt rather than Student V4 card copy.
+      final teachingAssessment = AssessmentProvider(
+        _AllEligiblePreviewRepository(),
+      )
+        ..bindAuthenticatedUser('faculty-1')
+        ..selectRole(AssessmentRole.faculty);
+      await tester.pumpWidget(
+        MultiProvider(
+          key: const ValueKey('teaching-scope'),
+          providers: [
+            ChangeNotifierProvider<AssessmentProvider>.value(
+              value: teachingAssessment,
+            ),
+            ChangeNotifierProvider<AuthProvider>(
+              create: (_) => _TestAuthProvider('faculty-1'),
+            ),
+          ],
+          child: const MaterialApp(
+            key: ValueKey('teaching-app'),
+            home: StudentAssessmentScreen(),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('I understand, start assessment'));
+      await tester.pumpAndSettle();
+      for (var i = 0; i < 9; i += 1) {
+        await teachingAssessment.answerCurrentStudentQuestion(LikertAnswer.often);
+      }
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(LikertAnswer.often.label));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Optional activity · 1–3 min'), findsNothing);
+      expect(find.text('Start with five minutes'), findsNothing);
+      expect(find.text('Try Activity'), findsOneWidget);
+    },
+  );
 }
 
 Future<void> _expectTextVisible(WidgetTester tester, String value) async {
@@ -945,5 +1270,65 @@ class _NoopAppointmentRepository extends AppointmentRepository {
   }) async {
     createCalls += 1;
     return appointment.copyWith(id: 'created_1');
+  }
+}
+
+class _TestAuthProvider extends AuthProvider {
+  _TestAuthProvider(String uid) : super(_TestAuthRepository(uid));
+}
+
+class _TestAuthRepository extends AuthRepository {
+  _TestAuthRepository(this._uid) : super(AuthService());
+  final String _uid;
+
+  @override
+  String? get currentUserId => _uid;
+}
+
+class _AllEligiblePreviewRepository extends AssessmentRepository {
+  @override
+  Future<Map<String, Object>> previewV4AssessmentDomain({
+    required String instrumentVersion,
+    required String domainId,
+    required List<StudentAssessmentAnswer> answers,
+  }) async => {
+    'domainId': domainId,
+    'domainLabel': domainId,
+    'status': 'supportMayHelp',
+    'isScorable': true,
+    'answeredCount': answers.length,
+    'presentedCount': 10,
+    'summary': 'Server result.',
+    'suggestedAction': 'Continue.',
+    'reflectionPrompt': 'Reflect.',
+    'interventionEligible': true,
+    'policyVersion': 'assessment_intervention_v1',
+  };
+}
+
+class _FailThenIneligibleRepository extends AssessmentRepository {
+  int _calls = 0;
+
+  @override
+  Future<Map<String, Object>> previewV4AssessmentDomain({
+    required String instrumentVersion,
+    required String domainId,
+    required List<StudentAssessmentAnswer> answers,
+  }) async {
+    _calls += 1;
+    if (_calls == 1) throw StateError('offline');
+    return {
+      'domainId': domainId,
+      'domainLabel': domainId,
+      'status': 'mostlySupported',
+      'isScorable': true,
+      'answeredCount': answers.length,
+      'presentedCount': 10,
+      'summary': 'Server result.',
+      'suggestedAction': 'Continue.',
+      'reflectionPrompt': 'Reflect.',
+      'interventionEligible': false,
+      'policyVersion': 'assessment_intervention_v1',
+    };
   }
 }

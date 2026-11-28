@@ -359,6 +359,124 @@ void main() {
       expect(result, isTrue);
     },
   );
+
+  test(
+    'Student V4 maps all five eligible domains deterministically to their category activity',
+    () async {
+      final provider = AssessmentProvider(_EligiblePreviewRepository())
+        ..startStudentAssessment();
+      final selected = <String, InterventionType?>{};
+      for (var index = 0; index < 50; index += 1) {
+        final domainId = provider.currentStudentQuestion!.v4DomainId!;
+        await provider.answerCurrentStudentQuestion(LikertAnswer.often);
+        if (provider.flowStage == AssessmentFlowStage.domainReview) {
+          selected[domainId] = provider.pendingIntervention;
+          provider.continueAfterDomainReview();
+        }
+      }
+
+      expect(selected, {
+        'academic': InterventionType.academicPlanning,
+        'financial': InterventionType.financialPlanning,
+        'socialAdjustment': InterventionType.walking,
+        'sleepRest': InterventionType.breathing,
+        'emotionalWellbeing': InterventionType.grounding,
+      });
+    },
+  );
+
+  test(
+    'Student V4 ineligible previews leave pendingIntervention null and auto-advance',
+    () async {
+      final provider = AssessmentProvider(_PreviewRepository())
+        ..startStudentAssessment();
+      for (var index = 0; index < 50; index += 1) {
+        await provider.answerCurrentStudentQuestion(LikertAnswer.often);
+        expect(provider.pendingIntervention, isNull);
+        expect(
+          provider.flowStage,
+          index == 49
+              ? AssessmentFlowStage.submissionReview
+              : AssessmentFlowStage.answering,
+        );
+      }
+    },
+  );
+
+  test(
+    'continuing or hitting a subsequent preview error clears stale pendingIntervention',
+    () async {
+      final repository = _FailSecondDomainPreviewRepository();
+      final provider = AssessmentProvider(repository)..startStudentAssessment();
+
+      for (var index = 0; index < 10; index += 1) {
+        await provider.answerCurrentStudentQuestion(LikertAnswer.often);
+      }
+      expect(provider.pendingIntervention, InterventionType.academicPlanning);
+
+      provider.continueAfterDomainReview();
+      expect(provider.pendingIntervention, isNull);
+
+      for (var index = 0; index < 10; index += 1) {
+        await provider.answerCurrentStudentQuestion(LikertAnswer.often);
+      }
+      expect(provider.flowStage, AssessmentFlowStage.recoverableError);
+      expect(provider.pendingIntervention, isNull);
+    },
+  );
+
+  test(
+    'Teaching and Non-Teaching V4 eligible previews keep generic rotation and never select Student V4 planning activities',
+    () async {
+      for (final role in [AssessmentRole.faculty, AssessmentRole.staff]) {
+        final provider = AssessmentProvider(_EligiblePreviewRepository())
+          ..selectRole(role)
+          ..startStudentAssessment();
+        final selected = <InterventionType?>[];
+        for (var index = 0; index < 50; index += 1) {
+          await provider.answerCurrentStudentQuestion(LikertAnswer.often);
+          if (provider.flowStage == AssessmentFlowStage.domainReview) {
+            selected.add(provider.pendingIntervention);
+            provider.continueAfterDomainReview();
+          }
+        }
+        expect(selected, hasLength(5));
+        expect(
+          selected,
+          everyElement(
+            isIn([
+              InterventionType.walking,
+              InterventionType.breathing,
+              InterventionType.grounding,
+            ]),
+          ),
+        );
+        expect(selected, isNot(contains(InterventionType.academicPlanning)));
+        expect(selected, isNot(contains(InterventionType.financialPlanning)));
+      }
+    },
+  );
+
+  test(
+    'completing an activity without feedback still advances cleanly and keeps feedback empty',
+    () async {
+      final provider = AssessmentProvider(_EligiblePreviewRepository())
+        ..startStudentAssessment();
+      for (var index = 0; index < 10; index += 1) {
+        await provider.answerCurrentStudentQuestion(LikertAnswer.often);
+      }
+      final attempt = provider.beginInterventionAttempt();
+      provider.handleInterventionOutcome(
+        attempt,
+        InterventionOutcome.completed,
+      );
+
+      expect(provider.interventionFeedback, isEmpty);
+      expect(provider.flowStage, AssessmentFlowStage.answering);
+      expect(provider.studentQuestionIndex, 10);
+      expect(provider.pendingIntervention, isNull);
+    },
+  );
 }
 
 class _PreviewRequest {
@@ -462,4 +580,23 @@ class _DelayedPreviewRepository extends AssessmentRepository {
     'reflectionPrompt': 'Reflect.',
     'interventionEligible': false,
   });
+}
+
+class _FailSecondDomainPreviewRepository extends _EligiblePreviewRepository {
+  @override
+  Future<Map<String, Object>> previewV4AssessmentDomain({
+    required String instrumentVersion,
+    required String domainId,
+    required List<StudentAssessmentAnswer> answers,
+  }) async {
+    if (previewRequests.length == 1) {
+      previewRequests.add(_PreviewRequest(instrumentVersion, domainId, answers));
+      throw StateError('second domain preview failed');
+    }
+    return super.previewV4AssessmentDomain(
+      instrumentVersion: instrumentVersion,
+      domainId: domainId,
+      answers: answers,
+    );
+  }
 }

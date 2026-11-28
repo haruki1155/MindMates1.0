@@ -12,6 +12,7 @@ import 'intervention_breathing_screen.dart';
 import 'intervention_feedback_screen.dart';
 import 'intervention_grounding_screen.dart';
 import 'intervention_walking_screen.dart';
+import 'student_v4_category_intervention_screen.dart';
 import '../models/intervention_models.dart';
 import '../widgets/domain_preview_loading_view.dart';
 
@@ -152,23 +153,48 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
           builder: (_) => AssessmentDomainReviewScreen(
             preview: provider.domainPreview,
             error: provider.domainPreviewError,
-            onRetry: () => provider.retryDomainPreview(),
+            isStudentV4: provider.isStudentAssessmentV4,
+            onRetry: () async {
+              final navigator = Navigator.of(context);
+              await provider.retryDomainPreview();
+              if (mounted &&
+                  provider.flowStage != AssessmentFlowStage.domainReview &&
+                  provider.flowStage != AssessmentFlowStage.recoverableError) {
+                navigator.pop();
+              }
+            },
             previewAfterRetry: () => provider.domainPreview,
             errorAfterRetry: () => provider.domainPreviewError,
+            interventionAfterRetry: () => provider.pendingIntervention,
             onBack: provider.returnToAnsweringFromDomainReview,
             intervention: provider.pendingIntervention,
             onTryActivity: () async {
+              final intervention = provider.pendingIntervention;
+              if (intervention == null) return;
               final attempt = provider.beginInterventionAttempt();
+              if (attempt == 0) return;
+              final isStudentV4 = provider.isStudentAssessmentV4;
               final outcome = await Navigator.of(context)
                   .push<InterventionOutcome>(
                     MaterialPageRoute(
-                      builder: (_) => switch (provider.pendingIntervention!) {
+                      builder: (_) => switch (intervention) {
+                        InterventionType.academicPlanning =>
+                          const StudentV4CategoryInterventionScreen(
+                            intervention: InterventionType.academicPlanning,
+                          ),
+                        InterventionType.financialPlanning =>
+                          const StudentV4CategoryInterventionScreen(
+                            intervention: InterventionType.financialPlanning,
+                          ),
                         InterventionType.breathing =>
                           const InterventionBreathingScreen(),
                         InterventionType.grounding =>
-                          const InterventionGroundingScreen(),
-                        InterventionType.walking =>
-                          const InterventionWalkingScreen(),
+                          InterventionGroundingScreen(
+                            includeFeelingPrompt: isStudentV4,
+                          ),
+                        InterventionType.walking => InterventionWalkingScreen(
+                          selfReportedMode: isStudentV4,
+                        ),
                         InterventionType.appointment =>
                           const InterventionGroundingScreen(),
                       },
@@ -176,7 +202,9 @@ class _StudentAssessmentScreenState extends State<StudentAssessmentScreen> {
                   );
               if (!mounted) return;
               final resolved = outcome ?? InterventionOutcome.cancelled;
-              if (resolved == InterventionOutcome.completed) {
+              if (resolved == InterventionOutcome.completed ||
+                  (isStudentV4 &&
+                      resolved == InterventionOutcome.selfReportedCompleted)) {
                 final feedback = await Navigator.of(context)
                     .push<InterventionFeedback>(
                       MaterialPageRoute(

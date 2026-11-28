@@ -517,8 +517,10 @@ class AssessmentProvider extends ChangeNotifier {
       return;
     }
     _flowStage = AssessmentFlowStage.resuming;
+    _domainPreview = null;
     _domainPreviewError = null;
     _pendingDomainId = null;
+    _pendingIntervention = null;
     if (isLastStudentQuestion) {
       _flowStage = isV4FullAssessment
           ? AssessmentFlowStage.submissionReview
@@ -621,6 +623,7 @@ class AssessmentProvider extends ChangeNotifier {
     _flowStage = AssessmentFlowStage.previewLoading;
     _domainPreview = null;
     _domainPreviewError = null;
+    _pendingIntervention = null;
     notifyListeners();
     try {
       final preview = await _repository.previewV4AssessmentDomain(
@@ -636,7 +639,9 @@ class AssessmentProvider extends ChangeNotifier {
       _domainPreview = preview;
       _domainPreviews[domainId] = preview;
       _pendingIntervention = preview['interventionEligible'] == true
-          ? _interventionRotation.select(domainId)
+          ? (isStudentAssessmentV4
+                ? _interventionRotation.selectForStudentV4(domainId)
+                : _interventionRotation.select(domainId))
           : null;
       if (_pendingIntervention == null) {
         _domainPreview = null;
@@ -723,6 +728,7 @@ class AssessmentProvider extends ChangeNotifier {
     _domainPreview = null;
     _domainPreviewError = null;
     _pendingDomainId = null;
+    _pendingIntervention = null;
     _flowStage = AssessmentFlowStage.answering;
   }
 

@@ -23,6 +23,7 @@ class InterventionWalkingScreen extends StatefulWidget {
     this.requestActivityRecognitionPermission,
     this.initialReadingDelay = const Duration(seconds: 5),
     this.noReadingTimeout = const Duration(seconds: 15),
+    this.selfReportedMode = false,
   });
 
   final Stream<int>? stepCountStream;
@@ -30,6 +31,10 @@ class InterventionWalkingScreen extends StatefulWidget {
   requestActivityRecognitionPermission;
   final Duration initialReadingDelay;
   final Duration noReadingTimeout;
+
+  /// When true (Student V4 Social Adjustment), omits pedometer tracking and
+  /// activity-recognition permission requests and offers a self-reported option.
+  final bool selfReportedMode;
 
   @override
   State<InterventionWalkingScreen> createState() =>
@@ -52,7 +57,9 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
   @override
   void initState() {
     super.initState();
-    unawaited(_startStepCounting());
+    if (!widget.selfReportedMode) {
+      unawaited(_startStepCounting());
+    }
   }
 
   Future<void> _startStepCounting() async {
@@ -223,6 +230,9 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.selfReportedMode) {
+      return _buildSelfReportedView(context);
+    }
     final unavailable =
         _state == WalkingTrackingState.unavailable ||
         _state == WalkingTrackingState.manualFallback;
@@ -325,6 +335,86 @@ class _InterventionWalkingScreenState extends State<InterventionWalkingScreen> {
                       icon: const Icon(Icons.check_rounded),
                       label: const Text('Record self-reported walk'),
                     ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    style: AssessmentPresentation.textButtonStyle(context),
+                    onPressed: () =>
+                        Navigator.of(context).pop(InterventionOutcome.skipped),
+                    child: const Text('Skip activity'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelfReportedView(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Take a short walk')),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: (constraints.maxHeight - 40)
+                    .clamp(0, double.infinity)
+                    .toDouble(),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Take a short walk',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const AssessmentStatusPill(label: '1–3 min'),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  AssessmentSurfaceCard(
+                    color: AssessmentPresentation.softAccent(context),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.directions_walk_rounded,
+                          color: AssessmentPresentation.onSoftAccent(context),
+                          size: 30,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Step away for a brief 1–3 minute walk at a pace that feels comfortable. You can walk alone or invite someone along if you feel like company—no contact is required.',
+                          style: TextStyle(height: 1.45),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'No step sensor or device permission is needed. Whenever you are ready, mark this walk done or skip back to your assessment.',
+                          style: TextStyle(
+                            color: AssessmentPresentation.muted(context),
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    style: AssessmentPresentation.filledButtonStyle(context),
+                    onPressed: _recordSelfReportedCompletion,
+                    icon: const Icon(Icons.check_rounded),
+                    label: const Text('I took a short walk'),
+                  ),
                   const SizedBox(height: 8),
                   TextButton(
                     style: AssessmentPresentation.textButtonStyle(context),
