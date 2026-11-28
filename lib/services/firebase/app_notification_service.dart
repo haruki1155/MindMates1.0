@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 import '../../database/firestore_collections.dart';
+import '../../routes/route_names.dart';
 import 'firestore_service.dart';
 
 class AppNotificationService {
@@ -23,6 +24,7 @@ class AppNotificationService {
     String userId, {
     void Function(String appointmentId)? onAppointmentOpened,
     void Function(String inquiryId)? onInquiryOpened,
+    void Function(String reminderType)? onSelfCareReminderOpened,
     void Function(RemoteMessage message)? onForegroundMessage,
   }) async {
     final settings = await _instance.requestPermission();
@@ -42,18 +44,20 @@ class AppNotificationService {
     _openedSubscription = FirebaseMessaging.onMessageOpenedApp.listen((
       message,
     ) {
-      _dispatchOpenedMessage(
+      dispatchOpenedMessage(
         message,
         onAppointmentOpened: onAppointmentOpened,
         onInquiryOpened: onInquiryOpened,
+        onSelfCareReminderOpened: onSelfCareReminderOpened,
       );
     });
     final initial = await _instance.getInitialMessage();
     if (initial != null) {
-      _dispatchOpenedMessage(
+      dispatchOpenedMessage(
         initial,
         onAppointmentOpened: onAppointmentOpened,
         onInquiryOpened: onInquiryOpened,
+        onSelfCareReminderOpened: onSelfCareReminderOpened,
       );
     }
     await _foregroundSubscription?.cancel();
@@ -62,10 +66,12 @@ class AppNotificationService {
     );
   }
 
-  static void _dispatchOpenedMessage(
+  @visibleForTesting
+  static void dispatchOpenedMessage(
     RemoteMessage message, {
     void Function(String appointmentId)? onAppointmentOpened,
     void Function(String inquiryId)? onInquiryOpened,
+    void Function(String reminderType)? onSelfCareReminderOpened,
   }) {
     final inquiryId = message.data['inquiryId']?.toString().trim() ?? '';
     if (inquiryId.isNotEmpty) {
@@ -76,6 +82,11 @@ class AppNotificationService {
         message.data['appointmentId']?.toString().trim() ?? '';
     if (appointmentId.isNotEmpty) {
       onAppointmentOpened?.call(appointmentId);
+      return;
+    }
+    final type = message.data['type']?.toString().trim().toLowerCase() ?? '';
+    if (RouteNames.selfCareReminderRoute(type) != null) {
+      onSelfCareReminderOpened?.call(type);
     }
   }
 

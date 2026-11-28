@@ -7,6 +7,7 @@ import 'package:mind_mates/providers/appointment_provider.dart';
 import 'package:mind_mates/repositories/appointment_repository.dart';
 import 'package:mind_mates/repositories/inquiry_repository.dart';
 import 'package:mind_mates/repositories/notification_repository.dart';
+import 'package:mind_mates/routes/route_names.dart';
 import 'package:provider/provider.dart';
 
 void main() {
@@ -72,109 +73,155 @@ void main() {
     expect(tester.takeException(), isNull);
     final semantics = tester.ensureSemantics();
     expect(find.bySemanticsLabel(RegExp('.*Mark all read.*')), findsWidgets);
-    expect(tester.getSize(find.widgetWithText(TextButton, 'Mark all read')).height, greaterThanOrEqualTo(48));
-    expect(tester.getSize(find.byKey(const ValueKey('notification-unread'))).height, greaterThanOrEqualTo(48));
+    expect(
+      tester.getSize(find.widgetWithText(TextButton, 'Mark all read')).height,
+      greaterThanOrEqualTo(48),
+    );
+    expect(
+      tester.getSize(find.byKey(const ValueKey('notification-unread'))).height,
+      greaterThanOrEqualTo(48),
+    );
     semantics.dispose();
   });
 
-  testWidgets('tapping inquiry notification marks read and opens StudentInquiryDetailScreen', (
-    tester,
-  ) async {
-    final repository = _MemoryNotificationsRepository([
-      AppNotificationModel(
-        id: 'notif-inq-1',
-        userId: 'user_1',
-        title: 'PACC replied to your inquiry',
-        body: 'Open MindMate to view the reply.',
-        type: 'inquiry',
-        inquiryId: 'inq_1',
-        createdAt: DateTime(2026, 11, 15, 9),
-      ),
-    ]);
-    final inquiryRepository = _TestInquiryRepository(
-      inquiry: StudentInquiryRecord(
-        id: 'inq_1',
-        userId: 'user_1',
-        subject: 'Intake Follow-up',
-        message: 'When is my next check-in?',
-        category: 'Service Form',
-        status: StudentInquiryStatus.inProgress,
-        createdAt: DateTime(2026, 11, 15, 8),
-        responseCount: 1,
-      ),
-      replies: [
-        StudentInquiryReply(
-          id: 'rep-1',
-          message: 'Your counselor scheduled Friday at 10 AM.',
-          authorName: 'Counselor Santos',
-          authorRole: 'counselor',
+  testWidgets(
+    'tapping inquiry notification marks read and opens StudentInquiryDetailScreen',
+    (tester) async {
+      final repository = _MemoryNotificationsRepository([
+        AppNotificationModel(
+          id: 'notif-inq-1',
+          userId: 'user_1',
+          title: 'PACC replied to your inquiry',
+          body: 'Open MindMate to view the reply.',
+          type: 'inquiry',
+          inquiryId: 'inq_1',
           createdAt: DateTime(2026, 11, 15, 9),
         ),
-      ],
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: NotificationsScreen(
+      ]);
+      final inquiryRepository = _TestInquiryRepository(
+        inquiry: StudentInquiryRecord(
+          id: 'inq_1',
           userId: 'user_1',
-          repository: repository,
-          inquiryRepository: inquiryRepository,
+          subject: 'Intake Follow-up',
+          message: 'When is my next check-in?',
+          category: 'Service Form',
+          status: StudentInquiryStatus.inProgress,
+          createdAt: DateTime(2026, 11, 15, 8),
+          responseCount: 1,
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+        replies: [
+          StudentInquiryReply(
+            id: 'rep-1',
+            message: 'Your counselor scheduled Friday at 10 AM.',
+            authorName: 'Counselor Santos',
+            authorRole: 'counselor',
+            createdAt: DateTime(2026, 11, 15, 9),
+          ),
+        ],
+      );
 
-    await tester.tap(find.text('PACC replied to your inquiry'));
-    await tester.pumpAndSettle();
-
-    expect(repository.markedIds, ['notif-inq-1']);
-    expect(find.text('Inquiry Details'), findsOneWidget);
-    expect(find.text('Intake Follow-up'), findsOneWidget);
-    expect(
-      find.text('Your counselor scheduled Friday at 10 AM.'),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('tapping appointment notification preserves appointment lookup behavior', (
-    tester,
-  ) async {
-    final repository = _MemoryNotificationsRepository([
-      AppNotificationModel(
-        id: 'notif-appt-1',
-        userId: 'user_1',
-        title: 'Appointment confirmed',
-        body: 'Your PACC appointment has been updated.',
-        type: 'appointment_confirmed',
-        appointmentId: 'appt_missing',
-        createdAt: DateTime(2026, 11, 15, 10),
-      ),
-    ]);
-    final provider = AppointmentProvider(_TestAppointmentRepository());
-
-    await tester.pumpWidget(
-      ChangeNotifierProvider<AppointmentProvider>.value(
-        value: provider,
-        child: MaterialApp(
+      await tester.pumpWidget(
+        MaterialApp(
           home: NotificationsScreen(
             userId: 'user_1',
             repository: repository,
+            inquiryRepository: inquiryRepository,
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Appointment confirmed'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('PACC replied to your inquiry'));
+      await tester.pumpAndSettle();
 
-    expect(repository.markedIds, ['notif-appt-1']);
-    expect(find.text('This appointment is no longer available.'), findsOneWidget);
-  });
+      expect(repository.markedIds, ['notif-inq-1']);
+      expect(find.text('Inquiry Details'), findsOneWidget);
+      expect(find.text('Intake Follow-up'), findsOneWidget);
+      expect(
+        find.text('Your counselor scheduled Friday at 10 AM.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'tapping appointment notification preserves appointment lookup behavior',
+    (tester) async {
+      final repository = _MemoryNotificationsRepository([
+        AppNotificationModel(
+          id: 'notif-appt-1',
+          userId: 'user_1',
+          title: 'Appointment confirmed',
+          body: 'Your PACC appointment has been updated.',
+          type: 'appointment_confirmed',
+          appointmentId: 'appt_missing',
+          createdAt: DateTime(2026, 11, 15, 10),
+        ),
+      ]);
+      final provider = AppointmentProvider(_TestAppointmentRepository());
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppointmentProvider>.value(
+          value: provider,
+          child: MaterialApp(
+            home: NotificationsScreen(userId: 'user_1', repository: repository),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Appointment confirmed'));
+      await tester.pumpAndSettle();
+
+      expect(repository.markedIds, ['notif-appt-1']);
+      expect(
+        find.text('This appointment is no longer available.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  for (final (type, route, target) in [
+    ('mood_reminder', RouteNames.logMood, 'Mood logger target'),
+    ('breathing_reminder', RouteNames.mindfulBreathing, 'Breathing target'),
+  ]) {
+    testWidgets('$type notification marks read and opens its destination', (
+      tester,
+    ) async {
+      final repository = _MemoryNotificationsRepository([
+        AppNotificationModel(
+          id: 'reminder-1',
+          userId: 'user_1',
+          title: 'MindMate Reminder',
+          body: 'A gentle reminder.',
+          type: type,
+          createdAt: DateTime(2026, 11, 15, 10),
+        ),
+      ]);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: NotificationsScreen(userId: 'user_1', repository: repository),
+          routes: {route: (_) => Scaffold(body: Text(target))},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('MindMate Reminder'));
+      await tester.pumpAndSettle();
+
+      expect(repository.markedIds, ['reminder-1']);
+      expect(find.text(target), findsOneWidget);
+    });
+  }
 }
 
 Widget _app(_MemoryNotificationsRepository repository, {double scale = 1}) {
-  return MaterialApp(builder: (context, child) => MediaQuery(data: MediaQuery.of(context).copyWith(disableAnimations: true), child: child!),
+  return MaterialApp(
+    builder: (context, child) => MediaQuery(
+      data: MediaQuery.of(context).copyWith(disableAnimations: true),
+      child: child!,
+    ),
     home: MediaQuery(
       data: MediaQueryData(textScaler: TextScaler.linear(scale)),
       child: NotificationsScreen(userId: 'user_1', repository: repository),

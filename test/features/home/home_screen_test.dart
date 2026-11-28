@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:mind_mates/features/mood/config/mood_v2_feature_flag.dart';
 import 'package:mind_mates/features/home/data/daily_affirmation_quotes.dart';
 import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
+import 'package:mind_mates/features/notifications/widgets/appointment_notification_banner.dart';
 import 'package:mind_mates/features/announcements/screens/announcements_screen.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
 import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
@@ -28,10 +30,58 @@ import 'package:mind_mates/repositories/mood_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:mind_mates/routes/app_pages.dart';
+import 'package:mind_mates/routes/route_names.dart';
 import 'package:mind_mates/services/auth/auth_service.dart';
 import 'package:provider/provider.dart';
 
 void main() {
+  for (final (type, route, target) in [
+    ('mood_reminder', RouteNames.logMood, 'Mood screen target'),
+    (
+      'breathing_reminder',
+      RouteNames.mindfulBreathing,
+      'Breathing screen target',
+    ),
+  ]) {
+    testWidgets('foreground $type banner opens the matching screen', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          routes: {route: (_) => Scaffold(body: Text(target))},
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () => showAppointmentNotificationBanner(
+                    context,
+                    title: 'MindMate Reminder',
+                    message: 'A gentle reminder.',
+                    onView: selfCareReminderActionForMessage(
+                      context,
+                      RemoteMessage(data: {'type': type}),
+                    ),
+                  ),
+                  child: const Text('Show reminder'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Show reminder'));
+      await tester.pump(const Duration(milliseconds: 300));
+      final viewButton = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, 'View'),
+      );
+      viewButton.onPressed!();
+      await tester.pumpAndSettle();
+
+      expect(find.text(target), findsOneWidget);
+    });
+  }
+
   test('home dashboard no longer includes Journal or wellness check', () {
     expect(
       HomeDashboardData.mock().toolkitItems.map((item) => item.title),

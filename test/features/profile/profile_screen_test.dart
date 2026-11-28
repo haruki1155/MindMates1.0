@@ -8,6 +8,7 @@ import 'package:mind_mates/features/profile/screens/mental_health_report_screen.
 import 'package:mind_mates/features/profile/screens/profile_screen.dart';
 import 'package:mind_mates/models/mental_health_activity_summary.dart';
 import 'package:mind_mates/models/assessment_explanation_model.dart';
+import 'package:mind_mates/models/app_notification_model.dart';
 import 'package:mind_mates/models/report_model.dart';
 import 'package:mind_mates/models/profile_roles.dart';
 import 'package:mind_mates/models/user_model.dart';
@@ -15,10 +16,19 @@ import 'package:mind_mates/providers/auth_provider.dart';
 import 'package:mind_mates/providers/mental_health_activity_provider.dart';
 import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
+import 'package:mind_mates/providers/reminder_preferences_provider.dart';
 import 'package:mind_mates/repositories/mental_health_activity_repository.dart';
 import 'package:mind_mates/repositories/auth_repository.dart';
 import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
+import 'package:mind_mates/repositories/notification_repository.dart';
+import 'package:mind_mates/repositories/reminder_preferences_repository.dart';
+import 'package:mind_mates/features/settings/screens/reminders_screen.dart';
+import 'package:mind_mates/features/settings/screens/privacy_settings_screen.dart';
+import 'package:mind_mates/features/settings/screens/help_screen.dart';
+import 'package:mind_mates/features/settings/screens/about_screen.dart';
+import 'package:mind_mates/features/notifications/screens/notifications_screen.dart';
+import 'package:mind_mates/features/settings/models/reminder_preferences.dart';
 import 'package:mind_mates/routes/app_pages.dart';
 import 'package:mind_mates/routes/route_names.dart';
 import 'package:mind_mates/services/auth/auth_service.dart';
@@ -238,6 +248,110 @@ void main() {
     expect(find.textContaining('Data Privacy Act of 2012'), findsOneWidget);
     expect(find.byKey(const Key('terms-close')), findsOneWidget);
   });
+
+  testWidgets(
+    'Mood reminders opens the Reminders screen with self-care first',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 4000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final provider = UserProvider(_FakeUserRepository())
+        ..setUser(const UserModel(id: 'user_1', email: 'leo@example.com'));
+      final reminders = ReminderPreferencesProvider(
+        _MemoryReminderPreferencesRepository(),
+      );
+
+      await tester.pumpWidget(
+        _profileApp(
+          provider,
+          data: _dataFrom(provider.user!),
+          reminderProvider: reminders,
+        ),
+      );
+      await tester.tap(find.text('Mood reminders'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(RemindersScreen), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('mood-reminders-section')),
+        findsOneWidget,
+      );
+      expect(
+        tester.getTopLeft(find.text('Daily self-care reminders')).dy,
+        lessThan(tester.getTopLeft(find.text('Appointment reminders')).dy),
+      );
+    },
+  );
+
+  for (final role in PopulationRole.values.where(
+    (value) =>
+        value == PopulationRole.student ||
+        value == PopulationRole.teaching ||
+        value == PopulationRole.nonTeaching,
+  )) {
+    testWidgets('shared settings actions are available to ${role.name}', (
+      tester,
+    ) async {
+      final provider = UserProvider(_FakeUserRepository())
+        ..setUser(
+          UserModel(
+            id: 'user-${role.name}',
+            email: 'leo@example.com',
+            populationRole: role,
+          ),
+        );
+      await tester.pumpWidget(
+        _profileApp(provider, data: _dataFrom(provider.user!)),
+      );
+
+      expect(find.text('Mood reminders'), findsOneWidget);
+      expect(find.text('Reminders'), findsOneWidget);
+      expect(find.text('Privacy settings'), findsOneWidget);
+      expect(find.text('Help'), findsOneWidget);
+      expect(find.text('About MindMate').first, findsOneWidget);
+    });
+  }
+
+  testWidgets(
+    'Profile opens Privacy, Help, About, and the notification inbox',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 4000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final provider = UserProvider(_FakeUserRepository())
+        ..setUser(const UserModel(id: 'user_1', email: 'leo@example.com'));
+      final notifications = _MemoryProfileNotificationsRepository();
+
+      await tester.pumpWidget(
+        _profileApp(
+          provider,
+          data: _dataFrom(provider.user!),
+          notificationRepository: notifications,
+        ),
+      );
+
+      await tester.tap(find.text('Privacy settings'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PrivacySettingsScreen), findsOneWidget);
+      await tester.pageBack();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      await tester.tap(find.text('Help'));
+      await tester.pumpAndSettle();
+      expect(find.byType(HelpScreen), findsOneWidget);
+      await tester.pageBack();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      await tester.tap(find.text('About MindMate').first);
+      await tester.pumpAndSettle();
+      expect(find.byType(AboutScreen), findsOneWidget);
+      await tester.pageBack();
+      await tester.pump(const Duration(milliseconds: 500));
+
+      await tester.tap(find.byTooltip('Notifications'));
+      await tester.pumpAndSettle();
+      expect(find.byType(NotificationsScreen), findsOneWidget);
+      expect(find.text('No notifications yet'), findsOneWidget);
+    },
+  );
 
   for (final student in [true, false]) {
     testWidgets(
@@ -753,6 +867,8 @@ Widget _profileApp(
   ReportProvider? reportProvider,
   AuthProvider? authProvider,
   EditProfileImagePicker? imagePicker,
+  ReminderPreferencesProvider? reminderProvider,
+  NotificationRepository? notificationRepository,
 }) {
   return MultiProvider(
     providers: [
@@ -761,16 +877,37 @@ Widget _profileApp(
         ChangeNotifierProvider<AuthProvider>.value(value: authProvider),
       if (reportProvider != null)
         ChangeNotifierProvider<ReportProvider>.value(value: reportProvider),
+      if (reminderProvider != null)
+        ChangeNotifierProvider<ReminderPreferencesProvider>.value(
+          value: reminderProvider,
+        ),
     ],
     child: MaterialApp(
       theme: ThemeData(splashFactory: NoSplash.splashFactory),
-      home: ProfileScreen(data: data, imagePicker: imagePicker),
+      home: ProfileScreen(
+        data: data,
+        imagePicker: imagePicker,
+        notificationRepository: notificationRepository,
+      ),
       routes: {
         RouteNames.login: (_) =>
             const Scaffold(body: Center(child: Text('Login target'))),
       },
     ),
   );
+}
+
+class _MemoryReminderPreferencesRepository
+    extends ReminderPreferencesRepository {
+  @override
+  Future<ReminderPreferences> load(String userId) async =>
+      const ReminderPreferences();
+}
+
+class _MemoryProfileNotificationsRepository extends NotificationRepository {
+  @override
+  Stream<List<AppNotificationModel>> watchNotifications(String userId) =>
+      Stream.value(const []);
 }
 
 ProfileViewData _dataFrom(UserModel user) {

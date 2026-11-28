@@ -14,11 +14,17 @@ import '../../../providers/mood_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/sleep_provider.dart';
 import '../../../providers/user_provider.dart';
+import '../../../repositories/notification_repository.dart';
 import '../../../repositories/user_repository.dart';
 import '../../../routes/route_names.dart';
 import '../../mood/config/mood_v2_feature_flag.dart';
 import '../../student_info/screens/student_information_screen.dart';
 import '../../mood/domain/mood_v2_analytics.dart';
+import '../../notifications/screens/notifications_screen.dart';
+import '../../settings/screens/about_screen.dart';
+import '../../settings/screens/help_screen.dart';
+import '../../settings/screens/privacy_settings_screen.dart';
+import '../../settings/screens/reminders_screen.dart';
 
 typedef EditProfileImagePicker = Future<EditProfileImage?> Function();
 
@@ -30,10 +36,16 @@ class EditProfileImage {
 }
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key, this.data, this.imagePicker});
+  const ProfileScreen({
+    super.key,
+    this.data,
+    this.imagePicker,
+    this.notificationRepository,
+  });
 
   final ProfileViewData? data;
   final EditProfileImagePicker? imagePicker;
+  final NotificationRepository? notificationRepository;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -58,7 +70,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       icon: Icons.article_outlined,
     ),
     ProfileActionItem(
-      label: 'Mood tracking settings',
+      label: 'Mood reminders',
       icon: Icons.monitor_heart_outlined,
     ),
     ProfileActionItem(
@@ -142,6 +154,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         final authProvider = widget.data == null && userProvider.user == null
             ? _authProviderOrNull(context)
             : null;
+        final userId = userProvider.user?.id ?? authProvider?.userId;
         final data =
             widget.data ??
             _profileDataFromUser(
@@ -175,8 +188,16 @@ class _ProfileScreenState extends State<ProfileScreen>
                   slivers: [
                     SliverToBoxAdapter(
                       child: _ProfileHeader(
-                        onNotificationTap: () =>
-                            _openPlaceholder(context, 'Notifications'),
+                        onNotificationTap: userId == null
+                            ? null
+                            : () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => NotificationsScreen(
+                                    userId: userId,
+                                    repository: widget.notificationRepository,
+                                  ),
+                                ),
+                              ),
                       ),
                     ),
                     SliverPadding(
@@ -235,6 +256,54 @@ class _ProfileScreenState extends State<ProfileScreen>
                                 }
                                 if (action.label == 'Terms and Conditions') {
                                   showMindMateTermsAndConditions(context);
+                                  return;
+                                }
+                                if (action.label == 'Reminders' ||
+                                    action.label == 'Mood reminders') {
+                                  if (userId == null || userId.isEmpty) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Please sign in to manage reminders.',
+                                        ),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => RemindersScreen(
+                                        userId: userId,
+                                        focusMoodSection:
+                                            action.label == 'Mood reminders',
+                                      ),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                if (action.label == 'Privacy settings') {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) =>
+                                          const PrivacySettingsScreen(),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                if (action.label == 'Help') {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => const HelpScreen(),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                if (action.label == 'About MindMate') {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => const AboutScreen(),
+                                    ),
+                                  );
                                   return;
                                 }
                                 _openPlaceholder(context, action.label);
@@ -565,7 +634,7 @@ class ProfileActionItem {
 class _ProfileHeader extends StatelessWidget {
   const _ProfileHeader({required this.onNotificationTap});
 
-  final VoidCallback onNotificationTap;
+  final VoidCallback? onNotificationTap;
 
   @override
   Widget build(BuildContext context) {

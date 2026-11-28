@@ -35,6 +35,17 @@ import '../../notifications/widgets/appointment_notification_banner.dart';
 import '../models/home_dashboard_data.dart';
 import '../widgets/home_dashboard_widgets.dart';
 
+VoidCallback? selfCareReminderActionForMessage(
+  BuildContext context,
+  RemoteMessage message,
+) {
+  final route = RouteNames.selfCareReminderRoute(
+    message.data['type']?.toString() ?? '',
+  );
+  if (route == null) return null;
+  return () => Navigator.of(context).pushNamed(route);
+}
+
 enum _HomeNavDestination { today, services, appointments, secretChat, messages }
 
 class HomeScreen extends StatefulWidget {
@@ -178,6 +189,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               userId,
               onAppointmentOpened: _openAppointmentFromNotification,
               onInquiryOpened: _openInquiryFromNotification,
+              onSelfCareReminderOpened: _openSelfCareReminderFromNotification,
               onForegroundMessage: _showForegroundNotification,
             )
             .catchError((_) {});
@@ -236,6 +248,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _openSelfCareReminderFromNotification(String reminderType) {
+    if (!mounted) return;
+    final route = RouteNames.selfCareReminderRoute(reminderType);
+    if (route != null) Navigator.of(context).pushNamed(route);
+  }
+
   void _showForegroundNotification(RemoteMessage message) {
     if (!mounted) return;
     final title = message.notification?.title ?? 'MindMate update';
@@ -243,14 +261,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final inquiryId = message.data['inquiryId']?.toString().trim() ?? '';
     final appointmentId =
         message.data['appointmentId']?.toString().trim() ?? '';
+    final reminderType =
+        message.data['type']?.toString().trim().toLowerCase() ?? '';
+    final reminderAction = selfCareReminderActionForMessage(context, message);
     final eventId =
-        message.messageId ?? '$appointmentId|$inquiryId|$title|$body';
+        message.messageId ??
+        '$appointmentId|$inquiryId|$reminderType|$title|$body';
     if (!_shownForegroundEvents.add(eventId)) return;
     VoidCallback? onView;
     if (inquiryId.isNotEmpty) {
       onView = () => _openInquiryFromNotification(inquiryId);
     } else if (appointmentId.isNotEmpty) {
       onView = () => _openAppointmentFromNotification(appointmentId);
+    } else if (reminderAction != null) {
+      onView = reminderAction;
     }
     showAppointmentNotificationBanner(
       context,

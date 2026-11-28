@@ -99,9 +99,11 @@ import {
   canonicalAppointmentStatus,
 } from "./appointment_lifecycle";
 import {
+  isAppointmentReminderEnabled,
   isReminderEligibleAppointmentStatus,
   REMINDER_ELIGIBLE_APPOINTMENT_STATUSES,
 } from "./appointment_reminders";
+import {createSelfCareReminderIfDue} from "./self_care_reminders";
 import {appointmentBookingPolicy, bookingPolicyViolation} from "./appointment_policy";
 import {appointmentEmail, appointmentPhone, boundedText} from "./appointment_intake";
 import {canBookFollowUpFromParent, validateCompletionInput, validateRescheduleReason} from "./appointment_follow_up";
@@ -2943,7 +2945,7 @@ export const sendAppointmentNotification = onDocumentCreated(
   async (event) => {
     const notification = event.data?.data();
     const notificationType = String(notification?.type ?? "");
-    if (!notification || !(notificationType === "inquiry" || notificationType.startsWith("appointment") || notificationType.startsWith("reschedule") || notificationType === "mind_aid_emergency")) return;
+    if (!notification || !(notificationType === "inquiry" || notificationType.startsWith("appointment") || notificationType.startsWith("reschedule") || notificationType === "mind_aid_emergency" || notificationType === "mood_reminder" || notificationType === "breathing_reminder")) return;
     if (notificationType === "appointment_reminder" || notification.expectedStatus) {
       await deliverCurrentAppointmentNotification(event.data!.ref);
       return;
@@ -3009,8 +3011,13 @@ export const sendAppointmentReminders = onSchedule(
           const fresh = await transaction.get(appointment.ref);
           const current = fresh.data() ?? {};
           if (!isReminderEligibleAppointmentStatus(current.status) || current.reminders?.[key] || !(current.scheduledAt instanceof Timestamp) || current.scheduledAt.toMillis() !== scheduledAt.toMillis() || current.scheduleRevision !== data.scheduleRevision || current.archivedAt) return;
+          const recipientId = String(current.userId ?? "");
+          if (!recipientId) return;
+          const preferencesRef = db.collection("reminder_preferences").doc(recipientId);
+          const preferences = await transaction.get(preferencesRef);
+          if (!isAppointmentReminderEnabled(preferences.data(), key)) return;
           transaction.create(notification, {
-            userId: String(current.userId ?? ""), appointmentId: appointment.id,
+            userId: recipientId, appointmentId: appointment.id,
             type: "appointment_reminder", title: "PACC Appointment Reminder",
             body: minutes === 60 ? "You have a PACC appointment in about an hour." : "You have a PACC appointment tomorrow.",
             scheduleRevision: current.scheduleRevision ?? null, scheduledAt,
@@ -3023,6 +3030,19 @@ export const sendAppointmentReminders = onSchedule(
         if (code !== "6" && code !== "already-exists") throw error;
       }
     })));
+
+    const [moodPreferences, breathingPreferences] = await Promise.all([
+      db.collection("reminder_preferences").where("moodDailyEnabled", "==", true).get(),
+      db.collection("reminder_preferences").where("breathingDailyEnabled", "==", true).get(),
+    ]);
+    await Promise.all([
+      ...moodPreferences.docs.map((preference) =>
+        createSelfCareReminderIfDue(db, preference.id, "mood", now.toDate()),
+      ),
+      ...breathingPreferences.docs.map((preference) =>
+        createSelfCareReminderIfDue(db, preference.id, "breathing", now.toDate()),
+      ),
+    ]);
   },
 );
 

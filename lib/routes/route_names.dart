@@ -32,4 +32,11 @@ class RouteNames {
   static const logMood = '/mood/log';
   static const mindfulBreathing = '/insights/mindful-breathing';
   static const sleepQuality = '/sleep-quality';
+
+  static String? selfCareReminderRoute(String type) =>
+      switch (type.trim().toLowerCase()) {
+        'mood_reminder' => logMood,
+        'breathing_reminder' => mindfulBreathing,
+        _ => null,
+      };
 }
