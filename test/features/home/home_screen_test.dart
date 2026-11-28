@@ -733,12 +733,12 @@ void main() {
       'High Importance.png',
       'Forward.png',
       'Notification.png',
-      'fire_icon.png',
       'Thumbs up.png',
       'Good Quality.png',
     ]) {
       expect(_dashboardAsset(assetName), findsWidgets);
     }
+    expect(find.byKey(const Key('streak-flame')), findsOneWidget);
     expect(_dashboardAsset('x.png'), findsNothing);
 
     await tester.scrollUntilVisible(

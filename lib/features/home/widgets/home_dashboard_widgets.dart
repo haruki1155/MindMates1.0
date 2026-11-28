@@ -817,7 +817,10 @@ class HomeStreakCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              StreakFlame(days: streak?.days ?? 0),
+              StreakFlame(
+                days: streak?.days ?? 0,
+                state: streak?.state,
+              ),
             ],
           ),
         ),
