@@ -229,6 +229,10 @@ class ReportModel {
 
   bool get isDraftReport => !isFinalReport;
 
+  /// Dated and still open, so its signals describe the user's current week.
+  bool get isCurrentWeekReport =>
+      weekStart != null && weekEnd != null && !isFinalReport;
+
   String get weekDateRangeLabel {
     final start = weekStart;
     final end = weekEnd;

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../models/report_model.dart';
 import '../../../models/assessment_explanation_model.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/insights_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/user_provider.dart';
 import '../../student_assessment/widgets/v4_assessment_response_review.dart';
@@ -72,6 +73,11 @@ class _MentalHealthReportScreenState extends State<MentalHealthReportScreen> {
       // Rebuild on every visit/refresh so the latest of the two allowed weekly
       // full assessments is reflected immediately.
       await provider.refreshWeeklyReport(userId);
+      if (mounted) {
+        await _readProviderOrNull<InsightsProvider>()?.refreshLoadedContext(
+          userId,
+        );
+      }
       V4AssessmentResponseReviewData? review;
       V4FullAssessmentResultData? fullResult;
       try {

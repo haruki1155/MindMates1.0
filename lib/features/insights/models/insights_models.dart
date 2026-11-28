@@ -2,7 +2,83 @@ import '../../../core/utils/firestore_mapper.dart';
 import '../../../models/mood_model.dart';
 import '../../../models/profile_roles.dart';
 import '../../../models/report_model.dart';
+import '../../../routes/route_names.dart';
 import '../../mood/domain/mood_v2_analytics.dart';
+
+/// Why a featured insight was picked. Copy shown to users stays fixed and
+/// non-diagnostic per reason.
+enum InsightRecommendationReason { assessment, mood, appActivity, general }
+
+class FeaturedInsightRecommendation {
+  const FeaturedInsightRecommendation({
+    required this.item,
+    required this.reason,
+  });
+
+  final InsightCardItem item;
+  final InsightRecommendationReason reason;
+}
+
+const insightEligibleEvidenceTypes = <String, String>{
+  'official_guideline': 'Official guideline',
+  'systematic_review': 'Systematic review',
+  'peer_reviewed_study': 'Peer-reviewed study',
+  'institution_approved': 'Institution-approved',
+};
+
+const insightEligibleRightsStatuses = {
+  'original',
+  'open_license',
+  'permission_granted',
+};
+
+const insightReviewStatuses = [
+  'draft',
+  'pending_review',
+  'approved',
+  'archived',
+];
+
+/// In-app destinations an insight may link to, with their button labels.
+const insightActionRouteLabels = <String, String>{
+  RouteNames.mindfulBreathing: 'Try mindful breathing',
+  RouteNames.logMood: 'Log a mood check-in',
+  RouteNames.mindAid: 'Talk with MindAid',
+  RouteNames.services: 'Explore PACC services',
+  RouteNames.mentalHealthReport: 'View wellness summary',
+  RouteNames.studentAssessment: 'Take wellness assessment',
+  RouteNames.sleepQuality: 'Track sleep quality',
+};
+
+/// Accepts only absolute https links with a host and no embedded credentials.
+Uri? validInsightSourceUri(String? value) {
+  final text = value?.trim();
+  if (text == null || text.isEmpty) return null;
+  final uri = Uri.tryParse(text);
+  if (uri == null ||
+      uri.scheme != 'https' ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty) {
+    return null;
+  }
+  return uri;
+}
+
+/// Provenance requirements still missing before an item may be approved;
+/// empty means ready.
+List<String> insightProvenanceGaps({
+  required String? sourceTitle,
+  required String? sourceUrl,
+  required String? evidenceType,
+  required String? rightsStatus,
+}) => [
+  if (sourceTitle == null || sourceTitle.trim().isEmpty) 'Source title',
+  if (validInsightSourceUri(sourceUrl) == null) 'HTTPS source link',
+  if (!insightEligibleEvidenceTypes.containsKey(evidenceType))
+    'Eligible evidence type',
+  if (!insightEligibleRightsStatuses.contains(rightsStatus))
+    'Cleared rights status',
+];
 
 /// The minimum trusted profile context needed to tailor educational resources.
 /// A missing role intentionally resolves to shared content only.
@@ -30,11 +106,13 @@ class InsightsDashboardData {
     required this.categories,
     required this.sections,
     this.resources = const [],
+    this.featuredRecommendation,
   });
 
   final List<InsightCategory> categories;
   final List<InsightSection> sections;
   final List<InsightCardItem> resources;
+  final FeaturedInsightRecommendation? featuredRecommendation;
 
   List<InsightCardItem> resourcesForCategory(String categoryId) {
     return resources
@@ -97,6 +175,17 @@ class InsightCardItem {
     this.durationLabel,
     this.targetRoles = const ['all'],
     this.domainIds = const [],
+    this.sourceTitle,
+    this.sourceUrl,
+    this.evidenceType,
+    this.rightsStatus,
+    this.reviewStatus,
+    this.reviewedAt,
+    this.reviewedBy,
+    this.sectionId = '',
+    this.sortOrder = 0,
+    this.isActive = true,
+    this.updatedAt,
   });
 
   final String id;
@@ -116,8 +205,77 @@ class InsightCardItem {
   final String? durationLabel;
   final List<String> targetRoles;
   final List<String> domainIds;
+  final String? sourceTitle;
+  final String? sourceUrl;
+  final String? evidenceType;
+  final String? rightsStatus;
+  final String? reviewStatus;
+  final DateTime? reviewedAt;
+  final String? reviewedBy;
+  final String sectionId;
+  final int sortOrder;
+  final bool isActive;
+  final DateTime? updatedAt;
 
   bool get isVideoPlaceholder => contentType == 'video_placeholder';
+
+  Uri? get validSourceUri => validInsightSourceUri(sourceUrl);
+
+  List<String> get provenanceGaps => insightProvenanceGaps(
+    sourceTitle: sourceTitle,
+    sourceUrl: sourceUrl,
+    evidenceType: evidenceType,
+    rightsStatus: rightsStatus,
+  );
+
+  /// Only reviewed, source-verified, rights-cleared content may be featured.
+  bool get hasApprovedProvenance =>
+      !isVideoPlaceholder &&
+      contentType != 'generated_pattern' &&
+      reviewStatus == 'approved' &&
+      provenanceGaps.isEmpty;
+
+  String? get validActionRoute =>
+      insightActionRouteLabels.containsKey(actionRoute) ? actionRoute : null;
+
+  String? get actionButtonLabel => insightActionRouteLabels[actionRoute];
+
+  String? get evidenceTypeLabel => insightEligibleEvidenceTypes[evidenceType];
+
+  /// Short publisher name for cards, e.g. "NIMH" from "NIMH — Depression".
+  String? get sourcePublisher {
+    final title = sourceTitle?.trim();
+    if (title == null || title.isEmpty || validSourceUri == null) return null;
+    return title.split(' — ').first.trim();
+  }
+
+  /// Firestore shape of an `insight_content` document (without `id`).
+  Map<String, dynamic> toCatalogJson() => {
+    'title': title,
+    'subtitle': subtitle,
+    'categoryLabel': category,
+    'categoryId': categoryId,
+    'sectionId': sectionId,
+    'imageAsset': imageAsset,
+    'actionRoute': actionRoute,
+    'publishedAt': publishedAt,
+    'contentType': contentType,
+    'body': body,
+    'tags': tags,
+    'source': source,
+    'targetRoles': targetRoles,
+    'domainIds': domainIds,
+    'sourceTitle': sourceTitle,
+    'sourceUrl': sourceUrl,
+    'evidenceType': evidenceType,
+    'rightsStatus': rightsStatus,
+    'reviewStatus': reviewStatus,
+    'reviewedAt': reviewedAt,
+    'reviewedBy': reviewedBy,
+    'sortOrder': sortOrder,
+    'isActive': isActive,
+    'updatedAt': updatedAt,
+  };
 
   factory InsightCardItem.fromJson(Map<String, dynamic> json) {
     return InsightCardItem(
@@ -141,6 +299,17 @@ class InsightCardItem {
       durationLabel: _stringOrNull(json['durationLabel']),
       targetRoles: _stringListOrDefault(json['targetRoles'], const ['all']),
       domainIds: _stringListOrDefault(json['domainIds'], const []),
+      sourceTitle: _stringOrNull(json['sourceTitle']),
+      sourceUrl: _stringOrNull(json['sourceUrl']),
+      evidenceType: _stringOrNull(json['evidenceType']),
+      rightsStatus: _stringOrNull(json['rightsStatus']),
+      reviewStatus: _stringOrNull(json['reviewStatus']),
+      reviewedAt: dateTimeFromFirestore(json['reviewedAt']),
+      reviewedBy: _stringOrNull(json['reviewedBy']),
+      sectionId: (json['sectionId'] ?? '').toString(),
+      sortOrder: intFromFirestore(json['sortOrder']),
+      isActive: boolFromFirestore(json['isActive'], fallback: true),
+      updatedAt: dateTimeFromFirestore(json['updatedAt']),
     );
   }
 }

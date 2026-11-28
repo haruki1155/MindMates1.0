@@ -103,9 +103,13 @@ class InsightsRepository {
         ? insightSeedRules
         : rules;
 
-    final report = reportJson == null
+    final latestReport = reportJson == null
         ? null
         : ReportModel.fromJson(reportJson, id: reportJson['id']?.toString());
+    // Finalized, past-week, or undated reports must not drive "this week".
+    final report = latestReport != null && latestReport.isCurrentWeekReport
+        ? latestReport
+        : null;
     final cards = effectiveContent
         .map(_InsightContent.fromJson)
         .where((item) => item.id.isNotEmpty)
@@ -125,15 +129,68 @@ class InsightsRepository {
       ...categoryModels.map(_videoPlaceholderFor),
     ];
 
+    final personalized = report == null
+        ? const <_ScoredRecommendation>[]
+        : _personalizedCandidates(
+            cards: cards,
+            rules: activeRules,
+            report: report,
+          );
+    final featured = _featuredRecommendation(
+      cards: cards,
+      personalized: personalized,
+      report: report,
+      populationRole: context.populationRole,
+    );
+
     return InsightsDashboardData(
       categories: categoryModels,
       resources: resources,
+      featuredRecommendation: featured,
       sections: _buildSections(
         cards: cards,
-        rules: activeRules,
+        personalized: personalized,
         report: report,
         populationRole: context.populationRole,
+        featuredId: featured?.item.id,
       ),
+    );
+  }
+
+  FeaturedInsightRecommendation? _featuredRecommendation({
+    required List<_InsightContent> cards,
+    required List<_ScoredRecommendation> personalized,
+    required ReportModel? report,
+    required PopulationRole? populationRole,
+  }) {
+    if (report != null && report.hasEnoughData) {
+      for (final candidate in personalized) {
+        if (candidate.card.hasApprovedProvenance) {
+          return FeaturedInsightRecommendation(
+            item: candidate.card,
+            reason: candidate.reason,
+          );
+        }
+      }
+    }
+
+    final approved = cards.where((item) => item.card.hasApprovedProvenance);
+    final fallback = [
+      ...approved.where(
+        (item) =>
+            item.sectionId == 'recommended' &&
+            item.isRoleSpecificFor(populationRole),
+      ),
+      ...approved.where(
+        (item) => item.sectionId == 'recommended' && item.isShared,
+      ),
+      ...approved.where((item) => item.isRoleSpecificFor(populationRole)),
+      ...approved.where((item) => item.isShared),
+    ];
+    if (fallback.isEmpty) return null;
+    return FeaturedInsightRecommendation(
+      item: fallback.first.card,
+      reason: InsightRecommendationReason.general,
     );
   }
 
@@ -188,9 +245,10 @@ class InsightsRepository {
 
   List<InsightSection> _buildSections({
     required List<_InsightContent> cards,
-    required List<_InsightRule> rules,
+    required List<_ScoredRecommendation> personalized,
     required ReportModel? report,
     required PopulationRole? populationRole,
+    required String? featuredId,
   }) {
     if (cards.isEmpty && report == null) return const [];
 
@@ -198,10 +256,9 @@ class InsightsRepository {
         ? const <InsightCardItem>[]
         : _recommendedCards(
             cards: cards,
-            rules: rules,
-            report: report,
+            personalized: personalized,
             populationRole: populationRole,
-          );
+          ).where((item) => item.id != featuredId).toList(growable: false);
     final patternCards = [
       if (report != null) ..._reportPatternCards(report),
       ..._sectionCards(cards, 'patterns'),
@@ -256,14 +313,14 @@ class InsightsRepository {
         .toList(growable: false);
   }
 
-  List<InsightCardItem> _recommendedCards({
+  /// Report-matched cards in display order, each with why it matched.
+  List<_ScoredRecommendation> _personalizedCandidates({
     required List<_InsightContent> cards,
     required List<_InsightRule> rules,
     required ReportModel report,
-    required PopulationRole? populationRole,
   }) {
     final cardsById = {for (final card in cards) card.id: card.card};
-    final matched = <InsightCardItem>[];
+    final matched = <_ScoredRecommendation>[];
     final seen = <String>{};
 
     // Domain relevance is deterministic and takes precedence over generic
@@ -274,7 +331,13 @@ class InsightsRepository {
           !content.domainIds.any(concernDomainIds.contains)) {
         continue;
       }
-      if (seen.add(content.id)) matched.add(content.card);
+      if (seen.add(content.id)) {
+        matched.add(
+          _ScoredRecommendation(content.card, const {
+            InsightRecommendationReason.assessment,
+          }),
+        );
+      }
     }
 
     final sortedRules = [...rules]
@@ -282,11 +345,22 @@ class InsightsRepository {
     for (final rule in sortedRules) {
       final card = cardsById[rule.contentId];
       if (card == null || seen.contains(card.id)) continue;
-      if (!_matchesRule(rule, report)) continue;
+      final reasons = _matchedReasons(rule, report);
+      if (reasons == null) continue;
 
-      matched.add(card);
+      matched.add(_ScoredRecommendation(card, reasons));
       seen.add(card.id);
     }
+    return matched;
+  }
+
+  List<InsightCardItem> _recommendedCards({
+    required List<_InsightContent> cards,
+    required List<_ScoredRecommendation> personalized,
+    required PopulationRole? populationRole,
+  }) {
+    final matched = [for (final item in personalized) item.card];
+    final seen = {for (final item in matched) item.id};
 
     if (matched.isEmpty) {
       final roleDefaults = cards.where(
@@ -309,19 +383,53 @@ class InsightsRepository {
     return matched;
   }
 
-  bool _matchesRule(_InsightRule rule, ReportModel report) {
-    final results = rule.conditions.entries
-        .map((entry) {
-          return _matchesCondition(entry.key, entry.value, report);
-        })
-        .toList(growable: false);
+  /// Signal types of the conditions that matched, or null if the rule fails.
+  Set<InsightRecommendationReason>? _matchedReasons(
+    _InsightRule rule,
+    ReportModel report,
+  ) {
+    final matchedKeys = <String>[];
+    var allMatched = true;
+    for (final entry in rule.conditions.entries) {
+      if (_matchesCondition(entry.key, entry.value, report)) {
+        matchedKeys.add(entry.key);
+      } else {
+        allMatched = false;
+      }
+    }
 
-    if (results.isEmpty) return false;
-    if (rule.matchType == 'any') return results.any((result) => result);
-    return results.every((result) => result);
+    if (rule.conditions.isEmpty || matchedKeys.isEmpty) return null;
+    if (rule.matchType != 'any' && !allMatched) return null;
+    return {
+      for (final key in matchedKeys)
+        if (_conditionReasons[key] != null) _conditionReasons[key]!,
+    };
   }
 
+  static const _conditionReasons = <String, InsightRecommendationReason>{
+    'mentalStatus': InsightRecommendationReason.assessment,
+    'topConcernAreas': InsightRecommendationReason.assessment,
+    'domainIds': InsightRecommendationReason.assessment,
+    'fullAssessmentStatus': InsightRecommendationReason.assessment,
+    'quickAssessmentSignal': InsightRecommendationReason.assessment,
+    'averageMoodMax': InsightRecommendationReason.mood,
+    'moodCheckInMin': InsightRecommendationReason.mood,
+    'moodCheckInMax': InsightRecommendationReason.mood,
+    'breathingSessionMax': InsightRecommendationReason.appActivity,
+    'mindAidMessageMax': InsightRecommendationReason.appActivity,
+  };
+
   bool _matchesCondition(String key, Object? value, ReportModel report) {
+    // Without enough data, a zero count is missing data, not low activity.
+    if (!report.hasEnoughData &&
+        const {
+          'moodCheckInMax',
+          'breathingSessionMax',
+          'mindAidMessageMax',
+        }.contains(key) &&
+        _intOrZero(value) == 0) {
+      return false;
+    }
     switch (key) {
       case 'mentalStatus':
         return _matchesAny(value, [report.mentalStatus]);
@@ -437,12 +545,17 @@ class InsightsRepository {
         if (_domainIdForLabel(label) != null) _domainIdForLabel(label)!,
     };
 
-    report.fullAssessmentDomainStatuses.forEach((label, status) {
-      if (_isConcernStatus(status)) {
-        final domainId = _domainIdForLabel(label);
-        if (domainId != null) ids.add(domainId);
-      }
-    });
+    for (final statuses in [
+      report.fullAssessmentDomainStatuses,
+      report.quickAssessmentAreaStatuses,
+    ]) {
+      statuses.forEach((label, status) {
+        if (_isConcernStatus(status)) {
+          final domainId = _domainIdForLabel(label);
+          if (domainId != null) ids.add(domainId);
+        }
+      });
+    }
     return ids;
   }
 
@@ -531,6 +644,25 @@ class _InsightContent {
         .map((item) => item.toString().trim())
         .where((item) => item.isNotEmpty)
         .toList(growable: false);
+  }
+}
+
+class _ScoredRecommendation {
+  const _ScoredRecommendation(this.card, this.reasons);
+
+  final InsightCardItem card;
+  final Set<InsightRecommendationReason> reasons;
+
+  /// Precedence when several signal types matched: assessment, mood, activity.
+  InsightRecommendationReason get reason {
+    for (final reason in const [
+      InsightRecommendationReason.assessment,
+      InsightRecommendationReason.mood,
+      InsightRecommendationReason.appActivity,
+    ]) {
+      if (reasons.contains(reason)) return reason;
+    }
+    return InsightRecommendationReason.general;
   }
 }
 

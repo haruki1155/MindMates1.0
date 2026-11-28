@@ -107,5 +107,49 @@ void main() {
       expect(report.reportStatus, 'draft');
       expect(report.isDraftReport, isTrue);
     });
+
+    group('isCurrentWeekReport', () {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final weekStart = today.subtract(Duration(days: now.weekday - 1));
+      final weekEnd = weekStart.add(const Duration(days: 6));
+
+      ReportModel report({
+        String status = 'draft',
+        DateTime? start,
+        DateTime? end,
+        bool omitStart = false,
+        bool omitEnd = false,
+      }) => ReportModel(
+        id: 'r',
+        generatedAt: now,
+        reportStatus: status,
+        weekStart: omitStart ? null : (start ?? weekStart),
+        weekEnd: omitEnd ? null : (end ?? weekEnd),
+      );
+
+      test('is true for an open current-week draft', () {
+        expect(report().isCurrentWeekReport, isTrue);
+      });
+
+      test('is false for an explicitly finalized current-week report', () {
+        expect(report(status: 'final').isCurrentWeekReport, isFalse);
+      });
+
+      test('is false for a draft whose week already ended', () {
+        expect(
+          report(
+            start: weekStart.subtract(const Duration(days: 14)),
+            end: weekStart.subtract(const Duration(days: 8)),
+          ).isCurrentWeekReport,
+          isFalse,
+        );
+      });
+
+      test('is false when weekStart or weekEnd is missing', () {
+        expect(report(omitStart: true).isCurrentWeekReport, isFalse);
+        expect(report(omitEnd: true).isCurrentWeekReport, isFalse);
+      });
+    });
   });
 }

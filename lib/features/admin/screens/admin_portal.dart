@@ -40,6 +40,7 @@ import 'counselor_assigned_colleges_page.dart';
 import 'student_roster_page.dart';
 import 'admin_operations_dashboard.dart';
 import '../../announcements/screens/manage_announcements_page.dart';
+import '../../insights/screens/manage_insights_page.dart';
 import 'activity_logs_page.dart';
 import 'backup_data_page.dart';
 import 'staff_operations_dashboard.dart';
@@ -74,6 +75,7 @@ String _headerRoleLabel(AccessRole role) => switch (role) {
 
 enum AdminPortalPage {
   announcements,
+  insightCatalog,
   dashboard,
   users,
   createAccount,
@@ -98,6 +100,7 @@ enum AdminPortalPage {
 extension on AdminPortalPage {
   String get label => switch (this) {
     AdminPortalPage.announcements => 'Announcements',
+    AdminPortalPage.insightCatalog => 'Insights Content',
     AdminPortalPage.dashboard => 'Dashboard',
     AdminPortalPage.users => 'User Management',
     AdminPortalPage.createAccount => 'Create Account',
@@ -128,6 +131,7 @@ extension on AdminPortalPage {
 
   IconData get icon => switch (this) {
     AdminPortalPage.announcements => Icons.campaign_outlined,
+    AdminPortalPage.insightCatalog => Icons.auto_stories_outlined,
     AdminPortalPage.dashboard => Icons.home_outlined,
     AdminPortalPage.users => Icons.group_outlined,
     AdminPortalPage.createAccount => Icons.person_add_alt_1_outlined,
@@ -826,6 +830,11 @@ class _AdminPortalHomeState extends State<AdminPortalHome> {
           : const Center(
               child: Text('Staff or administrator access is required.'),
             ),
+    // Mirrors isPortalAdmin() on insight_content writes in firestore.rules.
+    AdminPortalPage.insightCatalog =>
+      _repository.currentAccessRole == AccessRole.admin
+          ? const ManageInsightsPage()
+          : const Center(child: Text('Administrator access is required.')),
     AdminPortalPage.dashboard =>
       _repository.currentAccessRole == AccessRole.portalStaff
           ? StaffOperationsDashboardPage(
@@ -964,6 +973,7 @@ class PortalWorkspaceNavigation extends StatelessWidget {
   bool _allowed(AdminPortalPage page) => switch (page) {
     AdminPortalPage.announcements =>
       accessRole == AccessRole.portalStaff || accessRole == AccessRole.admin,
+    AdminPortalPage.insightCatalog => accessRole == AccessRole.admin,
     AdminPortalPage.users => isSuperAdmin,
     AdminPortalPage.createAccount => isSuperAdmin,
     AdminPortalPage.studentRoster => isSuperAdmin,
@@ -997,7 +1007,10 @@ class PortalWorkspaceNavigation extends StatelessWidget {
   Widget build(BuildContext context) {
     final sections = <_NavSection>[
       const _NavSection('Overview', [AdminPortalPage.dashboard]),
-      const _NavSection('Publishing', [AdminPortalPage.announcements]),
+      const _NavSection('Publishing', [
+        AdminPortalPage.announcements,
+        AdminPortalPage.insightCatalog,
+      ]),
       const _NavSection('People', [
         AdminPortalPage.users,
         AdminPortalPage.createAccount,
