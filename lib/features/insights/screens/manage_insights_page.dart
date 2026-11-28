@@ -123,10 +123,33 @@ class _ManageInsightsPageState extends State<ManageInsightsPage> {
     ),
   );
 
+  Widget _buildCard(InsightCardItem item, {required bool compactActions}) =>
+      _InsightRow(
+        item: item,
+        compactActions: compactActions,
+        onEdit: () => _edit(item),
+        onApprove: item.provenanceGaps.isEmpty
+            ? () => _setStatus(item, 'approved')
+            : null,
+        onToggleActive: () => _run(
+          () => _repository.setActive(
+            id: item.id,
+            isActive: !item.isActive,
+          ),
+        ),
+        onArchive: _statusOf(item) == 'archived'
+            ? () => _setStatus(item, 'pending_review')
+            : () => _setStatus(item, 'archived'),
+      );
+
   @override
   Widget build(BuildContext context) {
     final visible = _visible;
     final eligible = _items.where((item) => item.hasApprovedProvenance).length;
+    final summaryText =
+        '$eligible Featured-eligible • '
+        '${_items.length - eligible} Need provenance/review';
+
     return Theme(
       data: InsightsAdminTheme.data,
       child: ColoredBox(
@@ -135,29 +158,27 @@ class _ManageInsightsPageState extends State<ManageInsightsPage> {
         child: Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1120),
+            constraints: const BoxConstraints(maxWidth: 1200),
             child: ListView(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.fromLTRB(28, 24, 28, 28),
               children: [
-                Wrap(
-                  alignment: WrapAlignment.spaceBetween,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 20,
-                  runSpacing: 16,
-                  children: [
-                    const Column(
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wideHeader = constraints.maxWidth >= 660;
+                    const titleBlock = Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Insights Content',
                           style: TextStyle(
-                            fontSize: 24,
+                            fontSize: 28,
                             fontWeight: FontWeight.w800,
                             color: InsightsAdminColors.navy,
-                            letterSpacing: -0.3,
+                            letterSpacing: -0.5,
+                            height: 1.15,
                           ),
                         ),
-                        SizedBox(height: 4),
+                        SizedBox(height: 6),
                         Text(
                           'Curate and approve source-verified wellness guides',
                           style: TextStyle(
@@ -166,52 +187,64 @@ class _ManageInsightsPageState extends State<ManageInsightsPage> {
                           ),
                         ),
                       ],
-                    ),
-                    FilledButton.icon(
-                      key: const Key('new_insight_button'),
-                      style: InsightsAdminTheme.newInsightButtonStyle,
-                      onPressed: () => _edit(),
-                      icon: const Icon(Icons.add_rounded, size: 18),
-                      label: const Text('New insight'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  key: const Key('insights_summary_banner'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: InsightsAdminColors.surface,
-                    borderRadius: InsightsAdminTheme.controlRadius,
-                    border: Border.all(color: InsightsAdminColors.cardBorder),
-                    boxShadow: InsightsAdminTheme.cardShadow,
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.verified_outlined,
-                        size: 18,
-                        color: InsightsAdminColors.activeFg,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          '$eligible Featured-eligible • '
-                          '${_items.length - eligible} Need provenance/review',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: InsightsAdminColors.navy,
+                    );
+
+                    final actionColumn = Column(
+                      crossAxisAlignment: wideHeader
+                          ? CrossAxisAlignment.end
+                          : CrossAxisAlignment.start,
+                      children: [
+                        FilledButton.icon(
+                          key: const Key('new_insight_button'),
+                          style: InsightsAdminTheme.newInsightButtonStyle,
+                          onPressed: () => _edit(),
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('New insight'),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          key: const Key('insights_summary_banner'),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 5,
+                          ),
+                          decoration: const BoxDecoration(
+                            color: InsightsAdminColors.summaryPillBg,
+                            borderRadius: InsightsAdminTheme.pillRadius,
+                          ),
+                          child: Text(
+                            summaryText,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: InsightsAdminColors.navy,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    );
+
+                    if (wideHeader) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Expanded(child: titleBlock),
+                          const SizedBox(width: 20),
+                          actionColumn,
+                        ],
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        titleBlock,
+                        const SizedBox(height: 14),
+                        actionColumn,
+                      ],
+                    );
+                  },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
                 _InsightsFilterBar(
                   statusFilters: _statusFilters,
                   selectedStatus: _status,
@@ -221,7 +254,7 @@ class _ManageInsightsPageState extends State<ManageInsightsPage> {
                   onRoleChanged: (value) => setState(() => _role = value),
                   onQueryChanged: (value) => setState(() => _query = value),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
                 if (_error != null)
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -275,25 +308,64 @@ class _ManageInsightsPageState extends State<ManageInsightsPage> {
                     ),
                   )
                 else
-                  for (final item in visible) ...[
-                    _InsightRow(
-                      item: item,
-                      onEdit: () => _edit(item),
-                      onApprove: item.provenanceGaps.isEmpty
-                          ? () => _setStatus(item, 'approved')
-                          : null,
-                      onToggleActive: () => _run(
-                        () => _repository.setActive(
-                          id: item.id,
-                          isActive: !item.isActive,
-                        ),
-                      ),
-                      onArchive: _statusOf(item) == 'archived'
-                          ? () => _setStatus(item, 'pending_review')
-                          : () => _setStatus(item, 'archived'),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final twoColumns = constraints.maxWidth >= 820;
+                      const columnGap = 16.0;
+                      final cardInnerWidth =
+                          (twoColumns
+                              ? (constraints.maxWidth - columnGap) / 2
+                              : constraints.maxWidth) -
+                          40;
+                      final compactActions = cardInnerWidth < 330;
+
+                      if (!twoColumns) {
+                        return Column(
+                          key: const Key('insights_card_grid_single'),
+                          children: [
+                            for (var i = 0; i < visible.length; i++) ...[
+                              if (i > 0) const SizedBox(height: 16),
+                              _buildCard(
+                                visible[i],
+                                compactActions: compactActions,
+                              ),
+                            ],
+                          ],
+                        );
+                      }
+
+                      return Column(
+                        key: const Key('insights_card_grid_two_col'),
+                        children: [
+                          for (var i = 0; i < visible.length; i += 2) ...[
+                            if (i > 0) const SizedBox(height: 16),
+                            IntrinsicHeight(
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(
+                                    child: _buildCard(
+                                      visible[i],
+                                      compactActions: compactActions,
+                                    ),
+                                  ),
+                                  const SizedBox(width: columnGap),
+                                  Expanded(
+                                    child: i + 1 < visible.length
+                                        ? _buildCard(
+                                            visible[i + 1],
+                                            compactActions: compactActions,
+                                          )
+                                        : const SizedBox.shrink(),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
               ],
             ),
           ),
@@ -324,16 +396,10 @@ class _InsightsFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final segmentedControl = _StatusSegmentedControl(
-      filters: statusFilters,
-      selected: selectedStatus,
-      onSelected: onStatusChanged,
-    );
-
     final roleDropdown = Container(
       key: const Key('insights_role_filter'),
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      height: 42,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: InsightsAdminTheme.controlDecoration,
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String?>(
@@ -348,7 +414,7 @@ class _InsightsFilterBar extends StatelessWidget {
           ),
           style: const TextStyle(
             fontSize: 13,
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w500,
             color: InsightsAdminColors.navy,
           ),
           items: [
@@ -361,17 +427,17 @@ class _InsightsFilterBar extends StatelessWidget {
     );
 
     final searchField = SizedBox(
-      height: 44,
+      height: 42,
       child: TextField(
         key: const Key('insights_search_field'),
         style: const TextStyle(
-          fontSize: 14,
+          fontSize: 13.5,
           color: InsightsAdminColors.navy,
         ),
         decoration: const InputDecoration(
           prefixIcon: Icon(
             Icons.search_rounded,
-            size: 20,
+            size: 19,
             color: InsightsAdminColors.subtleMuted,
           ),
           hintText: 'Search insights',
@@ -383,14 +449,28 @@ class _InsightsFilterBar extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth >= 920) {
+        final compactSegment = constraints.maxWidth < 520;
+        final segmentedControl = _StatusSegmentedControl(
+          filters: statusFilters,
+          selected: selectedStatus,
+          onSelected: onStatusChanged,
+          pillContainer: !compactSegment,
+        );
+
+        if (constraints.maxWidth >= 880) {
           return Row(
             children: [
-              segmentedControl,
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(child: segmentedControl),
+                    const SizedBox(width: 12),
+                    roleDropdown,
+                  ],
+                ),
+              ),
               const SizedBox(width: 12),
-              roleDropdown,
-              const SizedBox(width: 12),
-              Expanded(child: searchField),
+              SizedBox(width: 230, child: searchField),
             ],
           );
         }
@@ -402,7 +482,7 @@ class _InsightsFilterBar extends StatelessWidget {
             segmentedControl,
             roleDropdown,
             SizedBox(
-              width: constraints.maxWidth < 360 ? constraints.maxWidth : 280,
+              width: constraints.maxWidth < 360 ? constraints.maxWidth : 230,
               child: searchField,
             ),
           ],
@@ -417,17 +497,25 @@ class _StatusSegmentedControl extends StatelessWidget {
     required this.filters,
     required this.selected,
     required this.onSelected,
+    required this.pillContainer,
   });
 
   final Map<String?, String> filters;
   final String? selected;
   final ValueChanged<String?> onSelected;
+  final bool pillContainer;
 
   @override
   Widget build(BuildContext context) => Container(
     key: const Key('insights_status_segmented_control'),
     padding: const EdgeInsets.all(4),
-    decoration: InsightsAdminTheme.controlDecoration,
+    decoration: BoxDecoration(
+      color: InsightsAdminColors.surface,
+      borderRadius: pillContainer
+          ? InsightsAdminTheme.pillRadius
+          : InsightsAdminTheme.controlRadius,
+      border: Border.all(color: InsightsAdminColors.controlBorder, width: 1),
+    ),
     child: Wrap(
       spacing: 4,
       runSpacing: 4,
@@ -458,25 +546,36 @@ class _SegmentButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Material(
-    color: selected ? InsightsAdminColors.tagBlueBg : Colors.transparent,
-    borderRadius: InsightsAdminTheme.actionRadius,
+    color: selected ? InsightsAdminColors.ctaYellow : Colors.transparent,
+    borderRadius: InsightsAdminTheme.pillRadius,
     child: InkWell(
       onTap: onPressed,
-      borderRadius: InsightsAdminTheme.actionRadius,
+      borderRadius: InsightsAdminTheme.pillRadius,
       hoverColor: selected
-          ? InsightsAdminColors.tagBlueBg
+          ? InsightsAdminColors.ctaYellowHover
           : InsightsAdminColors.canvas,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-            color: selected
-                ? InsightsAdminColors.navy
-                : InsightsAdminColors.bodyMuted,
-          ),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (selected) ...[
+              const Icon(
+                Icons.check_rounded,
+                size: 14,
+                color: InsightsAdminColors.navy,
+              ),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: InsightsAdminColors.navy,
+              ),
+            ),
+          ],
         ),
       ),
     ),
@@ -486,6 +585,7 @@ class _SegmentButton extends StatelessWidget {
 class _InsightRow extends StatelessWidget {
   const _InsightRow({
     required this.item,
+    required this.compactActions,
     required this.onEdit,
     required this.onApprove,
     required this.onToggleActive,
@@ -493,6 +593,7 @@ class _InsightRow extends StatelessWidget {
   });
 
   final InsightCardItem item;
+  final bool compactActions;
   final VoidCallback onEdit;
   final VoidCallback? onApprove;
   final VoidCallback onToggleActive;
@@ -504,6 +605,23 @@ class _InsightRow extends StatelessWidget {
     return item.body?.trim() ?? '';
   }
 
+  Widget _actionLabel(IconData icon, String text) => Row(
+    mainAxisSize: MainAxisSize.min,
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Icon(icon, size: 15),
+      const SizedBox(width: 5),
+      Flexible(
+        child: Text(
+          text,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final eligible = item.hasApprovedProvenance;
@@ -511,68 +629,74 @@ class _InsightRow extends StatelessWidget {
     final isArchived = status == 'archived';
     final description = _description;
     final showApprove = status != 'approved' && !isArchived;
-
-    final statusPills = <Widget>[
-      InsightsStatusPill.active(item.isActive),
-      InsightsStatusPill.reviewStatus(status),
-    ];
+    final needsProvenance = !eligible && item.provenanceGaps.isNotEmpty;
 
     final categoryTags = <Widget>[
       for (final role in item.targetRoles)
         InsightsCategoryTag(insightTargetRoleLabels[role] ?? role),
+      for (final domain in item.domainIds) InsightsCategoryTag(domain),
+      if (item.domainIds.isEmpty && item.category.trim().isNotEmpty)
+        InsightsCategoryTag(item.category),
       InsightsCategoryTag(
         eligible ? 'Featured-eligible' : 'Library only',
         icon: eligible ? Icons.verified_outlined : null,
+        muted: !eligible,
+        highlighted: eligible,
       ),
-      if (item.category.trim().isNotEmpty) InsightsCategoryTag(item.category),
-      if (item.sectionId.trim().isNotEmpty) InsightsCategoryTag(item.sectionId),
-      for (final domain in item.domainIds) InsightsCategoryTag(domain),
     ];
 
-    final actionButtons = <Widget>[
-      OutlinedButton.icon(
-        key: Key('edit_${item.id}'),
-        style: InsightsAdminTheme.secondaryActionStyle(),
-        onPressed: onEdit,
-        icon: const Icon(Icons.edit_outlined, size: 16),
-        label: const Text('Edit'),
+    final actions = <(int, Widget)>[
+      (
+        10,
+        OutlinedButton(
+          key: Key('edit_${item.id}'),
+          style: InsightsAdminTheme.secondaryActionStyle(),
+          onPressed: onEdit,
+          child: _actionLabel(Icons.edit_outlined, 'Edit'),
+        ),
       ),
       if (showApprove)
-        Tooltip(
-          message: onApprove == null
-              ? 'Complete source provenance before approving'
-              : 'Approve for Featured recommendations',
-          child: FilledButton.icon(
-            key: Key('approve_${item.id}'),
-            style: InsightsAdminTheme.primaryActionStyle,
-            onPressed: onApprove,
-            icon: const Icon(Icons.check_rounded, size: 16),
-            label: const Text('Approve'),
+        (
+          13,
+          Tooltip(
+            message: onApprove == null
+                ? 'Complete source provenance before approving'
+                : 'Approve for Featured recommendations',
+            child: FilledButton(
+              key: Key('approve_${item.id}'),
+              style: InsightsAdminTheme.primaryActionStyle,
+              onPressed: onApprove,
+              child: _actionLabel(Icons.check_rounded, 'Approve'),
+            ),
           ),
         ),
-      OutlinedButton.icon(
-        key: Key('toggle_active_${item.id}'),
-        style: InsightsAdminTheme.secondaryActionStyle(),
-        onPressed: onToggleActive,
-        icon: Icon(
-          item.isActive
-              ? Icons.visibility_off_outlined
-              : Icons.visibility_outlined,
-          size: 16,
+      (
+        10,
+        OutlinedButton(
+          key: Key('toggle_active_${item.id}'),
+          style: InsightsAdminTheme.secondaryActionStyle(),
+          onPressed: onToggleActive,
+          child: _actionLabel(
+            item.isActive
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            item.isActive ? 'Hide' : 'Show',
+          ),
         ),
-        label: Text(item.isActive ? 'Hide' : 'Show'),
       ),
-      OutlinedButton.icon(
-        key: Key('archive_${item.id}'),
-        style: InsightsAdminTheme.secondaryActionStyle(
-          destructiveHover: !isArchived,
+      (
+        12,
+        OutlinedButton(
+          key: Key('archive_${item.id}'),
+          style: InsightsAdminTheme.secondaryActionStyle(
+            destructiveHover: !isArchived,
+          ),
+          onPressed: onArchive,
+          child: _actionLabel(
+            isArchived ? Icons.unarchive_outlined : Icons.archive_outlined,
+            isArchived ? 'Restore' : 'Archive',
+          ),
         ),
-        onPressed: onArchive,
-        icon: Icon(
-          isArchived ? Icons.unarchive_outlined : Icons.archive_outlined,
-          size: 16,
-        ),
-        label: Text(isArchived ? 'Restore' : 'Archive'),
       ),
     ];
 
@@ -580,67 +704,61 @@ class _InsightRow extends StatelessWidget {
       key: Key('insight_row_${item.id}'),
       padding: const EdgeInsets.all(20),
       decoration: InsightsAdminTheme.cardDecoration,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wideHeader = constraints.maxWidth >= 420;
-          final wideActions = constraints.maxWidth >= 500;
-          return Column(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (wideHeader)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item.title,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: InsightsAdminColors.navy,
-                          height: 1.3,
-                        ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.title,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: InsightsAdminColors.navy,
+                        height: 1.25,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      alignment: WrapAlignment.end,
-                      children: statusPills,
+                  ),
+                  if (needsProvenance) ...[
+                    const SizedBox(width: 10),
+                    InsightsStatusPill.needsProvenance(
+                      key: Key('needs_provenance_${item.id}'),
                     ),
                   ],
-                )
-              else ...[
-                Text(
-                  item.title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: InsightsAdminColors.navy,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(spacing: 8, runSpacing: 6, children: statusPills),
-              ],
-              const SizedBox(height: 10),
-              Wrap(spacing: 8, runSpacing: 8, children: categoryTags),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  InsightsStatusPill.active(item.isActive),
+                  InsightsStatusPill.reviewStatus(status),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(spacing: 6, runSpacing: 6, children: categoryTags),
               if (description.isNotEmpty) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Text(
                   description,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 14,
-                    color: InsightsAdminColors.bodyMuted,
-                    height: 1.45,
+                    fontSize: 13.5,
+                    color: InsightsAdminColors.bodyText,
+                    height: 1.42,
                   ),
                 ),
               ],
               if (item.sourceTitle != null || item.sourceUrl != null) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -648,67 +766,78 @@ class _InsightRow extends StatelessWidget {
                       padding: EdgeInsets.only(top: 2),
                       child: Icon(
                         Icons.link_rounded,
-                        size: 14,
+                        size: 13,
                         color: InsightsAdminColors.subtleMuted,
                       ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 5),
                     Expanded(
                       child: Text(
                         '${item.sourceTitle ?? 'Untitled source'} — ${item.sourceUrl ?? 'no link'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 12,
+                          fontSize: 11.5,
                           color: InsightsAdminColors.subtleMuted,
-                          height: 1.4,
+                          height: 1.35,
                         ),
                       ),
                     ),
                   ],
                 ),
               ],
-              if (!eligible && item.provenanceGaps.isNotEmpty) ...[
+              if (needsProvenance) ...[
                 const SizedBox(height: 6),
                 Text(
                   'Needs: ${item.provenanceGaps.join(', ')}',
                   style: const TextStyle(
-                    fontSize: 12,
-                    color: InsightsAdminColors.subtleMuted,
-                    height: 1.4,
+                    fontSize: 11.5,
+                    color: InsightsAdminColors.bodyMuted,
+                    height: 1.35,
                   ),
                 ),
               ],
+            ],
+          ),
+          Column(
+            children: [
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
+                padding: EdgeInsets.only(top: 14, bottom: 12),
                 child: SizedBox(
                   height: 2,
                   width: double.infinity,
                   child: ColoredBox(color: InsightsAdminColors.canvas),
                 ),
               ),
-              if (wideActions)
+              if (!compactActions)
                 Row(
                   children: [
-                    for (var i = 0; i < actionButtons.length; i++) ...[
-                      if (i > 0) const SizedBox(width: 10),
-                      Expanded(child: actionButtons[i]),
+                    for (var i = 0; i < actions.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 8),
+                      Expanded(flex: actions[i].$1, child: actions[i].$2),
                     ],
                   ],
                 )
               else
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
+                Column(
                   children: [
-                    for (final button in actionButtons)
-                      SizedBox(
-                        width: (constraints.maxWidth - 10) / 2,
-                        child: button,
+                    for (var i = 0; i < actions.length; i += 2) ...[
+                      if (i > 0) const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(child: actions[i].$2),
+                          if (i + 1 < actions.length) ...[
+                            const SizedBox(width: 8),
+                            Expanded(child: actions[i + 1].$2),
+                          ],
+                        ],
                       ),
+                    ],
                   ],
                 ),
             ],
-          );
-        },
+          ),
+        ],
       ),
     );
   }

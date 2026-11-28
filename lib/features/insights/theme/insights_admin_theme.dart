@@ -6,33 +6,43 @@ abstract final class InsightsAdminColors {
   static const canvas = Color(0xFFF4F7FB);
   static const surface = Color(0xFFFFFFFF);
   static const navy = Color(0xFF0B1C2D);
+  static const bodyText = Color(0xFF1E293B);
   static const bodyMuted = Color(0xFF4B5563);
   static const subtleMuted = Color(0xFF64748B);
 
   static const cardBorder = Color(0xFFF3F4F6);
-  static const controlBorder = Color(0xFFE5E7EB);
-  static const controlBorderStrong = Color(0xFFD1D5DB);
-  static const hoverSurface = Color(0xFFF3F4F6);
+  static const controlBorder = Color(0xFFE2E8F0);
+  static const actionBorder = Color(0xFFCBD5E1);
+  static const controlBorderStrong = Color(0xFF94A3B8);
+  static const hoverSurface = Color(0xFFF4F7FB);
 
-  static const ctaYellow = Color(0xFFFDE68A);
-  static const ctaYellowHover = Color(0xFFFCD34D);
-  static const ctaYellowPressed = Color(0xFFFBBF24);
+  static const summaryPillBg = Color(0xFFDCE4EE);
+
+  static const ctaYellow = Color(0xFFFCD77F);
+  static const ctaYellowHover = Color(0xFFFBC959);
+  static const ctaYellowPressed = Color(0xFFF6B83B);
 
   static const primaryBlue = Color(0xFF89CFF0);
   static const primaryBlueHover = Color(0xFF74C3EA);
   static const primaryBluePressed = Color(0xFF5CB6E3);
+  static const primaryBlueDisabledBg = Color(0xFFC7E6F7);
+  static const primaryBlueDisabledFg = Color(0xFF52728C);
   static const disabledBg = Color(0xFFE2E8F0);
   static const disabledFg = Color(0xFF94A3B8);
 
-  static const tagBlueBg = Color(0xFFCFEFF7);
+  static const tagBlueBg = Color(0xFFCBE8F6);
+  static const tagNeutralBg = Color(0xFFD5DFE9);
 
-  static const activeBg = Color(0xFFDCFCE7);
+  static const provenanceAlertBg = Color(0xFFF5A484);
+  static const provenanceAlertFg = Color(0xFF3E180A);
+
+  static const activeBg = Color(0xFFC6F0CE);
   static const activeFg = Color(0xFF166534);
-  static const activeBorder = Color(0xFF86EFAC);
+  static const activeBorder = Color(0xFFA7E6B4);
 
-  static const draftBg = Color(0xFFF3F4F6);
-  static const draftFg = Color(0xFF374151);
-  static const draftBorder = Color(0xFFD1D5DB);
+  static const draftBg = Color(0xFFE5EAF0);
+  static const draftFg = Color(0xFF475569);
+  static const draftBorder = Color(0xFFD5DEE7);
 
   static const amberBg = Color(0xFFFEF3C7);
   static const amberFg = Color(0xFF92400E);
@@ -51,8 +61,9 @@ abstract final class InsightsAdminTheme {
 
   static const cardRadius = BorderRadius.all(Radius.circular(16));
   static const controlRadius = BorderRadius.all(Radius.circular(12));
-  static const actionRadius = BorderRadius.all(Radius.circular(8));
-  static const tagRadius = BorderRadius.all(Radius.circular(6));
+  static const actionRadius = BorderRadius.all(Radius.circular(14));
+  static const tagRadius = BorderRadius.all(Radius.circular(999));
+  static const chipRadius = BorderRadius.all(Radius.circular(8));
   static const pillRadius = BorderRadius.all(Radius.circular(999));
 
   static const List<BoxShadow> cardShadow = [
@@ -120,10 +131,10 @@ abstract final class InsightsAdminTheme {
       visualDensity: VisualDensity.standard,
       textTheme: TextTheme(
         headlineLarge: baseText.copyWith(
-          fontSize: 26,
+          fontSize: 28,
           fontWeight: FontWeight.w800,
-          letterSpacing: -0.4,
-          height: 1.2,
+          letterSpacing: -0.5,
+          height: 1.18,
         ),
         headlineSmall: baseText.copyWith(
           fontSize: 20,
@@ -142,6 +153,7 @@ abstract final class InsightsAdminTheme {
         ),
         bodyLarge: baseText.copyWith(
           fontSize: 14,
+          color: InsightsAdminColors.bodyText,
           height: 1.45,
         ),
         bodyMedium: baseText.copyWith(
@@ -220,7 +232,7 @@ abstract final class InsightsAdminTheme {
         selectedColor: InsightsAdminColors.tagBlueBg,
         checkmarkColor: InsightsAdminColors.navy,
         side: const BorderSide(color: InsightsAdminColors.controlBorder),
-        shape: const RoundedRectangleBorder(borderRadius: tagRadius),
+        shape: const RoundedRectangleBorder(borderRadius: chipRadius),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         labelStyle: const TextStyle(
           color: InsightsAdminColors.navy,
@@ -245,7 +257,7 @@ abstract final class InsightsAdminTheme {
           if (states.contains(WidgetState.selected)) {
             return Colors.transparent;
           }
-          return InsightsAdminColors.controlBorderStrong;
+          return InsightsAdminColors.actionBorder;
         }),
       ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
@@ -280,9 +292,9 @@ abstract final class InsightsAdminTheme {
       return InsightsAdminColors.navy;
     }),
     elevation: const WidgetStatePropertyAll(0),
-    minimumSize: const WidgetStatePropertyAll(Size(48, 46)),
+    minimumSize: const WidgetStatePropertyAll(Size(48, 44)),
     padding: const WidgetStatePropertyAll(
-      EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      EdgeInsets.symmetric(horizontal: 18, vertical: 10),
     ),
     shape: const WidgetStatePropertyAll(
       RoundedRectangleBorder(borderRadius: controlRadius),
@@ -298,11 +310,11 @@ abstract final class InsightsAdminTheme {
   );
 
   /// Brand cool-blue primary action (`Approve`, `Save insight`), borderless,
-  /// 8px radius.
+  /// pill-rounded (`14px`) to match the mockup.
   static ButtonStyle get primaryActionStyle => ButtonStyle(
     backgroundColor: WidgetStateProperty.resolveWith((states) {
       if (states.contains(WidgetState.disabled)) {
-        return InsightsAdminColors.disabledBg;
+        return InsightsAdminColors.primaryBlueDisabledBg;
       }
       if (states.contains(WidgetState.pressed)) {
         return InsightsAdminColors.primaryBluePressed;
@@ -314,22 +326,23 @@ abstract final class InsightsAdminTheme {
     }),
     foregroundColor: WidgetStateProperty.resolveWith((states) {
       if (states.contains(WidgetState.disabled)) {
-        return InsightsAdminColors.disabledFg;
+        return InsightsAdminColors.primaryBlueDisabledFg;
       }
       return InsightsAdminColors.navy;
     }),
     side: const WidgetStatePropertyAll(BorderSide.none),
     elevation: const WidgetStatePropertyAll(0),
-    minimumSize: const WidgetStatePropertyAll(Size(0, 42)),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    minimumSize: const WidgetStatePropertyAll(Size(0, 38)),
     padding: const WidgetStatePropertyAll(
-      EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      EdgeInsets.symmetric(horizontal: 10, vertical: 8),
     ),
     shape: const WidgetStatePropertyAll(
       RoundedRectangleBorder(borderRadius: actionRadius),
     ),
     textStyle: const WidgetStatePropertyAll(
       TextStyle(
-        fontSize: 13,
+        fontSize: 12.5,
         fontWeight: FontWeight.w700,
         fontFamily: _fontFamily,
         fontFamilyFallback: _fontFallback,
@@ -338,11 +351,11 @@ abstract final class InsightsAdminTheme {
   );
 
   /// Secondary card/editor action (`Edit`, `Hide`, `Archive`, `Cancel`,
-  /// `Test link`): transparent fill, 1px light gray border, 8px radius, with
+  /// `Test link`): transparent fill, 1px crisp gray border, 14px radius, with
   /// optional destructive red hover treatment for `Archive`.
   static ButtonStyle secondaryActionStyle({
     bool destructiveHover = false,
-    double minHeight = 42,
+    double minHeight = 38,
   }) => ButtonStyle(
     backgroundColor: WidgetStateProperty.resolveWith((states) {
       if (states.contains(WidgetState.disabled)) {
@@ -370,11 +383,7 @@ abstract final class InsightsAdminTheme {
               states.contains(WidgetState.pressed))) {
         return InsightsAdminColors.dangerFg;
       }
-      if (states.contains(WidgetState.hovered) ||
-          states.contains(WidgetState.pressed)) {
-        return InsightsAdminColors.navy;
-      }
-      return InsightsAdminColors.bodyMuted;
+      return InsightsAdminColors.navy;
     }),
     side: WidgetStateProperty.resolveWith((states) {
       if (destructiveHover &&
@@ -392,22 +401,23 @@ abstract final class InsightsAdminTheme {
         );
       }
       return const BorderSide(
-        color: InsightsAdminColors.controlBorder,
+        color: InsightsAdminColors.actionBorder,
         width: 1,
       );
     }),
     overlayColor: const WidgetStatePropertyAll(Colors.transparent),
     elevation: const WidgetStatePropertyAll(0),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     minimumSize: WidgetStatePropertyAll(Size(0, minHeight)),
     padding: const WidgetStatePropertyAll(
-      EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      EdgeInsets.symmetric(horizontal: 10, vertical: 8),
     ),
     shape: const WidgetStatePropertyAll(
       RoundedRectangleBorder(borderRadius: actionRadius),
     ),
     textStyle: const WidgetStatePropertyAll(
       TextStyle(
-        fontSize: 13,
+        fontSize: 12.5,
         fontWeight: FontWeight.w600,
         fontFamily: _fontFamily,
         fontFamilyFallback: _fontFallback,
@@ -416,14 +426,14 @@ abstract final class InsightsAdminTheme {
   );
 }
 
-/// Fully rounded (`999px`) status pill with a matching 1px border.
+/// Fully rounded (`999px`) status pill with a subtle matching 1px border.
 class InsightsStatusPill extends StatelessWidget {
   const InsightsStatusPill({
     super.key,
     required this.label,
     required this.background,
     required this.foreground,
-    required this.borderColor,
+    this.borderColor,
   });
 
   factory InsightsStatusPill.active(bool isActive, {Key? key}) => isActive
@@ -474,10 +484,17 @@ class InsightsStatusPill extends StatelessWidget {
         ),
       };
 
+  factory InsightsStatusPill.needsProvenance({Key? key}) => InsightsStatusPill(
+    key: key,
+    label: 'Needs Provenance',
+    background: InsightsAdminColors.provenanceAlertBg,
+    foreground: InsightsAdminColors.provenanceAlertFg,
+  );
+
   final String label;
   final Color background;
   final Color foreground;
-  final Color borderColor;
+  final Color? borderColor;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -485,7 +502,9 @@ class InsightsStatusPill extends StatelessWidget {
     decoration: BoxDecoration(
       color: background,
       borderRadius: InsightsAdminTheme.pillRadius,
-      border: Border.all(color: borderColor, width: 1),
+      border: borderColor != null
+          ? Border.all(color: borderColor!, width: 1)
+          : null,
     ),
     child: Text(
       label,
@@ -499,38 +518,56 @@ class InsightsStatusPill extends StatelessWidget {
   );
 }
 
-/// Rectangular (`6px`) cool-blue category/audience tag distinct from rounded
-/// status pills.
+/// Soft pill tag for audience roles, domains, and eligibility (`Library only` /
+/// `Featured-eligible`).
 class InsightsCategoryTag extends StatelessWidget {
-  const InsightsCategoryTag(this.label, {super.key, this.icon});
+  const InsightsCategoryTag(
+    this.label, {
+    super.key,
+    this.icon,
+    this.muted = false,
+    this.highlighted = false,
+  });
 
   final String label;
   final IconData? icon;
+  final bool muted;
+  final bool highlighted;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-    decoration: const BoxDecoration(
-      color: InsightsAdminColors.tagBlueBg,
-      borderRadius: InsightsAdminTheme.tagRadius,
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (icon != null) ...[
-          Icon(icon, size: 13, color: InsightsAdminColors.navy),
-          const SizedBox(width: 4),
-        ],
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: InsightsAdminColors.navy,
-            height: 1.2,
+  Widget build(BuildContext context) {
+    final background = highlighted
+        ? InsightsAdminColors.activeBg
+        : muted
+        ? InsightsAdminColors.tagNeutralBg
+        : InsightsAdminColors.tagBlueBg;
+    final foreground = highlighted
+        ? InsightsAdminColors.activeFg
+        : InsightsAdminColors.navy;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: InsightsAdminTheme.tagRadius,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 13, color: foreground),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: foreground,
+              height: 1.2,
+            ),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }

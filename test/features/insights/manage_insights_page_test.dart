@@ -235,13 +235,13 @@ void main() {
       );
       expect(canvas.color, const Color(0xFFF4F7FB));
 
-      // Warm yellow #FDE68A New insight CTA with 12px border radius.
+      // Warm yellow New insight CTA with 12px border radius.
       final newBtn = tester.widget<FilledButton>(
         find.byKey(const Key('new_insight_button')),
       );
       expect(
         newBtn.style?.backgroundColor?.resolve(<WidgetState>{}),
-        const Color(0xFFFDE68A),
+        InsightsAdminColors.ctaYellow,
       );
       expect(
         newBtn.style?.shape?.resolve(<WidgetState>{}),
@@ -250,13 +250,17 @@ void main() {
         ),
       );
 
-      // Cohesive segmented status bar, role dropdown, and search icon.
+      // Cohesive segmented status bar, role dropdown, search icon, and 2-column grid.
       expect(
         find.byKey(const Key('insights_status_segmented_control')),
         findsOneWidget,
       );
       expect(find.byKey(const Key('insights_role_filter')), findsOneWidget);
       expect(find.byIcon(Icons.search_rounded), findsOneWidget);
+      expect(
+        find.byKey(const Key('insights_card_grid_two_col')),
+        findsOneWidget,
+      );
 
       // Squircle card container (#FFFFFF, 16px radius, 20px padding, #F3F4F6 border).
       final card = tester.widget<Container>(
@@ -274,9 +278,13 @@ void main() {
         const Color(0xFFF3F4F6),
       );
 
-      // Description (14px), provenance text (12px), status pills, category tags,
-      // and action icons are rendered.
+      // Needs Provenance pill, description, provenance text, status pills,
+      // category tags, and action icons are rendered.
       final legacyRow = find.byKey(const Key('insight_row_legacy_guide'));
+      expect(
+        find.byKey(const Key('needs_provenance_legacy_guide')),
+        findsOneWidget,
+      );
       expect(
         find.descendant(of: legacyRow, matching: find.text('Subtitle')),
         findsOneWidget,
@@ -293,7 +301,7 @@ void main() {
           of: legacyRow,
           matching: find.byType(InsightsStatusPill),
         ),
-        findsNWidgets(2),
+        findsNWidgets(3),
       );
       expect(
         find.descendant(
