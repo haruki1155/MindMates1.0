@@ -256,7 +256,7 @@ void main() {
 
   group('Role navigation & access control', () {
     testWidgets(
-      'PortalWorkspaceNavigation shows Activity Logs only for Super-Admin and hides it for Counselor and PAACC Staff',
+      'PortalWorkspaceNavigation shows Activity Logs only for Super-Admin and hides it for Counselor and PACC Staff',
       (tester) async {
         // Super-Admin sees Activity Logs
         await tester.pumpWidget(
@@ -290,7 +290,7 @@ void main() {
         );
         expect(find.text('Activity Logs'), findsNothing);
 
-        // PAACC Staff does NOT see Activity Logs
+        // PACC Staff does NOT see Activity Logs
         await tester.pumpWidget(
           MaterialApp(
             theme: AdminTheme.data,
@@ -309,7 +309,7 @@ void main() {
     );
 
     testWidgets(
-      'Counselor and PAACC Staff are denied access on ActivityLogsPage and perform zero queries',
+      'Counselor and PACC Staff are denied access on ActivityLogsPage and perform zero queries',
       (tester) async {
         for (final role in const [
           AccessRole.counselor,
@@ -369,7 +369,7 @@ void main() {
           expect(tester.takeException(), isNull);
           expect(
             find.text(
-              'Read-only audit trail of Administrator, Counselor, and PAACC Staff actions.',
+              'Read-only audit trail of Administrator, Counselor, and PACC Staff actions.',
             ),
             findsOneWidget,
           );
@@ -415,10 +415,10 @@ void main() {
         await tester.tap(find.text('Close'));
         await tester.pumpAndSettle();
 
-        // Filter by Actor Role -> PAACC Staff.
+        // Filter by Actor Role -> PACC Staff.
         await tester.tap(find.byKey(const ValueKey('activity-role-filter')));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('PAACC Staff').last);
+        await tester.tap(find.text('PACC Staff').last);
         await tester.pumpAndSettle();
         expect(find.text('Announcement published'), findsOneWidget);
         expect(find.text('Staff role changed'), findsNothing);

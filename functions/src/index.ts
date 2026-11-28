@@ -1230,7 +1230,7 @@ export const getAuditLogPage = onCall(async (request) => {
     }), hasMore: snapshot.size === pageSize};
   }
 
-  // Admin-wide Activity Logs feed (monitoring Administrator, Counselor, and PAACC Staff actions).
+  // Admin-wide Activity Logs feed (monitoring Administrator, Counselor, and PACC Staff actions).
   const actorRoleFilter = typeof request.data?.actorRole === "string" ? request.data.actorRole.trim() : "";
   const filterActorId = typeof request.data?.filterActorId === "string" ? request.data.filterActorId.trim() : "";
   const search = typeof request.data?.search === "string" ? request.data.search.trim().toLowerCase() : "";
@@ -1284,7 +1284,7 @@ export const getAuditLogPage = onCall(async (request) => {
 
     const targetType = typeof data.targetType === "string" ? data.targetType.trim().toLowerCase() : null;
     const redactedTargetId = redactAuditTargetId(targetType, data.targetId ?? data.targetUserId);
-    const roleLabel = normalizedRole === "admin" ? "Administrator" : normalizedRole === "counselor" ? "Counselor" : "PAACC Staff";
+    const roleLabel = normalizedRole === "admin" ? "Administrator" : normalizedRole === "counselor" ? "Counselor" : "PACC Staff";
     const actorNameVal = String(data.actorNameSnapshot ?? "").trim() || roleLabel;
 
     if (search) {

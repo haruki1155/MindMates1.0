@@ -1072,7 +1072,7 @@ class AdminPortalRepository {
   }
 
   /// Fetches a paginated, sanitized page of Admin-wide activity logs monitoring
-  /// Administrator, Counselor, and PAACC Staff actions.
+  /// Administrator, Counselor, and PACC Staff actions.
   ///
   /// Restricted strictly to Super-Administrators on both client and server.
   Future<({List<AdminAuditEvent> events, bool hasMore, String? nextCursor})>

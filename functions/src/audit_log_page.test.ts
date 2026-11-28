@@ -75,7 +75,7 @@ before(async () => {
   await Promise.all([
     db.doc(`users/${adminUid}`).set({id: adminUid, accessRole: "admin", role: "admin", name: "Test Admin", accountStatus: "active"}, {merge: true}),
     db.doc(`users/${counselorUid}`).set({id: counselorUid, accessRole: "counselor", approvedRole: "counselor", staffAccountStatus: "approved", accountStatus: "active", name: "Test Counselor"}, {merge: true}),
-    db.doc(`users/${staffUid}`).set({id: staffUid, accessRole: "portalStaff", approvedRole: "portalStaff", staffAccountStatus: "approved", accountStatus: "active", name: "Test PAACC Staff"}, {merge: true}),
+    db.doc(`users/${staffUid}`).set({id: staffUid, accessRole: "portalStaff", approvedRole: "portalStaff", staffAccountStatus: "approved", accountStatus: "active", name: "Test PACC Staff"}, {merge: true}),
   ]);
   // Pre-existing shape: an action about a staff account.
   roleChangeId = await seed({
@@ -111,10 +111,10 @@ before(async () => {
       before: {status: "active", studentKey: "SYNTHETIC-ROSTER-KEY"},
     },
   });
-  // PAACC Staff action.
+  // PACC Staff action.
   staffPublishId = await seed({
     actorId: staffUid,
-    actorNameSnapshot: "Test PAACC Staff",
+    actorNameSnapshot: "Test PACC Staff",
     actorRoleSnapshot: "portalStaff",
     action: "ANNOUNCEMENT_PUBLISHED",
     category: "SYSTEM",
@@ -123,7 +123,7 @@ before(async () => {
     targetUserId: null,
     metadata: {status: "published", revision: 1},
   });
-  // Student self-action (must be excluded from Admin/Counselor/PAACC Staff feed).
+  // Student self-action (must be excluded from Admin/Counselor/PACC Staff feed).
   studentSelfId = await seed({
     actorId: studentUid,
     actorNameSnapshot: "Student",
@@ -166,7 +166,7 @@ test("All actions does not include student information views", async () => {
   assert.ok(!all.events.some((e) => e.id === viewId));
 });
 
-test("Admin-wide Activity Logs feed denies Counselor, PAACC Staff, and unauthenticated callers", async () => {
+test("Admin-wide Activity Logs feed denies Counselor, PACC Staff, and unauthenticated callers", async () => {
   await assert.rejects(
     () => page.run({data: {}}),
     (err: {code?: string}) => err.code === "unauthenticated"
@@ -181,7 +181,7 @@ test("Admin-wide Activity Logs feed denies Counselor, PAACC Staff, and unauthent
   );
 });
 
-test("Admin-wide Activity Logs feed monitors Admin, Counselor, and PAACC Staff, excludes appUser, redacts student IDs, and strips secrets", async () => {
+test("Admin-wide Activity Logs feed monitors Admin, Counselor, and PACC Staff, excludes appUser, redacts student IDs, and strips secrets", async () => {
   const feed = await page.run({
     auth: {uid: adminUid},
     data: {pageSize: 50},
@@ -190,7 +190,7 @@ test("Admin-wide Activity Logs feed monitors Admin, Counselor, and PAACC Staff, 
 
   assert.ok(byId.has(roleChangeId), "Admin event should be returned");
   assert.ok(byId.has(viewId), "Counselor event should be returned");
-  assert.ok(byId.has(staffPublishId), "PAACC Staff event should be returned");
+  assert.ok(byId.has(staffPublishId), "PACC Staff event should be returned");
   assert.ok(!byId.has(studentSelfId), "Student/appUser event must be excluded from staff activity feed");
 
   const adminEv = byId.get(roleChangeId)!;
@@ -222,7 +222,7 @@ test("Admin-wide Activity Logs feed monitors Admin, Counselor, and PAACC Staff, 
   });
   assert.deepEqual(securityOnly.events.map((e) => e.id), [viewId]);
 
-  // Search by humanized action label ("Student personal information viewed") or role label ("PAACC Staff")
+  // Search by humanized action label ("Student personal information viewed") or role label ("PACC Staff")
   const byActionLabel = await page.run({
     auth: {uid: adminUid},
     data: {search: "Student personal information viewed", filterActorId: counselorUid},
@@ -231,7 +231,7 @@ test("Admin-wide Activity Logs feed monitors Admin, Counselor, and PAACC Staff, 
 
   const byRoleLabel = await page.run({
     auth: {uid: adminUid},
-    data: {search: "PAACC Staff", filterActorId: staffUid},
+    data: {search: "PACC Staff", filterActorId: staffUid},
   });
   assert.deepEqual(byRoleLabel.events.map((e) => e.id), [staffPublishId]);
 });

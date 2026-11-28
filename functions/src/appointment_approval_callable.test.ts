@@ -809,7 +809,7 @@ test("Admin read-only appointment policy: admins can read permitted approvals bu
     );
   }
 
-  // 3. Unauthenticated, PAACC staff (ops), and students cannot perform appointment management mutations.
+  // 3. Unauthenticated, PACC staff (ops), and students cannot perform appointment management mutations.
   await rejects((reviewAppointment as unknown as Callable).run({data: confirm(req.id, req.at)}), "unauthenticated");
   await rejects((archiveAppointments as unknown as Callable).run({data: {appointmentIds: [conf.id], archived: true}}), "unauthenticated");
   await rejects((changeAppointmentAgreement as unknown as Callable).run({data: {appointmentId: conf.id, action: "cancel"}}), "unauthenticated");
