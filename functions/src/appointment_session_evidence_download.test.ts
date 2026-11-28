@@ -223,7 +223,7 @@ before(async () => {
       accessRole: "portalStaff",
       staffAccountStatus: "approved",
       accountStatus: "active",
-      name: "PAACC Staff",
+      name: "PACC Staff",
     }),
   ]);
 });

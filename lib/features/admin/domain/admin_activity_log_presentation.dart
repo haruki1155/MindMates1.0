@@ -8,7 +8,7 @@ enum ActivityActorRoleFilter {
   all('', 'All roles'),
   admin('admin', 'Administrator'),
   counselor('counselor', 'Counselor'),
-  portalStaff('portalStaff', 'PAACC Staff');
+  portalStaff('portalStaff', 'PACC Staff');
 
   const ActivityActorRoleFilter(this.code, this.label);
   final String code;
@@ -77,7 +77,7 @@ String auditActorRoleLabel(String rawRole) =>
     switch (normalizeAuditActorRole(rawRole)) {
       'admin' => 'Administrator',
       'counselor' => 'Counselor',
-      'portalStaff' => 'PAACC Staff',
+      'portalStaff' => 'PACC Staff',
       _ => 'Portal User',
     };
 

@@ -8,7 +8,7 @@ import '../domain/admin_status_presentation.dart';
 import '../theme/admin_theme.dart';
 
 /// Read-only Admin Activity Logs page monitoring Administrator, Counselor, and
-/// PAACC Staff actions recorded in `admin_audit_logs`.
+/// PACC Staff actions recorded in `admin_audit_logs`.
 class ActivityLogsPage extends StatefulWidget {
   const ActivityLogsPage({
     super.key,
@@ -207,7 +207,7 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Text(
-                    'Read-only audit trail of Administrator, Counselor, and PAACC Staff actions.',
+                    'Read-only audit trail of Administrator, Counselor, and PACC Staff actions.',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   Wrap(
@@ -546,7 +546,7 @@ class _ActivityLogsPageState extends State<ActivityLogsPage> {
                 icon: Icons.psychology_outlined,
               ),
               _SemanticPill(
-                label: 'PAACC Staff: $staffCount',
+                label: 'PACC Staff: $staffCount',
                 tone: AdminSemanticTone.green,
                 icon: Icons.badge_outlined,
               ),
@@ -708,7 +708,7 @@ class _ScopeNoticeBanner extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Showing server-recorded Administrator, Counselor, and PAACC Staff '
+              'Showing server-recorded Administrator, Counselor, and PACC Staff '
               'audit events stored in admin_audit_logs. Confidential message/session '
               'contents and student personal identifiers are never logged here, and '
               'actions prior to audit coverage are not backfilled.',
@@ -760,8 +760,8 @@ class _PermissionDeniedPanel extends StatelessWidget {
           const SizedBox(height: 10),
           const Text(
             'Only system administrators can view the organization-wide activity '
-            'logs for Administrator, Counselor, and PAACC Staff actions. '
-            'Counselor and PAACC Staff accounts are denied access to this feed.',
+            'logs for Administrator, Counselor, and PACC Staff actions. '
+            'Counselor and PACC Staff accounts are denied access to this feed.',
             style: TextStyle(color: AdminColors.muted),
           ),
         ],

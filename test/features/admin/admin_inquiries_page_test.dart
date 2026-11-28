@@ -331,7 +331,7 @@ void main() {
         expect(find.text('Confirm Receipt'), findsOneWidget);
         expect(find.text('Change status'), findsNothing);
 
-        // PAACC Staff operational projection: sanitized list + detail, no overflow.
+        // PACC Staff operational projection: sanitized list + detail, no overflow.
         await tester.pumpWidget(
           MaterialApp(
             theme: AdminTheme.data,
@@ -555,7 +555,7 @@ void main() {
       expect(find.text('Mark as Resolved'), findsOneWidget);
       expect(find.text('Unable to mark inquiry as resolved.'), findsOneWidget);
 
-      // PAACC Staff (portalStaff) operational view does not show Mark as Resolved.
+      // PACC Staff (portalStaff) operational view does not show Mark as Resolved.
       final operationalInProgress = AdminInquiryModel(
         id: 'op_prog',
         userId: '',

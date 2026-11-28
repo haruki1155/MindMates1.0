@@ -125,7 +125,7 @@ void main() {
     },
   );
 
-  testWidgets('PAACC Staff remains read-only with no Send decision', (
+  testWidgets('PACC Staff remains read-only with no Send decision', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1440, 1200);
@@ -166,7 +166,7 @@ void main() {
   });
 
   testWidgets(
-    'PAACC Staff does not see row selection or archive controls on finalized rows',
+    'PACC Staff does not see row selection or archive controls on finalized rows',
     (tester) async {
       tester.view.physicalSize = const Size(1440, 1200);
       tester.view.devicePixelRatio = 1;
@@ -355,7 +355,7 @@ void main() {
         expect(find.byTooltip('Move to history'), findsOneWidget);
         expect(find.textContaining('Select finished'), findsOneWidget);
 
-        // PAACC Staff role: View action only (no Review, no archive controls).
+        // PACC Staff role: View action only (no Review, no archive controls).
         final staffRepo = _RoleAppointmentsRepo(
           items,
           role: AccessRole.portalStaff,

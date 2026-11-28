@@ -248,7 +248,7 @@ test("administrator rule gates require the verified, active lifecycle", async ()
   await assertSucceeds(getDocs(collection(admin, "admin_audit_logs")));
   await assertSucceeds(getDoc(doc(admin, "mind_aid_config/current")));
 
-  // Counselor and PAACC Staff must be denied read/write access to admin_audit_logs.
+  // Counselor and PACC Staff must be denied read/write access to admin_audit_logs.
   const counselor = environment.authenticatedContext("counselor", verified).firestore();
   await assertFails(getDoc(doc(counselor, "admin_audit_logs/audit-1")));
   await assertFails(getDocs(collection(counselor, "admin_audit_logs")));
