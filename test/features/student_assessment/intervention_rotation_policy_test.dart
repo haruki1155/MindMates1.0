@@ -20,4 +20,58 @@ void main() {
     expect(firstCycle, secondCycle);
     expect(firstCycle, isNot(contains(InterventionType.appointment)));
   });
+
+  test(
+    'Student V4 maps each of the five domains deterministically regardless of seed or order',
+    () {
+      const expected = {
+        'academic': InterventionType.academicPlanning,
+        'financial': InterventionType.financialPlanning,
+        'socialAdjustment': InterventionType.walking,
+        'sleepRest': InterventionType.breathing,
+        'emotionalWellbeing': InterventionType.grounding,
+      };
+
+      for (final seed in [0, 1, 7, 42]) {
+        final forward = InterventionRotationPolicy(random: Random(seed));
+        final reverse = InterventionRotationPolicy(random: Random(seed));
+        for (final entry in expected.entries) {
+          expect(forward.selectForStudentV4(entry.key), entry.value);
+        }
+        for (final entry in expected.entries.toList().reversed) {
+          expect(reverse.selectForStudentV4(entry.key), entry.value);
+        }
+      }
+    },
+  );
+
+  test(
+    'generic select keeps rotating strictly within walking, breathing, and grounding including shared workplace domain IDs',
+    () {
+      final policy = InterventionRotationPolicy(random: Random(99));
+      final selected = [
+        for (final domainId in [
+          'teachingWorkloadDemands',
+          'teachingSupport',
+          'teachingEngagementMeaning',
+          'sleepRest',
+          'emotionalWellbeing',
+        ])
+          policy.select(domainId),
+      ];
+      expect(
+        selected,
+        everyElement(
+          isIn([
+            InterventionType.walking,
+            InterventionType.breathing,
+            InterventionType.grounding,
+          ]),
+        ),
+      );
+      expect(selected, isNot(contains(InterventionType.academicPlanning)));
+      expect(selected, isNot(contains(InterventionType.financialPlanning)));
+      expect(selected, isNot(contains(InterventionType.appointment)));
+    },
+  );
 }

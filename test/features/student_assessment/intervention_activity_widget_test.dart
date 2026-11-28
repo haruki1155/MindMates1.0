@@ -406,4 +406,140 @@ void main() {
     await tester.pump();
     expect(find.text('Record self-reported walk'), findsOneWidget);
   });
+
+  testWidgets('feedback Skip feedback returns null and does not block', (
+    tester,
+  ) async {
+    Object? popped = 'sentinel';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => FilledButton(
+            onPressed: () async {
+              popped = await Navigator.of(context).push<InterventionFeedback>(
+                MaterialPageRoute(
+                  builder: (_) => const InterventionFeedbackScreen(),
+                ),
+              );
+            },
+            child: const Text('Open feedback'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open feedback'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Skip feedback'));
+    await tester.tap(find.text('Skip feedback'));
+    await tester.pumpAndSettle();
+    expect(popped, isNull);
+  });
+
+  testWidgets(
+    'Student V4 self-reported walking never requests permission, completes, skips, and handles dark landscape',
+    (tester) async {
+      var permissionCalls = 0;
+      InterventionOutcome? outcome;
+      Future<void> pushWalking(WidgetTester tester, ThemeData theme) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: theme,
+            home: Builder(
+              builder: (context) => FilledButton(
+                onPressed: () async {
+                  outcome = await Navigator.of(context)
+                      .push<InterventionOutcome>(
+                        MaterialPageRoute(
+                          builder: (_) => InterventionWalkingScreen(
+                            selfReportedMode: true,
+                            requestActivityRecognitionPermission: () async {
+                              permissionCalls += 1;
+                              return PermissionStatus.denied;
+                            },
+                          ),
+                        ),
+                      );
+                },
+                child: const Text('Open walk'),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open walk'));
+        await tester.pumpAndSettle();
+      }
+
+      await pushWalking(tester, AppTheme.light);
+      expect(permissionCalls, 0);
+      expect(find.text('Take a short walk'), findsWidgets);
+      expect(find.text('500-step goal'), findsNothing);
+      expect(find.textContaining('/ 500 steps'), findsNothing);
+      expect(find.textContaining('sensor'), findsOneWidget);
+
+      await tester.tap(find.text('I took a short walk'));
+      await tester.pumpAndSettle();
+      expect(outcome, InterventionOutcome.selfReportedCompleted);
+
+      tester.view.physicalSize = const Size(800, 360);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await pushWalking(tester, AppTheme.dark);
+      await tester.scrollUntilVisible(find.text('Skip activity'), 200);
+      await tester.tap(find.text('Skip activity'));
+      await tester.pumpAndSettle();
+      expect(outcome, InterventionOutcome.skipped);
+      expect(permissionCalls, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Student V4 grounding adds optional feeling prompt on step 6, allows blank finish, and supports skip',
+    (tester) async {
+      InterventionOutcome? outcome;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: Builder(
+            builder: (context) => FilledButton(
+              onPressed: () async {
+                outcome = await Navigator.of(context).push<InterventionOutcome>(
+                  MaterialPageRoute(
+                    builder: (_) => const InterventionGroundingScreen(
+                      includeFeelingPrompt: true,
+                    ),
+                  ),
+                );
+              },
+              child: const Text('Open grounding'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open grounding'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ground and notice'), findsOneWidget);
+      for (var step = 1; step <= 5; step += 1) {
+        expect(find.text('Step $step of 6'), findsOneWidget);
+        await tester.tap(find.text('Next'));
+        await tester.pump();
+      }
+      expect(find.text('Step 6 of 6'), findsOneWidget);
+      expect(find.text('Notice or name a feeling (optional)'), findsOneWidget);
+      expect(find.textContaining('Nothing here is saved.'), findsOneWidget);
+      expect(find.byKey(const Key('grounding-feeling-note')), findsOneWidget);
+
+      await tester.tap(find.text('Finish'));
+      await tester.pumpAndSettle();
+      expect(outcome, InterventionOutcome.completed);
+
+      await tester.tap(find.text('Open grounding'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Skip activity'));
+      await tester.pumpAndSettle();
+      expect(outcome, InterventionOutcome.skipped);
+    },
+  );
 }

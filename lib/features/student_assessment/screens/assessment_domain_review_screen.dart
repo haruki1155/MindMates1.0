@@ -15,7 +15,9 @@ class AssessmentDomainReviewScreen extends StatefulWidget {
     this.onTryActivity,
     this.previewAfterRetry,
     this.errorAfterRetry,
+    this.interventionAfterRetry,
     this.error,
+    this.isStudentV4 = false,
     super.key,
   });
 
@@ -27,7 +29,9 @@ class AssessmentDomainReviewScreen extends StatefulWidget {
   final Future<void> Function() onRetry;
   final Map<String, Object>? Function()? previewAfterRetry;
   final Object? Function()? errorAfterRetry;
+  final InterventionType? Function()? interventionAfterRetry;
   final Object? error;
+  final bool isStudentV4;
 
   @override
   State<AssessmentDomainReviewScreen> createState() =>
@@ -38,6 +42,7 @@ class _AssessmentDomainReviewScreenState
     extends State<AssessmentDomainReviewScreen> {
   late Map<String, Object>? _preview;
   Object? _error;
+  InterventionType? _intervention;
   bool _retrying = false;
 
   @override
@@ -45,6 +50,7 @@ class _AssessmentDomainReviewScreenState
     super.initState();
     _preview = widget.preview;
     _error = widget.error;
+    _intervention = widget.intervention;
   }
 
   @override
@@ -53,6 +59,11 @@ class _AssessmentDomainReviewScreenState
     final domainLabel = _text('domainLabel') ?? 'Category review';
     final eligible = _preview?['interventionEligible'] == true;
     final status = _text('status');
+    final studentV4Copy = widget.isStudentV4 && _intervention != null
+        ? studentV4ActivityCopyFor(_intervention!)
+        : null;
+    final showStudentV4ActivityCard =
+        hasPreview && eligible && widget.isStudentV4 && studentV4Copy != null;
     return PopScope(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) widget.onBack();
@@ -87,10 +98,10 @@ class _AssessmentDomainReviewScreenState
                     const Text(
                       'You have completed this part of your assessment.',
                     ),
-                    if (hasPreview && eligible) ...[
+                    if (hasPreview && eligible && !showStudentV4ActivityCard) ...[
                       const SizedBox(height: 18),
                       Text(
-                        'A short ${widget.intervention?.name ?? 'wellness'} activity is available if you would like a pause before continuing.',
+                        'A short ${_intervention?.name ?? 'wellness'} activity is available if you would like a pause before continuing.',
                         style: const TextStyle(height: 1.45),
                       ),
                       if (widget.onTryActivity != null) ...[
@@ -127,6 +138,45 @@ class _AssessmentDomainReviewScreenState
                   ],
                 ),
               ),
+              if (showStudentV4ActivityCard) ...[
+                const SizedBox(height: 16),
+                AssessmentSurfaceCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Optional activity · 1–3 min',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: AssessmentPresentation.muted(context),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        studentV4Copy.title,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        studentV4Copy.description,
+                        style: const TextStyle(height: 1.45),
+                      ),
+                      if (widget.onTryActivity != null) ...[
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          style: AssessmentPresentation.filledButtonStyle(
+                            context,
+                          ),
+                          onPressed: widget.onTryActivity,
+                          child: const Text('Try Activity'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               FilledButton(
                 style: AssessmentPresentation.filledButtonStyle(context),
@@ -159,8 +209,15 @@ class _AssessmentDomainReviewScreenState
     await widget.onRetry();
     if (!mounted) return;
     setState(() {
-      _preview = widget.previewAfterRetry?.call() ?? widget.preview;
-      _error = widget.errorAfterRetry?.call() ?? widget.error;
+      _preview = widget.previewAfterRetry != null
+          ? widget.previewAfterRetry!()
+          : widget.preview;
+      _error = widget.errorAfterRetry != null
+          ? widget.errorAfterRetry!()
+          : widget.error;
+      _intervention = widget.interventionAfterRetry != null
+          ? widget.interventionAfterRetry!()
+          : widget.intervention;
       _retrying = false;
     });
   }
