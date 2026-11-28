@@ -4,8 +4,12 @@ import 'package:mind_mates/features/breathing/models/breathing_models.dart';
 import 'package:mind_mates/features/breathing/screens/mindful_breathing_screen.dart';
 import 'package:mind_mates/models/user_model.dart';
 import 'package:mind_mates/providers/breathing_provider.dart';
+import 'package:mind_mates/providers/insights_provider.dart';
+import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/user_provider.dart';
 import 'package:mind_mates/repositories/breathing_repository.dart';
+import 'package:mind_mates/repositories/insights_repository.dart';
+import 'package:mind_mates/repositories/report_repository.dart';
 import 'package:mind_mates/repositories/user_repository.dart';
 import 'package:provider/provider.dart';
 
@@ -141,6 +145,68 @@ void main() {
 
     expect(find.text('Session complete'), findsOneWidget);
   });
+
+  testWidgets('a saved session refreshes the same user insights', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final userProvider = UserProvider(_ProfileUserRepository())
+      ..setUser(const UserModel(id: 'user_1', email: 'leo@example.com'));
+    final reports = _RecordingReportProvider();
+    final insights = _RecordingInsightsProvider();
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+          ChangeNotifierProvider(
+            create: (_) => BreathingProvider(_FakeBreathingRepository()),
+          ),
+          ChangeNotifierProvider<ReportProvider>.value(value: reports),
+          ChangeNotifierProvider<InsightsProvider>.value(value: insights),
+        ],
+        child: const MaterialApp(home: MindfulBreathingScreen()),
+      ),
+    );
+
+    await tester.tap(find.text('Start breathing'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Start breathing').last);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 300));
+    await tester.pump(const Duration(milliseconds: 700));
+
+    expect(reports.refreshedUsers, ['user_1']);
+    expect(insights.refreshedUsers, ['user_1']);
+  });
+}
+
+class _ProfileUserRepository extends UserRepository {
+  @override
+  Future<UserModel?> fetchUserProfile(String uid) async =>
+      UserModel(id: uid, email: 'leo@example.com');
+}
+
+class _RecordingReportProvider extends ReportProvider {
+  _RecordingReportProvider() : super(ReportRepository());
+  final refreshedUsers = <String>[];
+
+  @override
+  Future<void> refreshWeeklyReport(String userId) async {
+    refreshedUsers.add(userId);
+  }
+}
+
+class _RecordingInsightsProvider extends InsightsProvider {
+  _RecordingInsightsProvider() : super(InsightsRepository());
+  final refreshedUsers = <String>[];
+
+  @override
+  Future<void> refreshLoadedContext(String userId) async {
+    refreshedUsers.add(userId);
+  }
 }
 
 class _FakeBreathingRepository extends BreathingRepository {

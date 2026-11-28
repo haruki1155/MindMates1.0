@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../../providers/insights_provider.dart';
 import '../../../providers/report_provider.dart';
 import '../../../providers/secret_chat_provider.dart';
 import '../../../providers/user_provider.dart';
@@ -94,6 +95,10 @@ class _SecretChatPageState extends State<SecretChatPage> {
     try {
       await userProvider?.loadProfile(userId);
       await _readProviderOrNull<ReportProvider>()?.refreshWeeklyReport(userId);
+      if (!mounted) return;
+      await _readProviderOrNull<InsightsProvider>()?.refreshLoadedContext(
+        userId,
+      );
     } catch (_) {
       // Secret Chat changes remain saved even if the summary refresh is delayed.
     }

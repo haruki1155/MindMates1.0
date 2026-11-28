@@ -37,14 +37,7 @@ void main() {
     await moodProvider.loadRecentMoods('user_1');
 
     final reportProvider = ReportProvider(
-      _FakeReportRepository(
-        ReportModel(
-          id: 'report_1',
-          userId: 'user_1',
-          generatedAt: now,
-          assessmentCount: 1,
-        ),
-      ),
+      _FakeReportRepository(_currentWeekReport(now, assessmentCount: 1)),
     );
     await reportProvider.loadLatestReport('user_1');
 
@@ -331,7 +324,7 @@ void main() {
       const Color(0xFFEDE2C6),
     );
     expect(
-      find.byKey(const Key('insights_resource_fallback_unknown_resource')),
+      find.byKey(const Key('insights_resource_art_unknown_resource')),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -423,10 +416,10 @@ void main() {
       find.textContaining('Stress is the body natural response to challenges'),
       findsOneWidget,
     );
-    expect(
-      find.textContaining('Mental Health Insights Categories.docx'),
-      findsOneWidget,
-    );
+    // Internal authoring file names stay hidden; the source link shows.
+    expect(find.textContaining('.docx'), findsNothing);
+    expect(find.textContaining('MindMate summary •'), findsOneWidget);
+    expect(find.text('Read the full article at WHO'), findsOneWidget);
     expect(find.text('stress'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Back'));
@@ -550,6 +543,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.text('See all').at(1));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('See all').at(1));
     await tester.pumpAndSettle();
 
@@ -565,6 +560,395 @@ void main() {
       findsOneWidget,
     );
   });
+
+  group('Featured recommendation', () {
+    InsightCardItem approvedItem({
+      String id = 'featured',
+      String title = 'Featured guide',
+      String? actionRoute = RouteNames.mindfulBreathing,
+    }) => InsightCardItem(
+      id: id,
+      title: title,
+      subtitle: 'A calm subtitle',
+      category: 'Stress relief',
+      imageAsset: '',
+      contentType: 'article',
+      body: 'Short MindMate summary.',
+      sourceTitle: 'WHO — Stress: Questions and Answers',
+      sourceUrl:
+          'https://www.who.int/news-room/questions-and-answers/item/stress',
+      evidenceType: 'official_guideline',
+      rightsStatus: 'original',
+      reviewStatus: 'approved',
+      reviewedAt: DateTime(2026, 11, 28),
+      actionRoute: actionRoute,
+    );
+
+    InsightsDashboardData dashboard(
+      InsightRecommendationReason reason, {
+      InsightCardItem? item,
+    }) {
+      final featured = item ?? approvedItem();
+      return InsightsDashboardData(
+        categories: const [],
+        resources: [featured],
+        sections: const [],
+        featuredRecommendation: FeaturedInsightRecommendation(
+          item: featured,
+          reason: reason,
+        ),
+      );
+    }
+
+    testWidgets('renders below weekly glance with fixed reason copy', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      const copy = {
+        InsightRecommendationReason.assessment:
+            'Based on a focus area from your recent assessment',
+        InsightRecommendationReason.mood:
+            'Based on your mood check-ins this week',
+        InsightRecommendationReason.appActivity:
+            'An optional MindMate tool you can try this week',
+        InsightRecommendationReason.general: 'Curated wellness guide for you',
+      };
+      for (final entry in copy.entries) {
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpWidget(
+          _insightsApp(
+            insightsProvider: InsightsProvider(
+              _StaticInsightsRepository(dashboard(entry.key)),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text(entry.value), findsOneWidget);
+        expect(
+          find.text('Verified source • WHO — Stress: Questions and Answers'),
+          findsOneWidget,
+        );
+        expect(
+          tester.getTopLeft(find.byKey(const Key('featured_insight_card'))).dy,
+          greaterThan(tester.getTopLeft(find.text('This week at a glance')).dy),
+        );
+      }
+    });
+
+    testWidgets('featured item is not repeated in the recommended rail', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(390, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final featured = approvedItem(title: 'Only once guide');
+      await tester.pumpWidget(
+        _insightsApp(
+          insightsProvider: InsightsProvider(
+            InsightsRepository(
+              dataSource: _FakeDataSource(
+                content: [
+                  {
+                    ...featured.toCatalogJson(),
+                    'id': 'featured',
+                    'sectionId': 'recommended',
+                  },
+                  {
+                    'id': 'other',
+                    'title': 'Other guide',
+                    'subtitle': 's',
+                    'sectionId': 'recommended',
+                  },
+                ],
+                report: {
+                  'id': 'r',
+                  'userId': 'preview_user',
+                  'generatedAt': DateTime.now(),
+                  'reportStatus': 'draft',
+                  'weekStart': DateTime.now(),
+                  'weekEnd': DateTime.now().add(const Duration(days: 1)),
+                  'hasEnoughData': true,
+                },
+              ),
+              useFallbackContent: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('featured_insight_card')), findsOneWidget);
+      expect(find.text('Recommended for you'), findsOneWidget);
+      expect(find.text('Other guide'), findsOneWidget);
+      expect(find.text('Only once guide'), findsOneWidget);
+    });
+
+    testWidgets('search hides featured card but still finds the article', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        _insightsApp(
+          insightsProvider: InsightsProvider(
+            _StaticInsightsRepository(
+              dashboard(InsightRecommendationReason.general),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('featured_insight_card')), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'featured');
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('featured_insight_card')), findsNothing);
+      expect(find.text('Featured guide'), findsOneWidget);
+    });
+
+    testWidgets('unverified catalog renders without a featured card', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        _insightsApp(
+          insightsProvider: InsightsProvider(
+            InsightsRepository(
+              dataSource: _FakeDataSource(
+                content: [
+                  {
+                    'id': 'legacy',
+                    'title': 'Legacy guide',
+                    'subtitle': 's',
+                    'sectionId': 'wellbeing_101',
+                    'source': 'Mental Health Insights Categories.docx',
+                  },
+                ],
+              ),
+              useFallbackContent: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('featured_insight_card')), findsNothing);
+      expect(find.text('Legacy guide'), findsOneWidget);
+    });
+
+    testWidgets('read guide opens detail with source and in-app action', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        _insightsApp(
+          insightsProvider: InsightsProvider(
+            _StaticInsightsRepository(
+              dashboard(InsightRecommendationReason.mood),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('featured_insight_read')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InsightArticleDetailScreen), findsOneWidget);
+      expect(find.text('Verified Source & Attribution'), findsOneWidget);
+      expect(
+        find.text('Official guideline • Reviewed Nov 28, 2026'),
+        findsOneWidget,
+      );
+      expect(find.text('Read the full article at WHO'), findsOneWidget);
+      expect(
+        find.byKey(const Key('insight_local_crisis_line')),
+        findsOneWidget,
+      );
+      expect(find.text('Try mindful breathing'), findsOneWidget);
+    });
+
+    testWidgets(
+      'featured secondary action navigates to the allowlisted route',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(390, 1400));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+
+        await tester.pumpWidget(
+          _insightsApp(
+            insightsProvider: InsightsProvider(
+              _StaticInsightsRepository(
+                dashboard(
+                  InsightRecommendationReason.general,
+                  item: approvedItem(actionRoute: RouteNames.logMood),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('featured_insight_action')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(LogMoodScreen), findsOneWidget);
+      },
+    );
+
+    testWidgets('detail opens source via launcher and navigates the CTA', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final opened = <Uri>[];
+      var launchResult = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          routes: {
+            RouteNames.mindfulBreathing: (_) =>
+                const Scaffold(body: Text('Breathing route')),
+          },
+          home: InsightArticleDetailScreen(
+            item: approvedItem(),
+            onOpenSource: (uri) async {
+              opened.add(uri);
+              return launchResult;
+            },
+          ),
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('insight_open_source')));
+      await tester.pumpAndSettle();
+      expect(opened.single.host, 'www.who.int');
+      expect(find.text('Unable to open the source right now.'), findsNothing);
+
+      launchResult = false;
+      await tester.tap(find.byKey(const Key('insight_open_source')));
+      await tester.pumpAndSettle();
+      expect(find.text('Unable to open the source right now.'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('insight_action_button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Breathing route'), findsOneWidget);
+    });
+
+    testWidgets('legacy article shows no source panel or action', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: InsightArticleDetailScreen(
+            item: InsightCardItem(
+              id: 'legacy',
+              title: 'Legacy',
+              subtitle: 's',
+              category: 'c',
+              imageAsset: '',
+              actionRoute: '/admin',
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('insight_source_panel')), findsNothing);
+      expect(find.byKey(const Key('insight_action_button')), findsNothing);
+    });
+
+    testWidgets('article detail uses dark theme surfaces', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: InsightArticleDetailScreen(item: approvedItem()),
+        ),
+      );
+
+      final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+      expect(scaffold.backgroundColor, const Color(0xFF15120D));
+      final title = tester.widget<Text>(find.text('Featured guide'));
+      expect(title.style?.color, const Color(0xFFFFF7E3));
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  testWidgets('finalized report does not count toward weekly logs', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final reportProvider = ReportProvider(
+      _FakeReportRepository(
+        ReportModel(
+          id: 'old',
+          generatedAt: DateTime.now(),
+          reportStatus: 'final',
+          weekStart: DateTime.now().subtract(const Duration(days: 3)),
+          weekEnd: DateTime.now().add(const Duration(days: 3)),
+          assessmentCount: 7,
+        ),
+      ),
+    );
+    await reportProvider.loadLatestReport('user_1');
+
+    await tester.pumpWidget(
+      _insightsApp(
+        insightsProvider: InsightsProvider(_EmptyInsightsRepository()),
+        reportProvider: reportProvider,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('7'), findsNothing);
+  });
+}
+
+ReportModel _currentWeekReport(DateTime now, {int assessmentCount = 0}) {
+  final weekStart = DateTime(
+    now.year,
+    now.month,
+    now.day,
+  ).subtract(Duration(days: now.weekday - 1));
+  return ReportModel(
+    id: 'report_1',
+    userId: 'user_1',
+    generatedAt: now,
+    reportStatus: 'draft',
+    weekStart: weekStart,
+    weekEnd: weekStart.add(const Duration(days: 6)),
+    assessmentCount: assessmentCount,
+  );
+}
+
+class _FakeDataSource implements InsightsRepositoryDataSource {
+  _FakeDataSource({this.content = const [], this.report});
+
+  final List<Map<String, dynamic>> content;
+  final Map<String, dynamic>? report;
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchCategories() async => const [];
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchContent() async => content;
+
+  @override
+  Future<Map<String, dynamic>?> fetchLatestReport(String userId) async =>
+      report;
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchRules() async => const [];
 }
 
 Widget _insightsApp({

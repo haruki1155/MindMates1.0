@@ -4,7 +4,17 @@ import 'package:mind_mates/features/secret_chat/domain/secret_chat_safety_valida
 import 'package:mind_mates/features/secret_chat/domain/forum_live_check.dart';
 import 'package:mind_mates/features/secret_chat/screens/secret_chat_screen.dart';
 import 'package:mind_mates/models/secret_chat_model.dart';
+import 'package:mind_mates/features/secret_chat/pages/secret_chat_page.dart';
+import 'package:mind_mates/models/user_model.dart';
+import 'package:mind_mates/providers/insights_provider.dart';
+import 'package:mind_mates/providers/report_provider.dart';
 import 'package:mind_mates/providers/secret_chat_provider.dart';
+import 'package:mind_mates/providers/user_provider.dart';
+import 'package:mind_mates/repositories/insights_repository.dart';
+import 'package:mind_mates/repositories/report_repository.dart';
+import 'package:mind_mates/repositories/secret_chat_repository.dart';
+import 'package:mind_mates/repositories/user_repository.dart';
+import 'package:provider/provider.dart';
 
 const forumWarning =
     'MindMate is a safe and supportive community. Please revise your message using respectful language before publishing.';
@@ -385,6 +395,81 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Saved (0)'), findsOneWidget);
   });
+
+  _pageRefreshTests();
+}
+
+void _pageRefreshTests() {
+  testWidgets('a forum interaction refreshes the same user insights', (
+    tester,
+  ) async {
+    final users = UserProvider(_ProfileUserRepository())
+      ..setUser(const UserModel(id: 'user_1', email: 'a@example.com'));
+    final reports = _RecordingReportProvider();
+    final insights = _RecordingInsightsProvider();
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider<UserProvider>.value(value: users),
+          ChangeNotifierProvider<SecretChatProvider>.value(
+            value: _QuietSecretChatProvider(),
+          ),
+          ChangeNotifierProvider<ReportProvider>.value(value: reports),
+          ChangeNotifierProvider<InsightsProvider>.value(value: insights),
+        ],
+        child: const MaterialApp(home: SecretChatPage()),
+      ),
+    );
+    await tester.pump();
+
+    tester
+        .widget<SecretChatScreen>(find.byType(SecretChatScreen))
+        .onToggleLike('post_1');
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(reports.refreshedUsers, ['user_1']);
+    expect(insights.refreshedUsers, ['user_1']);
+  });
+}
+
+class _QuietSecretChatProvider extends SecretChatProvider {
+  _QuietSecretChatProvider() : super(SecretChatRepository());
+
+  @override
+  bool get canCreate => true;
+
+  @override
+  Future<void> loadPosts() async {}
+
+  @override
+  Future<void> toggleLike(String postId) async {}
+}
+
+class _RecordingReportProvider extends ReportProvider {
+  _RecordingReportProvider() : super(ReportRepository());
+  final refreshedUsers = <String>[];
+
+  @override
+  Future<void> refreshWeeklyReport(String userId) async {
+    refreshedUsers.add(userId);
+  }
+}
+
+class _RecordingInsightsProvider extends InsightsProvider {
+  _RecordingInsightsProvider() : super(InsightsRepository());
+  final refreshedUsers = <String>[];
+
+  @override
+  Future<void> refreshLoadedContext(String userId) async {
+    refreshedUsers.add(userId);
+  }
+}
+
+class _ProfileUserRepository extends UserRepository {
+  @override
+  Future<UserModel?> fetchUserProfile(String uid) async =>
+      UserModel(id: uid, email: 'a@example.com');
 }
 
 Widget _app({
