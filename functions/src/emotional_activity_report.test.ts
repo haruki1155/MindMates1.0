@@ -450,3 +450,171 @@ test("excludes staff and admin role token variants from emotional activity aggre
     [["positive", 100]],
   );
 });
+
+test("computes weekly Manila Monday-Sunday trends, flags elevated Stressed mood vs rolling baseline, and never exposes notes", () => {
+  const users = makeUsers(25);
+  const moodEntries: Array<Record<string, unknown>> = [];
+
+  // Week 1 (Nov 2-8, 2026): 15 Great (60%), 10 Stressed (40%)
+  for (let i = 0; i < 25; i++) {
+    moodEntries.push({
+      userId: `u-${i + 1}`,
+      clientRequestId: `w1-u-${i + 1}`,
+      label: i < 15 ? "Great" : "Stressed",
+      level: i < 15 ? 5 : 2,
+      entryMethod: i < 15 ? "manual" : "expression_assisted",
+      expressionAssistUsed: i >= 15,
+      note: "Private sensitive journal note must never leak",
+      occurredAt: "2026-11-04T09:00:00+08:00", // Wed
+    });
+  }
+
+  // Week 2 (Nov 9-15, 2026): 15 Great (60%), 10 Stressed (40%)
+  for (let i = 0; i < 25; i++) {
+    moodEntries.push({
+      userId: `u-${i + 1}`,
+      clientRequestId: `w2-u-${i + 1}`,
+      label: i < 15 ? "Great" : "Stressed",
+      level: i < 15 ? 5 : 2,
+      entryMethod: "manual",
+      occurredAt: "2026-11-11T09:00:00+08:00", // Wed
+    });
+  }
+
+  // Week 3 (Nov 16-22, 2026): 10 Great (40%), 15 Stressed (60% -> +20.0 pp vs 40% baseline => elevated!)
+  for (let i = 0; i < 25; i++) {
+    moodEntries.push({
+      userId: `u-${i + 1}`,
+      clientRequestId: `w3-u-${i + 1}`,
+      label: i < 10 ? "Great" : "Stressed",
+      level: i < 10 ? 5 : 2,
+      entryMethod: "manual",
+      occurredAt: "2026-11-18T09:00:00+08:00", // Wed
+    });
+  }
+
+  // Duplicate entry in legacy moods with same clientRequestId must be deduplicated.
+  const duplicateLegacy = [
+    {
+      userId: "u-1",
+      clientRequestId: "w3-u-1",
+      label: "Great",
+      level: 5,
+      occurredAt: "2026-11-18T09:00:00+08:00",
+    },
+  ];
+
+  const report = buildEmotionalActivityReport({
+    users,
+    moodEntries,
+    moods: duplicateLegacy,
+    assessments: [],
+    range: {
+      start: new Date("2026-11-01T00:00:00+08:00"),
+      end: new Date("2026-11-30T00:00:00+08:00"),
+      label: "November 2026",
+    },
+    schoolYear: "2026-2027",
+    source: "mood",
+  });
+
+  assert.equal(report.status, "ready");
+  assert.equal(report.weeklyTrends.length, 3);
+  assert.deepEqual(
+    report.weeklyTrends.map((w) => w.weekKey),
+    ["2026-11-02", "2026-11-09", "2026-11-16"],
+  );
+  assert.equal(report.weeklyTrends[0].dominantMoodLabel, "Great");
+  assert.equal(report.weeklyTrends[2].dominantMoodLabel, "Stressed");
+  assert.equal(report.weeklyTrends[2].strainedShare, 60);
+
+  const stressedSignal = report.elevatedMoodSignals.find((s) => s.key === "stressed");
+  assert.ok(stressedSignal);
+  assert.equal(stressedSignal.severity, "elevated");
+  assert.equal(stressedSignal.currentPercentage, 60);
+  assert.equal(stressedSignal.baselinePercentage, 40);
+  assert.equal(stressedSignal.deltaPoints, 20);
+  assert.equal(stressedSignal.weekOverWeekDelta, 20);
+
+  // Deduplication kept exact 3.0 check-ins per participant (75 / 25), not 76 / 25.
+  assert.ok(report.moodEngagement);
+  assert.equal(report.moodEngagement.avgCheckInsPerParticipant, 3);
+  assert.equal(report.moodEngagement.repeatParticipantRate, 100);
+  assert.equal(report.moodEngagement.entryMethodBreakdown.length, 2);
+
+  // Weekday breakdown captures Wednesday with unsuppressed strained share.
+  const wed = report.weekdayBreakdown.find((d) => d.key === "3_wed");
+  assert.ok(wed);
+  assert.equal(wed.suppressed, false);
+  assert.equal(wed.activityShare, 100);
+
+  // Actionable insights populated and raw journal note never appears anywhere in report JSON.
+  assert.ok(report.actionableInsights.length >= 2);
+  assert.ok(!JSON.stringify(report).includes("Private sensitive journal note"));
+});
+
+test("suppresses weekly rows with fewer than 10 unique participants and supports pre-range lookback baseline", () => {
+  const users = makeUsers(22);
+  const moodEntries: Array<Record<string, unknown>> = [];
+
+  // Lookback week before range.start (Nov 2-8): 12 Great, 10 Stressed (45.5% Stressed).
+  for (let i = 0; i < 22; i++) {
+    moodEntries.push({
+      userId: `u-${i + 1}`,
+      label: i < 12 ? "Great" : "Stressed",
+      level: i < 12 ? 5 : 2,
+      occurredAt: "2026-11-04T10:00:00+08:00",
+    });
+  }
+
+  // In-range Week A (Nov 9-15): only 5 unique users -> MUST be suppressed!
+  for (let i = 0; i < 5; i++) {
+    moodEntries.push({
+      userId: `u-${i + 1}`,
+      label: "Angry",
+      level: 1,
+      occurredAt: "2026-11-11T10:00:00+08:00",
+    });
+  }
+
+  // In-range Week B (Nov 16-22): 10 Great, 12 Stressed (54.5% Stressed -> +9.0 pp vs lookback).
+  for (let i = 0; i < 22; i++) {
+    moodEntries.push({
+      userId: `u-${i + 1}`,
+      label: i < 10 ? "Great" : "Stressed",
+      level: i < 10 ? 5 : 2,
+      occurredAt: "2026-11-18T10:00:00+08:00",
+    });
+  }
+
+  const report = buildEmotionalActivityReport({
+    users,
+    moodEntries,
+    moods: [],
+    assessments: [],
+    range: {
+      start: new Date("2026-11-09T00:00:00+08:00"),
+      end: new Date("2026-11-23T00:00:00+08:00"),
+      label: "Nov 9–22, 2026",
+    },
+    schoolYear: "2026-2027",
+    source: "mood",
+  });
+
+  assert.equal(report.status, "ready");
+  assert.equal(report.weeklyTrends.length, 2);
+  assert.equal(report.weeklyTrends[0].suppressed, true);
+  assert.equal(report.weeklyTrends[0].dominantMoodLabel, null);
+  assert.deepEqual(report.weeklyTrends[0].moodBreakdown, []);
+  // Secondary suppression hides Week B's activityShare too so Week A cannot be subtracted,
+  // while Week B's own internal moodBreakdown remains reportable (n = 22 >= 10).
+  assert.equal(report.weeklyTrends[1].suppressed, false);
+  assert.equal(report.weeklyTrends[1].activityShare, null);
+  assert.equal(report.weeklyTrends[1].dominantMoodLabel, "Stressed");
+
+  // Elevation signal uses lookback week (Nov 2-8) cleanly without leaking suppressed Week A ("Angry").
+  assert.ok(!report.elevatedMoodSignals.some((s) => s.key === "angry"));
+  const stressedSignal = report.elevatedMoodSignals.find((s) => s.key === "stressed");
+  assert.ok(stressedSignal);
+  assert.equal(stressedSignal.severity, "elevated");
+});

@@ -220,6 +220,162 @@ class _EmotionalReportFakeRepository extends AdminPortalRepository {
                 },
               ]
             : const [],
+        'weeklyTrends': status == 'ready'
+            ? [
+                {
+                  'weekKey': '2026-11-09',
+                  'label': 'Nov 9-15, 2026',
+                  'suppressed': false,
+                  'activityShare': 45.0,
+                  'averageMoodLevel': 3.85,
+                  'dominantMoodKey': 'great',
+                  'dominantMoodLabel': 'Great',
+                  'strainedShare': 24.0,
+                  'valenceBreakdown': [
+                    {
+                      'key': 'positive',
+                      'label': 'Positive (Levels 4-5)',
+                      'percentage': 61.0,
+                      'suppressed': false,
+                    },
+                    {
+                      'key': 'neutral',
+                      'label': 'Steady / Tired (Level 3)',
+                      'percentage': 15.0,
+                      'suppressed': false,
+                    },
+                    {
+                      'key': 'strained',
+                      'label': 'Strained / Distressed (Levels 1-2)',
+                      'percentage': 24.0,
+                      'suppressed': false,
+                    },
+                  ],
+                  'moodBreakdown': [
+                    {
+                      'key': 'great',
+                      'label': 'Great',
+                      'percentage': 61.0,
+                      'suppressed': false,
+                    },
+                    {
+                      'key': 'stressed',
+                      'label': 'Stressed',
+                      'percentage': 24.0,
+                      'suppressed': false,
+                    },
+                  ],
+                },
+                {
+                  'weekKey': '2026-11-16',
+                  'label': 'Nov 16-22, 2026',
+                  'suppressed': false,
+                  'activityShare': 55.0,
+                  'averageMoodLevel': 3.2,
+                  'dominantMoodKey': 'stressed',
+                  'dominantMoodLabel': 'Stressed',
+                  'strainedShare': 42.0,
+                  'valenceBreakdown': [
+                    {
+                      'key': 'positive',
+                      'label': 'Positive (Levels 4-5)',
+                      'percentage': 44.0,
+                      'suppressed': false,
+                    },
+                    {
+                      'key': 'neutral',
+                      'label': 'Steady / Tired (Level 3)',
+                      'percentage': 14.0,
+                      'suppressed': false,
+                    },
+                    {
+                      'key': 'strained',
+                      'label': 'Strained / Distressed (Levels 1-2)',
+                      'percentage': 42.0,
+                      'suppressed': false,
+                    },
+                  ],
+                  'moodBreakdown': [
+                    {
+                      'key': 'stressed',
+                      'label': 'Stressed',
+                      'percentage': 42.0,
+                      'suppressed': false,
+                    },
+                    {
+                      'key': 'great',
+                      'label': 'Great',
+                      'percentage': 44.0,
+                      'suppressed': false,
+                    },
+                  ],
+                },
+              ]
+            : const [],
+        'elevatedMoodSignals': status == 'ready'
+            ? [
+                {
+                  'key': 'stressed',
+                  'label': 'Stressed',
+                  'severity': 'elevated',
+                  'currentWeekLabel': 'Nov 16-22, 2026',
+                  'baselineLabel': 'Prior week (Nov 9-15, 2026)',
+                  'currentPercentage': 42.0,
+                  'baselinePercentage': 24.0,
+                  'deltaPoints': 18.0,
+                  'weekOverWeekDelta': 18.0,
+                  'summary':
+                      'Stressed is elevated at 42.0% in Nov 16-22, 2026 (+18.0 pp vs. prior week of 24.0%).',
+                },
+              ]
+            : const [],
+        'weekdayBreakdown': status == 'ready'
+            ? [
+                {
+                  'key': '1_mon',
+                  'label': 'Mon',
+                  'activityShare': 55.0,
+                  'strainedShare': 40.0,
+                  'dominantMoodLabel': 'Stressed',
+                  'suppressed': false,
+                },
+                {
+                  'key': '3_wed',
+                  'label': 'Wed',
+                  'activityShare': 45.0,
+                  'strainedShare': 20.0,
+                  'dominantMoodLabel': 'Great',
+                  'suppressed': false,
+                },
+              ]
+            : const [],
+        'moodEngagement': status == 'ready' && emotionalSource != 'assessment'
+            ? {
+                'averageMoodLevel': 3.52,
+                'avgCheckInsPerParticipant': 3.4,
+                'repeatParticipantRate': 72.0,
+                'entryMethodBreakdown': [
+                  {
+                    'key': 'manual',
+                    'label': 'Manual check-in',
+                    'percentage': 74.0,
+                    'suppressed': false,
+                  },
+                  {
+                    'key': 'expression_assisted',
+                    'label': 'Expression-assisted',
+                    'percentage': 26.0,
+                    'suppressed': false,
+                  },
+                ],
+              }
+            : null,
+        'actionableInsights': status == 'ready'
+            ? [
+                'Stressed is elevated at 42.0% in Nov 16-22, 2026 (+18.0 pp vs. prior week of 24.0%).',
+                'Aggregate wellness indicators reflect self-reported patterns (n >= 10) and are intended for preventive campus planning, not clinical diagnosis.',
+              ]
+            : const [],
         'departmentCoverageNote':
             'Includes all app-user colleges/departments within your access scope.',
       },
@@ -259,11 +415,42 @@ void main() {
       expect(find.text('Positive (Levels 4-5)'), findsWidgets);
       expect(find.textContaining('Suppressed (n < 10)'), findsWidgets);
       expect(find.text('Generally Supported'), findsOneWidget);
+      expect(
+        find.byKey(const Key('emotional_elevation_watchlist')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('emotional_actionable_insights')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('emotional_chart_mode_toggle')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('emotional_weekly_trends')), findsOneWidget);
+      expect(
+        find.byKey(const Key('emotional_weekday_pattern')),
+        findsOneWidget,
+      );
+      expect(find.text('Log your Mood entry methods'), findsOneWidget);
 
+      final valenceChip = find.widgetWithText(ChoiceChip, 'Valence');
+      await tester.ensureVisible(valenceChip);
+      await tester.tap(valenceChip);
+      await tester.pumpAndSettle();
+      expect(find.text('Emotional pattern distribution'), findsOneWidget);
+      final moodsChip = find.widgetWithText(ChoiceChip, '7 Moods');
+      await tester.ensureVisible(moodsChip);
+      await tester.tap(moodsChip);
+      await tester.pumpAndSettle();
+      expect(find.text('Log your Mood distribution'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Mood check-ins'));
       await tester.tap(find.text('Mood check-ins'));
       await tester.pumpAndSettle();
       expect(repo.calls.last['emotionalSource'], 'mood');
 
+      await tester.ensureVisible(find.text('Students'));
       await tester.tap(find.text('Students'));
       await tester.pumpAndSettle();
       expect(repo.calls.last['userCategory'], 'student');

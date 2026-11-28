@@ -191,6 +191,17 @@ class AdminReportPdfService {
                 emotional.dominantValenceLabel ??
                     'Suppressed (n < ${emotional.suppressionThreshold})',
               ],
+              if (emotional.moodEngagement?.averageMoodLevel != null)
+                [
+                  'Average mood score',
+                  '${emotional.moodEngagement!.averageMoodLevel!.toStringAsFixed(2)} / 5.00',
+                ],
+              if (emotional.moodEngagement?.avgCheckInsPerParticipant != null)
+                [
+                  'Avg check-ins per participant',
+                  '${emotional.moodEngagement!.avgCheckInsPerParticipant!.toStringAsFixed(1)}'
+                      '${emotional.moodEngagement!.repeatParticipantRate != null ? ' (${_percent(emotional.moodEngagement!.repeatParticipantRate!)} multi-day)' : ''}',
+                ],
               if (emotional.moodCheckInShare != null &&
                   emotional.assessmentShare != null)
                 [
@@ -245,14 +256,172 @@ class AdminReportPdfService {
               (emotional.valenceBreakdown.isNotEmpty ||
                   emotional.moodBreakdown.isNotEmpty ||
                   emotional.assessmentBreakdown.isNotEmpty ||
-                  emotional.periodTrends.isNotEmpty)) ...[
+                  emotional.periodTrends.isNotEmpty ||
+                  emotional.weeklyTrends.isNotEmpty ||
+                  emotional.elevatedMoodSignals.isNotEmpty)) ...[
             pw.SizedBox(height: 24),
             pw.Text(
-              'Percentage summary',
+              'Detailed emotional analytics',
               style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
             ),
-            if (emotional.valenceBreakdown.isNotEmpty) ...[
+            if (emotional.elevatedMoodSignals.isNotEmpty) ...[
               pw.SizedBox(height: 10),
+              pw.Text(
+                'Weekly mood elevation watchlist',
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.TableHelper.fromTextArray(
+                headers: const [
+                  'Mood / Signal',
+                  'Status',
+                  'Latest week',
+                  'Baseline',
+                  'Change',
+                ],
+                data: emotional.elevatedMoodSignals
+                    .map(
+                      (s) => [
+                        s.label,
+                        s.severity.toUpperCase(),
+                        _percent(s.currentPercentage),
+                        _percent(s.baselinePercentage),
+                        '${s.deltaPoints > 0 ? '+' : ''}${s.deltaPoints.toStringAsFixed(1)} pp',
+                      ],
+                    )
+                    .toList(growable: false),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.grey200,
+                ),
+                headerStyle: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                cellStyle: const pw.TextStyle(fontSize: 9),
+                cellPadding: const pw.EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 5,
+                ),
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+              ),
+            ],
+            if (emotional.actionableInsights.isNotEmpty) ...[
+              pw.SizedBox(height: 12),
+              pw.Text(
+                'PACC key takeaways',
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 4),
+              for (final insight in emotional.actionableInsights)
+                pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 3),
+                  child: pw.Text(
+                    '- ${insight.replaceAll('–', '-')}',
+                    style: const pw.TextStyle(fontSize: 9.5),
+                  ),
+                ),
+            ],
+            if (emotional.weeklyTrends.isNotEmpty) ...[
+              pw.SizedBox(height: 14),
+              pw.Text(
+                'Weekly emotional activity trend',
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.TableHelper.fromTextArray(
+                headers: const [
+                  'Week',
+                  'Dominant mood',
+                  'Avg score',
+                  'Strained',
+                  'Activity share',
+                ],
+                data: emotional.weeklyTrends
+                    .map(
+                      (w) => [
+                        w.label.replaceAll('–', '-'),
+                        w.suppressed
+                            ? 'Suppressed (n < ${emotional.suppressionThreshold})'
+                            : (w.dominantMoodLabel ?? '-'),
+                        w.suppressed || w.averageMoodLevel == null
+                            ? '-'
+                            : '${w.averageMoodLevel!.toStringAsFixed(2)} / 5',
+                        w.suppressed || w.strainedShare == null
+                            ? 'Suppressed'
+                            : _percent(w.strainedShare!),
+                        w.suppressed || w.activityShare == null
+                            ? 'Suppressed'
+                            : _percent(w.activityShare!),
+                      ],
+                    )
+                    .toList(growable: false),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.grey200,
+                ),
+                headerStyle: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                cellStyle: const pw.TextStyle(fontSize: 9),
+                cellPadding: const pw.EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 5,
+                ),
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+              ),
+            ],
+            if (emotional.weekdayBreakdown.isNotEmpty) ...[
+              pw.SizedBox(height: 14),
+              pw.Text(
+                'Day-of-week check-in & strain pattern',
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.TableHelper.fromTextArray(
+                headers: const ['Day', 'Activity share', 'Strained', 'Top mood'],
+                data: emotional.weekdayBreakdown
+                    .map(
+                      (d) => [
+                        d.label,
+                        d.suppressed || d.activityShare == null
+                            ? 'Suppressed (n < ${emotional.suppressionThreshold})'
+                            : _percent(d.activityShare!),
+                        d.suppressed || d.strainedShare == null
+                            ? 'Suppressed'
+                            : _percent(d.strainedShare!),
+                        d.suppressed ? '-' : (d.dominantMoodLabel ?? '-'),
+                      ],
+                    )
+                    .toList(growable: false),
+                headerDecoration: const pw.BoxDecoration(
+                  color: PdfColors.grey200,
+                ),
+                headerStyle: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+                cellStyle: const pw.TextStyle(fontSize: 9),
+                cellPadding: const pw.EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 5,
+                ),
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+              ),
+            ],
+            if (emotional.valenceBreakdown.isNotEmpty) ...[
+              pw.SizedBox(height: 14),
               _emotionalTable(
                 'Emotional valence summary',
                 const ['Pattern', 'Share'],
@@ -266,6 +435,16 @@ class AdminReportPdfService {
                 'Mood check-in breakdown',
                 const ['Mood state', 'Share'],
                 emotional.moodBreakdown,
+                emotional.suppressionThreshold,
+              ),
+            ],
+            if (emotional.moodEngagement != null &&
+                emotional.moodEngagement!.entryMethodBreakdown.isNotEmpty) ...[
+              pw.SizedBox(height: 14),
+              _emotionalTable(
+                'Log your Mood entry methods',
+                const ['Check-in method', 'Share'],
+                emotional.moodEngagement!.entryMethodBreakdown,
                 emotional.suppressionThreshold,
               ),
             ],

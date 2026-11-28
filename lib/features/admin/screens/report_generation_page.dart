@@ -15,7 +15,14 @@ import '../domain/report_generation_models.dart';
 import '../theme/admin_theme.dart';
 import '../services/admin_import_file_picker.dart';
 
-enum _ReportPeriod { wholeYear, firstSemester, secondSemester, custom }
+enum _ReportPeriod {
+  wholeYear,
+  firstSemester,
+  secondSemester,
+  last4Weeks,
+  last8Weeks,
+  custom,
+}
 
 class ReportGenerationPage extends StatefulWidget {
   const ReportGenerationPage({
@@ -65,6 +72,8 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
     _ReportPeriod.wholeYear => 'Whole academic year',
     _ReportPeriod.firstSemester => '1st semester',
     _ReportPeriod.secondSemester => '2nd semester',
+    _ReportPeriod.last4Weeks => 'Last 4 weeks',
+    _ReportPeriod.last8Weeks => 'Last 8 weeks',
     _ReportPeriod.custom => 'Custom date range',
   };
 
@@ -136,6 +145,22 @@ class _ReportGenerationPageState extends State<ReportGenerationPage> {
   }
 
   DateTimeRange? _periodRange() {
+    if (_period == _ReportPeriod.last4Weeks ||
+        _period == _ReportPeriod.last8Weeks) {
+      final manilaNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+      final days = _period == _ReportPeriod.last4Weeks ? 28 : 56;
+      final endExclusive = _manilaDayStart(
+        manilaNow.year,
+        manilaNow.month,
+        manilaNow.day + 1,
+      );
+      final start = _manilaDayStart(
+        manilaNow.year,
+        manilaNow.month,
+        manilaNow.day - (days - 1),
+      );
+      return DateTimeRange(start: start, end: endExclusive);
+    }
     if (_period == _ReportPeriod.custom) {
       final range = _customRange;
       if (range == null) return null;
@@ -1629,6 +1654,14 @@ class _ReportingPeriodField extends StatelessWidget {
         DropdownMenuItem(
           value: _ReportPeriod.secondSemester,
           child: Text('2nd semester'),
+        ),
+        DropdownMenuItem(
+          value: _ReportPeriod.last4Weeks,
+          child: Text('Last 4 weeks'),
+        ),
+        DropdownMenuItem(
+          value: _ReportPeriod.last8Weeks,
+          child: Text('Last 8 weeks'),
         ),
         DropdownMenuItem(
           value: _ReportPeriod.custom,
@@ -3186,11 +3219,15 @@ class _ChartPanel extends StatelessWidget {
     required this.subtitle,
     required this.data,
     required this.chartType,
+    this.colorByKey,
+    this.trailing,
   });
   final String title;
   final String subtitle;
   final List<ReportPercentageItem> data;
   final ReportChartType chartType;
+  final Map<String, Color>? colorByKey;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -3202,21 +3239,41 @@ class _ChartPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: const TextStyle(color: AdminColors.muted, fontSize: 12),
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 10,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      color: AdminColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              ?trailing,
+            ],
           ),
           const SizedBox(height: 22),
           if (chartData.isEmpty)
             const SizedBox(
               height: 220,
               child: Center(
-                child: Text('No reportable appointment data is available.'),
+                child: Text('No reportable data is available.'),
               ),
             )
           else if (chartType == ReportChartType.pie &&
@@ -3233,8 +3290,16 @@ class _ChartPanel extends StatelessWidget {
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
               child: chartType == ReportChartType.pie
-                  ? _PieChart(key: const ValueKey('pie'), data: chartData)
-                  : _BarChart(key: const ValueKey('bar'), data: chartData),
+                  ? _PieChart(
+                      key: const ValueKey('pie'),
+                      data: chartData,
+                      colorByKey: colorByKey,
+                    )
+                  : _BarChart(
+                      key: const ValueKey('bar'),
+                      data: chartData,
+                      colorByKey: colorByKey,
+                    ),
             ),
         ],
       ),
@@ -3253,18 +3318,27 @@ const _chartColors = <Color>[
   AdminColors.neutralFg,
 ];
 
+Color _resolveChartColor(
+  ReportPercentageItem item,
+  int index,
+  Map<String, Color>? colorByKey,
+) => colorByKey?[item.key] ?? _chartColors[index % _chartColors.length];
+
 class _PieChart extends StatelessWidget {
-  const _PieChart({super.key, required this.data});
+  const _PieChart({super.key, required this.data, this.colorByKey});
   final List<ReportPercentageItem> data;
+  final Map<String, Color>? colorByKey;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final pie = SizedBox(
         width: 230,
         height: 230,
-        child: CustomPaint(painter: _PieChartPainter(data)),
+        child: CustomPaint(
+          painter: _PieChartPainter(data, colorByKey: colorByKey),
+        ),
       );
-      final legend = _ChartLegend(data: data);
+      final legend = _ChartLegend(data: data, colorByKey: colorByKey);
       if (constraints.maxWidth < 620) {
         return Column(children: [pie, const SizedBox(height: 18), legend]);
       }
@@ -3280,8 +3354,9 @@ class _PieChart extends StatelessWidget {
 }
 
 class _PieChartPainter extends CustomPainter {
-  const _PieChartPainter(this.data);
+  const _PieChartPainter(this.data, {this.colorByKey});
   final List<ReportPercentageItem> data;
+  final Map<String, Color>? colorByKey;
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
@@ -3291,7 +3366,7 @@ class _PieChartPainter extends CustomPainter {
       ..strokeWidth = 46;
     for (var index = 0; index < data.length; index++) {
       final sweep = math.pi * 2 * (data[index].percentage / 100);
-      paint.color = _chartColors[index % _chartColors.length];
+      paint.color = _resolveChartColor(data[index], index, colorByKey);
       canvas.drawArc(rect.deflate(30), start, sweep, false, paint);
       start += sweep;
     }
@@ -3299,12 +3374,13 @@ class _PieChartPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _PieChartPainter oldDelegate) =>
-      oldDelegate.data != data;
+      oldDelegate.data != data || oldDelegate.colorByKey != colorByKey;
 }
 
 class _ChartLegend extends StatelessWidget {
-  const _ChartLegend({required this.data});
+  const _ChartLegend({required this.data, this.colorByKey});
   final List<ReportPercentageItem> data;
+  final Map<String, Color>? colorByKey;
   @override
   Widget build(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
@@ -3318,7 +3394,7 @@ class _ChartLegend extends StatelessWidget {
                 width: 10,
                 height: 10,
                 decoration: BoxDecoration(
-                  color: _chartColors[index % _chartColors.length],
+                  color: _resolveChartColor(data[index], index, colorByKey),
                   shape: BoxShape.circle,
                 ),
               ),
@@ -3342,8 +3418,9 @@ class _ChartLegend extends StatelessWidget {
 }
 
 class _BarChart extends StatelessWidget {
-  const _BarChart({super.key, required this.data});
+  const _BarChart({super.key, required this.data, this.colorByKey});
   final List<ReportPercentageItem> data;
+  final Map<String, Color>? colorByKey;
   @override
   Widget build(BuildContext context) => Column(
     children: [
@@ -3377,7 +3454,7 @@ class _BarChart extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: data[index].percentage / 100,
                   minHeight: 13,
-                  color: _chartColors[index % _chartColors.length],
+                  color: _resolveChartColor(data[index], index, colorByKey),
                   backgroundColor: AdminColors.surfaceMuted,
                 ),
               ),
@@ -3666,7 +3743,21 @@ class _EmotionalReportControls extends StatelessWidget {
   }
 }
 
-class _EmotionalActivityReportView extends StatelessWidget {
+// Aligned 1-to-1 with LogMoodScreen (_moodChoices in log_mood_screen.dart).
+const _logMoodChartColors = <String, Color>{
+  'great': Color(0xFF78A94E),
+  'excited': Color(0xFFD99B20),
+  'okay': Color(0xFF5E95BC),
+  'tired': Color(0xFF8072A8),
+  'stressed': Color(0xFF8F76C2),
+  'sad': Color(0xFFC89F3A),
+  'angry': Color(0xFFE3704D),
+  'positive': Color(0xFF78A94E),
+  'neutral': Color(0xFF8072A8),
+  'strained': Color(0xFFE3704D),
+};
+
+class _EmotionalActivityReportView extends StatefulWidget {
   const _EmotionalActivityReportView({
     super.key,
     required this.report,
@@ -3676,15 +3767,29 @@ class _EmotionalActivityReportView extends StatelessWidget {
   final AdminReportAnalytics report;
   final ReportChartType chartType;
 
-  String _bucketValue(
+  @override
+  State<_EmotionalActivityReportView> createState() =>
+      _EmotionalActivityReportViewState();
+}
+
+class _EmotionalActivityReportViewState
+    extends State<_EmotionalActivityReportView> {
+  bool _showMoodStatesChart = true;
+
+  static String _bucketValue(
     EmotionalActivityBucket bucket,
     int suppressionThreshold,
   ) => bucket.suppressed || bucket.percentage == null
       ? 'Suppressed (n < $suppressionThreshold)'
       : _formatPercent(bucket.percentage!);
 
+  static String _formatSignedDelta(double delta) =>
+      '${delta > 0 ? '+' : ''}${delta.toStringAsFixed(1)} pp';
+
   @override
   Widget build(BuildContext context) {
+    final report = widget.report;
+    final chartType = widget.chartType;
     final emotional = report.emotionalActivity;
     final header = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3774,7 +3879,7 @@ class _EmotionalActivityReportView extends StatelessWidget {
       );
     }
 
-    final chartItems = emotional.valenceBreakdown
+    final valenceChartItems = emotional.valenceBreakdown
         .where((item) => !item.suppressed && item.percentage != null)
         .map(
           (item) => ReportPercentageItem(
@@ -3784,6 +3889,34 @@ class _EmotionalActivityReportView extends StatelessWidget {
           ),
         )
         .toList(growable: false);
+
+    final moodChartItems = emotional.moodBreakdown
+        .where((item) => !item.suppressed && item.percentage != null)
+        .map(
+          (item) => ReportPercentageItem(
+            key: item.key,
+            label: item.label,
+            percentage: item.percentage!,
+          ),
+        )
+        .toList(growable: false);
+
+    final canToggleChartMode =
+        moodChartItems.isNotEmpty && valenceChartItems.isNotEmpty;
+    final displayingMoodChart =
+        (_showMoodStatesChart && moodChartItems.isNotEmpty) ||
+        valenceChartItems.isEmpty;
+    final activeChartItems = displayingMoodChart
+        ? moodChartItems
+        : valenceChartItems;
+
+    final engagement = emotional.moodEngagement;
+    final elevatedCount = emotional.elevatedMoodSignals
+        .where((s) => s.isElevated)
+        .length;
+    final primaryElevated = emotional.elevatedMoodSignals
+        .where((s) => s.isElevated || s.isWatch)
+        .firstOrNull;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3818,42 +3951,120 @@ class _EmotionalActivityReportView extends StatelessWidget {
               tone: AdminSemanticTone.violet,
               badgeLabel: 'Valence',
             ),
-            _SummaryValue(
-              label: 'Mood vs assessments mix',
-              value:
-                  emotional.moodCheckInShare != null &&
-                      emotional.assessmentShare != null
-                  ? '${_formatPercent(emotional.moodCheckInShare!)} / ${_formatPercent(emotional.assessmentShare!)}'
-                  : emotional.sourceScopeLabel,
-              note:
-                  emotional.moodCheckInShare != null &&
-                      emotional.assessmentShare != null
-                  ? 'Mood check-ins / verified assessments'
-                  : 'Source breakdown gated at n >= ${emotional.suppressionThreshold}',
-              icon: Icons.pie_chart_outline,
-              tone: AdminSemanticTone.green,
-              badgeLabel: 'Sources',
-            ),
-            _SummaryValue(
-              label: 'Privacy guard',
-              value: 'n >= ${emotional.suppressionThreshold}',
-              note: 'Small groups & raw text/images omitted',
-              icon: Icons.shield_outlined,
-              tone: AdminSemanticTone.neutral,
-              badgeLabel: 'Threshold',
-            ),
+            if (engagement?.averageMoodLevel != null)
+              _SummaryValue(
+                label: 'Average mood score',
+                value: '${engagement!.averageMoodLevel!.toStringAsFixed(2)} / 5',
+                note: engagement.avgCheckInsPerParticipant != null
+                    ? '${engagement.avgCheckInsPerParticipant!.toStringAsFixed(1)} check-ins/user'
+                          '${engagement.repeatParticipantRate != null ? ' · ${_formatPercent(engagement.repeatParticipantRate!)} multi-day' : ''}'
+                    : 'Aligned with Log your Mood (1-5 scale)',
+                icon: Icons.mood_outlined,
+                tone: AdminSemanticTone.green,
+                badgeLabel: 'Mood depth',
+              )
+            else
+              _SummaryValue(
+                label: 'Mood vs assessments mix',
+                value:
+                    emotional.moodCheckInShare != null &&
+                        emotional.assessmentShare != null
+                    ? '${_formatPercent(emotional.moodCheckInShare!)} / ${_formatPercent(emotional.assessmentShare!)}'
+                    : emotional.sourceScopeLabel,
+                note:
+                    emotional.moodCheckInShare != null &&
+                        emotional.assessmentShare != null
+                    ? 'Mood check-ins / verified assessments'
+                    : 'Source breakdown gated at n >= ${emotional.suppressionThreshold}',
+                icon: Icons.pie_chart_outline,
+                tone: AdminSemanticTone.green,
+                badgeLabel: 'Sources',
+              ),
+            if (primaryElevated != null)
+              _SummaryValue(
+                label: 'Weekly elevation signal',
+                value:
+                    '${primaryElevated.label} ${_formatSignedDelta(primaryElevated.deltaPoints)}',
+                note: elevatedCount > 0
+                    ? '$elevatedCount elevated vs. ${primaryElevated.baselineLabel.toLowerCase()}'
+                    : 'Watch signal · privacy guard n >= ${emotional.suppressionThreshold}',
+                icon: Icons.trending_up_rounded,
+                tone: elevatedCount > 0
+                    ? AdminSemanticTone.red
+                    : AdminSemanticTone.amber,
+                badgeLabel: elevatedCount > 0 ? 'Elevated' : 'Watch',
+              )
+            else
+              _SummaryValue(
+                label: 'Privacy guard',
+                value: 'n >= ${emotional.suppressionThreshold}',
+                note: 'Small groups & raw text/images omitted',
+                icon: Icons.shield_outlined,
+                tone: AdminSemanticTone.neutral,
+                badgeLabel: 'Threshold',
+              ),
           ],
         ),
-        const SizedBox(height: 18),
-        if (chartItems.isNotEmpty)
-          _ChartPanel(
-            title: 'Emotional pattern distribution',
-            subtitle:
-                'Unsuppressed aggregate percentages only · small sub-cells marked as suppressed',
-            data: chartItems,
-            chartType: chartType,
+        if (emotional.elevatedMoodSignals.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          _ElevationWatchlistPanel(
+            signals: emotional.elevatedMoodSignals,
+            suppressionThreshold: emotional.suppressionThreshold,
           ),
-        if (chartItems.isNotEmpty) const SizedBox(height: 18),
+        ],
+        if (emotional.actionableInsights.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          _ActionableInsightsPanel(insights: emotional.actionableInsights),
+        ],
+        const SizedBox(height: 18),
+        if (activeChartItems.isNotEmpty)
+          _ChartPanel(
+            title: displayingMoodChart
+                ? 'Log your Mood distribution'
+                : 'Emotional pattern distribution',
+            subtitle: displayingMoodChart
+                ? '7 canonical Log your Mood states · unsuppressed shares (n >= ${emotional.suppressionThreshold})'
+                : 'Unsuppressed aggregate valence shares · small sub-cells marked as suppressed',
+            data: activeChartItems,
+            chartType: chartType,
+            colorByKey: _logMoodChartColors,
+            trailing: canToggleChartMode
+                ? Wrap(
+                    key: const Key('emotional_chart_mode_toggle'),
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('7 Moods'),
+                        selected: displayingMoodChart,
+                        onSelected: (_) =>
+                            setState(() => _showMoodStatesChart = true),
+                      ),
+                      ChoiceChip(
+                        label: const Text('Valence'),
+                        selected: !displayingMoodChart,
+                        onSelected: (_) =>
+                            setState(() => _showMoodStatesChart = false),
+                      ),
+                    ],
+                  )
+                : null,
+          ),
+        if (activeChartItems.isNotEmpty) const SizedBox(height: 18),
+        if (emotional.weeklyTrends.isNotEmpty) ...[
+          _WeeklyMoodTrendPanel(
+            weeks: emotional.weeklyTrends,
+            suppressionThreshold: emotional.suppressionThreshold,
+          ),
+          const SizedBox(height: 18),
+        ],
+        if (emotional.weekdayBreakdown.isNotEmpty) ...[
+          _WeekdayPatternPanel(
+            weekdays: emotional.weekdayBreakdown,
+            suppressionThreshold: emotional.suppressionThreshold,
+          ),
+          const SizedBox(height: 18),
+        ],
         _PercentageTable(
           title: 'Emotional valence summary',
           headers: const ['Emotional pattern', 'Share'],
@@ -3872,6 +4083,22 @@ class _EmotionalActivityReportView extends StatelessWidget {
             title: 'Mood check-in breakdown',
             headers: const ['Mood state', 'Share'],
             rows: emotional.moodBreakdown
+                .map(
+                  (item) => [
+                    item.label,
+                    _bucketValue(item, emotional.suppressionThreshold),
+                  ],
+                )
+                .toList(growable: false),
+          ),
+        ],
+        if (engagement != null &&
+            engagement.entryMethodBreakdown.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          _PercentageTable(
+            title: 'Log your Mood entry methods',
+            headers: const ['Check-in method', 'Share'],
+            rows: engagement.entryMethodBreakdown
                 .map(
                   (item) => [
                     item.label,
@@ -3914,6 +4141,567 @@ class _EmotionalActivityReportView extends StatelessWidget {
       ],
     );
   }
+}
+
+class _ElevationWatchlistPanel extends StatelessWidget {
+  const _ElevationWatchlistPanel({
+    required this.signals,
+    required this.suppressionThreshold,
+  });
+
+  final List<EmotionalActivityElevationSignal> signals;
+  final int suppressionThreshold;
+
+  static (Color bg, Color fg, Color border, String label) _badgeStyle(
+    String severity,
+  ) => switch (severity) {
+    'elevated' => (
+      AdminColors.redBg,
+      AdminColors.redFg,
+      AdminColors.redBorder,
+      'Elevated',
+    ),
+    'watch' => (
+      AdminColors.amberBg,
+      AdminColors.amberFg,
+      AdminColors.amberBorder,
+      'Watch',
+    ),
+    'improving' => (
+      AdminColors.greenBg,
+      AdminColors.greenFg,
+      AdminColors.greenBorder,
+      'Improving',
+    ),
+    _ => (
+      AdminColors.neutralBg,
+      AdminColors.neutralFg,
+      AdminColors.neutralBorder,
+      'Stable',
+    ),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final latestWeek = signals.first.currentWeekLabel;
+    final baselineLabel = signals.first.baselineLabel;
+    return Container(
+      key: const Key('emotional_elevation_watchlist'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: _panelDecoration,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.monitor_heart_outlined,
+                size: 20,
+                color: AdminColors.ink,
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Weekly mood elevation watchlist',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$latestWeek vs. $baselineLabel · n >= $suppressionThreshold',
+            style: const TextStyle(color: AdminColors.muted, fontSize: 12),
+          ),
+          const SizedBox(height: 14),
+          for (var i = 0; i < signals.length; i++) ...[
+            if (i > 0) const SizedBox(height: 10),
+            Builder(
+              builder: (context) {
+                final signal = signals[i];
+                final (bg, fg, border, badgeText) = _badgeStyle(
+                  signal.severity,
+                );
+                final deltaText =
+                    '${signal.deltaPoints > 0 ? '+' : ''}${signal.deltaPoints.toStringAsFixed(1)} pp';
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AdminColors.surfaceMuted.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AdminColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: bg,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: border),
+                            ),
+                            child: Text(
+                              badgeText,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: fg,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            signal.label,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
+                            ),
+                          ),
+                          Text(
+                            '${_formatPercent(signal.currentPercentage)} ($deltaText)',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                              color: fg,
+                            ),
+                          ),
+                          Text(
+                            'Baseline ${_formatPercent(signal.baselinePercentage)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AdminColors.muted,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (signal.summary.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          signal.summary,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AdminColors.muted,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionableInsightsPanel extends StatelessWidget {
+  const _ActionableInsightsPanel({required this.insights});
+
+  final List<String> insights;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('emotional_actionable_insights'),
+    width: double.infinity,
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: AdminColors.accentFaint,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: AdminColors.accent.withValues(alpha: 0.6)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(
+              Icons.lightbulb_outline_rounded,
+              size: 19,
+              color: AdminColors.accentStrong,
+            ),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'PACC key takeaways',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        for (final line in insights)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '• ',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                Expanded(
+                  child: Text(
+                    line,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AdminColors.ink,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+class _WeeklyMoodTrendPanel extends StatelessWidget {
+  const _WeeklyMoodTrendPanel({
+    required this.weeks,
+    required this.suppressionThreshold,
+  });
+
+  final List<EmotionalActivityWeeklyTrend> weeks;
+  final int suppressionThreshold;
+
+  static double _valencePct(
+    EmotionalActivityWeeklyTrend week,
+    String key,
+  ) {
+    final found = week.valenceBreakdown
+        .where((b) => b.key == key && !b.suppressed && b.percentage != null)
+        .firstOrNull;
+    return found?.percentage ?? 0;
+  }
+
+  static String _topMoodSummary(
+    EmotionalActivityWeeklyTrend week,
+    int threshold,
+  ) {
+    if (week.suppressed) return 'Suppressed (n < $threshold)';
+    final visible = week.moodBreakdown
+        .where((m) => !m.suppressed && m.percentage != null)
+        .take(3)
+        .map((m) => '${m.label} ${_formatPercent(m.percentage!)}')
+        .toList(growable: false);
+    if (visible.isEmpty) {
+      return week.moodBreakdown.isNotEmpty
+          ? 'Suppressed (n < $threshold)'
+          : '—';
+    }
+    return visible.join(' · ');
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('emotional_weekly_trends'),
+    width: double.infinity,
+    padding: const EdgeInsets.all(22),
+    decoration: _panelDecoration,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Weekly emotional activity & mood breakdown',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Monday–Sunday (Asia/Manila) aligned with My Mood Journey · Green = Positive, Violet = Tired, Coral = Strained',
+          style: TextStyle(color: AdminColors.muted, fontSize: 12),
+        ),
+        const SizedBox(height: 16),
+        for (final week in weeks) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      week.label,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
+                    ),
+                    if (week.suppressed)
+                      Text(
+                        'Suppressed (n < $suppressionThreshold)',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AdminColors.muted,
+                        ),
+                      )
+                    else ...[
+                      if (week.dominantMoodLabel != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AdminColors.surfaceMuted,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'Top: ${week.dominantMoodLabel}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      if (week.averageMoodLevel != null)
+                        Text(
+                          'Avg ${week.averageMoodLevel!.toStringAsFixed(2)}/5',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AdminColors.muted,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      if (week.strainedShare != null)
+                        Text(
+                          'Strained ${_formatPercent(week.strainedShare!)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: week.strainedShare! >= 35
+                                ? AdminColors.redFg
+                                : AdminColors.muted,
+                          ),
+                        ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 6),
+                if (!week.suppressed)
+                  _StackedValenceBar(
+                    positive: _valencePct(week, 'positive'),
+                    neutral: _valencePct(week, 'neutral'),
+                    strained: _valencePct(week, 'strained'),
+                  )
+                else
+                  Container(
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: AdminColors.surfaceMuted,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columns: const [
+              DataColumn(label: Text('Week')),
+              DataColumn(label: Text('Dominant mood')),
+              DataColumn(label: Text('Avg score')),
+              DataColumn(label: Text('Strained')),
+              DataColumn(label: Text('Top mood shares')),
+            ],
+            rows: weeks
+                .map(
+                  (week) => DataRow(
+                    cells: [
+                      DataCell(Text(week.label)),
+                      DataCell(
+                        Text(
+                          week.suppressed
+                              ? 'Suppressed (n < $suppressionThreshold)'
+                              : (week.dominantMoodLabel ?? '—'),
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          week.suppressed || week.averageMoodLevel == null
+                              ? '—'
+                              : '${week.averageMoodLevel!.toStringAsFixed(2)} / 5',
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          week.suppressed
+                              ? 'Suppressed'
+                              : week.strainedShare == null
+                              ? 'Suppressed (n < $suppressionThreshold)'
+                              : _formatPercent(week.strainedShare!),
+                        ),
+                      ),
+                      DataCell(
+                        Text(_topMoodSummary(week, suppressionThreshold)),
+                      ),
+                    ],
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _StackedValenceBar extends StatelessWidget {
+  const _StackedValenceBar({
+    required this.positive,
+    required this.neutral,
+    required this.strained,
+  });
+
+  final double positive;
+  final double neutral;
+  final double strained;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = positive + neutral + strained;
+    if (total <= 0) {
+      return Container(
+        height: 11,
+        decoration: BoxDecoration(
+          color: AdminColors.surfaceMuted,
+          borderRadius: BorderRadius.circular(6),
+        ),
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        height: 11,
+        child: Row(
+          children: [
+            if (positive > 0)
+              Expanded(
+                flex: (positive * 10).round().clamp(1, 1000),
+                child: const ColoredBox(color: Color(0xFF78A94E)),
+              ),
+            if (neutral > 0)
+              Expanded(
+                flex: (neutral * 10).round().clamp(1, 1000),
+                child: const ColoredBox(color: Color(0xFF8072A8)),
+              ),
+            if (strained > 0)
+              Expanded(
+                flex: (strained * 10).round().clamp(1, 1000),
+                child: const ColoredBox(color: Color(0xFFE3704D)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WeekdayPatternPanel extends StatelessWidget {
+  const _WeekdayPatternPanel({
+    required this.weekdays,
+    required this.suppressionThreshold,
+  });
+
+  final List<EmotionalActivityWeekdayBucket> weekdays;
+  final int suppressionThreshold;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('emotional_weekday_pattern'),
+    width: double.infinity,
+    padding: const EdgeInsets.all(22),
+    decoration: _panelDecoration,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Day-of-week check-in & strain pattern',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Identifies which days of the week carry the highest check-in volume and strained-mood share',
+          style: TextStyle(color: AdminColors.muted, fontSize: 12),
+        ),
+        const SizedBox(height: 16),
+        for (final day in weekdays)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 38,
+                  child: Text(
+                    day.label,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(5),
+                    child: LinearProgressIndicator(
+                      value: day.suppressed || day.activityShare == null
+                          ? 0
+                          : (day.activityShare! / 100).clamp(0.0, 1.0),
+                      minHeight: 11,
+                      color: (day.strainedShare ?? 0) >= 35
+                          ? const Color(0xFFE3704D)
+                          : const Color(0xFF5E95BC),
+                      backgroundColor: AdminColors.surfaceMuted,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    day.suppressed
+                        ? 'Suppressed (n < $suppressionThreshold)'
+                        : [
+                            if (day.activityShare != null)
+                              '${_formatPercent(day.activityShare!)} vol',
+                            if (day.strainedShare != null)
+                              '${_formatPercent(day.strainedShare!)} strained',
+                            if (day.dominantMoodLabel != null)
+                              day.dominantMoodLabel!,
+                          ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AdminColors.muted,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 class _LoadingPanel extends StatelessWidget {
