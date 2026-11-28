@@ -370,6 +370,173 @@ class EmotionalActivityBucket {
       );
 }
 
+class EmotionalActivityWeeklyTrend {
+  const EmotionalActivityWeeklyTrend({
+    required this.weekKey,
+    required this.label,
+    required this.suppressed,
+    required this.activityShare,
+    required this.averageMoodLevel,
+    required this.dominantMoodKey,
+    required this.dominantMoodLabel,
+    required this.strainedShare,
+    required this.valenceBreakdown,
+    required this.moodBreakdown,
+  });
+
+  final String weekKey;
+  final String label;
+  final bool suppressed;
+  final double? activityShare;
+  final double? averageMoodLevel;
+  final String? dominantMoodKey;
+  final String? dominantMoodLabel;
+  final double? strainedShare;
+  final List<EmotionalActivityBucket> valenceBreakdown;
+  final List<EmotionalActivityBucket> moodBreakdown;
+
+  factory EmotionalActivityWeeklyTrend.fromJson(Map<String, dynamic> json) {
+    final isSuppressed = json['suppressed'] == true;
+    return EmotionalActivityWeeklyTrend(
+      weekKey: json['weekKey']?.toString() ?? '',
+      label: json['label']?.toString() ?? 'Week',
+      suppressed: isSuppressed,
+      activityShare: isSuppressed
+          ? null
+          : _nullableNumber(json['activityShare']),
+      averageMoodLevel: isSuppressed
+          ? null
+          : _nullableNumber(json['averageMoodLevel']),
+      dominantMoodKey: isSuppressed
+          ? null
+          : json['dominantMoodKey']?.toString(),
+      dominantMoodLabel: isSuppressed
+          ? null
+          : json['dominantMoodLabel']?.toString(),
+      strainedShare: isSuppressed
+          ? null
+          : _nullableNumber(json['strainedShare']),
+      valenceBreakdown: isSuppressed
+          ? const []
+          : _list(
+              json['valenceBreakdown'],
+            ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+      moodBreakdown: isSuppressed
+          ? const []
+          : _list(
+              json['moodBreakdown'],
+            ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+    );
+  }
+}
+
+class EmotionalActivityElevationSignal {
+  const EmotionalActivityElevationSignal({
+    required this.key,
+    required this.label,
+    required this.severity,
+    required this.currentWeekLabel,
+    required this.baselineLabel,
+    required this.currentPercentage,
+    required this.baselinePercentage,
+    required this.deltaPoints,
+    required this.weekOverWeekDelta,
+    required this.summary,
+  });
+
+  final String key;
+  final String label;
+  final String severity;
+  final String currentWeekLabel;
+  final String baselineLabel;
+  final double currentPercentage;
+  final double baselinePercentage;
+  final double deltaPoints;
+  final double? weekOverWeekDelta;
+  final String summary;
+
+  bool get isElevated => severity == 'elevated';
+  bool get isWatch => severity == 'watch';
+  bool get isImproving => severity == 'improving';
+
+  factory EmotionalActivityElevationSignal.fromJson(
+    Map<String, dynamic> json,
+  ) => EmotionalActivityElevationSignal(
+    key: json['key']?.toString() ?? '',
+    label: json['label']?.toString() ?? 'Mood',
+    severity: json['severity']?.toString() ?? 'stable',
+    currentWeekLabel: json['currentWeekLabel']?.toString() ?? '',
+    baselineLabel: json['baselineLabel']?.toString() ?? 'Prior baseline',
+    currentPercentage: _number(json['currentPercentage']),
+    baselinePercentage: _number(json['baselinePercentage']),
+    deltaPoints: _number(json['deltaPoints']),
+    weekOverWeekDelta: _nullableNumber(json['weekOverWeekDelta']),
+    summary: json['summary']?.toString() ?? '',
+  );
+}
+
+class EmotionalActivityWeekdayBucket {
+  const EmotionalActivityWeekdayBucket({
+    required this.key,
+    required this.label,
+    required this.activityShare,
+    required this.strainedShare,
+    required this.dominantMoodLabel,
+    required this.suppressed,
+  });
+
+  final String key;
+  final String label;
+  final double? activityShare;
+  final double? strainedShare;
+  final String? dominantMoodLabel;
+  final bool suppressed;
+
+  factory EmotionalActivityWeekdayBucket.fromJson(Map<String, dynamic> json) {
+    final isSuppressed = json['suppressed'] == true;
+    return EmotionalActivityWeekdayBucket(
+      key: json['key']?.toString() ?? '',
+      label: json['label']?.toString() ?? '',
+      activityShare: isSuppressed
+          ? null
+          : _nullableNumber(json['activityShare']),
+      strainedShare: isSuppressed
+          ? null
+          : _nullableNumber(json['strainedShare']),
+      dominantMoodLabel: isSuppressed
+          ? null
+          : json['dominantMoodLabel']?.toString(),
+      suppressed: isSuppressed,
+    );
+  }
+}
+
+class EmotionalActivityMoodEngagement {
+  const EmotionalActivityMoodEngagement({
+    required this.averageMoodLevel,
+    required this.avgCheckInsPerParticipant,
+    required this.repeatParticipantRate,
+    required this.entryMethodBreakdown,
+  });
+
+  final double? averageMoodLevel;
+  final double? avgCheckInsPerParticipant;
+  final double? repeatParticipantRate;
+  final List<EmotionalActivityBucket> entryMethodBreakdown;
+
+  factory EmotionalActivityMoodEngagement.fromJson(Map<String, dynamic> json) =>
+      EmotionalActivityMoodEngagement(
+        averageMoodLevel: _nullableNumber(json['averageMoodLevel']),
+        avgCheckInsPerParticipant: _nullableNumber(
+          json['avgCheckInsPerParticipant'],
+        ),
+        repeatParticipantRate: _nullableNumber(json['repeatParticipantRate']),
+        entryMethodBreakdown: _list(
+          json['entryMethodBreakdown'],
+        ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+      );
+}
+
 class EmotionalActivityReport {
   const EmotionalActivityReport({
     required this.status,
@@ -392,6 +559,11 @@ class EmotionalActivityReport {
     required this.assessmentBreakdown,
     required this.periodTrends,
     required this.departmentCoverageNote,
+    this.weeklyTrends = const [],
+    this.elevatedMoodSignals = const [],
+    this.weekdayBreakdown = const [],
+    this.moodEngagement,
+    this.actionableInsights = const [],
   });
 
   const EmotionalActivityReport.empty()
@@ -414,6 +586,11 @@ class EmotionalActivityReport {
       moodBreakdown = const [],
       assessmentBreakdown = const [],
       periodTrends = const [],
+      weeklyTrends = const [],
+      elevatedMoodSignals = const [],
+      weekdayBreakdown = const [],
+      moodEngagement = null,
+      actionableInsights = const [],
       departmentCoverageNote = '';
 
   final String status;
@@ -435,6 +612,11 @@ class EmotionalActivityReport {
   final List<EmotionalActivityBucket> moodBreakdown;
   final List<EmotionalActivityBucket> assessmentBreakdown;
   final List<EmotionalActivityBucket> periodTrends;
+  final List<EmotionalActivityWeeklyTrend> weeklyTrends;
+  final List<EmotionalActivityElevationSignal> elevatedMoodSignals;
+  final List<EmotionalActivityWeekdayBucket> weekdayBreakdown;
+  final EmotionalActivityMoodEngagement? moodEngagement;
+  final List<String> actionableInsights;
   final String departmentCoverageNote;
 
   bool get isReady => status == 'ready' && !suppressed;
@@ -470,6 +652,24 @@ class EmotionalActivityReport {
         periodTrends: _list(
           json['periodTrends'],
         ).map(EmotionalActivityBucket.fromJson).toList(growable: false),
+        weeklyTrends: _list(
+          json['weeklyTrends'],
+        ).map(EmotionalActivityWeeklyTrend.fromJson).toList(growable: false),
+        elevatedMoodSignals: _list(json['elevatedMoodSignals'])
+            .map(EmotionalActivityElevationSignal.fromJson)
+            .toList(growable: false),
+        weekdayBreakdown: _list(
+          json['weekdayBreakdown'],
+        ).map(EmotionalActivityWeekdayBucket.fromJson).toList(growable: false),
+        moodEngagement: json['moodEngagement'] is Map
+            ? EmotionalActivityMoodEngagement.fromJson(
+                _map(json['moodEngagement']),
+              )
+            : null,
+        actionableInsights: (json['actionableInsights'] as List<dynamic>? ?? [])
+            .map((item) => item?.toString().trim() ?? '')
+            .where((item) => item.isNotEmpty)
+            .toList(growable: false),
         departmentCoverageNote:
             json['departmentCoverageNote']?.toString() ?? '',
       );
