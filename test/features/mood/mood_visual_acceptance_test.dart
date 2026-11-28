@@ -53,6 +53,10 @@ void moodVisualAcceptance({Future<void> Function(String name)? screenshot}) {
           ),
         ],
         child: MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child!,
+          ),
           theme: AppTheme.light,
           routes: {
             RouteNames.logMood: (_) => LogMoodScreen(

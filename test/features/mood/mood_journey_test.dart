@@ -12,6 +12,12 @@ import 'package:mind_mates/features/mood/widgets/mood_journey_summary.dart';
 import 'package:mind_mates/repositories/student_academic_calendar_repository.dart';
 import 'package:mind_mates/routes/route_names.dart';
 
+Widget _disableAmbientAnimations(BuildContext context, Widget? child) =>
+    MediaQuery(
+      data: MediaQuery.of(context).copyWith(disableAnimations: true),
+      child: child!,
+    );
+
 void main() {
   testWidgets(
     'streak is a white card with yellow edge and readable dark text',
@@ -60,7 +66,8 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
 
       // Default selected date is Nov 11/12 week; Nov 11 is in week Nov 9-15 (1 check-in),
       // while November at a glance has 3 check-ins across 2 mood-active days (Nov 1 has 2, Nov 11 has 1).
@@ -97,14 +104,17 @@ void main() {
           matching: find.byTooltip('How mood percentages are calculated'),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('How percentages work'), findsOneWidget);
       expect(find.textContaining('check-ins with a mood label'), findsWidgets);
       await tester.tap(find.text('Got it'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
 
       await tester.tap(find.byTooltip('Open full calendar'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.text('Mood Calendar'), findsOneWidget);
       expect(weekCard, findsNothing);
       final loggedDay = find.byKey(const Key('mood-calendar-day-2026-11-01'));
@@ -117,10 +127,11 @@ void main() {
         ),
         findsOneWidget,
       );
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('Nov 1 · Your check-ins'), findsOneWidget);
       await tester.pageBack();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       expect(find.text('My Mood Journey'), findsOneWidget);
       expect(find.text('Nov 1 · Your check-ins'), findsOneWidget);
 
@@ -144,9 +155,11 @@ void main() {
       // Selecting an empty historical day does not open any mood logger.
       // The journey shows one week; other weeks are in the full calendar.
       await tester.tap(find.byTooltip('Open full calendar'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       await tester.tap(find.byKey(const Key('mood-calendar-day-2026-11-05')));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('No mood check-ins on this date.'), findsOneWidget);
       expect(find.text('Save mood entry'), findsNothing);
     },
@@ -164,6 +177,7 @@ void main() {
             ChangeNotifierProvider<MoodProvider>.value(value: mood),
           ],
           child: MaterialApp(
+            builder: _disableAmbientAnimations,
             home: MoodJourneyScreen(
               nowProvider: () => DateTime.utc(2026, 11, 11, 2),
             ),
@@ -249,6 +263,7 @@ void main() {
                 data: MediaQueryData(
                   size: Size(width, 1200),
                   textScaler: const TextScaler.linear(1.8),
+                  disableAnimations: true,
                 ),
                 child: MoodJourneyScreen(nowProvider: () => now),
               ),
@@ -338,6 +353,7 @@ void main() {
             ChangeNotifierProvider<MoodProvider>.value(value: _RecapMood()),
           ],
           child: MaterialApp(
+            builder: _disableAmbientAnimations,
             routes: {
               RouteNames.mindfulBreathing: (_) =>
                   const Scaffold(body: Text('Breathing target')),
@@ -481,6 +497,7 @@ void main() {
               ),
             ],
             child: MaterialApp(
+              builder: _disableAmbientAnimations,
               home: MoodJourneyScreen(
                 nowProvider: () => DateTime.utc(2026, 12, 2, 2),
                 academicCalendarRepository: academicRepo,
@@ -617,6 +634,7 @@ void main() {
               ),
             ],
             child: MaterialApp(
+              builder: _disableAmbientAnimations,
               home: MoodJourneyScreen(
                 nowProvider: () => DateTime.utc(2026, 12, 2, 2),
                 academicCalendarRepository: academicRepo,
@@ -655,6 +673,7 @@ void main() {
               ChangeNotifierProvider<MoodProvider>.value(value: _PeriodMood()),
             ],
             child: MaterialApp(
+              builder: _disableAmbientAnimations,
               home: MoodJourneyScreen(
                 nowProvider: () => DateTime.utc(2026, 11, 12),
                 academicCalendarRepository: academicRepo,
@@ -754,6 +773,7 @@ void main() {
             ),
           ],
           child: MaterialApp(
+            builder: _disableAmbientAnimations,
             home: MoodJourneyScreen(
               nowProvider: () => DateTime.utc(2026, 11, 18, 4),
             ),
@@ -790,7 +810,10 @@ void main() {
             ChangeNotifierProvider<AuthProvider>.value(value: _JourneyAuth()),
             ChangeNotifierProvider<MoodProvider>.value(value: mood),
           ],
-          child: MaterialApp(home: MoodJourneyScreen(nowProvider: () => now)),
+          child: MaterialApp(
+            builder: _disableAmbientAnimations,
+            home: MoodJourneyScreen(nowProvider: () => now),
+          ),
         ),
       );
       await tester.pumpAndSettle();

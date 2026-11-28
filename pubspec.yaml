@@ -65,6 +65,9 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
 
+  shaders:
+    - shaders/streak_flame.frag
+
   assets:
     - assets/images/breathing/
     - assets/images/APP LOGO/
