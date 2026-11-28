@@ -33,12 +33,23 @@ export function validateAnnouncementPayload(value: unknown): AnnouncementInput {
   if (data.category != null) post.category = data.category as AnnouncementInput["category"];
   return post;
 }
+// Older publisher clients omit the targeting fields. Fill absent ones from the
+// existing post (so an edit never widens its audience), else the backfill defaults.
+function withTargetingDefaults(before: Profile|null, post: unknown): unknown {
+  if (!post || typeof post !== "object" || Array.isArray(post)) return post;
+  const data = {...post as Profile};
+  const fill = (key: string, fallback: unknown) => { if (data[key] == null) data[key] = before?.[key] ?? fallback; };
+  fill("postType", "announcement");
+  fill("audienceRoles", [...ANNOUNCEMENT_AUDIENCE_ROLES]);
+  if (data.mediaType == null) data.mediaType = data.kind === "original" ? "standard" : before?.mediaType ?? "standard";
+  return data;
+}
 export function announcementMutation(before: Profile|null, input: Profile, uid: string, now: unknown): Profile {
   if (!Number.isSafeInteger(input.expectedRevision) || Number(input.expectedRevision) < 0) throw new HttpsError("invalid-argument", "Invalid revision.");
   if (Number(input.expectedRevision) !== (before?.revision ?? 0)) throw new HttpsError("aborted", "This announcement changed. Reload before saving.");
   if (!["saveDraft", "publish", "archive"].includes(String(input.action))) throw new HttpsError("invalid-argument", "Invalid action.");
   if (before?.status === "archived" || (!before && input.action === "archive") || (before?.status === "published" && input.action === "saveDraft")) throw new HttpsError("failed-precondition", "This action is unavailable for the current post status.");
-  const post: Profile = input.action === "archive" ? before! : validateAnnouncementPayload(input.post);
+  const post: Profile = input.action === "archive" ? before! : validateAnnouncementPayload(withTargetingDefaults(before, input.post));
   // tx.set replaces the document, so legacy category must be carried over explicitly.
   if (post.category == null && before?.category != null) post.category = before.category;
   return {...post, authorId: before?.authorId ?? uid, createdAt: before?.createdAt ?? now, publishedAt: before?.publishedAt ?? (input.action === "publish" ? now : null), updatedAt: now, status: input.action === "archive" ? "archived" : input.action === "publish" ? "published" : "draft", revision: Number(input.expectedRevision) + 1};

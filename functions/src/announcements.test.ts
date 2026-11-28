@@ -51,3 +51,15 @@ test("edits and archives preserve legacy category, author and publication time",
   const fresh = announcementMutation(null, {action: "saveDraft", expectedRevision: 0, post: {...targeted, mediaType: "standard"}}, "staff", "now");
   assert.equal("category" in fresh, false);
 });
+test("legacy portal saves without targeting fields keep the post's values or safe defaults", () => {
+  const legacyPost = {kind: "link", category: "placements", title: "Job fair", body: "Apply", imageUrl: "", sourceUrl: "https://example.com/post"};
+  const created = announcementMutation(null, {action: "publish", expectedRevision: 0, post: legacyPost}, "staff", "now");
+  assert.deepEqual(created.audienceRoles, ["student", "teaching", "nonTeaching"]);
+  assert.equal(created.postType, "announcement"); assert.equal(created.mediaType, "standard"); assert.equal(created.category, "placements");
+  const targeted = {...created, audienceRoles: ["teaching"], postType: "information", mediaType: "video"};
+  const edited = announcementMutation(targeted, {action: "publish", expectedRevision: 1, post: {...legacyPost, title: "Edited", postType: null}}, "admin", "later");
+  assert.deepEqual(edited.audienceRoles, ["teaching"], "old clients must not widen an existing audience");
+  assert.equal(edited.postType, "information"); assert.equal(edited.mediaType, "video"); assert.equal(edited.title, "Edited");
+  assert.throws(() => announcementMutation(targeted, {action: "publish", expectedRevision: 1, post: {...legacyPost, audienceRoles: []}}, "admin", "x"));
+  assert.throws(() => announcementMutation(null, {action: "publish", expectedRevision: 0, post: {...legacyPost, kind: "original", sourceUrl: "", mediaType: "video"}}, "staff", "x"));
+});
