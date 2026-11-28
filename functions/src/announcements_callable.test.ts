@@ -14,10 +14,13 @@ test("transaction persists publication and audit atomically and checks current r
   const db = getFirestore(app);
   try {
     await db.doc("users/publisher").set({accessRole: "portalStaff", staffAccountStatus: "approved", accountStatus: "active"});
-    const post = {kind: "original", category: "careerGuidance", title: "Career talk", body: "Join us"};
+    const post = {kind: "original", postType: "information", audienceRoles: ["teaching"], mediaType: "standard", title: "Career talk", body: "Join us"};
     const saved = await saveAnnouncement(db, "publisher", {expectedRevision: 0, action: "publish", post});
-    assert.equal((await db.doc(`announcements/${saved.id}`).get()).data()?.status, "published");
-    assert.equal((await db.collection("admin_audit_logs").where("targetId", "==", saved.id).get()).size, 1);
+    const stored = (await db.doc(`announcements/${saved.id}`).get()).data();
+    assert.equal(stored?.status, "published"); assert.equal(stored?.postType, "information"); assert.deepEqual(stored?.audienceRoles, ["teaching"]); assert.equal(stored?.mediaType, "standard"); assert.equal("category" in (stored ?? {}), false);
+    const audits = await db.collection("admin_audit_logs").where("targetId", "==", saved.id).get();
+    assert.equal(audits.size, 1);
+    assert.deepEqual(audits.docs[0].data().metadata, {status: "published", revision: 1, postType: "information", audienceRoles: ["teaching"], mediaType: "standard"});
     await assert.rejects(saveAnnouncement(db, "publisher", {id: saved.id, expectedRevision: 0, action: "publish", post}));
     await db.doc("users/publisher").update({accountStatus: "suspended"});
     await assert.rejects(saveAnnouncement(db, "publisher", {id: saved.id, expectedRevision: 1, action: "archive"}));
@@ -42,7 +45,7 @@ test("HTTP wrapper denies missing/unverified/ineligible identities and publishes
     const now = Math.floor(Date.now()/1000);
     return Buffer.from(JSON.stringify({alg:"none",typ:"JWT"})).toString("base64url") + "." + Buffer.from(JSON.stringify({iss:"https://securetoken.google.com/demo-announcements",aud:"demo-announcements",sub:uid,user_id:uid,iat:now,exp:now+3600,auth_time:now,email_verified:verified,firebase:{identities:{},sign_in_provider:"custom"}})).toString("base64url") + ".";
   };
-  const post = {kind:"original",category:"placements",title:"HTTP job fair",body:"Synthetic local fixture"};
+  const post = {kind:"original",postType:"announcement",audienceRoles:["student","teaching","nonTeaching"],mediaType:"standard",title:"HTTP job fair",body:"Synthetic local fixture"};
   const send = (path:string,data:unknown,auth?:string) => fetch(base+path,{method:"POST",headers:{"Content-Type":"application/json",...(auth?{Authorization:`Bearer ${auth}`}:{})},body:JSON.stringify({data})});
   try {
     await getAuth(app).createUser({uid:"http-staff",email:"http-staff@example.invalid",emailVerified:false});

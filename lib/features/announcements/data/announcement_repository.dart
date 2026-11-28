@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import '../../../services/firebase/firebase_callable_router.dart';
 import '../models/announcement.dart';
+import '../../../models/profile_roles.dart';
 
 class AnnouncementCursor {
   const AnnouncementCursor(this.at, this.id);
@@ -12,12 +13,14 @@ class AnnouncementCursor {
 class AnnouncementQuery {
   const AnnouncementQuery({
     this.status,
-    this.category,
+    this.audienceRole,
+    this.postType,
     this.after,
     required this.orderField,
   });
   final AnnouncementStatus? status;
-  final AnnouncementCategory? category;
+  final PopulationRole? audienceRole;
+  final AnnouncementPostType? postType;
   final AnnouncementCursor? after;
   final String orderField;
 }
@@ -40,13 +43,17 @@ class AnnouncementRepository {
   AnnouncementRepository({this.fetch, this.call});
   final AnnouncementFetch? fetch;
   final AnnouncementCall? call;
+
+  /// [audienceRole] is required so an unscoped published query cannot be built.
   Future<AnnouncementPage> loadPublished({
-    AnnouncementCategory? category,
+    required PopulationRole audienceRole,
+    AnnouncementPostType? postType,
     AnnouncementCursor? after,
   }) => _load(
     AnnouncementQuery(
       status: AnnouncementStatus.published,
-      category: category,
+      audienceRole: audienceRole,
+      postType: postType,
       after: after,
       orderField: 'publishedAt',
     ),
@@ -78,8 +85,14 @@ class AnnouncementRepository {
     if (spec.status != null) {
       query = query.where('status', isEqualTo: spec.status!.name);
     }
-    if (spec.category != null) {
-      query = query.where('category', isEqualTo: spec.category!.name);
+    if (spec.audienceRole != null) {
+      query = query.where(
+        'audienceRoles',
+        arrayContains: spec.audienceRole!.storedValue,
+      );
+    }
+    if (spec.postType != null) {
+      query = query.where('postType', isEqualTo: spec.postType!.name);
     }
     query = query
         .orderBy(spec.orderField, descending: true)

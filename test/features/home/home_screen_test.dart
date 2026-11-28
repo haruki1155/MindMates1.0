@@ -4,6 +4,7 @@ import 'package:mind_mates/features/mood/config/mood_v2_feature_flag.dart';
 import 'package:mind_mates/features/home/data/daily_affirmation_quotes.dart';
 import 'package:mind_mates/features/home/models/home_dashboard_data.dart';
 import 'package:mind_mates/features/home/screens/home_screen.dart';
+import 'package:mind_mates/features/announcements/screens/announcements_screen.dart';
 import 'package:mind_mates/features/home/widgets/home_dashboard_widgets.dart';
 import 'package:mind_mates/features/mood/domain/mood_v2_analytics.dart';
 import 'package:mind_mates/features/quick_assessment/models/quick_assessment_models.dart';
@@ -452,6 +453,69 @@ void main() {
     expect(find.text('PACC Services'), findsOneWidget);
   });
 
+  for (final role in <PopulationRole?>[
+    PopulationRole.student,
+    PopulationRole.teaching,
+    PopulationRole.nonTeaching,
+    null,
+  ]) {
+    testWidgets('home Announcements passes ${role?.name ?? 'missing'} role', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(900, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final userProvider = UserProvider(_FakeUserRepository())
+        ..setUser(
+          UserModel(
+            id: 'user_1',
+            email: 'leo@example.com',
+            populationRole: role,
+          ),
+        );
+      await tester.pumpWidget(
+        MultiProvider(
+          providers: [
+            ChangeNotifierProvider<UserProvider>.value(value: userProvider),
+            ChangeNotifierProvider<MoodProvider>(
+              create: (_) => MoodProvider(_FakeMoodRepository()),
+            ),
+            ChangeNotifierProvider<ReportProvider>(
+              create: (_) => ReportProvider(_FakeReportRepository()),
+            ),
+            ChangeNotifierProvider<InsightsProvider>(
+              create: (_) => InsightsProvider(InsightsRepository()),
+            ),
+            ChangeNotifierProvider(
+              create: (_) => AssessmentProvider(AssessmentRepository()),
+            ),
+            ChangeNotifierProvider(
+              create: (_) => BreathingProvider(_FakeBreathingRepository()),
+            ),
+          ],
+          child: MaterialApp(
+            theme: ThemeData(splashFactory: NoSplash.splashFactory),
+            routes: _testRoutes(),
+            home: const HomeScreen(),
+          ),
+        ),
+      );
+      final button = find.widgetWithText(HomeWideButton, 'Announcements');
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      final screen = tester.widget<AnnouncementsScreen>(
+        find.byType(AnnouncementsScreen),
+      );
+      expect(screen.populationRole, role);
+      if (role == null) {
+        expect(
+          find.text('Updates unavailable for this account'),
+          findsOneWidget,
+        );
+      }
+    });
+  }
+
   testWidgets('home Log your mood opens mood check-in screen', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -489,7 +553,10 @@ void main() {
 
     expect(find.text('Mood check-ins'), findsNothing);
     expect(find.widgetWithText(HomeWideButton, 'Log mood'), findsNothing);
-    expect(find.widgetWithText(HomeWideButton, 'Announcements'), findsOneWidget);
+    expect(
+      find.widgetWithText(HomeWideButton, 'Announcements'),
+      findsOneWidget,
+    );
     await tester.tap(
       find.descendant(
         of: find.byType(HomeStreakCard),

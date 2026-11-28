@@ -2,13 +2,22 @@ import 'package:flutter/material.dart';
 import '../data/announcement_feed_controller.dart';
 import '../data/announcement_repository.dart';
 import '../models/announcement.dart';
+import '../../../models/profile_roles.dart';
 import '../services/announcement_link_launcher.dart';
 import '../widgets/announcement_card.dart';
 import '../widgets/announcement_presentation.dart';
 import 'announcement_viewer_screen.dart';
 
 class AnnouncementsScreen extends StatefulWidget {
-  const AnnouncementsScreen({super.key, this.repository, this.launcher});
+  const AnnouncementsScreen({
+    super.key,
+    this.populationRole,
+    this.repository,
+    this.launcher,
+  });
+
+  /// Signed-in user's audience; null means no role-targeted feed is queried.
+  final PopulationRole? populationRole;
   final AnnouncementRepository? repository;
   final AnnouncementSourceLauncher? launcher;
   @override
@@ -19,6 +28,7 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen>
     with WidgetsBindingObserver {
   late final _feed = AnnouncementFeedController(
     widget.repository ?? AnnouncementRepository(),
+    audienceRole: widget.populationRole,
   );
   final _scroll = ScrollController();
   bool _external = false;
@@ -27,6 +37,14 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _feed.load();
+  }
+
+  @override
+  void didUpdateWidget(AnnouncementsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.populationRole != widget.populationRole) {
+      _feed.setAudienceRole(widget.populationRole);
+    }
   }
 
   @override
@@ -148,36 +166,45 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen>
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'Opportunities start here',
+                          'Updates from PACC',
                           style: Theme.of(context).textTheme.headlineSmall
                               ?.copyWith(fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 6),
                         const Text(
-                          'Career guidance and placement updates from PACC.',
+                          'Announcements and information shared with you.',
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('All'),
-                        selected: _feed.category == null,
-                        onSelected: (_) => _feed.selectCategory(null),
-                      ),
-                      for (final category in AnnouncementCategory.values)
+                  if (widget.populationRole == null)
+                    const AnnouncementStatusPanel(
+                      icon: Icons.lock_outline,
+                      title: 'Updates unavailable for this account',
+                      message:
+                          'Announcements are shared with students, teaching and non-teaching personnel. Complete your profile role to see updates for you.',
+                    )
+                  else ...[
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
                         ChoiceChip(
-                          label: Text(category.label),
-                          selected: _feed.category == category,
-                          onSelected: (_) => _feed.selectCategory(category),
+                          label: const Text('All'),
+                          selected: _feed.postType == null,
+                          onSelected: (_) => _feed.selectPostType(null),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
+                        for (final type in AnnouncementPostType.values)
+                          ChoiceChip(
+                            label: Text(type.label),
+                            selected: _feed.postType == type,
+                            onSelected: (_) => _feed.selectPostType(type),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                  ],
                   if (_feed.error != null)
                     AnnouncementStatusPanel(
                       icon: Icons.cloud_off_outlined,
@@ -187,7 +214,8 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen>
                       actionLabel: 'Retry',
                       onAction: _feed.retry,
                     ),
-                  if (!_feed.loading &&
+                  if (widget.populationRole != null &&
+                      !_feed.loading &&
                       _feed.error == null &&
                       _feed.posts.isEmpty)
                     const AnnouncementStatusPanel(
@@ -220,7 +248,7 @@ class _AnnouncementsScreenState extends State<AnnouncementsScreen>
                               semanticsLabel: "Loading announcements",
                             ),
                             SizedBox(height: 12),
-                            Text("Loading announcements?"),
+                            Text('Loading announcements…'),
                           ],
                         ),
                       ),

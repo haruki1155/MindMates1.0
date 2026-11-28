@@ -125,7 +125,7 @@ class _ManageAnnouncementsPageState extends State<ManageAnnouncementsPage> {
             spacing: 20,
             runSpacing: 16,
             children: [
-              const Text('Career guidance and placement updates'),
+              const Text('Announcements and information for app users'),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
                   backgroundColor: AdminColors.accentSoft,
@@ -181,8 +181,7 @@ class _ManageAnnouncementsPageState extends State<ManageAnnouncementsPage> {
             AnnouncementStatusPanel(
               icon: Icons.campaign_outlined,
               title: 'No ${_status.name} announcements',
-              message:
-                  'Create a post to share a career opportunity with your community.',
+              message: 'Create a post to share an update with your community.',
             ),
           for (final post in _posts)
             Card(
@@ -201,17 +200,23 @@ class _ManageAnnouncementsPageState extends State<ManageAnnouncementsPage> {
                           side: const BorderSide(color: AdminColors.border),
                         ),
                         Chip(
-                          label: Text(post.content.category.label),
+                          label: Text(post.postType.label),
                           side: BorderSide.none,
                         ),
+                        if (post.isVideo)
+                          const Chip(
+                            avatar: Icon(Icons.play_circle_outline, size: 18),
+                            label: Text('Video'),
+                            side: BorderSide.none,
+                          ),
+                        for (final role in post.audienceRoles)
+                          Chip(
+                            label: Text(role.label),
+                            side: const BorderSide(color: AdminColors.border),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      post.content.category.label,
-                      style: Theme.of(context).textTheme.labelMedium,
-                    ),
-                    const SizedBox(height: 6),
                     Text(
                       post.title,
                       style: Theme.of(context).textTheme.titleMedium,
@@ -252,7 +257,7 @@ class _ManageAnnouncementsPageState extends State<ManageAnnouncementsPage> {
                       semanticsLabel: 'Loading announcements',
                     ),
                     SizedBox(height: 12),
-                    Text('Loading announcements?'),
+                    Text('Loading announcements…'),
                   ],
                 ),
               ),

@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import '../../../models/profile_roles.dart';
 import '../../admin/theme/admin_theme.dart';
 import 'announcement_presentation.dart';
 import '../../../services/firebase/firebase_error_message.dart';
@@ -21,9 +24,21 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _title, _body, _source, _image;
   late AnnouncementKind _kind;
-  late AnnouncementCategory _category;
-  bool _saving = false, _previewing = false;
+  late AnnouncementPostType _postType;
+  late AnnouncementMediaType _mediaType;
+  late Set<PopulationRole> _audience;
+  AnnouncementCategory? _category;
+  bool _saving = false, _previewing = false, _audienceError = false;
   String? _notice, _error;
+
+  /// The preview server allows 10 requests/minute, so URL edits are debounced.
+  static const _previewDebounce = Duration(milliseconds: 650);
+  Timer? _debounce;
+  String? _lastFetchedUrl;
+  int _previewRequest = 0;
+
+  /// Last value a preview wrote per field; a field whose text differs was edited by the publisher.
+  final _autoFilled = <TextEditingController, String>{};
   @override
   void initState() {
     super.initState();
@@ -33,56 +48,112 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
     _source = TextEditingController(text: post?.sourceUrl);
     _image = TextEditingController(text: post?.imageUrl);
     _kind = post?.kind ?? AnnouncementKind.original;
-    _category = post?.category ?? AnnouncementCategory.careerGuidance;
+    _postType = post?.postType ?? AnnouncementPostType.announcement;
+    _mediaType = post?.mediaType ?? AnnouncementMediaType.standard;
+    _audience = {...(post?.audienceRoles ?? PopulationRole.values)};
+    _category = post?.category;
+    // Existing posts already have their details; don't spend a preview request on open.
+    if (post != null && post.sourceUrl.trim().isNotEmpty) {
+      _lastFetchedUrl = post.sourceUrl.trim();
+    }
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     for (final controller in [_title, _body, _source, _image]) {
       controller.dispose();
     }
     super.dispose();
   }
 
-  Future<void> _preview() async {
+  void _sourceChanged(String value) {
+    _debounce?.cancel();
+    final url = value.trim();
+    if (_kind == AnnouncementKind.link &&
+        announcementHttpUri(url) != null &&
+        url != _lastFetchedUrl) {
+      _debounce = Timer(_previewDebounce, () => _preview(automatic: true));
+    }
+    setState(() {});
+  }
+
+  bool _canFill(TextEditingController field) =>
+      field.text.trim().isEmpty || _autoFilled[field] == field.text;
+
+  void _fill(TextEditingController field, String value) {
+    if (value.isEmpty || !_canFill(field)) return;
+    field.text = value;
+    _autoFilled[field] = value;
+  }
+
+  Future<void> _preview({bool automatic = false}) async {
+    _debounce?.cancel();
     final url = _source.text.trim();
     if (announcementHttpUri(url) == null) {
-      setState(() => _error = 'Enter a valid http or https source link.');
+      if (!automatic) {
+        setState(() => _error = 'Enter a valid http or https source link.');
+      }
       return;
     }
+    if (automatic && url == _lastFetchedUrl) return;
+    _lastFetchedUrl = url;
+    final request = ++_previewRequest;
     setState(() {
       _previewing = true;
       _error = null;
       _notice = null;
     });
+    bool current() =>
+        mounted &&
+        request == _previewRequest &&
+        _source.text.trim() == url &&
+        _kind == AnnouncementKind.link;
     try {
       final preview = await widget.repository.previewLink(url);
-      if (!mounted ||
-          _source.text.trim() != url ||
-          _kind != AnnouncementKind.link) {
-        return;
-      }
+      if (!current()) return;
       setState(() {
-        if (_title.text.trim().isEmpty) _title.text = preview.title;
-        if (_body.text.trim().isEmpty) _body.text = preview.description;
-        if (_image.text.trim().isEmpty) _image.text = preview.imageUrl;
+        _fill(_title, preview.title);
+        _fill(_body, preview.description);
+        _fill(_image, preview.imageUrl);
         _notice = preview.available
-            ? 'Preview loaded. Review and edit before publishing. Existing text was kept.'
+            ? 'Preview loaded. Review and edit before publishing. Your edits were kept.'
             : 'Preview unavailable. Enter the details manually.';
       });
-    } catch (_) {
-      if (mounted && _source.text.trim() == url) {
+    } catch (error) {
+      if (current()) {
+        final limited =
+            error is FirebaseException && error.code == 'resource-exhausted';
         setState(
-          () => _notice = 'Preview unavailable. Enter the details manually.',
+          () => _notice = limited
+              ? 'Too many preview requests. Wait a minute and tap Load preview, or enter the details manually.'
+              : 'Preview unavailable. Enter the details manually.',
         );
       }
     } finally {
-      if (mounted) setState(() => _previewing = false);
+      if (mounted && request == _previewRequest) {
+        setState(() => _previewing = false);
+      }
     }
   }
 
+  void _selectKind(AnnouncementKind kind) => setState(() {
+    _kind = kind;
+    _notice = null;
+    if (kind == AnnouncementKind.original) {
+      _debounce?.cancel();
+      _mediaType = AnnouncementMediaType.standard;
+    }
+  });
+
   Future<void> _save(AnnouncementAction action) async {
-    if (!_form.currentState!.validate()) return;
+    // Saving never waits on, or races with, a link preview.
+    _debounce?.cancel();
+    _previewRequest++;
+    _previewing = false;
+    final formValid = _form.currentState!.validate();
+    setState(() => _audienceError = _audience.isEmpty);
+    if (!formValid || _audience.isEmpty) return;
     setState(() {
       _saving = true;
       _error = null;
@@ -94,6 +165,11 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
         action: action,
         post: AnnouncementInput(
           kind: _kind,
+          postType: _postType,
+          audienceRoles: canonicalAudienceRoles(_audience),
+          mediaType: _kind == AnnouncementKind.link
+              ? _mediaType
+              : AnnouncementMediaType.standard,
           category: _category,
           title: _title.text,
           body: _body.text,
@@ -119,6 +195,11 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
     data: AdminTheme.data.copyWith(visualDensity: VisualDensity.standard),
     child: Builder(builder: (context) => _buildEditor(context)),
   );
+  Widget _label(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(text, style: Theme.of(context).textTheme.labelLarge),
+  );
+
   Widget _buildEditor(BuildContext context) => PopScope(
     canPop: !_saving,
     child: Scaffold(
@@ -142,7 +223,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
-                      'Share an opportunity',
+                      'Share an update',
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.w800,
@@ -150,7 +231,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Career guidance and placement updates from PACC. Publishing makes this visible to app users.',
+                      'Announcements and information from PACC. Publishing makes this visible to the selected app users.',
                     ),
                     const SizedBox(height: 20),
                     const Text(
@@ -177,41 +258,101 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                             selected: _kind == kind,
                             onSelected: _saving
                                 ? null
-                                : (_) => setState(() {
-                                    _kind = kind;
-                                    _notice = null;
-                                  }),
+                                : (_) => _selectKind(kind),
                           ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    DropdownButtonFormField<AnnouncementCategory>(
-                      initialValue: _category,
-                      decoration: const InputDecoration(labelText: 'Category'),
-                      isExpanded: true,
-                      items: AnnouncementCategory.values
-                          .map(
-                            (v) => DropdownMenuItem(
-                              value: v,
-                              child: Text(v.label),
+                    _label('Post type'),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      children: [
+                        for (final type in AnnouncementPostType.values)
+                          ChoiceChip(
+                            label: Text(type.label),
+                            selected: _postType == type,
+                            onSelected: _saving
+                                ? null
+                                : (_) => setState(() => _postType = type),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    _label('Audience'),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      children: [
+                        for (final role in PopulationRole.values)
+                          FilterChip(
+                            label: Text(role.label),
+                            selected: _audience.contains(role),
+                            onSelected: _saving
+                                ? null
+                                : (selected) => setState(() {
+                                    selected
+                                        ? _audience.add(role)
+                                        : _audience.remove(role);
+                                    if (_audience.isNotEmpty) {
+                                      _audienceError = false;
+                                    }
+                                  }),
+                          ),
+                      ],
+                    ),
+                    if (_audienceError)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          'Select at least one audience.',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 16),
+                    _label('Media'),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      children: [
+                        for (final media in AnnouncementMediaType.values)
+                          ChoiceChip(
+                            label: Text(
+                              media == AnnouncementMediaType.video
+                                  ? 'Video'
+                                  : 'Standard',
                             ),
-                          )
-                          .toList(),
-                      onChanged: _saving
-                          ? null
-                          : (v) => setState(() => _category = v!),
+                            selected:
+                                _kind == AnnouncementKind.link &&
+                                    _mediaType == media ||
+                                _kind == AnnouncementKind.original &&
+                                    media == AnnouncementMediaType.standard,
+                            onSelected: _saving
+                                ? null
+                                : (_) => setState(() {
+                                    _mediaType = media;
+                                    // Video posts always point to an external source.
+                                    if (media == AnnouncementMediaType.video) {
+                                      _kind = AnnouncementKind.link;
+                                    }
+                                  }),
+                          ),
+                      ],
                     ),
                     if (_kind == AnnouncementKind.link) ...[
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _source,
-                        onChanged: (_) => setState(() {}),
+                        onChanged: _sourceChanged,
                         enabled: !_saving,
                         keyboardType: TextInputType.url,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Source link',
-                          helperText:
-                              'Students open this original post when they tap.',
+                          helperText: _mediaType == AnnouncementMediaType.video
+                              ? 'Paste the video link. App users tap Watch Video to open it.'
+                              : 'App users open this original post when they tap.',
                         ),
                         maxLength: 2048,
                         validator: (v) => announcementHttpUri(v) == null
@@ -283,8 +424,13 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                       controller: _image,
                       enabled: !_saving,
                       keyboardType: TextInputType.url,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Image URL (optional)',
+                        helperText:
+                            _kind == AnnouncementKind.link &&
+                                _mediaType == AnnouncementMediaType.video
+                            ? 'Used as the video thumbnail.'
+                            : null,
                       ),
                       maxLength: 2048,
                       onChanged: (_) => setState(() {}),
@@ -332,7 +478,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                         if (widget.announcement?.status !=
                             AnnouncementStatus.published)
                           OutlinedButton(
-                            onPressed: _saving || _previewing
+                            onPressed: _saving
                                 ? null
                                 : () => _save(AnnouncementAction.saveDraft),
                             style: OutlinedButton.styleFrom(
@@ -341,7 +487,7 @@ class _AnnouncementEditorState extends State<AnnouncementEditor> {
                             child: const Text('Save draft'),
                           ),
                         FilledButton.icon(
-                          onPressed: _saving || _previewing
+                          onPressed: _saving
                               ? null
                               : () => _save(AnnouncementAction.publish),
                           icon: _saving
