@@ -8,6 +8,33 @@ import 'package:mind_mates/features/announcements/screens/manage_announcements_p
 import 'package:mind_mates/features/announcements/widgets/announcement_editor.dart';
 
 void main() {
+  Finder source() => find.widgetWithText(TextFormField, 'Source link');
+
+  Finder audiencePanel(String label) => find.byWidgetPredicate(
+    (widget) =>
+        widget is Semantics &&
+        widget.properties.button == true &&
+        (widget.properties.label?.startsWith('$label,') ?? false),
+  );
+
+  Finder audienceTapTarget(String label) => find.widgetWithText(InkWell, label);
+
+  Future<void> tapVisible(WidgetTester tester, Finder finder) async {
+    await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
+    await tester.pump();
+    await tester.tap(finder);
+  }
+
+  Future<void> enterVisibleText(
+    WidgetTester tester,
+    Finder finder,
+    String value,
+  ) async {
+    await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
+    await tester.pump();
+    await tester.enterText(finder, value);
+  }
+
   testWidgets(
     'destination updates immediately and pending publishing blocks duplicate actions',
     (tester) async {
@@ -22,8 +49,12 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: AnnouncementEditor(repository: repository)),
       );
+      await tester.ensureVisible(find.text('Linked post'));
       await tester.tap(find.text('Linked post'));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.widgetWithText(TextFormField, 'Source link'),
+      );
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Source link'),
         'https://first.example/post',
@@ -37,16 +68,20 @@ void main() {
       await tester.pump();
       expect(find.text('Destination: second.example'), findsOneWidget);
       expect(find.text('Destination: first.example'), findsNothing);
+      await tester.ensureVisible(find.widgetWithText(TextFormField, 'Title'));
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Title'),
         'Test title',
+      );
+      await tester.ensureVisible(
+        find.widgetWithText(TextFormField, 'Description'),
       );
       await tester.enterText(
         find.widgetWithText(TextFormField, 'Description'),
         'Test details',
       );
-      await tester.ensureVisible(find.text('Publish'));
-      await tester.tap(find.text('Publish'));
+      await tester.ensureVisible(find.text('Publish announcement'));
+      await tester.tap(find.text('Publish announcement'));
       await tester.pump();
       expect(find.text('Saving…'), findsOneWidget);
       expect(calls, 1);
@@ -78,6 +113,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('New announcement'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(TextFormField, 'Title'));
+    await tester.ensureVisible(
+      find.widgetWithText(TextFormField, 'Description'),
+    );
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Title'),
       'Career talk',
@@ -87,8 +126,8 @@ void main() {
       'Join the PACC team',
     );
     expect(calls, isEmpty);
-    await tester.ensureVisible(find.text('Publish'));
-    await tester.tap(find.text('Publish'));
+    await tester.ensureVisible(find.text('Publish announcement'));
+    await tester.tap(find.text('Publish announcement'));
     await tester.pumpAndSettle();
     expect(calls.single['action'], 'publish');
     expect((calls.single['post'] as Map)['title'], 'Career talk');
@@ -114,8 +153,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: AnnouncementEditor(repository: repo)),
     );
+    await tester.ensureVisible(find.text('Linked post'));
     await tester.tap(find.text('Linked post'));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(source());
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Source link'),
       'https://example.com/post',
@@ -128,8 +169,8 @@ void main() {
       find.widgetWithText(TextFormField, 'Title'),
       'Edited title',
     );
-    await tester.ensureVisible(find.text('Publish'));
-    await tester.tap(find.text('Publish'));
+    await tester.ensureVisible(find.text('Publish announcement'));
+    await tester.tap(find.text('Publish announcement'));
     await tester.pumpAndSettle();
     expect((calls.single['post'] as Map)['title'], 'Edited title');
     expect(
@@ -150,8 +191,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: AnnouncementEditor(repository: repo)),
     );
+    await tester.ensureVisible(find.text('Linked post'));
     await tester.tap(find.text('Linked post'));
     await tester.pump();
+    await tester.ensureVisible(source());
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Source link'),
       'https://example.com/old',
@@ -247,17 +290,20 @@ void main() {
     },
   );
 
-  Finder source() => find.widgetWithText(TextFormField, 'Source link');
   Future<void> publish(WidgetTester tester) async {
-    await tester.ensureVisible(find.text('Publish'));
-    await tester.tap(find.text('Publish'));
+    await tester.ensureVisible(find.text('Publish announcement'));
+    await tester.tap(find.text('Publish announcement'));
     await tester.pumpAndSettle();
   }
 
   Future<void> fillText(WidgetTester tester) async {
+    await tester.ensureVisible(find.widgetWithText(TextFormField, 'Title'));
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Title'),
       'Campus update',
+    );
+    await tester.ensureVisible(
+      find.widgetWithText(TextFormField, 'Description'),
     );
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Description'),
@@ -268,6 +314,10 @@ void main() {
   testWidgets('new posts default to all audiences and require at least one', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(1000, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+
     final calls = <Map<String, dynamic>>[];
     final repo = AnnouncementRepository(
       call: (_, data) async {
@@ -280,23 +330,19 @@ void main() {
     );
     for (final label in ['Student', 'Teaching', 'Non-Teaching']) {
       expect(
-        tester
-            .widget<FilterChip>(find.widgetWithText(FilterChip, label))
-            .selected,
+        tester.widget<Semantics>(audiencePanel(label)).properties.selected,
         isTrue,
       );
     }
     await fillText(tester);
     for (final label in ['Student', 'Teaching', 'Non-Teaching']) {
-      await tester.ensureVisible(find.widgetWithText(FilterChip, label));
-      await tester.tap(find.widgetWithText(FilterChip, label));
+      await tapVisible(tester, audienceTapTarget(label));
       await tester.pump();
     }
     await publish(tester);
     expect(find.text('Select at least one audience.'), findsOneWidget);
     expect(calls, isEmpty);
-    await tester.ensureVisible(find.widgetWithText(FilterChip, 'Teaching'));
-    await tester.tap(find.widgetWithText(FilterChip, 'Teaching'));
+    await tapVisible(tester, audienceTapTarget('Teaching'));
     await tester.ensureVisible(find.text('Information'));
     await tester.tap(find.text('Information'));
     await tester.pump();
@@ -354,15 +400,16 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: AnnouncementEditor(repository: repo)),
       );
-      await tester.tap(find.text('Linked post'));
+      await tapVisible(tester, find.text('Linked post'));
       await tester.pumpAndSettle();
-      await tester.enterText(
+      await enterVisibleText(
+        tester,
         find.widgetWithText(TextFormField, 'Title'),
         'My own title',
       );
-      await tester.enterText(source(), 'https://news.example/a');
+      await enterVisibleText(tester, source(), 'https://news.example/a');
       await tester.pump(const Duration(milliseconds: 400));
-      await tester.enterText(source(), 'https://news.example/b');
+      await enterVisibleText(tester, source(), 'https://news.example/b');
       await tester.pump(const Duration(milliseconds: 600));
       expect(previews, isEmpty);
       await tester.pump(const Duration(milliseconds: 100));
@@ -370,9 +417,9 @@ void main() {
       expect(previews, ['https://news.example/b']);
       expect(find.text('My own title'), findsOneWidget);
       expect(find.text('Fetched body'), findsOneWidget);
-      await tester.enterText(source(), 'https://news.example/b ');
+      await enterVisibleText(tester, source(), 'https://news.example/b ');
       await tester.pump(const Duration(seconds: 1));
-      await tester.enterText(source(), 'not a url');
+      await enterVisibleText(tester, source(), 'not a url');
       await tester.pump(const Duration(seconds: 1));
       expect(previews, hasLength(1));
     },
@@ -390,11 +437,11 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: AnnouncementEditor(repository: repo)),
     );
-    await tester.tap(find.text('Linked post'));
+    await tapVisible(tester, find.text('Linked post'));
     await tester.pumpAndSettle();
-    await tester.enterText(source(), 'https://news.example/old');
+    await enterVisibleText(tester, source(), 'https://news.example/old');
     await tester.pump(const Duration(milliseconds: 700));
-    await tester.enterText(source(), 'https://news.example/new');
+    await enterVisibleText(tester, source(), 'https://news.example/new');
     await tester.pump(const Duration(milliseconds: 700));
     expect(pending, hasLength(2));
     pending[0].complete({'available': true, 'title': 'Old title'});
@@ -435,9 +482,7 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
     expect(previews, 0);
     expect(
-      tester
-          .widget<FilterChip>(find.widgetWithText(FilterChip, 'Teaching'))
-          .selected,
+      tester.widget<Semantics>(audiencePanel('Teaching')).properties.selected,
       isFalse,
     );
   });
@@ -461,9 +506,9 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(home: AnnouncementEditor(repository: repo)),
       );
-      await tester.tap(find.text('Linked post'));
+      await tapVisible(tester, find.text('Linked post'));
       await tester.pumpAndSettle();
-      await tester.enterText(source(), 'https://news.example/a');
+      await enterVisibleText(tester, source(), 'https://news.example/a');
       await tester.pump(const Duration(milliseconds: 700));
       await tester.pumpAndSettle();
       expect(find.textContaining('Too many preview requests'), findsOneWidget);
