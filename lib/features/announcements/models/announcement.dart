@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../models/profile_roles.dart';
 
 enum AnnouncementKind { original, link }
 
@@ -8,6 +9,22 @@ enum AnnouncementCategory {
 
   String get label => this == careerGuidance ? 'Career Guidance' : 'Placements';
 }
+
+enum AnnouncementPostType {
+  announcement,
+  information;
+
+  String get label => this == announcement ? 'Announcement' : 'Information';
+}
+
+enum AnnouncementMediaType { standard, video }
+
+T _enumValue<T extends Enum>(List<T> values, Object? raw, T fallback) =>
+    values.where((v) => v.name == raw).firstOrNull ?? fallback;
+
+/// Canonical order (student, teaching, nonTeaching), matching the backend.
+List<PopulationRole> canonicalAudienceRoles(Iterable<PopulationRole> roles) =>
+    PopulationRole.values.where(roles.contains).toList(growable: false);
 
 enum AnnouncementStatus { draft, published, archived }
 
@@ -32,18 +49,33 @@ DateTime? _date(Object? value) => value is Timestamp
 class AnnouncementInput {
   const AnnouncementInput({
     required this.kind,
-    required this.category,
+    this.postType = AnnouncementPostType.announcement,
+    this.audienceRoles = PopulationRole.values,
+    this.mediaType = AnnouncementMediaType.standard,
+    this.category,
     required this.title,
     required this.body,
     this.sourceUrl = '',
     this.imageUrl = '',
   });
   final AnnouncementKind kind;
-  final AnnouncementCategory category;
+  final AnnouncementPostType postType;
+  final List<PopulationRole> audienceRoles;
+  final AnnouncementMediaType mediaType;
+
+  /// Historical only; the backend preserves it on edits.
+  final AnnouncementCategory? category;
   final String title, body, sourceUrl, imageUrl;
   Map<String, dynamic> toJson() => {
     'kind': kind.name,
-    'category': category.name,
+    'postType': postType.name,
+    'audienceRoles': canonicalAudienceRoles(
+      audienceRoles,
+    ).map((role) => role.storedValue).toList(),
+    'mediaType': kind == AnnouncementKind.link
+        ? mediaType.name
+        : AnnouncementMediaType.standard.name,
+    'category': ?category?.name,
     'title': title.trim(),
     'body': body.trim(),
     'sourceUrl': kind == AnnouncementKind.link ? sourceUrl.trim() : '',
@@ -68,6 +100,11 @@ class Announcement {
   String get title => content.title;
   String get body => content.body;
   String get imageUrl => content.imageUrl;
+  AnnouncementPostType get postType => content.postType;
+  AnnouncementMediaType get mediaType => content.mediaType;
+  List<PopulationRole> get audienceRoles => content.audienceRoles;
+  bool get isVideo =>
+      mediaType == AnnouncementMediaType.video && sourceUri != null;
   Uri? get sourceUri => content.kind == AnnouncementKind.link
       ? announcementHttpUri(content.sourceUrl)
       : null;
@@ -78,9 +115,20 @@ class Announcement {
           kind: data['kind'] == 'link'
               ? AnnouncementKind.link
               : AnnouncementKind.original,
-          category: data['category'] == 'placements'
-              ? AnnouncementCategory.placements
-              : AnnouncementCategory.careerGuidance,
+          postType: _enumValue(
+            AnnouncementPostType.values,
+            data['postType'],
+            AnnouncementPostType.announcement,
+          ),
+          audienceRoles: _audienceRoles(data['audienceRoles']),
+          mediaType: _enumValue(
+            AnnouncementMediaType.values,
+            data['mediaType'],
+            AnnouncementMediaType.standard,
+          ),
+          category: AnnouncementCategory.values
+              .where((v) => v.name == data['category'])
+              .firstOrNull,
           title: data['title']?.toString() ?? '',
           body: data['body']?.toString() ?? '',
           sourceUrl: announcementHttpUri(data['sourceUrl'])?.toString() ?? '',
@@ -97,6 +145,16 @@ class Announcement {
         publishedAt: _date(data['publishedAt']),
         updatedAt: _date(data['updatedAt']),
       );
+}
+
+// Legacy (pre-targeting) records reached every app-user role.
+List<PopulationRole> _audienceRoles(Object? raw) {
+  final roles = raw is List
+      ? canonicalAudienceRoles(
+          PopulationRole.values.where((role) => raw.contains(role.name)),
+        )
+      : const <PopulationRole>[];
+  return roles.isEmpty ? PopulationRole.values : roles;
 }
 
 class AnnouncementLinkPreview {

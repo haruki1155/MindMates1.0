@@ -2,7 +2,7 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {canManageAnnouncements, validateAnnouncementPayload, announcementMutation} from "./announcements";
 
-const post = {kind: "link", category: "placements", title: "Job fair", body: "Apply today", sourceUrl: "https://example.com/post"};
+const post = {kind: "link", postType: "announcement", audienceRoles: ["student", "teaching", "nonTeaching"], mediaType: "standard", category: "placements", title: "Job fair", body: "Apply today", sourceUrl: "https://example.com/post"};
 test("only active approved staff and admins manage announcements", () => {
   for (const role of ["portalStaff", "admin"]) assert.equal(canManageAnnouncements({accessRole: role, staffAccountStatus: "approved", accountStatus: "active"}), true);
   for (const profile of [{accessRole: "counselor"}, {accessRole: "appUser"}, {accessRole: "portalStaff", staffAccountStatus: "pending"}, {accessRole: "portalStaff", staffAccountStatus: "approved", accountStatus: "inactive"}]) assert.equal(canManageAnnouncements(profile), false);
@@ -24,4 +24,30 @@ test("draft, publish, edit and archive preserve author and publication timestamp
   const archived = announcementMutation(edited, {action: "archive", expectedRevision: 3}, "staff", "x");
   assert.equal(archived.status, "archived"); assert.equal(archived.body, "Apply today");
   assert.throws(() => announcementMutation(archived, {action: "publish", expectedRevision: 4, post}, "staff", "x"));
+});
+
+const targeted = {kind: "link", postType: "information", audienceRoles: ["nonTeaching", "student"], mediaType: "video", title: "Campus tour", body: "Watch it", imageUrl: "", sourceUrl: "https://example.com/video"};
+test("targeted post validation canonicalises audiences and enforces type/media matrix", () => {
+  const valid = validateAnnouncementPayload(targeted);
+  assert.deepEqual(valid.audienceRoles, ["student", "nonTeaching"]);
+  assert.equal(valid.postType, "information"); assert.equal(valid.mediaType, "video");
+  assert.equal("category" in valid, false);
+  assert.equal(validateAnnouncementPayload({...targeted, category: "placements"}).category, "placements");
+  assert.equal(validateAnnouncementPayload({...targeted, kind: "original", mediaType: "standard", sourceUrl: ""}).kind, "original");
+  for (const patch of [
+    {postType: "video"}, {postType: undefined}, {mediaType: "audio"}, {mediaType: undefined},
+    {audienceRoles: []}, {audienceRoles: "student"}, {audienceRoles: ["student", "student"]}, {audienceRoles: ["counselor"]}, {audienceRoles: [1]}, {audienceRoles: undefined},
+    {kind: "original", sourceUrl: ""}, {kind: "original", mediaType: "video", sourceUrl: ""}, {sourceUrl: ""}, {category: "other"},
+    {authorId: "x"}, {revision: 3}, {publishedAt: "x"}, {createdAt: "x"},
+  ]) assert.throws(() => validateAnnouncementPayload({...targeted, ...patch}), JSON.stringify(patch));
+});
+test("edits and archives preserve legacy category, author and publication time", () => {
+  const legacy = {kind: "link", category: "careerGuidance", title: "Old", body: "Old body", imageUrl: "", sourceUrl: "https://example.com/a", status: "published", authorId: "orig", createdAt: "c", publishedAt: "p", revision: 4};
+  const edited = announcementMutation(legacy, {action: "publish", expectedRevision: 4, post: {...targeted, mediaType: "standard"}}, "admin", "now");
+  assert.equal(edited.category, "careerGuidance"); assert.equal(edited.authorId, "orig"); assert.equal(edited.publishedAt, "p"); assert.equal(edited.revision, 5);
+  assert.deepEqual(edited.audienceRoles, ["student", "nonTeaching"]);
+  const archived = announcementMutation(edited, {action: "archive", expectedRevision: 5}, "staff", "later");
+  assert.equal(archived.category, "careerGuidance"); assert.equal(archived.postType, "information"); assert.deepEqual(archived.audienceRoles, ["student", "nonTeaching"]); assert.equal(archived.publishedAt, "p");
+  const fresh = announcementMutation(null, {action: "saveDraft", expectedRevision: 0, post: {...targeted, mediaType: "standard"}}, "staff", "now");
+  assert.equal("category" in fresh, false);
 });

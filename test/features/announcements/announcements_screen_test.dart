@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mind_mates/features/announcements/data/announcement_repository.dart';
 import 'package:mind_mates/features/announcements/models/announcement.dart';
 import 'package:mind_mates/features/announcements/screens/announcements_screen.dart';
+import 'package:mind_mates/models/profile_roles.dart';
 
 Announcement post(String id, {bool link = false}) => Announcement.fromJson(id, {
   'kind': link ? 'link' : 'original',
@@ -22,6 +23,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: AnnouncementsScreen(
+            populationRole: PopulationRole.student,
             repository: AnnouncementRepository(
               fetch: (_) async => throw StateError('unavailable'),
             ),
@@ -48,6 +50,7 @@ void main() {
           child: child!,
         ),
         home: AnnouncementsScreen(
+          populationRole: PopulationRole.student,
           repository: AnnouncementRepository(
             fetch: (_) async => [post('one'), post('two')],
           ),
@@ -78,6 +81,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: AnnouncementsScreen(
+          populationRole: PopulationRole.student,
           repository: AnnouncementRepository(
             fetch: (_) async => [long, post('next')],
           ),
@@ -112,7 +116,12 @@ void main() {
         },
       );
       await tester.pumpWidget(
-        MaterialApp(home: AnnouncementsScreen(repository: repo)),
+        MaterialApp(
+          home: AnnouncementsScreen(
+            populationRole: PopulationRole.student,
+            repository: repo,
+          ),
+        ),
       );
       await tester.pumpAndSettle();
       fail = true;
@@ -131,6 +140,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: AnnouncementsScreen(
+            populationRole: PopulationRole.student,
             repository: AnnouncementRepository(
               fetch: (_) async => [post('one', link: true), post('two')],
             ),
@@ -157,7 +167,7 @@ void main() {
     },
   );
   testWidgets(
-    'errors retry, categories load independently, and empty state is clear',
+    'errors retry, post types load independently, and empty state is clear',
     (tester) async {
       var fail = true;
       final queries = <AnnouncementQuery>[];
@@ -169,7 +179,12 @@ void main() {
         },
       );
       await tester.pumpWidget(
-        MaterialApp(home: AnnouncementsScreen(repository: repo)),
+        MaterialApp(
+          home: AnnouncementsScreen(
+            populationRole: PopulationRole.student,
+            repository: repo,
+          ),
+        ),
       );
       await tester.pumpAndSettle();
       expect(find.text('Retry'), findsOneWidget);
@@ -177,24 +192,36 @@ void main() {
       await tester.tap(find.text('Retry'));
       await tester.pumpAndSettle();
       expect(find.text('No announcements yet'), findsOneWidget);
-      await tester.tap(find.text('Placements'));
+      await tester.tap(find.text('Information'));
       await tester.pumpAndSettle();
-      expect(queries.last.category, AnnouncementCategory.placements);
+      expect(queries.last.postType, AnnouncementPostType.information);
+      expect(queries.last.audienceRole, PopulationRole.student);
+      await tester.tap(find.text('Announcement'));
+      await tester.pumpAndSettle();
+      expect(queries.last.postType, AnnouncementPostType.announcement);
+      await tester.tap(find.text('All'));
+      await tester.pumpAndSettle();
+      expect(queries.last.postType, isNull);
     },
   );
   testWidgets(
-    'category switch ignores late results from the previous request',
+    'post type switch ignores late results from the previous request',
     (tester) async {
       final pending = Completer<List<Announcement>>();
       final repo = AnnouncementRepository(
         fetch: (q) =>
-            q.category == null ? pending.future : Future.value([post('new')]),
+            q.postType == null ? pending.future : Future.value([post('new')]),
       );
       await tester.pumpWidget(
-        MaterialApp(home: AnnouncementsScreen(repository: repo)),
+        MaterialApp(
+          home: AnnouncementsScreen(
+            populationRole: PopulationRole.student,
+            repository: repo,
+          ),
+        ),
       );
       await tester.pump();
-      await tester.tap(find.text('Placements'));
+      await tester.tap(find.text('Information'));
       await tester.pumpAndSettle();
       pending.complete([post('old')]);
       await tester.pumpAndSettle();
@@ -209,6 +236,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: AnnouncementsScreen(
+          populationRole: PopulationRole.student,
           repository: AnnouncementRepository(fetch: (_) async => items),
         ),
       ),
@@ -238,6 +266,7 @@ void main() {
             child: child!,
           ),
           home: AnnouncementsScreen(
+            populationRole: PopulationRole.student,
             repository: AnnouncementRepository(
               fetch: (_) async => [post('one', link: true)],
             ),
@@ -258,4 +287,127 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('missing population role fails closed without querying', (
+    tester,
+  ) async {
+    var queries = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AnnouncementsScreen(
+          repository: AnnouncementRepository(
+            fetch: (_) async {
+              queries++;
+              return [post('secret')];
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Refresh announcements'));
+    await tester.pumpAndSettle();
+    expect(queries, 0);
+    expect(find.text('Updates unavailable for this account'), findsOneWidget);
+    expect(find.text('Post secret'), findsNothing);
+    expect(find.text('Information'), findsNothing);
+  });
+
+  testWidgets('feed is scoped to the signed-in population role', (
+    tester,
+  ) async {
+    final queries = <AnnouncementQuery>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AnnouncementsScreen(
+          populationRole: PopulationRole.nonTeaching,
+          repository: AnnouncementRepository(
+            fetch: (q) async {
+              queries.add(q);
+              return [post('one')];
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(queries.single.audienceRole, PopulationRole.nonTeaching);
+    expect(queries.single.status, AnnouncementStatus.published);
+    expect(find.text('Post one'), findsOneWidget);
+  });
+
+  testWidgets('video posts open their source from feed and viewer', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final opened = <Uri>[];
+    final video = Announcement.fromJson('vid', {
+      'kind': 'link',
+      'postType': 'information',
+      'mediaType': 'video',
+      'title': 'Campus video',
+      'body': 'Watch the tour',
+      'sourceUrl': 'https://video.example/tour',
+      'status': 'published',
+      'publishedAt': DateTime.utc(2026, 11, 14),
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AnnouncementsScreen(
+          populationRole: PopulationRole.teaching,
+          repository: AnnouncementRepository(fetch: (_) async => [video]),
+          launcher: (uri) async {
+            opened.add(uri);
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final watch = find.widgetWithText(FilledButton, 'Watch Video');
+    await tester.ensureVisible(watch);
+    expect(tester.getSize(watch).height, greaterThanOrEqualTo(48));
+    await tester.tap(watch);
+    await tester.pumpAndSettle();
+    expect(opened.single.toString(), 'https://video.example/tour');
+    await tester.tap(find.byTooltip('View full screen'));
+    await tester.pumpAndSettle();
+    final viewerWatch = find.widgetWithText(FilledButton, 'Watch Video');
+    await tester.ensureVisible(viewerWatch);
+    await tester.tap(viewerWatch);
+    await tester.pumpAndSettle();
+    expect(opened, hasLength(2));
+  });
+
+  testWidgets('role arriving after first build loads the scoped feed', (
+    tester,
+  ) async {
+    final queries = <AnnouncementQuery>[];
+    final repo = AnnouncementRepository(
+      fetch: (q) async {
+        queries.add(q);
+        return [post('one')];
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(home: AnnouncementsScreen(repository: repo)),
+    );
+    await tester.pumpAndSettle();
+    expect(queries, isEmpty);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AnnouncementsScreen(
+          populationRole: PopulationRole.teaching,
+          repository: repo,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(queries.single.audienceRole, PopulationRole.teaching);
+    expect(find.text('Post one'), findsOneWidget);
+  });
 }

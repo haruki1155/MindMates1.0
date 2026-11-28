@@ -19,6 +19,8 @@
     "test:profile-rules": "npm run build && node --test lib/profile_rules.rules.js",
     "profiles:dry-run": "npm run build && node lib/backfill_profiles.js",
     "profiles:apply": "npm run build && node lib/backfill_profiles.js --apply",
+    "announcements:backfill:dry-run": "npm run build && node lib/backfill_announcements.js",
+    "announcements:backfill:apply": "npm run build && node lib/backfill_announcements.js --apply",
     "public-ids:dry-run": "npm run build && node lib/backfill_public_user_ids.js",
     "public-ids:apply": "npm run build && node lib/backfill_public_user_ids.js --apply",
     "admin:dry-run": "npm run build && node lib/provision_super_admin.js",

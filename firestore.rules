@@ -118,9 +118,26 @@ service cloud.firestore {
         && (currentAccessRole() == 'admin'
           || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('staffAccountStatus', 'approved') == 'approved');
     }
+    // Mirrors UserModel.effectivePopulationRole; "" counts as absent. Legacy `role`
+    // is mapped only for app users so privileged legacy roles never become audiences.
+    function effectiveAnnouncementAudienceRole() {
+      let profile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let audiences = ['student', 'teaching', 'nonTeaching'];
+      let legacy = profile.get('role', null);
+      return profile.get('populationRole', null) in audiences ? profile.populationRole
+        : profile.get('declaredRole', null) in audiences ? profile.declaredRole
+        : profile.get('accessRole', 'appUser') != 'appUser' ? null
+        : legacy == 'student' ? 'student'
+        : legacy in ['teaching', 'faculty'] ? 'teaching'
+        : legacy in ['nonTeaching', 'staff'] ? 'nonTeaching'
+        : null;
+    }
     match /announcements/{postId} {
       allow read: if announcementPublisher()
-        || (announcementReader() && resource.data.status == 'published');
+        || (announcementReader()
+          && resource.data.status == 'published'
+          && effectiveAnnouncementAudienceRole() != null
+          && effectiveAnnouncementAudienceRole() in resource.data.audienceRoles);
       allow write: if false;
     }
     match /system_config/{documentId} {

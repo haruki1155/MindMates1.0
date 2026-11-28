@@ -1,13 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'announcement_repository.dart';
 import '../models/announcement.dart';
+import '../../../models/profile_roles.dart';
 
 /// Shared state keeps list and full-screen pages in the same feed/order.
 class AnnouncementFeedController extends ChangeNotifier {
-  AnnouncementFeedController(this.repository);
+  AnnouncementFeedController(this.repository, {this.audienceRole});
   final AnnouncementRepository repository;
   final List<Announcement> posts = [];
-  AnnouncementCategory? category;
+  PopulationRole? audienceRole;
+  AnnouncementPostType? postType;
   AnnouncementCursor? cursor;
   bool loading = false;
   String? error;
@@ -15,8 +17,16 @@ class AnnouncementFeedController extends ChangeNotifier {
   Future<void> retry() => load(more: _failedMore);
   int _generation = 0;
   bool _disposed = false;
-  Future<void> selectCategory(AnnouncementCategory? value) async {
-    category = value;
+  Future<void> selectPostType(AnnouncementPostType? value) async {
+    postType = value;
+    posts.clear();
+    cursor = null;
+    await load();
+  }
+
+  Future<void> setAudienceRole(PopulationRole? value) async {
+    if (value == audienceRole) return;
+    audienceRole = value;
     posts.clear();
     cursor = null;
     await load();
@@ -25,13 +35,24 @@ class AnnouncementFeedController extends ChangeNotifier {
   Future<void> load({bool more = false}) async {
     if (more && (loading || cursor == null)) return;
     final generation = ++_generation;
+    final role = audienceRole;
+    if (role == null) {
+      // Fail closed: never issue an unscoped published query.
+      posts.clear();
+      cursor = null;
+      loading = false;
+      error = null;
+      if (!_disposed) notifyListeners();
+      return;
+    }
     final target = more ? 0 : posts.length;
     loading = true;
     error = null;
     notifyListeners();
     try {
       var page = await repository.loadPublished(
-        category: category,
+        audienceRole: role,
+        postType: postType,
         after: more ? cursor : null,
       );
       final fresh = <Announcement>[...page.items];
@@ -39,7 +60,8 @@ class AnnouncementFeedController extends ChangeNotifier {
       while (!more && fresh.length < target && page.nextCursor != null) {
         if (_disposed || generation != _generation) return;
         page = await repository.loadPublished(
-          category: category,
+          audienceRole: role,
+          postType: postType,
           after: page.nextCursor,
         );
         fresh.addAll(page.items);

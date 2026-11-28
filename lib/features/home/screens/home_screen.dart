@@ -368,7 +368,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               icon: Icons.campaign_outlined,
                               onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute(
-                                  builder: (_) => const AnnouncementsScreen(),
+                                  builder: (_) => AnnouncementsScreen(
+                                    populationRole:
+                                        _readProviderOrNull<UserProvider>(
+                                          context,
+                                        )?.user?.effectivePopulationRole,
+                                  ),
                                 ),
                               ),
                             ),

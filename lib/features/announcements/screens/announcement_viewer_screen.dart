@@ -71,7 +71,7 @@ class _AnnouncementViewerScreenState extends State<AnnouncementViewerScreen> {
   );
   Widget _buildViewer(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('PACC announcements'),
+      title: const Text('PACC updates'),
       actions: [
         IconButton(
           tooltip: 'Refresh announcements',

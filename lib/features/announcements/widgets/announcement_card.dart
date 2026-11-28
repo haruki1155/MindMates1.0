@@ -42,11 +42,11 @@ class AnnouncementCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'PACC ? Official update',
+                        'PACC · Official update',
                         style: TextStyle(fontWeight: FontWeight.w800),
                       ),
                       Text(
-                        '${post.content.category.label}${dateLabel.isEmpty ? '' : ' · $dateLabel'}',
+                        '${post.postType.label}${dateLabel.isEmpty ? '' : ' · $dateLabel'}',
                         style: Theme.of(
                           context,
                         ).textTheme.bodySmall?.copyWith(height: 1.6),
@@ -68,7 +68,30 @@ class AnnouncementCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (post.imageUrl.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        post.title,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        post.body,
+                        maxLines: fullScreen ? null : 5,
+                        overflow: fullScreen ? null : TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
+                    ],
+                  ),
+                ),
+                if (post.isVideo)
+                  _VideoThumbnail(post: post)
+                else if (post.imageUrl.isNotEmpty)
                   Image.network(
                     post.imageUrl,
                     height: fullScreen ? 240 : 200,
@@ -91,21 +114,16 @@ class AnnouncementCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        post.title,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        post.body,
-                        maxLines: fullScreen ? null : 5,
-                        overflow: fullScreen ? null : TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                      const SizedBox(height: 16),
-                      if (post.sourceUri != null)
+                      if (post.isVideo)
+                        FilledButton.icon(
+                          onPressed: onOpenContent,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(48, 48),
+                          ),
+                          icon: const Icon(Icons.play_arrow_rounded),
+                          label: const Text('Watch Video'),
+                        )
+                      else if (post.sourceUri != null)
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
@@ -134,6 +152,63 @@ class AnnouncementCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 16:9 thumbnail with a play treatment; a styled placeholder stands in when
+/// the image is absent or fails to load.
+class _VideoThumbnail extends StatelessWidget {
+  const _VideoThumbnail({required this.post});
+  final Announcement post;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final placeholder = Container(
+      key: const ValueKey('announcement-video-placeholder'),
+      color: scheme.primaryContainer,
+      alignment: Alignment.bottomLeft,
+      padding: const EdgeInsets.all(12),
+      child: Text(
+        post.sourceUri!.host,
+        style: Theme.of(context).textTheme.bodySmall,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+    return Semantics(
+      label: 'Video from ${post.sourceUri!.host}',
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (post.imageUrl.isEmpty)
+              placeholder
+            else
+              Image.network(
+                post.imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => placeholder,
+              ),
+            Center(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  shape: BoxShape.circle,
+                ),
+                child: const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Icon(
+                    Icons.play_arrow_rounded,
+                    color: Colors.white,
+                    size: 40,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
