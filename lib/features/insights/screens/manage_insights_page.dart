@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../admin/theme/admin_theme.dart';
 import '../data/admin_insight_catalog_repository.dart';
 import '../models/insights_models.dart';
+import '../theme/insights_admin_theme.dart';
 import '../widgets/insight_content_editor.dart';
 
 /// Admin-only curation of mobile Insights content (`insight_content`).
@@ -128,129 +128,359 @@ class _ManageInsightsPageState extends State<ManageInsightsPage> {
     final visible = _visible;
     final eligible = _items.where((item) => item.hasApprovedProvenance).length;
     return Theme(
-      data: AdminTheme.data.copyWith(visualDensity: VisualDensity.standard),
-      child: Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1120),
-          child: ListView(
-            padding: const EdgeInsets.all(24),
-            children: [
-              Wrap(
-                alignment: WrapAlignment.spaceBetween,
-                spacing: 20,
-                runSpacing: 16,
-                children: [
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      data: InsightsAdminTheme.data,
+      child: ColoredBox(
+        key: const Key('insights_page_canvas'),
+        color: InsightsAdminColors.canvas,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1120),
+            child: ListView(
+              padding: const EdgeInsets.all(24),
+              children: [
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 20,
+                  runSpacing: 16,
+                  children: [
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Insights Content',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                            color: InsightsAdminColors.navy,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Curate and approve source-verified wellness guides',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: InsightsAdminColors.bodyMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                    FilledButton.icon(
+                      key: const Key('new_insight_button'),
+                      style: InsightsAdminTheme.newInsightButtonStyle,
+                      onPressed: () => _edit(),
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: const Text('New insight'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  key: const Key('insights_summary_banner'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: InsightsAdminColors.surface,
+                    borderRadius: InsightsAdminTheme.controlRadius,
+                    border: Border.all(color: InsightsAdminColors.cardBorder),
+                    boxShadow: InsightsAdminTheme.cardShadow,
+                  ),
+                  child: Row(
                     children: [
-                      Text(
-                        'Insights Content',
+                      const Icon(
+                        Icons.verified_outlined,
+                        size: 18,
+                        color: InsightsAdminColors.activeFg,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '$eligible Featured-eligible • '
+                          '${_items.length - eligible} Need provenance/review',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: InsightsAdminColors.navy,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _InsightsFilterBar(
+                  statusFilters: _statusFilters,
+                  selectedStatus: _status,
+                  onStatusChanged: (value) => setState(() => _status = value),
+                  roleFilters: _roleFilters,
+                  selectedRole: _role,
+                  onRoleChanged: (value) => setState(() => _role = value),
+                  onQueryChanged: (value) => setState(() => _query = value),
+                ),
+                const SizedBox(height: 20),
+                if (_error != null)
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: InsightsAdminColors.dangerBg,
+                      borderRadius: InsightsAdminTheme.controlRadius,
+                      border: Border.all(
+                        color: InsightsAdminColors.dangerBorder,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.error_outline_rounded,
+                          size: 18,
+                          color: InsightsAdminColors.dangerFg,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _error!,
+                            style: const TextStyle(
+                              color: InsightsAdminColors.dangerFg,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (_loading)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 48),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (visible.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 32,
+                    ),
+                    decoration: InsightsAdminTheme.cardDecoration,
+                    child: const Center(
+                      child: Text(
+                        'No insights match these filters.',
                         style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                          color: InsightsAdminColors.bodyMuted,
                         ),
                       ),
-                      Text(
-                        'Curate and approve source-verified wellness guides',
-                        style: TextStyle(color: AdminColors.muted),
-                      ),
-                    ],
-                  ),
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AdminColors.accentSoft,
-                      foregroundColor: AdminColors.ink,
-                      minimumSize: const Size(48, 48),
                     ),
-                    onPressed: () => _edit(),
-                    icon: const Icon(Icons.add),
-                    label: const Text('New insight'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Container(
-                key: const Key('insights_summary_banner'),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AdminColors.surfaceMuted,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AdminColors.border),
-                ),
-                child: Text(
-                  '$eligible Featured-eligible • '
-                  '${_items.length - eligible} Need provenance/review',
-                ),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  for (final entry in _statusFilters.entries)
-                    ChoiceChip(
-                      label: Text(entry.value),
-                      selected: _status == entry.key,
-                      onSelected: (_) => setState(() => _status = entry.key),
-                    ),
-                  DropdownButton<String?>(
-                    value: _role,
-                    items: [
-                      for (final entry in _roleFilters.entries)
-                        DropdownMenuItem(
-                          value: entry.key,
-                          child: Text(entry.value),
+                  )
+                else
+                  for (final item in visible) ...[
+                    _InsightRow(
+                      item: item,
+                      onEdit: () => _edit(item),
+                      onApprove: item.provenanceGaps.isEmpty
+                          ? () => _setStatus(item, 'approved')
+                          : null,
+                      onToggleActive: () => _run(
+                        () => _repository.setActive(
+                          id: item.id,
+                          isActive: !item.isActive,
                         ),
-                    ],
-                    onChanged: (value) => setState(() => _role = value),
-                  ),
-                  SizedBox(
-                    width: 260,
-                    child: TextField(
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
-                        hintText: 'Search insights',
                       ),
-                      onChanged: (value) => setState(() => _query = value),
+                      onArchive: _statusOf(item) == 'archived'
+                          ? () => _setStatus(item, 'pending_review')
+                          : () => _setStatus(item, 'archived'),
                     ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              if (_error != null)
-                Text(_error!, style: const TextStyle(color: AdminColors.danger))
-              else if (_loading)
-                const Center(child: CircularProgressIndicator())
-              else if (visible.isEmpty)
-                const Text('No insights match these filters.')
-              else
-                for (final item in visible) ...[
-                  _InsightRow(
-                    item: item,
-                    onEdit: () => _edit(item),
-                    onApprove: item.provenanceGaps.isEmpty
-                        ? () => _setStatus(item, 'approved')
-                        : null,
-                    onToggleActive: () => _run(
-                      () => _repository.setActive(
-                        id: item.id,
-                        isActive: !item.isActive,
-                      ),
-                    ),
-                    onArchive: _statusOf(item) == 'archived'
-                        ? () => _setStatus(item, 'pending_review')
-                        : () => _setStatus(item, 'archived'),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-            ],
+                    const SizedBox(height: 16),
+                  ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+class _InsightsFilterBar extends StatelessWidget {
+  const _InsightsFilterBar({
+    required this.statusFilters,
+    required this.selectedStatus,
+    required this.onStatusChanged,
+    required this.roleFilters,
+    required this.selectedRole,
+    required this.onRoleChanged,
+    required this.onQueryChanged,
+  });
+
+  final Map<String?, String> statusFilters;
+  final String? selectedStatus;
+  final ValueChanged<String?> onStatusChanged;
+  final Map<String?, String> roleFilters;
+  final String? selectedRole;
+  final ValueChanged<String?> onRoleChanged;
+  final ValueChanged<String> onQueryChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final segmentedControl = _StatusSegmentedControl(
+      filters: statusFilters,
+      selected: selectedStatus,
+      onSelected: onStatusChanged,
+    );
+
+    final roleDropdown = Container(
+      key: const Key('insights_role_filter'),
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: InsightsAdminTheme.controlDecoration,
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String?>(
+          value: selectedRole,
+          isDense: true,
+          borderRadius: InsightsAdminTheme.controlRadius,
+          dropdownColor: InsightsAdminColors.surface,
+          icon: const Icon(
+            Icons.keyboard_arrow_down_rounded,
+            size: 20,
+            color: InsightsAdminColors.bodyMuted,
+          ),
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: InsightsAdminColors.navy,
+          ),
+          items: [
+            for (final entry in roleFilters.entries)
+              DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+          ],
+          onChanged: onRoleChanged,
+        ),
+      ),
+    );
+
+    final searchField = SizedBox(
+      height: 44,
+      child: TextField(
+        key: const Key('insights_search_field'),
+        style: const TextStyle(
+          fontSize: 14,
+          color: InsightsAdminColors.navy,
+        ),
+        decoration: const InputDecoration(
+          prefixIcon: Icon(
+            Icons.search_rounded,
+            size: 20,
+            color: InsightsAdminColors.subtleMuted,
+          ),
+          hintText: 'Search insights',
+          contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        ),
+        onChanged: onQueryChanged,
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 920) {
+          return Row(
+            children: [
+              segmentedControl,
+              const SizedBox(width: 12),
+              roleDropdown,
+              const SizedBox(width: 12),
+              Expanded(child: searchField),
+            ],
+          );
+        }
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            segmentedControl,
+            roleDropdown,
+            SizedBox(
+              width: constraints.maxWidth < 360 ? constraints.maxWidth : 280,
+              child: searchField,
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _StatusSegmentedControl extends StatelessWidget {
+  const _StatusSegmentedControl({
+    required this.filters,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final Map<String?, String> filters;
+  final String? selected;
+  final ValueChanged<String?> onSelected;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const Key('insights_status_segmented_control'),
+    padding: const EdgeInsets.all(4),
+    decoration: InsightsAdminTheme.controlDecoration,
+    child: Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        for (final entry in filters.entries)
+          _SegmentButton(
+            key: Key('status_filter_${entry.key ?? 'all'}'),
+            label: entry.value,
+            selected: selected == entry.key,
+            onPressed: () => onSelected(entry.key),
+          ),
+      ],
+    ),
+  );
+}
+
+class _SegmentButton extends StatelessWidget {
+  const _SegmentButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: selected ? InsightsAdminColors.tagBlueBg : Colors.transparent,
+    borderRadius: InsightsAdminTheme.actionRadius,
+    child: InkWell(
+      onTap: onPressed,
+      borderRadius: InsightsAdminTheme.actionRadius,
+      hoverColor: selected
+          ? InsightsAdminColors.tagBlueBg
+          : InsightsAdminColors.canvas,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+            color: selected
+                ? InsightsAdminColors.navy
+                : InsightsAdminColors.bodyMuted,
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _InsightRow extends StatelessWidget {
@@ -268,114 +498,218 @@ class _InsightRow extends StatelessWidget {
   final VoidCallback onToggleActive;
   final VoidCallback onArchive;
 
+  String get _description {
+    final subtitle = item.subtitle.trim();
+    if (subtitle.isNotEmpty) return subtitle;
+    return item.body?.trim() ?? '';
+  }
+
   @override
   Widget build(BuildContext context) {
     final eligible = item.hasApprovedProvenance;
     final status = item.reviewStatus ?? 'draft';
     final isArchived = status == 'archived';
+    final description = _description;
+    final showApprove = status != 'approved' && !isArchived;
+
+    final statusPills = <Widget>[
+      InsightsStatusPill.active(item.isActive),
+      InsightsStatusPill.reviewStatus(status),
+    ];
+
+    final categoryTags = <Widget>[
+      for (final role in item.targetRoles)
+        InsightsCategoryTag(insightTargetRoleLabels[role] ?? role),
+      InsightsCategoryTag(
+        eligible ? 'Featured-eligible' : 'Library only',
+        icon: eligible ? Icons.verified_outlined : null,
+      ),
+      if (item.category.trim().isNotEmpty) InsightsCategoryTag(item.category),
+      if (item.sectionId.trim().isNotEmpty) InsightsCategoryTag(item.sectionId),
+      for (final domain in item.domainIds) InsightsCategoryTag(domain),
+    ];
+
+    final actionButtons = <Widget>[
+      OutlinedButton.icon(
+        key: Key('edit_${item.id}'),
+        style: InsightsAdminTheme.secondaryActionStyle(),
+        onPressed: onEdit,
+        icon: const Icon(Icons.edit_outlined, size: 16),
+        label: const Text('Edit'),
+      ),
+      if (showApprove)
+        Tooltip(
+          message: onApprove == null
+              ? 'Complete source provenance before approving'
+              : 'Approve for Featured recommendations',
+          child: FilledButton.icon(
+            key: Key('approve_${item.id}'),
+            style: InsightsAdminTheme.primaryActionStyle,
+            onPressed: onApprove,
+            icon: const Icon(Icons.check_rounded, size: 16),
+            label: const Text('Approve'),
+          ),
+        ),
+      OutlinedButton.icon(
+        key: Key('toggle_active_${item.id}'),
+        style: InsightsAdminTheme.secondaryActionStyle(),
+        onPressed: onToggleActive,
+        icon: Icon(
+          item.isActive
+              ? Icons.visibility_off_outlined
+              : Icons.visibility_outlined,
+          size: 16,
+        ),
+        label: Text(item.isActive ? 'Hide' : 'Show'),
+      ),
+      OutlinedButton.icon(
+        key: Key('archive_${item.id}'),
+        style: InsightsAdminTheme.secondaryActionStyle(
+          destructiveHover: !isArchived,
+        ),
+        onPressed: onArchive,
+        icon: Icon(
+          isArchived ? Icons.unarchive_outlined : Icons.archive_outlined,
+          size: 16,
+        ),
+        label: Text(isArchived ? 'Restore' : 'Archive'),
+      ),
+    ];
+
     return Container(
       key: Key('insight_row_${item.id}'),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AdminColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AdminColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            item.title,
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
+      padding: const EdgeInsets.all(20),
+      decoration: InsightsAdminTheme.cardDecoration,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final wideHeader = constraints.maxWidth >= 420;
+          final wideActions = constraints.maxWidth >= 500;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Badge(
-                eligible ? 'Featured-eligible' : 'Library only',
-                background: eligible
-                    ? AdminColors.greenBg
-                    : AdminColors.amberBg,
-                foreground: eligible
-                    ? AdminColors.greenFg
-                    : AdminColors.amberFg,
-              ),
-              _Badge(status.replaceAll('_', ' ')),
-              _Badge(item.isActive ? 'Active' : 'Hidden'),
-              _Badge(item.category),
-              if (item.sectionId.isNotEmpty) _Badge(item.sectionId),
-              for (final role in item.targetRoles)
-                _Badge(insightTargetRoleLabels[role] ?? role),
-              for (final domain in item.domainIds) _Badge(domain),
-            ],
-          ),
-          if (item.sourceTitle != null || item.sourceUrl != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              '${item.sourceTitle ?? 'Untitled source'} — ${item.sourceUrl ?? 'no link'}',
-              style: const TextStyle(color: AdminColors.muted, fontSize: 12),
-            ),
-          ],
-          if (!eligible && item.provenanceGaps.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              'Needs: ${item.provenanceGaps.join(', ')}',
-              style: const TextStyle(color: AdminColors.muted, fontSize: 12),
-            ),
-          ],
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton(onPressed: onEdit, child: const Text('Edit')),
-              if (status != 'approved' && !isArchived)
-                OutlinedButton(
-                  key: Key('approve_${item.id}'),
-                  onPressed: onApprove,
-                  child: const Text('Approve'),
+              if (wideHeader)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        item.title,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: InsightsAdminColors.navy,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      alignment: WrapAlignment.end,
+                      children: statusPills,
+                    ),
+                  ],
+                )
+              else ...[
+                Text(
+                  item.title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: InsightsAdminColors.navy,
+                    height: 1.3,
+                  ),
                 ),
-              OutlinedButton(
-                key: Key('toggle_active_${item.id}'),
-                onPressed: onToggleActive,
-                child: Text(item.isActive ? 'Hide' : 'Show'),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 6, children: statusPills),
+              ],
+              const SizedBox(height: 10),
+              Wrap(spacing: 8, runSpacing: 8, children: categoryTags),
+              if (description.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: InsightsAdminColors.bodyMuted,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+              if (item.sourceTitle != null || item.sourceUrl != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2),
+                      child: Icon(
+                        Icons.link_rounded,
+                        size: 14,
+                        color: InsightsAdminColors.subtleMuted,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${item.sourceTitle ?? 'Untitled source'} — ${item.sourceUrl ?? 'no link'}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: InsightsAdminColors.subtleMuted,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (!eligible && item.provenanceGaps.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Needs: ${item.provenanceGaps.join(', ')}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: InsightsAdminColors.subtleMuted,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: SizedBox(
+                  height: 2,
+                  width: double.infinity,
+                  child: ColoredBox(color: InsightsAdminColors.canvas),
+                ),
               ),
-              OutlinedButton(
-                key: Key('archive_${item.id}'),
-                onPressed: onArchive,
-                child: Text(isArchived ? 'Restore' : 'Archive'),
-              ),
+              if (wideActions)
+                Row(
+                  children: [
+                    for (var i = 0; i < actionButtons.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 10),
+                      Expanded(child: actionButtons[i]),
+                    ],
+                  ],
+                )
+              else
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final button in actionButtons)
+                      SizedBox(
+                        width: (constraints.maxWidth - 10) / 2,
+                        child: button,
+                      ),
+                  ],
+                ),
             ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge(this.label, {this.background, this.foreground});
-
-  final String label;
-  final Color? background;
-  final Color? foreground;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-    decoration: BoxDecoration(
-      color: background ?? AdminColors.neutralBg,
-      borderRadius: BorderRadius.circular(999),
-    ),
-    child: Text(
-      label,
-      style: TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-        color: foreground ?? AdminColors.neutralFg,
-      ),
-    ),
-  );
 }
