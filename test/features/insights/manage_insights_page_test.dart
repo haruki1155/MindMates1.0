@@ -5,6 +5,7 @@ import 'package:mind_mates/features/admin/theme/admin_theme.dart';
 import 'package:mind_mates/features/insights/data/admin_insight_catalog_repository.dart';
 import 'package:mind_mates/features/insights/models/insights_models.dart';
 import 'package:mind_mates/features/insights/screens/manage_insights_page.dart';
+import 'package:mind_mates/features/insights/theme/insights_admin_theme.dart';
 import 'package:mind_mates/features/insights/widgets/insight_content_editor.dart';
 import 'package:mind_mates/models/profile_roles.dart';
 
@@ -189,7 +190,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      final approve = tester.widget<OutlinedButton>(
+      final approve = tester.widget<FilledButton>(
         find.byKey(const Key('approve_legacy_guide')),
       );
       expect(approve.onPressed, isNull);
@@ -200,12 +201,12 @@ void main() {
     ) async {
       await pumpPage(tester);
 
-      await tester.tap(find.widgetWithText(ChoiceChip, 'Approved'));
+      await tester.tap(find.byKey(const Key('status_filter_approved')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('insight_row_approved_guide')), findsOne);
       expect(find.byKey(const Key('insight_row_legacy_guide')), findsNothing);
 
-      await tester.tap(find.widgetWithText(ChoiceChip, 'All'));
+      await tester.tap(find.byKey(const Key('status_filter_all')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('All roles'));
       await tester.pumpAndSettle();
@@ -218,6 +219,160 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('insight_row_approved_guide')), findsNothing);
       expect(find.byKey(const Key('insight_row_archived_guide')), findsOne);
+    });
+
+    testWidgets('applies page-scoped visual enhancement without altering AdminTheme', (
+      tester,
+    ) async {
+      await pumpPage(tester);
+
+      // Global AdminTheme stays untouched.
+      expect(AdminTheme.data.scaffoldBackgroundColor, AdminColors.canvas);
+
+      // Scoped #F4F7FB page background.
+      final canvas = tester.widget<ColoredBox>(
+        find.byKey(const Key('insights_page_canvas')),
+      );
+      expect(canvas.color, const Color(0xFFF4F7FB));
+
+      // Warm yellow New insight CTA with 12px border radius.
+      final newBtn = tester.widget<FilledButton>(
+        find.byKey(const Key('new_insight_button')),
+      );
+      expect(
+        newBtn.style?.backgroundColor?.resolve(<WidgetState>{}),
+        InsightsAdminColors.ctaYellow,
+      );
+      expect(
+        newBtn.style?.shape?.resolve(<WidgetState>{}),
+        const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+        ),
+      );
+
+      // Cohesive segmented status bar, role dropdown, search icon, and 2-column grid.
+      expect(
+        find.byKey(const Key('insights_status_segmented_control')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('insights_role_filter')), findsOneWidget);
+      expect(find.byIcon(Icons.search_rounded), findsOneWidget);
+      expect(
+        find.byKey(const Key('insights_card_grid_two_col')),
+        findsOneWidget,
+      );
+
+      // Squircle card container (#FFFFFF, 16px radius, 20px padding, #F3F4F6 border).
+      final card = tester.widget<Container>(
+        find.byKey(const Key('insight_row_legacy_guide')),
+      );
+      final decoration = card.decoration! as BoxDecoration;
+      expect(decoration.color, const Color(0xFFFFFFFF));
+      expect(
+        decoration.borderRadius,
+        const BorderRadius.all(Radius.circular(16)),
+      );
+      expect(card.padding, const EdgeInsets.all(20));
+      expect(
+        (decoration.border! as Border).top.color,
+        const Color(0xFFF3F4F6),
+      );
+
+      // Needs Provenance pill, description, provenance text, status pills,
+      // category tags, and action icons are rendered.
+      final legacyRow = find.byKey(const Key('insight_row_legacy_guide'));
+      expect(
+        find.byKey(const Key('needs_provenance_legacy_guide')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: legacyRow, matching: find.text('Subtitle')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: legacyRow,
+          matching: find.textContaining('Needs: Source title'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: legacyRow,
+          matching: find.byType(InsightsStatusPill),
+        ),
+        findsNWidgets(3),
+      );
+      expect(
+        find.descendant(
+          of: legacyRow,
+          matching: find.byType(InsightsCategoryTag),
+        ),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(
+          of: legacyRow,
+          matching: find.byIcon(Icons.edit_outlined),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: legacyRow,
+          matching: find.byIcon(Icons.check_rounded),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: legacyRow,
+          matching: find.byIcon(Icons.visibility_off_outlined),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: legacyRow,
+          matching: find.byIcon(Icons.archive_outlined),
+        ),
+        findsOneWidget,
+      );
+
+      // Primary Approve style uses #89CFF0 and Archive hover uses light red.
+      final approveBtn = tester.widget<FilledButton>(
+        find.byKey(const Key('approve_legacy_guide')),
+      );
+      expect(
+        approveBtn.style?.backgroundColor?.resolve(<WidgetState>{}),
+        const Color(0xFF89CFF0),
+      );
+      final archiveBtn = tester.widget<OutlinedButton>(
+        find.byKey(const Key('archive_legacy_guide')),
+      );
+      expect(
+        archiveBtn.style?.backgroundColor?.resolve({WidgetState.hovered}),
+        InsightsAdminColors.dangerBg,
+      );
+    });
+
+    testWidgets('renders cleanly on narrow viewports without overflow', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(420, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final source = _MemoryDataSource([
+        _doc('legacy_guide', withProvenance: false, sortOrder: 1),
+      ]);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ManageInsightsPage(repository: _repo(source))),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('insight_row_legacy_guide')), findsOneWidget);
     });
 
     testWidgets('archive and restore update review status', (tester) async {
@@ -322,6 +477,54 @@ void main() {
       // Approval was dropped when the link became invalid; re-approval is an
       // explicit step.
       expect(saved['reviewStatus'], 'pending_review');
+    });
+
+    testWidgets('uses scoped #F4F7FB canvas, status pills, and primary save styling', (
+      tester,
+    ) async {
+      final source = _MemoryDataSource();
+      await pumpEditor(tester, source);
+
+      final scaffold = tester.widget<Scaffold>(
+        find.byKey(const Key('insight_editor_scaffold')),
+      );
+      expect(scaffold.backgroundColor, const Color(0xFFF4F7FB));
+      expect(find.text('New insight'), findsOneWidget);
+      expect(find.byType(InsightsStatusPill), findsAtLeastNWidgets(2));
+      expect(find.byKey(const Key('insight_editor_cancel')), findsOneWidget);
+
+      final saveBtn = tester.widget<FilledButton>(
+        find.byKey(const Key('insight_editor_save')),
+      );
+      expect(
+        saveBtn.style?.backgroundColor?.resolve(<WidgetState>{}),
+        const Color(0xFF89CFF0),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('renders cleanly on narrow viewports without overflow', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(420, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final source = _MemoryDataSource();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: InsightContentEditor(repository: _repo(source)),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('insight_editor_save')),
+        400,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('insight_editor_save')), findsOneWidget);
     });
   });
 
